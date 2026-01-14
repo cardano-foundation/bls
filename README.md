@@ -7,24 +7,24 @@
 ## High level introduction
 
 **BLS** abbreviation stands for names of inventors of the scheme, ie., Boneh-Lynn-Shacham, that proposed the scheme in the
-(Short signatures from the Weil pairing)[https://mit6875.github.io/FA23HANDOUTS/boneh-lynn-shacham.pdf] paper.
+[Short signatures from the Weil pairing](https://mit6875.github.io/FA23HANDOUTS/boneh-lynn-shacham.pdf) paper.
 The scheme works for pairings-friendly elliptic curves within which two groups are chosen,  _G1_ and _G2_, with generators _g1_ and _g2_, respectively.
 The secret key *sk* is then randomly picked between _1_ and _order(G1)_. The corresponding public key is
 
-$pk = sk*g_2$
+$pk=sk*g_2$
 
 Having hashing function, $H(msg)=elem_1$ we can get signature,
 
-$sig = sk*H(msg)$
+$sig=sk*H(msg)$
 
 Given a pairing, _e_, verification is checking the equality
 
-$e(H(m), pk) == e(sig, g_2)$
+$e(H(m),pk)==e(sig, g_2)$
 
 Please notice that in any pairing we have elements of two groups, _G1_ and _G2_.
 And due to bilinearity property of the pairing we the following holding
 
-$e(H(m), pk) = e(H(m)m sk*g_2) = e(sk*H(m), g_2) = e(sig, g_2)$
+$e(H(m),pk)=e(H(m)m, sk*g_2)=e(sk*H(m), g_2)=e(sig, g_2)$
 
 The choices of representation of the different entities are not random and done by purpose. _G2_ is defined over the quadratic
 extention of the field and hence the storage demands are larger for _G2_. The arithmetic requirements are harsher for _G2_ in comparison with _G1_.
@@ -37,4 +37,9 @@ especially for multi-signature cases.
 
 ## BLS elliptic curve
 
-The elliptic curve BLS12-381 we are using here is currently in (IETF draft 12)[https://datatracker.ietf.org/doc/draft-irtf-cfrg-pairing-friendly-curves/12/] stage of ratification.
+Although the same abbreviation, BLS here, stands for Barreto-Lynn-Scott. The family of curves was intruduced in this [seminal paper]().
+BLS12-381 curve was proposed by [Sean Bowe in the context of ZCash](https://electriccoin.co/blog/new-snark-curve/).
+The usage of this curve was adopted in number of other blockchains, like Ethereum 2.0, Skale, Algorand, Dfinity or Chia.
+There is also support of this in [cardano-crypto-class](https://github.com/IntersectMBO/cardano-base/tree/master/cardano-crypto-class) and the curve it exposed in (aiken from 3.0)[https://aiken-lang.github.io/stdlib/aiken/crypto.html]. The great introduction and motivation for this curve was written in the blog post [BLS12-381 For The Rest Of Us](https://hackmd.io/@benjaminion/bls12-381#Motivation).
+It is especially worth mentioning and repeating that the elliptic curve BLS12-381 is currently in [IETF draft revision 12](https://datatracker.ietf.org/doc/draft-irtf-cfrg-pairing-friendly-curves/12/) stage of ratification.
+
