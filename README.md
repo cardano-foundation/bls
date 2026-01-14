@@ -20,12 +20,14 @@ $sig=sk*H(msg)$
 
 Given a pairing, _e_, verification is checking the equality
 
-$e(H(m),pk)==e(sig, g_2)$
+$e(H(m),pk)==e(sig,g_2)$
 
 Please notice that in any pairing we have elements of two groups, _G1_ and _G2_.
 And due to bilinearity property of the pairing we the following holding
 
-$e(H(m),pk)=e(H(m),sk*g_2)=e(sk*H(m),g_2)=e(sig, g_2)$
+$e(H(m),pk)=e(H(m),sk*g_2)$
+$e(H(m),sk*g_2)=e(sk*H(m),g_2)$
+$e(sk*H(m),g_2)=e(sig, g_2)$
 
 The choices of representation of the different entities are not random and done by purpose. _G2_ is defined over the quadratic
 extention of the field and hence the storage demands are larger for _G2_. The arithmetic requirements are harsher for _G2_ in comparison with _G1_.
@@ -45,3 +47,20 @@ There is also support of this in [cardano-crypto-class](https://github.com/Inter
 It is especially worth mentioning and repeating that the elliptic curve BLS12-381 is currently in [IETF draft revision 12](https://datatracker.ietf.org/doc/draft-irtf-cfrg-pairing-friendly-curves/12/) stage of ratification.
 
 ## BLS12-381 elliptic curve golden
+
+The golden are generated using _SageMath_. In order to run it do the following:
+Download the latest image from docker hub and run the image in Linux CLI:
+
+```bash
+$ docker image pull sagemath/sagemath:latest
+$ docker run -it sagemath/sagemath:latest
+┌────────────────────────────────────────────────────────────────────┐
+│ SageMath version 10.6, Release Date: 2025-03-31                    │
+│ Using Python 3.12.5. Type "help()" for help.                       │
+└────────────────────────────────────────────────────────────────────┘
+sage: ZZ(1234)
+1234
+sage: ZZ.random_element(10**10)
+4134169080
+sage: quit
+```
