@@ -44,15 +44,15 @@ The BLS scheme is [IEFT drafted](https://github.com/cfrg/draft-irtf-cfrg-bls-sig
 Let's assume we have _n_ participants that sign n **different** messages (each participant _i_ signs a different and single message $m_i$). Then we have n signatures
 $sig_i$ for i=0..n-1. The aggregate signature is then
 
-$\sum_{n=0}^{n-1} sig_i = sig_agg$
+$\sum_{n=0}^{n-1} sig_i = sig_{agg}$
 
 The verification requires the following pairing as a consequence
 
 ```math
-e(H(m_0)*g_1,pk_0)*...*e(H(m_(n-1))*g_1,pk_(n-1))=e(sig_agg, g_2)
+e(H(m_0)*g_1,pk_0)*...*e(H(m_{n-1})*g_1,pk_{n-1})=e(sig_{agg}, g_2)
 ```
 
-Meaning n-1 less pairings thanks to $sig_agg$.  
+Meaning n-1 less pairings thanks to $sig_{agg}$.  
 
 ## BLS elliptic curves overview
 
