@@ -10,33 +10,34 @@
 **BLS** abbreviation stands for names of inventors of the scheme, ie., Boneh-Lynn-Shacham, that proposed the scheme in the
 [Short signatures from the Weil pairing](https://mit6875.github.io/FA23HANDOUTS/boneh-lynn-shacham.pdf) paper.
 The scheme works for pairings-friendly elliptic curves within which two groups are chosen,  _G1_ and _G2_, with generators _g1_ and _g2_, respectively.
-The secret key *sk* is then randomly picked between _1_ and _order(G1)_. The corresponding public key is
+The secret key *sk* is then the number randomly picked between _1_ and _order(G1)_. The corresponding public key is
 
 $pk=sk*g_2$
 
-Having hashing function, $H(msg)=elem_1$ we can get signature,
+Having hashing function, $H(msg)*g_1$, we can get signature,
 
-$sig=sk*H(msg)$
+$sig=sk*H(msg)*g_1$
 
 Given a pairing, _e_, verification is checking the equality
 
-$e(H(m),pk)==e(sig,g_2)$
+$e(H(m)*g_1,pk)==e(sig,g_2)$
 
-Please notice that in any pairing we have elements of two groups, _G1_ and _G2_.
-And due to bilinearity property of the pairing we the following holding
+Please notice that in any pairing we have elements from two groups, _G1_ and _G2_, the pairing shares.
+And due to bilinearity property of the pairing the following holds
 
 ```math
-e(H(m),pk)=e(sk*H(m),g_2)=e(sig, g_2)
+e(H(m)*g_1,pk)=e(sk*H(m)*g_1,g_2)=e(sig, g_2)
 ```
 
-The choices of representation of the different entities are not random and done by purpose. _G2_ is defined over the quadratic
-extention of the field and hence the storage demands are larger for _G2_. The arithmetic requirements are harsher for _G2_ in comparison with _G1_.
+The choices of representation of the different entities are not random and carefully picked. _G2_ is defined over the quadratic
+extention of the field and hence the storage demands are larger for _G2_ elements than for elements of _G1_. The arithmetic requirements are harsher for _G2_ in comparison with _G1_.
 If we are to store all public keys in application then it would be tempting to represent them in _G1_. If we are to store signatures then it is advantageous to
-stick to the scheme proposed above. Especially, if **public keys could be aggregated**.
-Another performance dimension to ponder is verification, as normally pairing operation is costly. Especially if we compare it to other elliptic curve signature schemes like
-_Schnorr_ or _EdDSA_. However, as BLS allows for **signature aggregation**, not so straightforward in other schemes mentioned, the comparison picture changes dramatically in favor of BLS,
-especially for multi-signature cases.
+stick to the scheme proposed above. Especially, if **public keys could be aggregated** (as is the case for multi-signature).
+Another performance dimension to ponder the verification of the scheme, as normally pairing operation is costly. Especially if we compare it to other elliptic curve signature schemes like
+_Schnorr_ or _EdDSA_. However, as BLS allows for **signature aggregation**, which is not so straightforward in other schemes mentioned, the comparison picture changes dramatically in favor of BLS,
+especially for big number multi-party cases (like voting).
 
+The BLS scheme is [IEFT drafted](https://github.com/cfrg/draft-irtf-cfrg-bls-signature) and here we are aimimng to comply with it.
 
 ## BLS elliptic curves overview
 
