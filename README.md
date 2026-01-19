@@ -52,7 +52,22 @@ The verification requires the following pairing as a consequence
 e(H(m_0)*g_1,pk_0)*...*e(H(m_{n-1})*g_1,pk_{n-1})=e(sig_{agg}, g_2)
 ```
 
-Meaning n-1 less pairings thanks to $sig_{agg}$.  
+Meaning _n-1_ less pairing evaluation during verification thanks to $sig_{agg}$ .
+
+### Multi-signature case
+
+In multi-signature case, in addition to signature aggregation sketched above, all the signers sign **THE SAME** message.
+In that case, we can aggregate also public keys:
+
+$\sum_{n=0}^{n-1} pk_i = pk_{agg}$
+
+and just two pairing evaluations on the verification side: 
+
+```math
+e(sig_{agg}, g_2)=e(H(m), pk_{agg})
+```
+
+And this is regardless of the number of signatures engaged. 
 
 ## BLS elliptic curves overview
 
