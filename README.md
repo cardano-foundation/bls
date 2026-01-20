@@ -208,5 +208,10 @@ sage: left = atePairing(Hpoint,pk)
 sage: right = atePairing(sig,g2)
 sage: left == right
 True
+
+# Verifier receives 3 points, Hpoint, pk, and sig and calculates two pairings to verify
+# Prover has secret sk, calculates pk point from sk. Having msg also calculates hash and maps it to point.
+# signature is multiplication operation between sk and the hash point.
+# Caution/disclaimer: hash-to-point is naively calculated here for education purposes. 
 ```
 </details>
