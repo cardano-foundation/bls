@@ -28,10 +28,6 @@ iso = E2.isomorphism_to(E1)
 k = 12
 t = p + 1 - E0.order()
 
-# Returns ate pairing for scalar points p1 and p2 that must be between 0 and q - 1
+# Returns ate pairing for curve points p1 and p2, for G1 and G2 group, respectively. 
 def atePairing(p1, p2):
-    if ( p1 < 0 and p1 >= q ):
-        print ("p1 must be between 0 and %d", q )
-    if ( p2 < 0 and p2>= q ):
-        print ("p2 must be between 0 and %d", q )    
-    return((p1*g1).ate_pairing(iso(p2*g2), q, k, t, p))
+    return(p1.ate_pairing(iso(p2), q, k, t, p))
