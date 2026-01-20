@@ -23,3 +23,15 @@ x2 = ( 0x024AA2B2F08F0A91260805272DC51051C6E47AD4FA403B02B4510B647AE3D1770BAC032
 y2 = ( 0x0CE5D527727D6E118CC9CDC6DA2E351AADFD9BAA8CBDD3A76D429A695160D12C923AC9CC3BACA289E193548608B82801
       + 0x0606C4A02EA734CC32ACD2B02BC28B99CB3E287E85A763AF267492AB572E99AB3F370D275CEC1DA1AAA9075FF05F79BE * j )
 g2 = E2( (x2, y2) )
+
+iso = E2.isomorphism_to(E1)
+k = 12
+t = p + 1 - E0.order()
+
+# Returns ate pairing for scalar points p1 and p2 that must be between 0 and q - 1
+def atePairing(p1, p2):
+    if ( p1 < 0 and p1 >= q ):
+        print ("p1 must be between 0 and %d", q )
+    if ( p2 < 0 and p2>= q ):
+        print ("p2 must be between 0 and %d", q )    
+    return((p1*g1).ate_pairing(iso(p2*g2), q, k, t, p))
