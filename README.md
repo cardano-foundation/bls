@@ -3,7 +3,7 @@
 ## Contents
 1. [Introduction](#high-level-introduction)
 2. [BLS12-381 Elliptic curve overview](#bls-elliptic-curves-overview)
-3. [BLS12-381 Elliptic curve golden in sagemath](#bls12-381-elliptic-curve-golden)
+3. [BLS mechanics in sagemath](#bls-mechanics-in-sagemath)
 
 ## High level introduction
 
@@ -80,9 +80,10 @@ The usage of this curve was adopted in number of other blockchains, like Ethereu
 There is also support of this curve in Cardano, see for example, [cardano-crypto-class](https://github.com/IntersectMBO/cardano-base/tree/master/cardano-crypto-class) and the curve is exposed also in [aiken from 3.0 release](https://aiken-lang.github.io/stdlib/aiken/crypto.html). The great introduction and motivation for this curve was written in the blog post [BLS12-381 For The Rest Of Us](https://hackmd.io/@benjaminion/bls12-381#Motivation).
 It is especially worth mentioning and repeating that the elliptic curve BLS12-381 is currently in [IETF draft revision 12](https://datatracker.ietf.org/doc/draft-irtf-cfrg-pairing-friendly-curves/12/) stage of ratification.
 
-## BLS12-381 elliptic curve golden
+## BLS mechanics in sagemath
 
-The golden are generated using _SageMath_.
+The golden are generated using _SageMath_ and compliant with [IETF draft revision 6](https://datatracker.ietf.org/doc/html/draft-irtf-cfrg-bls-signature-06).
+But to get a sense how things look like let's before envisage simple proof of concepts what we are after.
 
 <details>
 <summary>
