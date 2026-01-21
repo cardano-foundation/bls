@@ -217,7 +217,7 @@ True
 </details>
 
 <details>
-<summary>Aggregate signature scheme</summary>
+<summary>Aggregate signature case</summary>
 
 ```sagemath
 sage: load('/data/bls13-381.sage')
@@ -230,7 +230,7 @@ sage: pk2=sk2*g2
 sage
 sage: sk1 == sk2
 False
-sage: # Let's assume that hashes of two msg are
+sage: # Let's assume that hashes of two msgs are
 sage: Hmsg1=111
 sage: Hmsg2=222
 sage: # which could be mapped into points of G1
@@ -240,13 +240,46 @@ sage:
 sage: # signatures
 sage: sig1 = sk1 * Hpoint1
 sage: sig2 = sk2 * Hpoint2
-sage: sig = sig1 + sig2
+sage: sigAggr = sig1 + sig2
 sage:
 sage: # verification
 sage: left1 = atePairing(Hpoint1,pk1)
 sage: left2 = atePairing(Hpoint2,pk2)
-sage: right = atePairing(sig,g2)
+sage: right = atePairing(sigAggr,g2)
 sage: left1*left2 == right
+True
+```
+
+</details>
+
+<details>
+<summary>Aggregate signature case</summary>
+
+```sagemath
+sage: load('/data/bls13-381.sage')
+sage: # Two parties represented by secrets, sk1 and sk2
+sage: sk1 = Integer(randrange(1, E1.order()))
+sage: sk2 = Integer(randrange(1, E1.order()))
+sage: # Two parties represented by the respective public keys, pk1 and pk2
+sage: pk1=sk1*g2
+sage: pk2=sk2*g2
+sage: pkAggr = pk1 + pk2
+sage
+sage: sk1 == sk2
+False
+sage: # Let's assume that hashes of ONE msg are
+sage: Hmsg=111
+sage: # which could be mapped into point of G1
+sage: Hpoint=Hmsg*g1
+sage:
+sage: sig1 = sk1 * Hpoint
+sage: sig2 = sk2 * Hpoint
+sage: sigAggr = sig1 + sig2
+sage:
+sage: # verification of aggregates
+sage: left = atePairing(Hpoint,pkAggr)
+sage: right = atePairing(sigAggr,g2)
+sage: left == right
 True
 ```
 
