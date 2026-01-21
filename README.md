@@ -42,7 +42,7 @@ especially for big number multi-party cases (like voting).
 
 The BLS scheme is [IEFT drafted](https://github.com/cfrg/draft-irtf-cfrg-bls-signature) and here we are aimimng to comply with it.
 
-### Signature aggregation case
+### Aggregate signature case
 
 Let's assume we have _n_ participants that sign n **different** messages (each participant _i_ signs a different and single message $m_i$). Then we have n signatures
 $sig_i$ for i=0..n-1. The aggregate signature is then
@@ -57,7 +57,7 @@ e(H(m_0)*g_1,pk_0)*...*e(H(m_{n-1})*g_1,pk_{n-1})=e(sig_{agg}, g_2)
 
 Meaning _n-1_ less pairing evaluation during verification thanks to $sig_{agg}$ .
 
-### Multi-signature case
+### Aggregate signature and public key case
 
 In multi-signature case, in addition to signature aggregation sketched above, all the signers sign **THE SAME** message.
 In that case, we can aggregate also public keys:
@@ -166,7 +166,7 @@ True
 </details>
 
 <details>
-<summary>How to load sage definitions in docker containers  here</summary>
+<summary>How to load sage definitions in docker containers</summary>
 
 ```bash
 docker run -v /local/path/to/bls/sage:/data -it sagemath/sagemath:latest
@@ -214,4 +214,40 @@ True
 # signature is multiplication operation between sk and the hash point.
 # Caution/disclaimer: hash-to-point is naively calculated here for education purposes. 
 ```
+</details>
+
+<details>
+<summary>Aggregate signature scheme</summary>
+
+```sagemath
+sage: load('/data/bls13-381.sage')
+sage: # Two parties represented by secrets, sk1 and sk2
+sage: sk1 = Integer(randrange(1, E1.order()))
+sage: sk2 = Integer(randrange(1, E1.order()))
+sage: # Two parties represented by the respective public keys, pk1 and pk2
+sage: pk1=sk1*g2
+sage: pk2=sk2*g2
+sage
+sage: sk1 == sk2
+False
+sage: # Let's assume that hashes of two msg are
+sage: Hmsg1=111
+sage: Hmsg2=222
+sage: # which could be mapped into points of G1
+sage: Hpoint1=Hmsg1*g1
+sage: Hpoint2=Hmsg2*g1
+sage:
+sage: # signatures
+sage: sig1 = sk1 * Hpoint1
+sage: sig2 = sk2 * Hpoint2
+sage: sig = sig1 + sig2
+sage:
+sage: # verification
+sage: left1 = atePairing(Hpoint1,pk1)
+sage: left2 = atePairing(Hpoint2,pk2)
+sage: right = atePairing(sig,g2)
+sage: left1*left2 == right
+True
+```
+
 </details>
