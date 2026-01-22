@@ -4,6 +4,7 @@
 1. [Introduction](#high-level-introduction)
 2. [BLS12-381 Elliptic curve overview](#bls-elliptic-curves-overview)
 3. [BLS mechanics in sagemath](#bls-mechanics-in-sagemath)
+4. [BLS standard component](#bls-standard-components)
 
 ## High level introduction
 
@@ -285,3 +286,25 @@ True
 ```
 
 </details>
+
+## BLS standard components
+
+According to [IETF draft revision 6](https://datatracker.ietf.org/doc/html/draft-irtf-cfrg-bls-signature-06) we have the following
+parts that comprise the standard
+
+- `KeyGen` procedure generates a secret key `SK`, deterministically, from a longer than 32-byte-long secret octet string `IKM`.
+   HKDF [RFC5869](https://www.rfc-editor.org/info/rfc5869) is used for that.
+   $SK=KeyGen(IKM)$
+
+   (This part is not going to be addressed for milestone 1)
+
+- `SkToPk` that generates, deterministically, public key, `PK`, from `SK`.
+   SK, a secret, is the integer such that 1 <= SK < r, where r is the order of either G1 or G2 depending if we optimize for public key (then G1) or signature sizes (then G2).
+   The exact procedure is
+
+```math
+xG=SK*G
+PK=point_to_pubkey(xG)
+```
+ Note: `point_to_pubkey` is the canonical representation of the point as an octet string.
+ SK*G is a given elliptic curve specific and is going to be in the context of BLS12-381.
