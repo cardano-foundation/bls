@@ -294,7 +294,10 @@ parts that comprise the standard
 
 - `KeyGen` procedure generates a secret key `SK`, deterministically, from a longer than 32-byte-long secret octet string `IKM`.
    HKDF [RFC5869](https://www.rfc-editor.org/info/rfc5869) is used for that.
-   $SK=KeyGen(IKM)$
+
+```math
+SK=KeyGen(IKM)
+```
 
    (This part is not going to be addressed for milestone 1)
 
@@ -304,8 +307,10 @@ parts that comprise the standard
 
 ```math
 xG=SK*G
+```
+```math
 PK=point\_to\_pubkey(xG)
 ```
 
  Note: `point_to_pubkey` is the canonical representation of the point as an octet string.
- `SK*G` is a given elliptic curve point where G is one of the group used in BLS12-381 definitions.
+ `SK*G` is a given elliptic curve point where G is one of the two groups, G1 or G2, used in BLS12-381 definitions.
