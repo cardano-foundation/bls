@@ -255,7 +255,7 @@ True
 </details>
 
 <details>
-<summary>Aggregate signature case</summary>
+<summary>Aggregate public key and signature case</summary>
 
 ```sagemath
 sage: load('/data/bls13-381.sage')
@@ -269,7 +269,7 @@ sage: pkAggr = pk1 + pk2
 sage
 sage: sk1 == sk2
 False
-sage: # Let's assume that hashes of ONE msg are
+sage: # Let's assume that hash of ONE msg is
 sage: Hmsg=111
 sage: # which could be mapped into point of G1
 sage: Hpoint=Hmsg*g1
@@ -299,12 +299,13 @@ parts that comprise the standard
    (This part is not going to be addressed for milestone 1)
 
 - `SkToPk` that generates, deterministically, public key, `PK`, from `SK`.
-   SK, a secret, is the integer such that 1 <= SK < r, where r is the order of either G1 or G2 depending if we optimize for public key (then G1) or signature sizes (then G2).
+   `SK`, a secret, is the integer such that 1 <= `SK` < r, where r is the order of either G1 or G2 depending whether the optimization is either after the public key (then G1 is used for `SK` storage) or signature sizes (then G2 is used for `SK` storage).
    The exact procedure is
 
 ```math
 xG=SK*G
-PK=point_to_pubkey(xG)
+PK=point\_to\_pubkey(xG)
 ```
+
  Note: `point_to_pubkey` is the canonical representation of the point as an octet string.
- SK*G is a given elliptic curve specific and is going to be in the context of BLS12-381.
+ `SK*G` is a given elliptic curve point where G is one of the group used in BLS12-381 definitions.
