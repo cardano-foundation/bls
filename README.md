@@ -117,31 +117,61 @@ $ docker run -it sagemath/sagemath:latest
 │ SageMath version 10.6, Release Date: 2025-03-31                    │
 │ Using Python 3.12.5. Type "help()" for help.                       │
 └────────────────────────────────────────────────────────────────────┘
-sage: # parameters for BLS12-381 
+sage: # parameters for BLS12-381 with comparison to
+sage: # standard/draft-irtf-cfrg-pairing-friendly-curves-12.txt
+sage: 
 sage: z = -0xd201000000010000
+sage:
+sage: # `q` stands for `r` (line 981)
 sage: q = (z^4 - z^2 + 1)
+sage: q.str(16)
+'73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000001'
+sage:
+sage: # `p` stands for `p` (line 977)
 sage: p = ZZ( z + q*(z - 1)^2/3 )
+sage: p.str(16)
+'1a0111ea397fe69a4b1ba7b6434bacd764774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab'
+sage:
+sage: # `4` stands for `b` (line 994)
+sage: # `h1` stands for `h` (line 992)
 sage: h1 = ZZ( (z - 1)^2 / 3 )
+sage: h1
+76329603384216526031706109802092473003
+sage: h1.str(16)
+'396c8c005555e1568c00aaab0000aaab'
+sage:
+sage: # `h2` stands for `h'` (line 992)
 sage: h2 = ZZ( (z^8 - 4*z^7 + 5*z^6 - 4*z^4 + 6*z^3 - 4*z^2-4*z + 13) / 9 )
+sage: h2
+305502333931268344200999753193121504214466019254188142667664032982267604182971884026507427359259977847832272839041616661285803823378372096355777062779109
+sage: h2.str(16)
+'5d543a95414e7f1091d50792876a202cd91de4547085abaa68a205b2e5a7ddfa628f1cb4d9e82ef21537e293a6691ae1616ec6e786f0c70cf1c38e31c7238e5'
 sage: 
 sage: F = GF(p)
 sage: F12.<T> = GF(p^12)
 sage: RF.<T> = PolynomialRing(F12)
 sage: j = (T^2 + 1).roots(ring=F12, multiplicities=0)[0]
-sage: 
+sage:
+sage: # `4` stands for `b` (line 994)
 sage: E0 = EllipticCurve(F  , [0, 4])
 sage: E1 = EllipticCurve(F12, [0, 4])
+sage: # `b'` is used here (line 1025)
 sage: E2 = EllipticCurve(F12, [0, 4 + 4*j])
 sage: 
 sage: # Generators of G1 and G2 (from https://aandds.com/blog/bls.html)
+sage: # and also page 18 in standard/draft-irtf-cfrg-pairing-friendly-curves-12.txt
+sage: # `x1` stands for `x` (line 984)
 sage: x1 = 0x17f1d3a73197d7942695638c4fa9ac0fc3688c4f9774b905a14e3a3f171bac586c55e83ff97a1aeffb3af00adb22c6bb
+sage: # `y1` stands for `y` (line 988)
 sage: y1 = 0x08b3f481e3aaa0f1a09e30ed741d8ae4fcf5e095d5d00af600db18cb2c04b3edd03cc744a2888ae40caa232946c5e7e1
 sage: g1 = E1( (x1, y1) )
 sage: g1
 (3685416753713387016781088315183077757961620795782546409894578378688607592378376318836054947676345821548104185464507 : 1339506544944476473020471379941921221584933875938349620426543736416511423956333506472724655353366534992391756441569 : 1)
 sage:
+sage: # `x2` encapsulates both `x'_0` (line 996) and `x'_1` (line 1000) 
 sage: x2 = ( 0x024AA2B2F08F0A91260805272DC51051C6E47AD4FA403B02B4510B647AE3D1770BAC0326A805BBEFD48056C8C121BDB8
 ....:        + 0x13E02B6052719F607DACD3A088274F65596BD0D09920B61AB5DA61BBDC7F5049334CF11213945D57E5AC7D055D042B7E * j )
+sage: # `y2` encapsulates both `y'_0` (line 1013) and `y'_1` (line 1017) 
 sage: y2 = ( 0x0CE5D527727D6E118CC9CDC6DA2E351AADFD9BAA8CBDD3A76D429A695160D12C923AC9CC3BACA289E193548608B82801
 ....:        + 0x0606C4A02EA734CC32ACD2B02BC28B99CB3E287E85A763AF267492AB572E99AB3F370D275CEC1DA1AAA9075FF05F79BE * j )
 sage: g2 = E2( (x2, y2) )
