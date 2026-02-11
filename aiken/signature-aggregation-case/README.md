@@ -63,3 +63,20 @@ of course, if the message to be signed is the same.
 Hence, distinct-message enforcement needs to be applied as exemplified by `aggregate_distinct_verify`.
 
 There are two other mitigations at hand, namely PoP and augmented signing.
+
+## Augmented BLS signing mode
+
+In order to avoid `rogue-key attack` the signed message altered to the following:
+
+```math
+H(pk || message)
+```
+
+Meaning the signer’s public key is prepended to the message before hashing,
+binding the public key to the signature.
+
+In order to enable this, we need to import
+
+```aiken
+        bls/g2_aug.{aggregate_signatures, aggregate_verify, skToPk, sign}
+```
