@@ -41,5 +41,25 @@ and make sure duplicate messages are not allowed. For this, we need to use
 
 __aggregate_distinct_verify__ make sure each message is unique before verification.
 
+### What is the nature of problem here?
 
+Let's assume we have __(sk1, pk1)__, __(sk2, pk2)__ and __(sk3, pk3)__ .
+Third party is malicious here and constructs public key that offsets the honest keys of other
+participants:
 
+```math
+pk_(rogue) = pk3 - (pk1 + pk2)
+```
+
+After key aggregation:
+
+```math
+ pk1 + pk2 + pk_(rogue) = pk3
+```
+
+This allows the attacker to produce a single valid signature with __pk3__ that verifies all participants contributed,
+of course, if the message to be signed is the same.
+
+Hence, distinct-message enforcement needs to be applied as exemplified by `aggregate_distinct_verify`.
+
+There are two other mitigations at hand, namely PoP and augmented signing.
