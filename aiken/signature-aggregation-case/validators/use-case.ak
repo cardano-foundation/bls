@@ -69,5 +69,10 @@ test three_party_unsafe_signature_aggregation_bls () {
   let sig3 = basic_bls.sign(sk3, message)
 
   // only sig3 is needed to verify! sig1 and sig2 could be omitted
-  basic_bls.aggregate_verify([pk1,pk2,rogue_pk3], [message,message,message], sig3)
+  let sigs_aggr_predicate = basic_bls.aggregate_verify([pk1,pk2,rogue_pk3], [message,message,message], sig3)
+
+  // the same vulnerability is present when public key aggregation is used
+  let pk_aggr = basic_bls.aggregate_publickeys([pk1,pk2,rogue_pk3])  
+  sigs_aggr_predicate &&
+  basic_bls.aggregate_verify([pk_aggr], [message,message,message], sig3)
 }
