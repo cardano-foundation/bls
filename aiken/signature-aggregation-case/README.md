@@ -13,7 +13,7 @@ Signature aggregation means we can, aggregate all __sig_i__, **make shorter** th
 in such a way that a resultant signature, __sig_(aggr)__ , can be used in verfication stage:
 
 ```
-verResult = verify([pk_1, ... , pk_n], sig_(aggr))
+verResult = verify([pk_1, ... , pk_n], [msg_1, ... , msg_n], sig_(aggr))
 ```
 
 Thanks to that verification is quicker and has lower byte imprint.
@@ -27,12 +27,19 @@ We can have two cases here,
 Basic primitives are **secure** and one can use
 
 ```aiken
-        bls/g2_basic.{aggregate_signatures, aggregate_verify, skToPk, sign, verify}
+        bls/g2_basic.{aggregate_signatures, aggregate_verify, skToPk, sign}
 ```
 
 ## there is duplication of __msg_i__ for some i's or we do not know it is the case
 
-Basic primitives are susceptible to __rogue attack__ and we need to be careful.
+Basic primitives are susceptible to __rogue-key attack__ and we need to be careful
+and make sure duplicate messages are not allowed. For this, we need to use
+
+```aiken
+        bls/g2_basic.{aggregate_signatures, aggregate_distinct_verify, skToPk, sign}
+```
+
+__aggregate_distinct_verify__ make sure each message is unique before verification.
 
 
 
