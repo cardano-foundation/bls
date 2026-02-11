@@ -1,65 +1,38 @@
-# signature-aggregation-case
+# Signature aggregation case
 
-Write validators in the `validators` folder, and supporting functions in the `lib` folder using `.ak` as a file extension.
+In multi signature aggregation case, we have multiple parties that participate in
+message signing and verification. Elliptic cryptography is used here (bls12-381)which is natively supported.
+Each party is having __(sk_i, pk_i)__ key pair and is signing __msg_i__ .
+As a consequence, we have signatures __sig_i__ produced, ie.,
+
+```math
+sig_i=sign(sk_i,msg_i) 
+```
+
+Signature aggregation means we can, aggregate all __sig_i__, **make shorter** than the sum of all signatures engaged,
+in such a way that a resultant signature, __sig_(aggr)__ , can be used in verfication stage:
+
+```
+verResult = verify([pk_1, ... , pk_n], sig_(aggr))
+```
+
+Thanks to that verification is quicker and has lower byte imprint.
+
+# Security considerations:
+
+We can have two cases here,
+
+## each __msg_i__ is unique
+
+Basic primitives are **secure** and one can use
 
 ```aiken
-validator my_first_validator {
-  spend(_datum: Option<Data>, _redeemer: Data, _output_reference: Data, _context: Data) {
-    True
-  }
-}
+        bls/g2_basic.{aggregate_signatures, aggregate_verify, skToPk, sign, verify}
 ```
 
-## Building
+## there is duplication of __msg_i__ for some i's or we do not know it is the case
 
-```sh
-aiken build
-```
+Basic primitives are susceptible to __rogue attack__ and we need to be careful.
 
-## Configuring
 
-**aiken.toml**
-```toml
-[config.default]
-network_id = 41
-```
 
-Or, alternatively, write conditional environment modules under `env`.
-
-## Testing
-
-You can write tests in any module using the `test` keyword. For example:
-
-```aiken
-use config
-
-test foo() {
-  config.network_id + 1 == 42
-}
-```
-
-To run all tests, simply do:
-
-```sh
-aiken check
-```
-
-To run only tests matching the string `foo`, do:
-
-```sh
-aiken check -m foo
-```
-
-## Documentation
-
-If you're writing a library, you might want to generate an HTML documentation for it.
-
-Use:
-
-```sh
-aiken docs
-```
-
-## Resources
-
-Find more on the [Aiken's user manual](https://aiken-lang.org).
