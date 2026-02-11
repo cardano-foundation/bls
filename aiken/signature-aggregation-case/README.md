@@ -1,4 +1,4 @@
-# Signature aggregation case
+# Signature and public key aggregation cases
 
 In multi signature aggregation case, we have multiple parties that participate in
 message signing and verification. Elliptic cryptography is used here (bls12-381)which is natively supported.
@@ -12,9 +12,24 @@ sig_i=sign(sk_i,msg_i)
 Signature aggregation means we can, aggregate all __sig_i__, **make shorter** than the sum of all signatures engaged,
 in such a way that a resultant signature, __sig_(aggr)__ , can be used in verfication stage:
 
-```
+```math
 verResult = verify([pk_1, ... , pk_n], [msg_1, ... , msg_n], sig_(aggr))
 ```
+
+also in the case when public keys are aggregated. Here,
+Here, public key aggregation means we can, aggregate all __pk_i__, **make shorter** than the sum of all public key engaged,
+in such a way that a resultant public key, __pk_(aggr)__ , can be used in verfication stage:
+
+```math
+verResult = verify([pk_(aggr)], [msg_1, ... , msg_n], [sk_1, ... , sk_n])
+```
+
+Also, both aggregations can be used together:
+
+```math
+verResult = verify([pk_(aggr)], [msg_1, ... , msg_n], sig_(aggr))
+```
+
 
 Thanks to that verification is quicker and has lower byte imprint.
 
