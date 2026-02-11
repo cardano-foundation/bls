@@ -1,3 +1,4 @@
+use bls/g2_aug as aug_bls
 use bls/g2_basic as basic_bls
 use bls/tests/utils.{construct_rogue_key}
 
@@ -75,4 +76,47 @@ test three_party_unsafe_signature_aggregation_bls () {
   let pk_aggr = basic_bls.aggregate_publickeys([pk1,pk2,rogue_pk3])  
   sigs_aggr_predicate &&
   basic_bls.aggregate_verify([pk_aggr], [message,message,message], sig3)
+}
+
+test three_party_safe_augmented_signature_aggregation_bls () {
+  // party1
+  let sk1 = #"ed69a93f0cf8c9836be3b67c7eeff416612d45ba39a5c099d48fa668bf558c9a"
+  let pk1 = aug_bls.skToPk(sk1)
+
+  // party2
+  let sk2 = #"ed69a93f0cf8c9836be3b67c7eeff416612d45ba39a5c099d48fa668bf558c9b"
+  let pk2 = aug_bls.skToPk(sk2)
+
+  // party3
+  let sk3 = #"ed69a93f0cf8c9836be3b67c7eeff416612d45ba39a5c099d48fa668bf558c9c"
+  let pk3 = aug_bls.skToPk(sk3)
+
+  let message = "Hello, Aiken from all parties!"
+
+  //let sig1 = aug_bls.sign(sk1, pk1, message)
+  //let sig2 = aug_bls.sign(sk2, pk1, message)
+  let sig3 = aug_bls.sign(sk3, pk1, message)
+
+  //let sig_aggr = aug_bls.aggregate_signatures([sig1, sig2, sig3])
+
+  let rogue_pk3 = construct_rogue_key(pk1, pk2, pk3)
+
+  // sig3 is not anymore enough to verify!
+  let rogue_aggr_predicate_fails = aug_bls.aggregate_verify([pk1,pk2,rogue_pk3], [message,message,message], sig3)
+
+  // full signature aggregation works
+  //let full_aggr_predicate = aug_bls.aggregate_verify([pk1,pk2,pk3], [message,message,message], sig_aggr)
+
+  // partial signature aggregation works also
+  //let sig13_aggr = aug_bls.aggregate_signatures([sig1, sig3])
+  //let partial_aggr_predicate = aug_bls.aggregate_verify([pk1,pk3], [message,message], sig13_aggr)  
+
+  // sig3 is not anymore enough to verify also in public key aggregation case
+  let pk_aggr = aug_bls.aggregate_publickeys([pk1,pk2,rogue_pk3])  
+  let rogue_aggr_pks_predicate_fails = aug_bls.aggregate_verify([pk_aggr], [message,message,message], sig3)
+
+  !rogue_aggr_predicate_fails &&
+  //full_aggr_predicate &&
+  //partial_aggr_predicate &&
+  !rogue_aggr_pks_predicate_fails
 }

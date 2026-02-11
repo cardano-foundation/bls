@@ -30,7 +30,6 @@ Also, both aggregations can be used together:
 verResult = verify([pk_(aggr)], [msg_1, ... , msg_n], sig_(aggr))
 ```
 
-
 Thanks to that verification is quicker and has lower byte imprint.
 
 # Security considerations:
