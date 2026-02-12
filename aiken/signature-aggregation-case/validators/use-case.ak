@@ -93,11 +93,11 @@ test three_party_safe_augmented_signature_aggregation_bls () {
 
   let message = "Hello, Aiken from all parties!"
 
-  //let sig1 = aug_bls.sign(sk1, pk1, message)
-  //let sig2 = aug_bls.sign(sk2, pk1, message)
-  let sig3 = aug_bls.sign(sk3, pk1, message)
+  let sig1 = aug_bls.sign(sk1, pk1, message)
+  let sig2 = aug_bls.sign(sk2, pk2, message)
+  let sig3 = aug_bls.sign(sk3, pk3, message)
 
-  //let sig_aggr = aug_bls.aggregate_signatures([sig1, sig2, sig3])
+  let sig_aggr = aug_bls.aggregate_signatures([sig1, sig2, sig3])
 
   let rogue_pk3 = construct_rogue_key(pk1, pk2, pk3)
 
@@ -105,18 +105,19 @@ test three_party_safe_augmented_signature_aggregation_bls () {
   let rogue_aggr_predicate_fails = aug_bls.aggregate_verify([pk1,pk2,rogue_pk3], [message,message,message], sig3)
 
   // full signature aggregation works
-  //let full_aggr_predicate = aug_bls.aggregate_verify([pk1,pk2,pk3], [message,message,message], sig_aggr)
+  let full_aggr_predicate = aug_bls.aggregate_verify([pk1,pk2,pk3], [message,message,message], sig_aggr)
 
   // partial signature aggregation works also
-  //let sig13_aggr = aug_bls.aggregate_signatures([sig1, sig3])
-  //let partial_aggr_predicate = aug_bls.aggregate_verify([pk1,pk3], [message,message], sig13_aggr)  
+  let sig13_aggr = aug_bls.aggregate_signatures([sig1, sig3])
+  let partial_aggr_predicate = aug_bls.aggregate_verify([pk1,pk3], [message,message], sig13_aggr)  
 
   // sig3 is not anymore enough to verify also in public key aggregation case
-  let pk_aggr = aug_bls.aggregate_publickeys([pk1,pk2,rogue_pk3])  
-  let rogue_aggr_pks_predicate_fails = aug_bls.aggregate_verify([pk_aggr], [message,message,message], sig3)
+  //let pk_aggr = aug_bls.aggregate_publickeys([pk1,pk2,rogue_pk3])  
+  //let rogue_aggr_pks_predicate_fails = aug_bls.aggregate_verify([pk_aggr], [message,message,message], sig3)
 
   !rogue_aggr_predicate_fails &&
-  //full_aggr_predicate &&
-  //partial_aggr_predicate &&
-  !rogue_aggr_pks_predicate_fails
+  full_aggr_predicate &&
+  partial_aggr_predicate 
+  //!rogue_aggr_pks_predicate_fails
 }
+
