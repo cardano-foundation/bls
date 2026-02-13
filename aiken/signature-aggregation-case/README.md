@@ -94,3 +94,29 @@ In order to enable this, we need to import
 ```aiken
         bls/g2_aug.{aggregate_signatures, aggregate_verify, skToPk, sign}
 ```
+
+## Proof of Possession (PoP) BLS
+
+PoP BLS is augmented BLS with additional goodies.
+Each participant during key registration needs to prove that actually controls the private key corresponding to the registered public key.
+
+In order to enable this, we need to import
+
+```aiken
+        bls/g2_pop.{aggregate_signatures, aggregate_verify, pop_prove, pop_verify, skToPk, sign}
+```
+
+## Summary of situation
+
+| Scenario | Basic BLS | Augmented BLS	| PoP BLS |
+|----------|-----------|----------------|---------|
+| not unique messages + `aggregate_verify([pks],[msgs],sig_aggr)` |	❌ unsafe unless aggregate_distinct_verify is used |	✅ safe |	✅ safe |
+| unique messages + `aggregate_verify([pks],[msgs],sig_aggr)` |	✅ safe	| ✅ safe	| ✅ safe |
+| not unique messages + `aggregate_verify(pk_aggr,[msgs],sig_aggr)` |	❌ unsafe unless aggregate_distinct_verify is used |	❌ unsafe |	✅ safe |
+| unique messages + `aggregate_verify(pk_aggr,[msgs],sig_aggr)` |	✅ safe	| ✅ safe	| ✅ safe |
+
+## Executive summary with IETF recommendations
+
+- Aggregating signatures does not increase security risk
+- Aggregating public keys can only be done if proof-of-possession is enforced
+- In the case when messages are unique all setups are safe 
