@@ -19,20 +19,8 @@ test test_basic_bls () {
 }
 
 test three_party_potentially_unsafe_signature_aggregation_bls () {
-  // party1
-  let secret1 = #"ed69a93f0cf8c9836be3b67c7eeff416612d45ba39a5c099d48fa668bf558c9a"
-  let sk1 = key_gen(secret1, "")  
-  let pk1 = basic_bls.sk_to_pk(sk1)
 
-  // party2
-  let secret2 = #"ed69a93f0cf8c9836be3b67c7eeff416612d45ba39a5c099d48fa668bf558c9b"
-  let sk2 = key_gen(secret2, "")    
-  let pk2 = basic_bls.sk_to_pk(sk2)
-
-  // party3
-  let secret3 = #"ed69a93f0cf8c9836be3b67c7eeff416612d45ba39a5c099d48fa668bf558c9c"
-  let sk3 = key_gen(secret3, "")    
-  let pk3 = basic_bls.sk_to_pk(sk3)
+  let (sk1, pk1, sk2, pk2, sk3, pk3) = get_three_party_keys()
 
   // if each message is unique then the 'aggregate_signatures' with 'aggregate_verify'
   // is safe, but if this condition is not satisfied then it is not
@@ -57,20 +45,8 @@ test three_party_potentially_unsafe_signature_aggregation_bls () {
 }
 
 test three_party_unsafe_signature_aggregation_bls () {
-  // party1
-  let secret1 = #"ed69a93f0cf8c9836be3b67c7eeff416612d45ba39a5c099d48fa668bf558c9a"
-  let sk1 = key_gen(secret1, "")  
-  let pk1 = basic_bls.sk_to_pk(sk1)
 
-  // party2
-  let secret2 = #"ed69a93f0cf8c9836be3b67c7eeff416612d45ba39a5c099d48fa668bf558c9b"
-  let sk2 = key_gen(secret2, "")    
-  let pk2 = basic_bls.sk_to_pk(sk2)
-
-  // party3
-  let secret3 = #"ed69a93f0cf8c9836be3b67c7eeff416612d45ba39a5c099d48fa668bf558c9c"
-  let sk3 = key_gen(secret3, "")    
-  let pk3 = basic_bls.sk_to_pk(sk3)
+  let (_sk1, pk1, _sk2, pk2, sk3, pk3) = get_three_party_keys()
   
   // one creates rogue_pk
   let rogue_pk3 = construct_rogue_key(pk1, pk2, pk3)
@@ -97,20 +73,8 @@ test three_party_unsafe_signature_aggregation_bls () {
 }
 
 test three_party_almost_safe_augmented_signature_aggregation_bls () {
-  // party1
-  let secret1 = #"ed69a93f0cf8c9836be3b67c7eeff416612d45ba39a5c099d48fa668bf558c9a"
-  let sk1 = key_gen(secret1, "")  
-  let pk1 = basic_bls.sk_to_pk(sk1)
 
-  // party2
-  let secret2 = #"ed69a93f0cf8c9836be3b67c7eeff416612d45ba39a5c099d48fa668bf558c9b"
-  let sk2 = key_gen(secret2, "")    
-  let pk2 = basic_bls.sk_to_pk(sk2)
-
-  // party3
-  let secret3 = #"ed69a93f0cf8c9836be3b67c7eeff416612d45ba39a5c099d48fa668bf558c9c"
-  let sk3 = key_gen(secret3, "")    
-  let pk3 = basic_bls.sk_to_pk(sk3)
+  let (sk1, pk1, sk2, pk2, sk3, pk3) = get_three_party_keys()
 
   let message = "Hello, Aiken from all parties!"
 
@@ -143,20 +107,7 @@ test three_party_almost_safe_augmented_signature_aggregation_bls () {
 }
 
 test three_party_safe_pop_signature_aggregation_bls () {
-  // party1
-  let secret1 = #"ed69a93f0cf8c9836be3b67c7eeff416612d45ba39a5c099d48fa668bf558c9a"
-  let sk1 = key_gen(secret1, "")  
-  let pk1 = basic_bls.sk_to_pk(sk1)
-
-  // party2
-  let secret2 = #"ed69a93f0cf8c9836be3b67c7eeff416612d45ba39a5c099d48fa668bf558c9b"
-  let sk2 = key_gen(secret2, "")    
-  let pk2 = basic_bls.sk_to_pk(sk2)
-
-  // party3
-  let secret3 = #"ed69a93f0cf8c9836be3b67c7eeff416612d45ba39a5c099d48fa668bf558c9c"
-  let sk3 = key_gen(secret3, "")    
-  let pk3 = basic_bls.sk_to_pk(sk3)
+  let (sk1, pk1, sk2, pk2, sk3, pk3) = get_three_party_keys()
 
   // at registration
   let pop1 = pop_bls.pop_prove(sk1)
@@ -182,3 +133,21 @@ test three_party_safe_pop_signature_aggregation_bls () {
   full_aggr_predicate 
 }
 
+fn get_three_party_keys() -> (api.PrivateKey, api.PublicKey, api.PrivateKey, api.PublicKey, api.PrivateKey, api.PublicKey) {
+  // party1
+  let secret1 = #"ed69a93f0cf8c9836be3b67c7eeff416612d45ba39a5c099d48fa668bf558c9a"
+  let sk1 = key_gen(secret1, "")  
+  let pk1 = basic_bls.sk_to_pk(sk1)
+
+  // party2
+  let secret2 = #"ed69a93f0cf8c9836be3b67c7eeff416612d45ba39a5c099d48fa668bf558c9b"
+  let sk2 = key_gen(secret2, "")    
+  let pk2 = basic_bls.sk_to_pk(sk2)
+
+  // party3
+  let secret3 = #"ed69a93f0cf8c9836be3b67c7eeff416612d45ba39a5c099d48fa668bf558c9c"
+  let sk3 = key_gen(secret3, "")    
+  let pk3 = basic_bls.sk_to_pk(sk3)
+
+  (sk1, pk1, sk2, pk2, sk3, pk3)
+}
