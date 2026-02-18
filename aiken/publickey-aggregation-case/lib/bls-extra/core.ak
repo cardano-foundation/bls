@@ -24,7 +24,7 @@ pub type PublicKeyAggregated =
 /// PublicKey - The compressed aggregated BLS public key.
 ///
 /// ```aiken
-/// let pk_agg = aggregate_publickeys([pk1, pk2, pk3])
+/// let agg_pk = aggregate_publickeys([pk1, pk2, pk3])
 /// ```
 pub fn aggregate_publickeys(publickeys: List<PublicKey>) -> PublicKeyAggregated {
   aggregate_g1(publickeys)
@@ -33,10 +33,13 @@ pub fn aggregate_publickeys(publickeys: List<PublicKey>) -> PublicKeyAggregated 
 /// Verify an aggregated signature over aggregated public keys and messages.
 ///
 /// Returns `True` if the aggregated signature is valid for the provided
-/// `(public_key_i, message_i)` pairs, and `False` otherwise.
+/// `agg_pk` and `message_i`s, and `False` otherwise.
 ///
 /// ```aiken
-/// aggregate_publickkeys_verify(agg_pk, [msg1, msg2], agg_sig) == True
+/// use bls/g1/aug.{aggregate}
+///
+/// let agg_sig = aggregate([sig1, sig2, sig3])
+/// aggregate_publickkeys_verify(agg_pk, [msg1, msg2, msg3], agg_sig) == True
 /// ```
 pub fn aggregate_publickkeys_verify(
   agg_pk: PublicKeyAggregated,
