@@ -29,6 +29,10 @@ pub fn aggregate_publickeys(publickeys: List<PublicKey>) -> PublicKeyAggregated 
   aggregate_g1(publickeys)
 }
 
+pub fn aggregate_publickeys1(publickeys: List<PublicKey>) -> PublicKey {
+  aggregate_g1(publickeys)
+}
+
 /// Verify an aggregated signature over aggregated public keys and messages.
 ///
 /// Returns `True` if the aggregated signature is valid for the provided
