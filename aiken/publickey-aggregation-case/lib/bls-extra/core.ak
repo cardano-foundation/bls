@@ -4,7 +4,6 @@ use aiken/builtin.{
 }
 use aiken/crypto/bls12_381/g1
 use bls/api.{Aug, Basic, BlsMode, Pop, PublicKey, Signature}
-use bls/g1/constants.{signature_len}
 use bls/g1/constants.{dst_aug, dst_basic, dst_pop}
 use bls/pairing.{aggregate_g1, group_pairing}
 use bls/utils.{foldl2}
