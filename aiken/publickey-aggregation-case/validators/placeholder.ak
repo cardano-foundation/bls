@@ -6,7 +6,41 @@ use bls/tests/utils.{construct_rogue_key}
 
 use bls_extra/core as bls_extra_core
 
-test three_party_publickey_signature_aggregation_bls () {
+test three_party_signature_aggregation_basic_bls () {
+
+  let (sk1, pk1, sk2, pk2, sk3, pk3) = get_three_party_keys()
+
+  // if each message is unique then the 'aggregate_signatures' with 'aggregate_verify'
+  // is safe
+  let message1 = "Hello, Aiken from party 1!"
+  let message2 = "Hello, Aiken from party 2!"
+  let message3 = "Hello, Aiken from party 3!"
+
+  let sig1 = basic_bls.sign(sk1, message1)
+  let sig2 = basic_bls.sign(sk2, message2)
+  let sig3 = basic_bls.sign(sk3, message3)
+
+  let sig_aggr = basic_bls.aggregate([sig1, sig2, sig3])
+
+  // full signature aggregation
+  let full_sig_aggr_predicate = basic_bls.aggregate_verify([pk1,pk2,pk3], [message1,message2,message3], sig_aggr)
+
+  // partial signature aggregation
+  let sig13_aggr = basic_bls.aggregate([sig1, sig3])  
+  let patial_sig_agg_predicate = basic_bls.aggregate_verify([pk1,pk3], [message1,message3], sig13_aggr)
+
+  // full both signature and public keys aggregation
+  let pk_aggr = bls_extra_core.aggregate_publickeys([pk1,pk2,pk3])
+  let pubkeys_sig_aggr_predicate = bls_extra_core.aggregate_publickkeys_verify(pk_aggr, [message1,message2,message3], sig_aggr, api.Basic)
+
+  // partial signature aggregation
+  full_sig_aggr_predicate &&
+  patial_sig_agg_predicate &&
+  !pubkeys_sig_aggr_predicate
+}
+
+
+test three_party_rogue_publickey_signature_aggregation_bls () {
 
   let (_sk1, pk1, _sk2, pk2, sk3, pk3) = get_three_party_keys()
   

@@ -18,7 +18,7 @@ test test_basic_bls () {
   basic_bls.verify(pk, message, signature)
 }
 
-test three_party_potentially_unsafe_signature_aggregation_bls () {
+test three_party_signature_aggregation_basic_bls () {
 
   let (sk1, pk1, sk2, pk2, sk3, pk3) = get_three_party_keys()
 
@@ -44,7 +44,7 @@ test three_party_potentially_unsafe_signature_aggregation_bls () {
   basic_bls.aggregate_verify([pk1,pk3], [message1,message3], sig13_aggr)
 }
 
-test three_party_unsafe_signature_aggregation_bls () {
+test three_party_rogue_signature_aggregation_basic_bls () {
 
   let (_sk1, pk1, _sk2, pk2, sk3, pk3) = get_three_party_keys()
   
@@ -60,10 +60,6 @@ test three_party_unsafe_signature_aggregation_bls () {
 
   // only sig3 is needed to verify! sig1 and sig2 could be omitted
   let sigs_aggr_predicate = core_bls.core_aggregate_verify([pk1,pk2,rogue_pk3], [message,message,message], sig3, api.Basic)
-
-  // the same vulnerability is present when public key aggregation is used
-  //let pk_aggr = basic_bls.aggregate([pk1,pk2,rogue_pk3])
-  //let sigs_aggr_predicate = core_bls.core_aggregate_verify(pk_aggr, [message,message,message], sig3, api.Basic)
 
   // basic bls impl has now detection of if not all msgs are distinct
   let sigs_aggr_predicate_fails = basic_bls.aggregate_verify([pk1,pk2,rogue_pk3], [message,message,message], sig3)
