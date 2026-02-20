@@ -4,6 +4,7 @@ use bls/g1/core as core_bls
 use bls/core.{key_gen}
 use bls/tests/utils.{construct_rogue_key}
 
+use bls_extra/core as bls_extra_core
 
 test three_party_unsafe_signature_aggregation_bls () {
 
@@ -23,14 +24,15 @@ test three_party_unsafe_signature_aggregation_bls () {
   let sigs_aggr_predicate = core_bls.core_aggregate_verify([pk1,pk2,rogue_pk3], [message,message,message], sig3, api.Basic)
 
   // the same vulnerability is present when public key aggregation is used
-  //let pk_aggr = basic_bls.aggregate([pk1,pk2,rogue_pk3])
-  //let sigs_aggr_predicate = core_bls.core_aggregate_verify(pk_aggr, [message,message,message], sig3, api.Basic)
+  let pk_aggr = bls_extra_core.aggregate_publickeys([pk1,pk2,rogue_pk3])
+  let pubkeys_aggr_predicate_fails = bls_extra_core.aggregate_publickkeys_verify(pk_aggr, [message,message,message], sig3, api.Basic)
 
   // basic bls impl has now detection of if not all msgs are distinct
   let sigs_aggr_predicate_fails = basic_bls.aggregate_verify([pk1,pk2,rogue_pk3], [message,message,message], sig3)
 
   sigs_aggr_predicate &&
-  !sigs_aggr_predicate_fails
+  !sigs_aggr_predicate_fails &&
+  !pubkeys_aggr_predicate_fails
 }
 
 fn get_three_party_keys() -> (api.PrivateKey, api.PublicKey, api.PrivateKey, api.PublicKey, api.PrivateKey, api.PublicKey) {
