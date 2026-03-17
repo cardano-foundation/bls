@@ -1,10 +1,12 @@
-# BLS multi-signatures cryptographic tools
+# BLS12-381 Elliptic curve, and BLS multi-signatures scheme and VRF based on it
 
 ## Contents
 1. [Introduction](#high-level-introduction)
 2. [BLS12-381 Elliptic curve overview](#bls-elliptic-curves-overview)
 3. [BLS mechanics in sagemath](#bls-mechanics-in-sagemath)
-4. [BLS standard component](#bls-standard-components)
+4. [BLS mechanics in aiken](#bls-mechanics-in-aiken)
+5. [BLS12-381 primitives in aiken](#bls-curve-primitives-in-aiken)
+6. [VRF using BLS12-381 primitives](#vrf-using-bls-curve-primitives)
 
 ## High level introduction
 
@@ -318,30 +320,16 @@ True
 
 </details>
 
-## BLS standard components
+## BLS mechanics in aiken
 
-According to [IETF draft revision 6](https://datatracker.ietf.org/doc/html/draft-irtf-cfrg-bls-signature-06) we have the following
-parts that comprise the standard
+The implementation of public key aggregation case using [aiken primitves](https://aiken-lang.github.io/stdlib/aiken/crypto/bls12_381/g1.html) and [ilap/bls](https://github.com/ilap/bls) is [here](./aiken/publickey-aggregation-case)
 
-- `KeyGen` procedure generates a secret key `SK`, deterministically, from a longer than 32-byte-long secret octet string `IKM`.
-   HKDF [RFC5869](https://www.rfc-editor.org/info/rfc5869) is used for that.
+The implementation of signature aggregation case using [aiken primitves](https://aiken-lang.github.io/stdlib/aiken/crypto/bls12_381/g1.html) and [ilap/bls](https://github.com/ilap/bls) is [here](./aiken/signature-aggregation-case)
 
-```math
-SK=KeyGen(IKM)
-```
+## BLS curve primitives in aiken
 
-   (This part is not going to be addressed for milestone 1)
+TODO
 
-- `SkToPk` that generates, deterministically, public key, `PK`, from `SK`.
-   `SK`, a secret, is the integer such that 1 <= `SK` < r, where r is the order of either G1 or G2 depending whether the optimization is either after the public key (then G1 is used for `SK` storage) or signature sizes (then G2 is used for `SK` storage).
-   The exact procedure is
+## VRF using BLS curve primitives
 
-```math
-xG=SK*G
-```
-```math
-PK=point\_to\_pubkey(xG)
-```
-
- Note: `point_to_pubkey` is the canonical representation of the point as an octet string.
- `SK*G` is a given elliptic curve point where G is one of the two groups, G1 or G2, used in BLS12-381 definitions.
+TODO
