@@ -1,7 +1,7 @@
-# Signature and public key aggregation cases
+# Signature aggregation case using BLS12-381
 
 In multi signature aggregation case, we have multiple parties that participate in
-message signing and verification. Elliptic cryptography is used here (bls12-381)which is natively supported.
+message signing and verification. Elliptic cryptography is used here (bls12-381) which is natively supported.
 Each party is having __(sk_i, pk_i)__ key pair and is signing __msg_i__ .
 As a consequence, we have signatures __sig_i__ produced, ie.,
 
@@ -16,20 +16,6 @@ in such a way that a resultant signature, __sig_(aggr)__ , can be used in verfic
 verResult = verify([pk_1, ... , pk_n], [msg_1, ... , msg_n], sig_(aggr))
 ```
 
-also in the case when public keys are aggregated. Here,
-Here, public key aggregation means we can, aggregate all __pk_i__, **make shorter** than the sum of all public key engaged,
-in such a way that a resultant public key, __pk_(aggr)__ , can be used in verfication stage:
-
-```math
-verResult = verify([pk_(aggr)], [msg_1, ... , msg_n], [sk_1, ... , sk_n])
-```
-
-Also, both aggregations can be used together:
-
-```math
-verResult = verify([pk_(aggr)], [msg_1, ... , msg_n], sig_(aggr))
-```
-
 Thanks to that verification is quicker and has lower byte imprint.
 
 # Security considerations:
@@ -41,7 +27,7 @@ We can have two cases here,
 Basic primitives are **secure** and one can use
 
 ```aiken
-        bls/g2_basic.{aggregate_signatures, aggregate_verify, skToPk, sign}
+        use bls/g1/basic.{aggregate, aggregate_verify, sign}
 ```
 
 ## there is duplication of __msg_i__ for some i's or we do not know it is the case
@@ -50,10 +36,10 @@ Basic primitives are susceptible to __rogue-key attack__ and we need to be caref
 and make sure duplicate messages are not allowed. For this, we need to use
 
 ```aiken
-        bls/g2_basic.{aggregate_signatures, aggregate_distinct_verify, skToPk, sign}
+        bls/g2_basic.{aggregate_verify}
 ```
 
-__aggregate_distinct_verify__ make sure each message is unique before verification.
+__aggregate_verify__ make sure each message is unique before verification.
 
 ### What is the nature of problem here?
 
@@ -74,7 +60,8 @@ After key aggregation:
 This allows the attacker to produce a single valid signature with __pk3__ that verifies all participants contributed,
 of course, if the message to be signed is the same.
 
-Hence, distinct-message enforcement needs to be applied as exemplified by `aggregate_distinct_verify`.
+Hence, distinct-message enforcement needs to be applied as exemplified by `aggregate_verify`.
+If one want to see the problem there is 'core_aggregate_verify' low level function, without message distincness check.
 
 There are two other mitigations at hand, namely PoP and augmented signing.
 
@@ -92,31 +79,37 @@ binding the public key to the signature.
 In order to enable this, we need to import
 
 ```aiken
-        bls/g2_aug.{aggregate_signatures, aggregate_verify, skToPk, sign}
+        use bls/g1/aug.{aggregate, aggregate_verify,sign}
+```
+
+Thanks to that, the following verification is possible:
+
+```aiken
+        aug_bls.aggregate_verify([pk1,pk2,pk3], [message,message,message], sig_aggr)
 ```
 
 ## Proof of Possession (PoP) BLS
 
-PoP BLS is augmented BLS with additional goodies.
+PoP BLS is augmenting the BLS scheme with additional goodies.
 Each participant during key registration needs to prove that actually controls the private key corresponding to the registered public key.
 
 In order to enable this, we need to import
 
 ```aiken
-        bls/g2_pop.{aggregate_signatures, aggregate_verify, pop_prove, pop_verify, skToPk, sign}
+        use bls/g1/pop.{aggregate, aggregate_verify, pop_prove, pop_verify, sign}
 ```
 
 ## Summary of situation
 
 | Scenario | Basic BLS | Augmented BLS	| PoP BLS |
 |----------|-----------|----------------|---------|
-| not unique messages + `aggregate_verify([pks],[msgs],sig_aggr)` |	❌ unsafe unless aggregate_distinct_verify is used |	✅ safe |	✅ safe |
+| not unique messages +'core_aggregate_verify'| 	❌ unsafe  |	✅ safe |	✅ safe |
+| not unique messages + `aggregate_verify([pks],[msgs],sig_aggr)` |	❌ unsafe as validation is not passing |	✅ safe |	✅ safe |
 | unique messages + `aggregate_verify([pks],[msgs],sig_aggr)` |	✅ safe	| ✅ safe	| ✅ safe |
-| not unique messages + `aggregate_verify(pk_aggr,[msgs],sig_aggr)` |	❌ unsafe unless aggregate_distinct_verify is used |	❌ unsafe |	✅ safe |
-| unique messages + `aggregate_verify(pk_aggr,[msgs],sig_aggr)` |	✅ safe	| ✅ safe	| ✅ safe |
+
 
 ## Executive summary with IETF recommendations
 
 - Aggregating signatures does not increase security risk
-- Aggregating public keys can only be done if proof-of-possession is enforced
-- In the case when messages are unique all setups are safe 
+- In the case when messages are unique all setups are safe
+- In the case when messages are NOT unique only augmented and PoP setups are safe

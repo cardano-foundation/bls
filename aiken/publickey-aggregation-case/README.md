@@ -1,13 +1,18 @@
-# publickey-aggregation-case
+# Public key aggregation case using BLS12-381 aiken primitives
 
-Write validators in the `validators` folder, and supporting functions in the `lib` folder using `.ak` as a file extension.
+Public key aggregation means we can, aggregate all __pk_i__, **make shorter** than the sum of all public key engaged,
+in such a way that a resultant public key, __pk_(aggr)__ , can be used in verfication stage:
 
-```aiken
-validator my_first_validator {
-  spend(_datum: Option<Data>, _redeemer: Data, _output_reference: Data, _context: Data) {
-    True
-  }
-}
+```math
+verResult = verify([pk_(aggr)], [msg_1, ... , msg_n], [sk_1, ... , sk_n])
+```
+
+where each party is having __(sk_i, pk_i)__ key pair and is signing __msg_i__ .
+
+Also, both aggregations, ie., public key and signature, can be used together:
+
+```math
+verResult = verify([pk_(aggr)], [msg_1, ... , msg_n], sig_(aggr))
 ```
 
 ## Building
@@ -16,28 +21,8 @@ validator my_first_validator {
 aiken build
 ```
 
-## Configuring
-
-**aiken.toml**
-```toml
-[config.default]
-network_id = 41
-```
-
-Or, alternatively, write conditional environment modules under `env`.
-
 ## Testing
-
-You can write tests in any module using the `test` keyword. For example:
-
-```aiken
-use config
-
-test foo() {
-  config.network_id + 1 == 42
-}
-```
-
+ 
 To run all tests, simply do:
 
 ```sh
@@ -50,16 +35,7 @@ To run only tests matching the string `foo`, do:
 aiken check -m foo
 ```
 
-## Documentation
-
-If you're writing a library, you might want to generate an HTML documentation for it.
-
-Use:
-
-```sh
-aiken docs
-```
-
 ## Resources
 
 Find more on the [Aiken's user manual](https://aiken-lang.org).
+Find more on the [ilap/bls](https://github.com/ilap/bls).
