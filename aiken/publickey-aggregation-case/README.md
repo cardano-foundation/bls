@@ -37,5 +37,4 @@ aiken check -m foo
 
 ## Resources
 
-Find more on the [Aiken's user manual](https://aiken-lang.org).
-Find more on the [ilap/bls](https://github.com/ilap/bls).
+Find more on [Aiken's user manual](https://aiken-lang.org) and the recommended library for the scheme [ilap/bls](https://github.com/ilap/bls).

@@ -22,7 +22,7 @@ Thanks to that verification is quicker and has lower byte imprint.
 
 We can have two cases here,
 
-## each __msg_i__ is unique
+## 1. Each __msg_i__ is unique
 
 Basic primitives are **secure** and one can use
 
@@ -30,7 +30,7 @@ Basic primitives are **secure** and one can use
         use bls/g1/basic.{aggregate, aggregate_verify, sign}
 ```
 
-## there is duplication of __msg_i__ for some i's or we do not know it is the case
+## 2. There is the duplication of __msg_i__ for some i's or we do not know if it is the case
 
 Basic primitives are susceptible to __rogue-key attack__ and we need to be careful
 and make sure duplicate messages are not allowed. For this, we need to use
@@ -61,7 +61,7 @@ This allows the attacker to produce a single valid signature with __pk3__ that v
 of course, if the message to be signed is the same.
 
 Hence, distinct-message enforcement needs to be applied as exemplified by `aggregate_verify`.
-If one want to see the problem there is 'core_aggregate_verify' low level function, without message distincness check.
+If one want to see the problem there is `core_aggregate_verify` low level function, without message distincness check.
 
 There are two other mitigations at hand, namely PoP and augmented signing.
 
@@ -113,3 +113,27 @@ In order to enable this, we need to import
 - Aggregating signatures does not increase security risk
 - In the case when messages are unique all setups are safe
 - In the case when messages are NOT unique only augmented and PoP setups are safe
+
+## Building
+
+```sh
+aiken build
+```
+
+## Testing
+ 
+To run all tests, simply do:
+
+```sh
+aiken check
+```
+
+To run only tests matching the string `foo`, do:
+
+```sh
+aiken check -m foo
+```
+
+## Resources
+
+Find more on [Aiken's user manual](https://aiken-lang.org) and the recommended library for the scheme [ilap/bls](https://github.com/ilap/bls).
