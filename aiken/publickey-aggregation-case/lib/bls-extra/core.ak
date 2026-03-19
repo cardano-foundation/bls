@@ -7,6 +7,7 @@ use aiken/crypto/bls12_381/g1
 use bls/api.{Aug, Basic, BlsMode, Pop, PublicKey, Signature}
 use bls/g2/constants.{dst_aug, dst_basic, dst_pop}
 use bls/pairing.{aggregate_g1, group_pairing}
+use bls/utils.{all_unique}
 
 
 pub type PublicKeyAggregated =
@@ -66,7 +67,10 @@ fn internal_aggregate_verify_with_aggregated_pk(
   signature: ByteArray,
   mode: BlsMode,
 ) -> Bool {
-  let p = bls12_381_g1_uncompress(pk_agg)
+  if !all_unique(messages) {
+    False
+  } else {
+    let p = bls12_381_g1_uncompress(pk_agg)
 
   expect [msg, ..msgs] = messages
 
@@ -86,7 +90,8 @@ fn internal_aggregate_verify_with_aggregated_pk(
   let s = bls12_381_g2_uncompress(signature)
   let c2 = group_pairing(g1.generator, s)
 
-  bls12_381_final_verify(c1, c2)
+    bls12_381_final_verify(c1, c2)
+  }
 }
 
 fn select_dst(mode: BlsMode) -> ByteArray {
