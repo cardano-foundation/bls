@@ -31,6 +31,18 @@ pub fn aggregate_publickeys(publickeys: List<PublicKey>) -> PublicKeyAggregated 
   aggregate_g1(publickeys)
 }
 
+/// Verify an aggregated signature using a pre-aggregated public key.
+///
+/// This verifies that the aggregate signature is valid for all messages,
+/// using the pre-aggregated public key.
+///
+/// For Basic/Pop modes: duplicates messages are rejected
+/// For Aug mode: duplicate messages are allowed (but only works with single signer)
+///
+/// ```aiken
+/// let agg_pk = aggregate_publickeys([pk1, pk2, pk3])
+/// let result = aggregate_publickey_verify(agg_pk, [message], sig, Basic)
+/// ```
 pub fn aggregate_publickey_verify(
   pk_agg: PublicKeyAggregated,
   messages: List<ByteArray>,
