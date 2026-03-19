@@ -27,23 +27,12 @@ pub type PublicKeyAggregated =
 /// ```aiken
 /// let agg_pk = aggregate_publickeys([pk1, pk2, pk3])
 /// ```
-pub fn aggregate_publickeys(publickeys: List<PublicKey>) -> ByteArray {
+pub fn aggregate_publickeys(publickeys: List<PublicKey>) -> PublicKeyAggregated {
   aggregate_g1(publickeys)
 }
 
-/// Verify an aggregated signature using a pre-aggregated public key.
-///
-/// This verifies that the aggregate signature is valid for all messages,
-/// using the pre-aggregated public key. The pk_agg is used for each message
-/// in the verification, which is mathematically valid when:
-/// - All signers sign all messages (not just their own), OR
-/// - There's only one message
-///
-/// NOTE: This function only works when all signers sign the SAME message.
-/// For different messages, use `aggregate_verify` with individual public keys.
-/// This is a mathematical constraint of BLS signatures.
 pub fn aggregate_publickey_verify(
-  pk_agg: ByteArray,
+  pk_agg: PublicKeyAggregated,
   messages: List<ByteArray>,
   sig: ByteArray,
   mode: BlsMode,
@@ -52,7 +41,7 @@ pub fn aggregate_publickey_verify(
 }
 
 fn internal_aggregate_verify_with_aggregated_pk(
-  pk_agg: ByteArray,
+  pk_agg: PublicKeyAggregated,
   messages: List<ByteArray>,
   signature: ByteArray,
   mode: BlsMode,
