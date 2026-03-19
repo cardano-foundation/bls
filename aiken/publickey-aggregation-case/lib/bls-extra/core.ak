@@ -51,54 +51,42 @@ pub fn aggregate_publickey_verify(
   internal_aggregate_verify_with_aggregated_pk(pk_agg, messages, sig, mode)
 }
 
-/// Verify an aggregated signature using a pre-aggregated public key.
-///
-/// This verifies that the aggregate signature is valid for all messages,
-/// using the pre-aggregated public key. The pk_agg is used for each message
-/// in the verification (treating it as representing all signers).
-///
-/// Mathematically this computes:
-/// Π e(pk_agg, H(msg_i)) == e(G1, sig_agg)
-///
-/// Note: This is mathematically equivalent to standard aggregate_verify only
-/// when there's ONE message, or when all signers sign ALL messages.
 fn internal_aggregate_verify_with_aggregated_pk(
   pk_agg: ByteArray,
   messages: List<ByteArray>,
   signature: ByteArray,
   mode: BlsMode,
 ) -> Bool {
-  if !all_unique(messages) {
+  if mode == Basic && !all_unique(messages) {
     False
   } else {
+    expect [msg, ..msgs_rest] = messages
     let p = bls12_381_g1_uncompress(pk_agg)
 
-  expect [msg, ..msgs] = messages
+    let q = hash_for_mode(pk_agg, msg, mode)
+    let ml = group_pairing(p, q)
+    let c1 =
+      foldl(
+        msgs_rest,
+        ml,
+        fn(message, miller_loop) {
+          let q = hash_for_mode(pk_agg, message, mode)
+          let pq = group_pairing(p, q)
+          bls12_381_mul_miller_loop_result(pq, miller_loop)
+        },
+      )
 
-  let q = bls12_381_g2_hash_to_group(msg, select_dst(mode))
-  let ml = group_pairing(p, q)
-  let c1 =
-    foldl(
-      msgs,
-      ml,
-      fn(message, miller_loop) {
-        let q = bls12_381_g2_hash_to_group(message, select_dst(mode))
-        let pq = group_pairing(p, q)
-        bls12_381_mul_miller_loop_result(pq, miller_loop)
-      },
-    )
-
-  let s = bls12_381_g2_uncompress(signature)
-  let c2 = group_pairing(g1.generator, s)
+    let s = bls12_381_g2_uncompress(signature)
+    let c2 = group_pairing(g1.generator, s)
 
     bls12_381_final_verify(c1, c2)
   }
 }
 
-fn select_dst(mode: BlsMode) -> ByteArray {
+fn hash_for_mode(pk: ByteArray, message: ByteArray, mode: BlsMode) -> G2Element {
   when mode is {
-    Basic -> dst_basic
-    Aug -> dst_aug
-    Pop -> dst_pop
-    }
+    Basic -> bls12_381_g2_hash_to_group(message, dst_basic)
+    Aug -> bls12_381_g2_hash_to_group(builtin.append_bytearray(pk, message), dst_aug)
+    Pop -> bls12_381_g2_hash_to_group(message, dst_pop)
+  }
 }

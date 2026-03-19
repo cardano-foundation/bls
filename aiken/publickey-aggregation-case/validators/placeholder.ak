@@ -1,4 +1,5 @@
 use bls/api
+use bls/g1/aug as aug_bls
 use bls/g1/basic as basic_bls
 use bls/core.{key_gen}
 //use bls/tests/utils.{construct_rogue_key}
@@ -62,6 +63,36 @@ test two_party_signature_aggregation_with_one_msg_basic_bls () {
   pubkey13_aggr_sig13_aggr_predicate
 }
 
+test two_party_signature_aggregation_with_one_msg_aug_bls () {
+
+  let (sk1, pk1, _pk2, _sk2,  sk3, pk3) = get_three_party_keys()
+
+  // the same message then the 'aggregate_signatures' with 'aggregate_verify'
+  // is safe here and public aggregation works 
+  let message = "Hello, Aiken from party!"
+
+  let sig1 = aug_bls.sign(sk1, message)
+  let sig3 = aug_bls.sign(sk3, message)
+
+  //basic checks
+  let sig1_aggr = aug_bls.aggregate([sig1])
+  let pk1_aggr = bls_extra_core.aggregate_publickeys([pk1])
+  let pubkey1_aggr_sig1_predicate = bls_extra_core.aggregate_publickey_verify(pk1_aggr, [message], sig1, api.Aug)
+  let pubkey1_aggr_sig1_aggr_predicate = bls_extra_core.aggregate_publickey_verify(pk1_aggr, [message], sig1_aggr, api.Aug)
+
+  let sig13_aggr = aug_bls.aggregate([sig1, sig3])
+  let pk13_aggr = bls_extra_core.aggregate_publickeys([pk1, pk3])
+  let pubkey13_aggr_sig13_predicate = aug_bls.aggregate_verify([pk1, pk3], [message, message], sig13_aggr)
+  // This cannot work because Aug mode with multiple signers requires individual pks for verification.
+  // aggregate_publickey_verify uses pk_agg for hash (H(pk_agg || msg)), but signatures are over H(pk_i || msg).
+  // These are only equal if pk1 = pk3. Mathematically: e(pk1+pk3, H((pk1+pk3)||msg)) != e(pk1, H(pk1||msg)) * e(pk3, H(pk3||msg))
+  let pubkey13_aggr_sig13_aggr_predicate = bls_extra_core.aggregate_publickey_verify(pk13_aggr, [message], sig13_aggr, api.Aug)
+
+  pubkey1_aggr_sig1_predicate &&
+  pubkey1_aggr_sig1_aggr_predicate &&
+  pubkey13_aggr_sig13_predicate &&
+  !pubkey13_aggr_sig13_aggr_predicate
+}
 
 //
 //
