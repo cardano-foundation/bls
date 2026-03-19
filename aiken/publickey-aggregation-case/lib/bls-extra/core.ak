@@ -4,7 +4,7 @@ use aiken/builtin.{
 }
 use aiken/collection/list.{foldl}
 use aiken/crypto/bls12_381/g1
-use bls/api.{Aug, Basic, BlsMode, Pop, PublicKey, Signature}
+use bls/api.{Aug, Basic, BlsMode, Pop, PublicKey}
 use bls/g2/constants.{dst_aug, dst_basic, dst_pop}
 use bls/pairing.{aggregate_g1, group_pairing}
 use bls/utils.{all_unique}
@@ -46,8 +46,9 @@ pub fn aggregate_publickey_verify(
   pk_agg: ByteArray,
   messages: List<ByteArray>,
   sig: ByteArray,
+  mode: BlsMode,
 ) -> Bool {
-  internal_aggregate_verify_with_aggregated_pk(pk_agg, messages, sig, Basic)
+  internal_aggregate_verify_with_aggregated_pk(pk_agg, messages, sig, mode)
 }
 
 /// Verify an aggregated signature using a pre-aggregated public key.
