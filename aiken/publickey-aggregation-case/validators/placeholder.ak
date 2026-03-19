@@ -6,12 +6,12 @@ use bls/tests/utils.{construct_rogue_key}
 
 use bls_extra/core as bls_extra_core
 
-test two_party_signature_aggregation_basic_bls () {
+test two_party_signature_aggregation_with_two_msgs_basic_bls () {
 
   let (sk1, pk1, _pk2, _sk2,  sk3, pk3) = get_three_party_keys()
 
   // if each message is unique then the 'aggregate_signatures' with 'aggregate_verify'
-  // is safe
+  // is safe, public key aggregation only works for one participant
   let message1 = "Hello, Aiken from party 1!"
   let message3 = "Hello, Aiken from party 3!"
 
@@ -35,6 +35,35 @@ test two_party_signature_aggregation_basic_bls () {
   pubkey13_aggr_sig13_predicate &&
   !pubkey13_aggr_sig13_aggr_fail_predicate
 }
+
+test two_party_signature_aggregation_with_one_msg_basic_bls () {
+
+  let (sk1, pk1, _pk2, _sk2,  sk3, pk3) = get_three_party_keys()
+
+  // the same message then the 'aggregate_signatures' with 'aggregate_verify'
+  // is not safe (hence it fails here), but public aggregation works 
+  let message = "Hello, Aiken from party!"
+
+  let sig1 = basic_bls.sign(sk1, message)
+  let sig3 = basic_bls.sign(sk3, message)
+
+  //basic checks
+  let sig1_aggr = basic_bls.aggregate([sig1])
+  let pk1_aggr = bls_extra_core.aggregate_publickeys([pk1])
+  let pubkey1_aggr_sig1_predicate = bls_extra_core.aggregate_publickey_verify(pk1_aggr, [message], sig1)
+  let pubkey1_aggr_sig1_aggr_predicate = bls_extra_core.aggregate_publickey_verify(pk1_aggr, [message], sig1_aggr)
+
+  let sig13_aggr = basic_bls.aggregate([sig1, sig3])
+  let pk13_aggr = bls_extra_core.aggregate_publickeys([pk1, pk3])
+  let pubkey13_aggr_sig13_fail_predicate = basic_bls.aggregate_verify([pk1, pk3], [message, message], sig13_aggr)
+  let pubkey13_aggr_sig13_aggr_predicate = bls_extra_core.aggregate_publickey_verify(pk13_aggr, [message], sig13_aggr)
+
+  pubkey1_aggr_sig1_predicate &&
+  pubkey1_aggr_sig1_aggr_predicate &&
+  !pubkey13_aggr_sig13_fail_predicate &&
+  pubkey13_aggr_sig13_aggr_predicate
+}
+
 
 //TO VERIFY AGAIN
 //test three_party_signature_aggregation_basic_bls () {
