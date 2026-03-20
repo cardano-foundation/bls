@@ -22,7 +22,7 @@ pub type PublicKeyAggregated =
 /// * publickeys: List<PublicKey> - A list of BLS public keys to be aggregated.
 ///
 /// Returns:
-/// PublicKey - The compressed aggregated BLS public key.
+/// PublicKeyAggregated - The compressed aggregated BLS public key.
 ///
 /// ```aiken
 /// let agg_pk = aggregate_publickeys([pk1, pk2, pk3])
@@ -36,12 +36,13 @@ pub fn aggregate_publickeys(publickeys: List<PublicKey>) -> PublicKeyAggregated 
 /// This verifies that the aggregate signature is valid for all messages,
 /// using the pre-aggregated public key.
 ///
-/// For Basic/Pop modes: duplicates messages are rejected
+/// For Basic mode: duplicates messages are rejected
 /// For Aug mode: duplicate messages are allowed (but only works with single signer)
+/// Meaning the method is working, in multi-party context, only in Basic BLS mode. 
 ///
 /// ```aiken
 /// let agg_pk = aggregate_publickeys([pk1, pk2, pk3])
-/// let result = aggregate_publickey_verify(agg_pk, [message], sig, Basic)
+/// let result = aggregate_publickey_verify(agg_pk, [message, message, message], agg_sig, Basic)
 /// ```
 pub fn aggregate_publickey_verify(
   pk_agg: PublicKeyAggregated,
@@ -88,6 +89,6 @@ fn hash_for_mode(pk: ByteArray, message: ByteArray, mode: BlsMode) -> G2Element 
   when mode is {
     Basic -> bls12_381_g2_hash_to_group(message, dst_basic)
     Aug -> bls12_381_g2_hash_to_group(builtin.append_bytearray(pk, message), dst_aug)
-    Pop -> bls12_381_g2_hash_to_group(message, dst_pop)
+    Pop -> bls12_381_g2_hash_to_group(builtin.append_bytearray(pk, message), dst_pop)
   }
 }
