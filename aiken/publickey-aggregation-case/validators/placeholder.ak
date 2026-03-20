@@ -1,6 +1,7 @@
 use bls/api
 use bls/g1/aug as aug_bls
 use bls/g1/basic as basic_bls
+use bls/g1/pop as pop_bls
 use bls/core.{key_gen}
 //use bls/tests/utils.{construct_rogue_key}
 
@@ -93,6 +94,41 @@ test two_party_signature_aggregation_with_one_msg_aug_bls () {
   pubkey13_aggr_sig13_predicate &&
   !pubkey13_aggr_sig13_aggr_predicate
 }
+
+test three_party_signature_aggregation_with_one_msg_pop_bls () {
+
+  let (sk1, pk1, sk2, pk2, sk3, pk3) = get_three_party_keys()
+
+  // at registration
+  let pop1 = pop_bls.pop_prove(sk1)
+  let pop2 = pop_bls.pop_prove(sk2)
+  let pop3 = pop_bls.pop_prove(sk3)
+
+  expect pop_bls.pop_verify(pk1, pop1)
+  expect pop_bls.pop_verify(pk2, pop2)
+  expect pop_bls.pop_verify(pk3, pop3)
+
+  let message ="Hello, Aiken from all parties!"
+
+  // now we are sure sks are corresposding to respective pks
+  let sig1 = pop_bls.sign(sk1, message)
+  let sig2 = pop_bls.sign(sk2, message)
+  let sig3 = pop_bls.sign(sk3, message)
+
+  let sig_aggr = pop_bls.aggregate([sig1, sig2, sig3])
+  let pk_aggr = bls_extra_core.aggregate_publickeys([pk1, pk2, pk3])
+
+  let full_aggr_predicate = pop_bls.aggregate_verify([pk1,pk2,pk3], [message,message,message], sig_aggr)
+  // For PoP mode, aggregate_publickey_verify with multiple signers cannot work.
+  // aggregate_publickey_verify uses pk_agg for hash (H(pk_agg || msg)), but signatures are over H(pk_i || msg).
+  // These are only equal if pk1 = pk2 = pk3. Mathematically: e(pk1+pk2+pk3, H((pk1+pk2+pk3)||msg)) != e(pk1, H(pk1||msg)) * e(pk2, H(pk2||msg)) * e(pk3, H(pk3||msg))
+  // PoP requires individual pks for verification.
+  let pk_aggr_sig_aggr_predicate = bls_extra_core.aggregate_publickey_verify(pk_aggr, [message, message, message], sig_aggr, api.Pop)
+
+  full_aggr_predicate &&
+  !pk_aggr_sig_aggr_predicate
+}
+
 
 //
 //
