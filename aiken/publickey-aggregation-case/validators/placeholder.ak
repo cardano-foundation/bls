@@ -1,9 +1,10 @@
 use bls/api
 use bls/g1/aug as aug_bls
 use bls/g1/basic as basic_bls
+use bls/g1/core as core_bls
 use bls/g1/pop as pop_bls
 use bls/core.{key_gen}
-//use bls/tests/utils.{construct_rogue_key}
+use bls/tests/utils.{construct_rogue_key}
 
 use bls_extra/core as bls_extra_core
 
@@ -130,37 +131,35 @@ test three_party_signature_aggregation_with_one_msg_pop_bls () {
 }
 
 
-//
-//
-//test three_party_rogue_publickey_signature_aggregation_bls () {
-//
-//  let (_sk1, pk1, _sk2, pk2, sk3, pk3) = get_three_party_keys()
-//  
-//  // one creates rogue_pk
-//  let rogue_pk3 = construct_rogue_key(pk1, pk2, pk3)
-//
-//  let message = "Hello, Aiken from party!"
-//
-//  // Although all parties can produce signatures
-//  // let _sig1 = basic_bls.sign(sk1, message)
-//  // let _sig2 = basic_bls.sign(sk2, message)
-//  let sig3 = basic_bls.sign(sk3, message)
-//
-//  // only sig3 is needed to verify! sig1 and sig2 could be omitted
-//  let sigs_aggr_predicate = core_bls.core_aggregate_verify([pk1,pk2,rogue_pk3], [message,message,message], sig3, api.Basic)
-//
-//  // basic bls impl has now detection of if not all msgs are distinct
-//  let sigs_aggr_predicate_fails = basic_bls.aggregate_verify([pk1,pk2,rogue_pk3], [message,message,message], sig3)
-//
-//  // the same detection is present when public key aggregation is used
-//  let pk_aggr = bls_extra_core.aggregate_publickeys([pk1,pk2,rogue_pk3])
-//  let pubkeys_aggr_predicate_fails = bls_extra_core.aggregate_publickkeys_verify(pk_aggr, [message,message,message], sig3, api.Basic)
-//
-//  sigs_aggr_predicate &&
-//  !sigs_aggr_predicate_fails &&
-//  !pubkeys_aggr_predicate_fails
-//}
-//
+
+test three_party_rogue_publickey_signature_aggregation_basic_bls () {
+
+  let (_sk1, pk1, _sk2, pk2, sk3, pk3) = get_three_party_keys()
+  
+  // one creates rogue_pk
+  let rogue_pk3 = construct_rogue_key(pk1, pk2, pk3)
+
+  let message = "Hello, Aiken from party!"
+
+  // Although all parties can produce signatures
+  // let _sig1 = basic_bls.sign(sk1, message)
+  // let _sig2 = basic_bls.sign(sk2, message)
+  let sig3 = basic_bls.sign(sk3, message)
+
+  // only sig3 is needed to verify! sig1 and sig2 could be omitted
+  let sigs_aggr_predicate = core_bls.core_aggregate_verify([pk1,pk2,rogue_pk3], [message,message,message], sig3, api.Basic)
+
+  // basic bls impl has now detection of if not all msgs are distinct
+  let sigs_aggr_predicate_fails = basic_bls.aggregate_verify([pk1,pk2,rogue_pk3], [message,message,message], sig3)
+
+  // the same detection is present when public key aggregation is used
+  let pk_aggr = bls_extra_core.aggregate_publickeys([pk1,pk2,rogue_pk3])
+  let pubkeys_aggr_predicate_fails = bls_extra_core.aggregate_publickey_verify(pk_aggr, [message,message,message], sig3, api.Basic)
+
+  sigs_aggr_predicate &&
+  !sigs_aggr_predicate_fails &&
+  !pubkeys_aggr_predicate_fails
+}
 
 fn get_three_party_keys() -> (api.PrivateKey, api.PublicKey, api.PrivateKey, api.PublicKey, api.PrivateKey, api.PublicKey) {
   // party1
