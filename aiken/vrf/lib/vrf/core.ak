@@ -22,7 +22,7 @@ pub type PublicKey =
 /// 2. Computes the public key by scaling the G2 generator point with the secret scalar: Y = x*G2
 ///
 /// Arguments:
-/// * secret: ByteArray - input keying material (must contain sufficient entropy)
+/// - secret: SecretKey - input keying material (must contain sufficient entropy)
 ///
 /// Returns:
 /// (secret scalar in G1 and compressed public key in G2)
@@ -30,7 +30,7 @@ pub type PublicKey =
 /// ```aiken
 /// let (sk, pk) = keys_from_secret(secret)
 /// ```
-pub fn keys_from_secret(secret: ByteArray) -> (SecretKey, PublicKey) {
+pub fn keys_from_secret(secret: SecretKey) -> (SecretKey, PublicKey) {
     let sk = secret_scalar(secret, "")
     let pk = g2.compress(g2.scale(g2.generator, from_bytes(sk)))
     (sk, pk)
@@ -55,8 +55,8 @@ pub fn keys_from_secret(secret: ByteArray) -> (SecretKey, PublicKey) {
 /// - Non-zero (the probability of generating zero is negligible: ~2^-255)
 /// 
 /// Arguments:
-/// * secret: ByteArray - input keying material (must contain sufficient entropy)
-/// * key_info: ByteArray - optional context and application specific information (can be empty)
+/// - secret: SecretKey - input keying material (must contain sufficient entropy)
+/// - key_info: ByteArray - optional context and application specific information (can be empty)
 ///
 /// Returns:
 /// Secret scalar as a 32-byte ByteArray
@@ -64,7 +64,7 @@ pub fn keys_from_secret(secret: ByteArray) -> (SecretKey, PublicKey) {
 /// ```aiken
 /// let sk = secret_scalar(secret, key_info)
 /// ```
-pub fn secret_scalar(secret: ByteArray, key_info: ByteArray) -> SecretKey {
+pub fn secret_scalar(secret: SecretKey, key_info: ByteArray) -> SecretKey {
     key_gen(secret, key_info)
 }
 
@@ -127,22 +127,22 @@ test point_to_string_2() {
   compressed == #"93e02b6052719f607dacd3a088274f65596bd0d09920b61ab5da61bbdc7f5049334cf11213945d57e5ac7d055d042b7e024aa2b2f08f0a91260805272dc51051c6e47ad4fa403b02b4510b647ae3d1770bac0326a805bbefd48056c8c121bdb8"
 }
 
-/// Generate the nonce value k in a deterministic pseudorandom fashion.
- ///
- /// Implements ECVRF_nonce_generation from [IETF RFC 9381](https://www.rfc-editor.org/rfc/rfc9381.html) Section 5.4.2.2
- /// (derived from RFC 8032 Section 5.1.6):
- ///
- ///   1. hashed_sk_string = Hash(SK)
- ///   2. truncated_hashed_sk_string = hashed_sk_string[32]...hashed_sk_string[63]
- ///   3. k_string = Hash(truncated_hashed_sk_string || h_string)
- ///   4. k = string_to_int(k_string) mod q
- ///
- /// Arguments:
- /// - secret_key: SecretKey - the VRF secret key (32-byte ByteArray)
- /// - h_string: ByteString - the hash string (output of point_to_string(H))
- ///
- /// Returns:
- /// A nonce scalar k as a ByteArray (32 bytes, between 1 and q-1)
+/// Generates the nonce value k in a deterministic pseudorandom fashion.
+///
+/// Implements ECVRF_nonce_generation from [IETF RFC 9381](https://www.rfc-editor.org/rfc/rfc9381.html) Section 5.4.2.2
+/// (derived from RFC 8032 Section 5.1.6):
+///
+///   1. hashed_sk_string = Hash(SK)
+///   2. truncated_hashed_sk_string = hashed_sk_string[32]...hashed_sk_string[63]
+///   3. k_string = Hash(truncated_hashed_sk_string || h_string)
+///   4. k = string_to_int(k_string) mod q
+///
+/// Arguments:
+/// - secret_key: SecretKey - the VRF secret key (32-byte ByteArray)
+/// - h_string: ByteString - the hash string (output of point_to_string(H))
+///
+/// Returns:
+/// A nonce scalar k as a ByteArray (32 bytes, between 1 and q-1)
 ///
 /// ```aiken
 /// let (sk, pk) = keys_from_secret(secret)
@@ -187,7 +187,7 @@ test nonce_generation_1() {
 /// - V: G2Element - V = k * H (nonce times hash point)
 ///
 /// Returns:
-/// c: challenge value as a Scalar (between 0 and 2^(8*cLen)-1, with cLen = 16)
+/// c: challenge value as a ByteArray (16 bytes, between 0 and 2^(8*cLen)-1, with cLen = 16)
 ///
 /// ```aiken
 /// let (sk, pk) = keys_from_secret(secret)
