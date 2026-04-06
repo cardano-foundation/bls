@@ -64,3 +64,32 @@ pub fn keys_from_secret(secret: ByteArray) -> (SecretKey, PublicKey) {
 pub fn secret_scalar(secret: ByteArray, key_info: ByteArray) -> SecretKey {
     key_gen(secret, key_info)
 }
+
+
+/// Hashes a VRF input string to a point on the G2 curve.
+///
+/// Implements ECVRF-encode-to-curve from [IETF RFC 9380](https://www.ietf.org/archive/id/draft-irtf-cfrg-hash-to-curve-13.html)
+/// using the Simplified SWU (Shallue-Woestijne-Ulas) method.
+///
+/// Arguments:
+/// - encode_to_curve_salt: ByteArray - public salt value (e.g., "ECVRF_")
+/// - alpha_string: ByteString - value to hash to a curve point
+///
+/// Returns:
+/// A G2Element point
+///
+/// ```aiken
+/// let salt = "ECVRF_"
+/// let input = "test input"
+/// let point = encode_to_curve(salt, input)
+/// ```
+pub fn encode_to_curve(encode_to_curve_salt: ByteArray, alpha_string: ByteString) -> G2Element {
+  g2.hash_to_group(alpha_string, encode_to_curve_salt)
+}
+
+test encode_to_curve_simple() {
+  let salt = "ECVRF_"
+  let alpha = "test input"
+  let h = encode_to_curve(salt, alpha)
+  g2.equal(h, g2.hash_to_group(alpha, salt))
+}
