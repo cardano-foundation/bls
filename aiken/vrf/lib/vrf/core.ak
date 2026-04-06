@@ -1,6 +1,6 @@
 use aiken/builtin
 use aiken/crypto.{sha2_256}
-use aiken/crypto/bls12_381/scalar.{from_bytes}
+use aiken/crypto/bls12_381/scalar.{from_bytes, add, mul, to_bytes, to_int}
 use aiken/crypto/bls12_381/g2
 use aiken/crypto/bitwise
 use bls/core.{key_gen}
@@ -226,4 +226,64 @@ test challenge_generation_1() {
   let V = g2.generator
   let c = challenge_generation(Y, H, Gamma, U, V)
   builtin.bytearray_to_integer(True, c) < bitwise.shift_left(2, 128)
+}
+
+/// Generates a VRF proof for a given input.
+///
+/// Implements ECVRF_prove from [IETF RFC 9381](https://www.rfc-editor.org/rfc/rfc9381.html) Section 5.1:
+///
+///   1. Use SK to derive the VRF secret scalar x and the VRF public key Y = x*G2
+///   2. H = ECVRF_encode_to_curve(encode_to_curve_salt, alpha_string)
+///   3. h_string = point_to_string(H)
+///   4. Gamma = x*H
+///   5. k = ECVRF_nonce_generation(SK, h_string)
+///   6. c = ECVRF_challenge_generation(Y, H, Gamma, k*G2, k*H)
+///   7. s = (k + c*x) mod q
+///   8. pi_string = point_to_string(Gamma) || int_to_string(c, cLen) || int_to_string(s, qLen)
+///
+/// Arguments:
+/// - secret: SecretKey - VRF secret key (32-byte ByteArray)
+/// - alpha_string: ByteString - input alpha, an octet string
+/// - encode_to_curve_salt: ByteArray - a public salt value (e.g., "ECVRF_")
+///
+/// Returns:
+/// pi_string: ByteArray - VRF proof (ptLen + cLen + qLen = 96 + 16 + 32 = 144 bytes)
+///
+/// ```aiken
+/// let (sk, pk) = keys_from_secret(secret)
+/// let alpha = "test input"
+/// let salt = "ECVRF_"
+/// let proof = prove(sk, alpha, salt)
+/// ```
+pub fn prove(secret: SecretKey, alpha_string: ByteString, encode_to_curve_salt: ByteArray) -> ByteArray {
+  let x = from_bytes(secret)
+  let Y = g2.scale(g2.generator, x)
+
+  let H = encode_to_curve(encode_to_curve_salt, alpha_string)
+  let h_string = point_to_string(H)
+
+  let Gamma = g2.scale(H, x)
+
+  let k = nonce_generation(secret, h_string)
+
+  let kG2 = g2.scale(g2.generator, to_int(k))
+  let kH = g2.scale(H, to_int(k))
+  let c_bytes = challenge_generation(Y, H, Gamma, kG2, kH)
+  let c = from_bytes(c_bytes)
+
+  let s = add(mul(c, x), k)
+
+  let gamma_string = point_to_string(Gamma)
+  let c_string = builtin.integer_to_bytearray(True, 16, to_int(c))
+  let s_string = to_bytes(s)
+
+  builtin.append_bytearray(builtin.append_bytearray(gamma_string, c_string), s_string)
+}
+
+test prove_1() {
+  let sk = secret_scalar(#"test_secret_key_123456", "")
+  let alpha = "test input"
+  let salt = "ECVRF_"
+  let proof = prove(sk, alpha, salt)
+  builtin.length_of_bytearray(proof) == 144
 }
