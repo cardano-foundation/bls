@@ -1,5 +1,8 @@
+use aiken/builtin
+use aiken/crypto.{sha2_256}
 use aiken/crypto/bls12_381/scalar.{from_bytes}
 use aiken/crypto/bls12_381/g2
+use aiken/crypto/bitwise
 use bls/core.{key_gen}
 
 pub type SecretKey =
@@ -92,4 +95,135 @@ test encode_to_curve_simple() {
   let alpha = "test input"
   let h = encode_to_curve(salt, alpha)
   g2.equal(h, g2.hash_to_group(alpha, salt))
+}
+
+/// Converts a G2 point to a compressed byte string.
+///
+/// Implements point_to_string from [IETF RFC 9381](https://www.rfc-editor.org/rfc/rfc9381.html)
+/// using the compressed encoding from [RFC 9380](https://www.ietf.org/archive/id/draft-irtf-cfrg-hash-to-curve-13.html).
+///
+/// Arguments:
+/// - point: G2Element - a point on the G2 curve
+///
+/// Returns:
+/// A ByteArray with the compressed representation (96 bytes)
+///
+/// ```aiken
+/// let point = g2.generator
+/// let encoded = point_to_string(point)
+/// ```
+pub fn point_to_string(point: G2Element) -> ByteArray {
+  g2.compress(point)
+}
+
+test point_to_string_1() {
+  let h = g2.hash_to_group("test", "salt")
+  point_to_string(h) == g2.compress(h)
+}
+
+test point_to_string_2() {
+  let point = g2.generator
+  let compressed = point_to_string(point)
+  compressed == #"93e02b6052719f607dacd3a088274f65596bd0d09920b61ab5da61bbdc7f5049334cf11213945d57e5ac7d055d042b7e024aa2b2f08f0a91260805272dc51051c6e47ad4fa403b02b4510b647ae3d1770bac0326a805bbefd48056c8c121bdb8"
+}
+
+/// Generate the nonce value k in a deterministic pseudorandom fashion.
+ ///
+ /// Implements ECVRF_nonce_generation from [IETF RFC 9381](https://www.rfc-editor.org/rfc/rfc9381.html) Section 5.4.2.2
+ /// (derived from RFC 8032 Section 5.1.6):
+ ///
+ ///   1. hashed_sk_string = Hash(SK)
+ ///   2. truncated_hashed_sk_string = hashed_sk_string[32]...hashed_sk_string[63]
+ ///   3. k_string = Hash(truncated_hashed_sk_string || h_string)
+ ///   4. k = string_to_int(k_string) mod q
+ ///
+ /// Arguments:
+ /// - secret_key: SecretKey - the VRF secret key (32-byte ByteArray)
+ /// - h_string: ByteString - the hash string (output of point_to_string(H))
+ ///
+ /// Returns:
+ /// A nonce scalar k as a ByteArray (32 bytes, between 1 and q-1)
+///
+/// ```aiken
+/// let (sk, pk) = keys_from_secret(secret)
+/// let h = encode_to_curve("ECVRF_", alpha)
+/// let h_string = point_to_string(h)
+/// let k = nonce_generation(sk, h_string)
+/// ```
+pub fn nonce_generation(secret_key: SecretKey, h_string: ByteString) -> SecretKey {
+  let hashed_sk_string = sha2_256(secret_key)
+  let truncated = builtin.slice_bytearray(32, 32, hashed_sk_string)
+  let k_string = sha2_256(builtin.append_bytearray(truncated, h_string))
+  from_bytes(k_string)
+}
+
+test nonce_generation_1() {
+  let sk = #"0000000000000000000000000000000000000000000000000000000000000001"
+  let h_string = #"9332903123123123123123123123123123123123123123123123123123123123"
+  let k = nonce_generation(sk, h_string)
+  k != sk
+}
+
+/// Generates a challenge value from five G2 points.
+///
+/// Implements ECVRF_challenge_generation from [IETF RFC 9381](https://www.rfc-editor.org/rfc/rfc9381.html) Section 5.4.3:
+///
+///   1. challenge_generation_domain_separator_front = 0x02
+///   2. Initialize str = suite_string || challenge_generation_domain_separator_front
+///   3. For PJ in [P1, P2, P3, P4, P5]:
+///      str = str || point_to_string(PJ)
+///   4. challenge_generation_domain_separator_back = 0x00
+///   5. str = str || challenge_generation_domain_separator_back
+///   6. c_string = Hash(str)
+///   7. truncated_c_string = c_string[0]...c_string[cLen-1]
+///   8. c = string_to_int(truncated_c_string)
+///   9. Output c
+///
+/// Arguments:
+/// - Y: G2Element - public key (Y = x * G2)
+/// - H: G2Element - encoded hash point (H = encode_to_curve(salt, alpha))
+/// - Gamma: G2Element - Gamma = k * H
+/// - U: G2Element - U = k * G2 (nonce times generator)
+/// - V: G2Element - V = k * H (nonce times hash point)
+///
+/// Returns:
+/// c: challenge value as a Scalar (between 0 and 2^(8*cLen)-1, with cLen = 16)
+///
+/// ```aiken
+/// let (sk, pk) = keys_from_secret(secret)
+/// let h = encode_to_curve("ECVRF_", alpha)
+/// let gamma = g2.scale(h, k)
+/// let u = g2.scale(g2.generator, k)
+/// let v = g2.scale(h, k)
+/// let c = challenge_generation(pk, h, gamma, u, v)
+/// ```
+pub fn challenge_generation(
+  Y: G2Element,
+  H: G2Element,
+  Gamma: G2Element,
+  U: G2Element,
+  V: G2Element,
+) -> ByteArray {
+  let challenge_generation_domain_separator_front = #"02"
+  let suite_string = #"00"
+  let str = builtin.append_bytearray(suite_string, challenge_generation_domain_separator_front)
+  let str = builtin.append_bytearray(str, point_to_string(Y))
+  let str = builtin.append_bytearray(str, point_to_string(H))
+  let str = builtin.append_bytearray(str, point_to_string(Gamma))
+  let str = builtin.append_bytearray(str, point_to_string(U))
+  let str = builtin.append_bytearray(str, point_to_string(V))
+  let challenge_generation_domain_separator_back = #"00"
+  let str = builtin.append_bytearray(str, challenge_generation_domain_separator_back)
+  let c_string = sha2_256(str)
+  builtin.slice_bytearray(0, 16, c_string)
+}
+
+test challenge_generation_1() {
+  let Y = g2.generator
+  let H = g2.hash_to_group("test", "salt")
+  let Gamma = g2.generator
+  let U = g2.generator
+  let V = g2.generator
+  let c = challenge_generation(Y, H, Gamma, U, V)
+  builtin.bytearray_to_integer(True, c) < bitwise.shift_left(2, 128)
 }
