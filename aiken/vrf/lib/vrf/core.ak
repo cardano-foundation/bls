@@ -350,3 +350,85 @@ test proof_decode_1() {
 test proof_decode_2() {
   decode_proof(#"00") == None
 }
+
+/// Converts a VRF proof to a hash output.
+///
+/// Implements ECVRF_proof_to_hash from [IETF RFC 9381](https://www.rfc-editor.org/rfc/rfc9381.html) Section 5.2:
+///
+///   1. D = ECVRF_decode_proof(pi_string) (see Section 5.4.4)
+///   2. If D is "INVALID", output "INVALID" and stop
+///   3. (Gamma, c, s) = D
+///   4. proof_to_hash_domain_separator_front = 0x03
+///   5. proof_to_hash_domain_separator_back = 0x00
+///   6. beta_string = Hash(suite_string || proof_to_hash_domain_separator_front || point_to_string(cofactor * Gamma) || proof_to_hash_domain_separator_back)
+///   7. Output beta_string
+///
+/// Note: For BLS12-381, cofactor = 1, so cofactor * Gamma = Gamma
+///
+/// Arguments:
+/// - pi_string: ByteArray - VRF proof (ptLen + cLen + qLen = 96 + 16 + 32 = 144 bytes)
+///
+/// Returns:
+/// Option<ByteArray> - Some(beta_string) on success, None on invalid proof
+///
+/// ```aiken
+/// let (sk, pk) = keys_from_secret(secret)
+/// let alpha = "test input"
+/// let salt = "ECVRF_"
+/// let proof = prove(sk, alpha, salt)
+/// let Some(beta) = proof_to_hash(proof)
+/// ```
+pub fn proof_to_hash(pi_string: ByteArray) -> Option<ByteArray> {
+  when decode_proof(pi_string) is {
+    Some((gamma, _c, _s)) -> {
+      let proof_to_hash_domain_separator_front = #"03"
+      let proof_to_hash_domain_separator_back = #"00"
+      let suite_string = #"00"
+
+      let gamma_string = point_to_string(gamma)
+
+      let str = append_bytearray(suite_string, proof_to_hash_domain_separator_front)
+      let str = append_bytearray(str, gamma_string)
+      let str = append_bytearray(str, proof_to_hash_domain_separator_back)
+
+      let beta_string = sha2_256(str)
+
+      Some(beta_string)
+    }
+    None -> None
+  }
+}
+
+test proof_to_hash_1() {
+  let sk = secret_scalar(#"746573745f7365637265745f6b65795f313233343536", "")
+  let alpha = "test input"
+  let salt = "ECVRF_"
+  let proof = prove(sk, alpha, salt)
+  when proof_to_hash(proof) is {
+    Some(_) -> True
+    None -> False
+  }
+}
+
+test proof_to_hash_2() {
+  proof_to_hash(#"00") == None
+}
+
+test proof_to_hash_3() {
+  let sk = secret_scalar(#"746573745f7365637265745f6b65795f313233343536", "")
+  let alpha = "test input"
+  let salt = "ECVRF_"
+  let proof = prove(sk, alpha, salt)
+  let beta1 = proof_to_hash(proof)
+  let proof2 = prove(sk, alpha, salt)
+  let beta2 = proof_to_hash(proof2)
+  when beta1 is {
+    Some(b1) -> {
+      when beta2 is {
+        Some(b2) -> b1 == b2
+        None -> False
+      }
+    }
+    None -> False
+  }
+}
