@@ -1,9 +1,12 @@
-use aiken/builtin
+use aiken/builtin.{bls12_381_g2_uncompress, slice_bytearray, append_bytearray, length_of_bytearray, integer_to_bytearray, bytearray_to_integer}
 use aiken/crypto.{sha2_256}
 use aiken/crypto/bls12_381/scalar.{from_bytes, add, mul, to_bytes, to_int}
-use aiken/crypto/bls12_381/g2
-use aiken/crypto/bitwise
+use aiken/crypto/bls12_381/g2.{compress, scale, generator, hash_to_group, equal}
 use bls/core.{key_gen}
+
+const ptLen = 96
+const cLen = 16
+const qLen = 32
 
 pub type SecretKey =
   ByteArray
@@ -32,7 +35,7 @@ pub type PublicKey =
 /// ```
 pub fn keys_from_secret(secret: SecretKey) -> (SecretKey, PublicKey) {
     let sk = secret_scalar(secret, "")
-    let pk = g2.compress(g2.scale(g2.generator, from_bytes(sk)))
+    let pk = compress(scale(generator, from_bytes(sk)))
     (sk, pk)
 }
 
@@ -76,7 +79,7 @@ pub fn secret_scalar(secret: SecretKey, key_info: ByteArray) -> SecretKey {
 ///
 /// Arguments:
 /// - encode_to_curve_salt: ByteArray - public salt value (e.g., "ECVRF_")
-/// - alpha_string: ByteString - value to hash to a curve point
+/// - alpha_string: ByteArray - value to hash to a curve point
 ///
 /// Returns:
 /// A G2Element point
@@ -86,15 +89,15 @@ pub fn secret_scalar(secret: SecretKey, key_info: ByteArray) -> SecretKey {
 /// let input = "test input"
 /// let point = encode_to_curve(salt, input)
 /// ```
-pub fn encode_to_curve(encode_to_curve_salt: ByteArray, alpha_string: ByteString) -> G2Element {
-  g2.hash_to_group(alpha_string, encode_to_curve_salt)
+pub fn encode_to_curve(encode_to_curve_salt: ByteArray, alpha_string: ByteArray) -> G2Element {
+  hash_to_group(alpha_string, encode_to_curve_salt)
 }
 
 test encode_to_curve_simple() {
   let salt = "ECVRF_"
   let alpha = "test input"
   let h = encode_to_curve(salt, alpha)
-  g2.equal(h, g2.hash_to_group(alpha, salt))
+  equal(h, hash_to_group(alpha, salt))
 }
 
 /// Converts a G2 point to a compressed byte string.
@@ -109,20 +112,20 @@ test encode_to_curve_simple() {
 /// A ByteArray with the compressed representation (96 bytes)
 ///
 /// ```aiken
-/// let point = g2.generator
+/// let point = generator
 /// let encoded = point_to_string(point)
 /// ```
 pub fn point_to_string(point: G2Element) -> ByteArray {
-  g2.compress(point)
+  compress(point)
 }
 
 test point_to_string_1() {
-  let h = g2.hash_to_group("test", "salt")
-  point_to_string(h) == g2.compress(h)
+  let h = hash_to_group("test", "salt")
+  point_to_string(h) == compress(h)
 }
 
 test point_to_string_2() {
-  let point = g2.generator
+  let point = generator
   let compressed = point_to_string(point)
   compressed == #"93e02b6052719f607dacd3a088274f65596bd0d09920b61ab5da61bbdc7f5049334cf11213945d57e5ac7d055d042b7e024aa2b2f08f0a91260805272dc51051c6e47ad4fa403b02b4510b647ae3d1770bac0326a805bbefd48056c8c121bdb8"
 }
@@ -139,7 +142,7 @@ test point_to_string_2() {
 ///
 /// Arguments:
 /// - secret_key: SecretKey - the VRF secret key (32-byte ByteArray)
-/// - h_string: ByteString - the hash string (output of point_to_string(H))
+/// - h_string: ByteArray - the hash string (output of point_to_string(H))
 ///
 /// Returns:
 /// A nonce scalar k as a ByteArray (32 bytes, between 1 and q-1)
@@ -150,11 +153,11 @@ test point_to_string_2() {
 /// let h_string = point_to_string(h)
 /// let k = nonce_generation(sk, h_string)
 /// ```
-pub fn nonce_generation(secret_key: SecretKey, h_string: ByteString) -> SecretKey {
+pub fn nonce_generation(secret_key: SecretKey, h_string: ByteArray) -> SecretKey {
   let hashed_sk_string = sha2_256(secret_key)
   let truncated = builtin.slice_bytearray(32, 32, hashed_sk_string)
   let k_string = sha2_256(builtin.append_bytearray(truncated, h_string))
-  from_bytes(k_string)
+  to_bytes(from_bytes(k_string))
 }
 
 test nonce_generation_1() {
@@ -192,40 +195,40 @@ test nonce_generation_1() {
 /// ```aiken
 /// let (sk, pk) = keys_from_secret(secret)
 /// let h = encode_to_curve("ECVRF_", alpha)
-/// let gamma = g2.scale(h, k)
-/// let u = g2.scale(g2.generator, k)
-/// let v = g2.scale(h, k)
+/// let gamma = scale(h, k)
+/// let u = scale(generator, k)
+/// let v = scale(h, k)
 /// let c = challenge_generation(pk, h, gamma, u, v)
 /// ```
 pub fn challenge_generation(
-  Y: G2Element,
-  H: G2Element,
-  Gamma: G2Element,
-  U: G2Element,
-  V: G2Element,
+  y: G2Element,
+  h: G2Element,
+  gamma: G2Element,
+  u: G2Element,
+  v: G2Element,
 ) -> ByteArray {
   let challenge_generation_domain_separator_front = #"02"
   let suite_string = #"00"
-  let str = builtin.append_bytearray(suite_string, challenge_generation_domain_separator_front)
-  let str = builtin.append_bytearray(str, point_to_string(Y))
-  let str = builtin.append_bytearray(str, point_to_string(H))
-  let str = builtin.append_bytearray(str, point_to_string(Gamma))
-  let str = builtin.append_bytearray(str, point_to_string(U))
-  let str = builtin.append_bytearray(str, point_to_string(V))
+  let str = append_bytearray(suite_string, challenge_generation_domain_separator_front)
+  let str = append_bytearray(str, point_to_string(y))
+  let str = append_bytearray(str, point_to_string(h))
+  let str = append_bytearray(str, point_to_string(gamma))
+  let str = append_bytearray(str, point_to_string(u))
+  let str = append_bytearray(str, point_to_string(v))
   let challenge_generation_domain_separator_back = #"00"
-  let str = builtin.append_bytearray(str, challenge_generation_domain_separator_back)
+  let str = append_bytearray(str, challenge_generation_domain_separator_back)
   let c_string = sha2_256(str)
-  builtin.slice_bytearray(0, 16, c_string)
+  slice_bytearray(0, 16, c_string)
 }
 
 test challenge_generation_1() {
-  let Y = g2.generator
-  let H = g2.hash_to_group("test", "salt")
-  let Gamma = g2.generator
-  let U = g2.generator
-  let V = g2.generator
-  let c = challenge_generation(Y, H, Gamma, U, V)
-  builtin.bytearray_to_integer(True, c) < bitwise.shift_left(2, 128)
+  let y = generator
+  let h = hash_to_group("test", "salt")
+  let gamma = generator
+  let u = generator
+  let v = generator
+  let c = challenge_generation(y, h, gamma, u, v)
+  bytearray_to_integer(True, c) < 340282366920938463463374607431768211456
 }
 
 /// Generates a VRF proof for a given input.
@@ -243,7 +246,7 @@ test challenge_generation_1() {
 ///
 /// Arguments:
 /// - secret: SecretKey - VRF secret key (32-byte ByteArray)
-/// - alpha_string: ByteString - input alpha, an octet string
+/// - alpha_string: ByteArray - input alpha, an octet string
 /// - encode_to_curve_salt: ByteArray - a public salt value (e.g., "ECVRF_")
 ///
 /// Returns:
@@ -255,35 +258,95 @@ test challenge_generation_1() {
 /// let salt = "ECVRF_"
 /// let proof = prove(sk, alpha, salt)
 /// ```
-pub fn prove(secret: SecretKey, alpha_string: ByteString, encode_to_curve_salt: ByteArray) -> ByteArray {
+pub fn prove(secret: SecretKey, alpha_string: ByteArray, encode_to_curve_salt: ByteArray) -> ByteArray {
   let x = from_bytes(secret)
-  let Y = g2.scale(g2.generator, x)
+  let y = scale(generator, x)
 
-  let H = encode_to_curve(encode_to_curve_salt, alpha_string)
-  let h_string = point_to_string(H)
+  let h = encode_to_curve(encode_to_curve_salt, alpha_string)
+  let h_string = point_to_string(h)
 
-  let Gamma = g2.scale(H, x)
+  let gamma = scale(h, x)
 
   let k = nonce_generation(secret, h_string)
 
-  let kG2 = g2.scale(g2.generator, to_int(k))
-  let kH = g2.scale(H, to_int(k))
-  let c_bytes = challenge_generation(Y, H, Gamma, kG2, kH)
+  let kG2 = scale(generator, from_bytes(k))
+  let kH = scale(h, from_bytes(k))
+  let c_bytes = challenge_generation(y, h, gamma, kG2, kH)
   let c = from_bytes(c_bytes)
 
-  let s = add(mul(c, x), k)
+  let s = add(mul(c, x), from_bytes(k))
 
-  let gamma_string = point_to_string(Gamma)
-  let c_string = builtin.integer_to_bytearray(True, 16, to_int(c))
+  let gamma_string = point_to_string(gamma)
+  let c_string = integer_to_bytearray(True, 16, to_int(c))
   let s_string = to_bytes(s)
 
-  builtin.append_bytearray(builtin.append_bytearray(gamma_string, c_string), s_string)
+  append_bytearray(append_bytearray(gamma_string, c_string), s_string)
 }
 
 test prove_1() {
-  let sk = secret_scalar(#"test_secret_key_123456", "")
+  let sk = secret_scalar(#"746573745f7365637265745f6b65795f313233343536", "")
   let alpha = "test input"
   let salt = "ECVRF_"
   let proof = prove(sk, alpha, salt)
-  builtin.length_of_bytearray(proof) == 144
+  length_of_bytearray(proof) == 144
+}
+
+/// Decodes a VRF proof into its component parts.
+///
+/// Implements ECVRF_decode_proof from [IETF RFC 9381](https://www.rfc-editor.org/rfc/rfc9381.html) Section 5.4.4:
+///
+///   1. gamma_string = pi_string[0]...pi_string[ptLen-1]
+///   2. c_string = pi_string[ptLen]...pi_string[ptLen+cLen-1]
+///   3. s_string = pi_string[ptLen+cLen]...pi_string[ptLen+cLen+qLen-1]
+///   4. Gamma = string_to_point(gamma_string)
+///   5. If Gamma = "INVALID", output "INVALID" and stop
+///   6. c = string_to_int(c_string)
+///   7. s = string_to_int(s_string)
+///   8. If s >= q, output "INVALID" and stop
+///   9. Output Gamma, c, and s
+///
+/// Arguments:
+/// - pi_string: ByteArray - VRF proof (ptLen + cLen + qLen = 96 + 16 + 32 = 144 bytes)
+///
+/// Returns:
+/// Option<(G2Element, Int, Int)> - Some((Gamma, c, s)) on success, None on invalid proof
+///
+/// ```aiken
+/// let (sk, pk) = keys_from_secret(secret)
+/// let alpha = "test input"
+/// let salt = "ECVRF_"
+/// let proof = prove(sk, alpha, salt)
+/// let Some((gamma, c, s)) = decode_proof(proof)
+/// ```
+pub fn decode_proof(pi_string: ByteArray) -> Option<(G2Element, Int, Int)> {
+  when length_of_bytearray(pi_string) is {
+    144 -> {
+      let gamma_string = slice_bytearray(0, ptLen, pi_string)
+      let c_string = slice_bytearray(ptLen, cLen, pi_string)
+      let s_string = slice_bytearray(ptLen + cLen, qLen, pi_string)
+
+      let gamma = bls12_381_g2_uncompress(gamma_string)
+      let c = bytearray_to_integer(True, c_string)
+      let s_scalar = from_bytes(s_string)
+      let s = to_int(s_scalar)
+
+      Some((gamma, c, s))
+    }
+    _ -> None
+  }
+}
+
+test proof_decode_1() {
+  let sk = secret_scalar(#"746573745f7365637265745f6b65795f313233343536", "")
+  let alpha = "test input"
+  let salt = "ECVRF_"
+  let proof = prove(sk, alpha, salt)
+  when decode_proof(proof) is {
+    Some(_) -> True
+    None -> False
+  }
+}
+
+test proof_decode_2() {
+  decode_proof(#"00") == None
 }
