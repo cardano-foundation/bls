@@ -1,7 +1,7 @@
 use aiken/builtin.{bls12_381_g2_uncompress, slice_bytearray, append_bytearray, length_of_bytearray, integer_to_bytearray, bytearray_to_integer}
 use aiken/crypto.{sha2_256}
 use aiken/crypto/bls12_381/scalar.{from_bytes, add, mul, to_bytes, to_int}
-use aiken/crypto/bls12_381/g2.{compress, scale, generator, hash_to_group, equal}
+use aiken/crypto/bls12_381/g2.{compress, scale, generator, hash_to_group, equal, add as g2_add}
 use bls/core.{key_gen}
 
 const ptLen = 96
@@ -474,15 +474,126 @@ test validate_key_2() {
   validate_key(identity_point) == False
 }
 
-/// Verify
+/// Verifies a VRF proof.
+///
+/// Implements ECVRF_verify from [IETF RFC 9381](https://www.rfc-editor.org/rfc/rfc9381.html) Section 5.3:
+///
+///   1. Y = string_to_point(PK_string)
+///   2. If Y is "INVALID", output "INVALID" and stop
+///   3. If validate_key, run ECVRF_validate_key(Y); if it outputs "INVALID", output "INVALID" and stop
+///   4. D = ECVRF_decode_proof(pi_string)
+///   5. If D is "INVALID", output "INVALID" and stop
+///   6. (Gamma, c, s) = D
+///   7. H = ECVRF_encode_to_curve(encode_to_curve_salt, alpha_string)
+///   8. U = s*B - c*Y
+///   9. V = s*H - c*Gamma
+///   10. c' = ECVRF_challenge_generation(Y, H, Gamma, U, V)
+///   11. If c and c' are equal, output ("VALID", ECVRF_proof_to_hash(pi_string)); else output "INVALID"
 ///
 /// Arguments:
-/// - pk: PublicKey - public key expressed as an octet string
+/// - pk: PublicKey - public key expressed as an octet string (96 bytes)
 /// - alpha_string: ByteArray - VRF input as an octet string
-/// - pi_string: ByteArray - VRF proof, an octet string of length ptLen+cLen+qLen
-/// - encode_to_curve_salt: Option<ByteArray> - a public salt value, an octet string;
-/// - validate_key: Option<Bool> - a boolean. An implementation MAY support only the option of validate_key = TRUE, or only the option of validate_key = FALSE, in which case this input is not needed. If an implementation supports only one option, it MUST specify which option it supports
+/// - pi_string: ByteArray - VRF proof (144 bytes: ptLen + cLen + qLen = 96 + 16 + 32)
+/// - encode_to_curve_salt: ByteArray - a public salt value (e.g., "ECVRF_")
+/// - validate_key: Bool - if True, validates the public key is not the identity point
 ///
-/// Return:
-/// beta_string: Option<ByteString> - VRF hash output, an octet string of length hLen if verification underwent correctly
-/// pub fn verify(pk: PublicKey, alpha_string: ByreArray, pi_string: ByteArray, encode_to_curve_salt: Option<ByteArray>, validate_key: Option<Bool>) Option<ByteArray> {}
+/// Returns:
+/// Option<ByteArray> - Some(beta_string) on success, None on invalid proof
+///
+/// ```aiken
+/// let (sk, pk) = keys_from_secret(secret)
+/// let alpha = "test input"
+/// let salt = "ECVRF_"
+/// let proof = prove(sk, alpha, salt)
+/// let Some(beta) = verify(pk, alpha, proof, salt, True)
+/// ```
+pub fn verify(
+  pk: PublicKey,
+  alpha_string: ByteArray,
+  pi_string: ByteArray,
+  encode_to_curve_salt: ByteArray,
+  validate_key_flag: Bool,
+) -> Option<ByteArray> {
+  if validate_key_flag && !validate_key(pk) {
+    None
+  } else {
+    when decode_proof(pi_string) is {
+      None -> None
+      Some((gamma, c, s)) -> {
+        let y_point = bls12_381_g2_uncompress(pk)
+        let h = encode_to_curve(encode_to_curve_salt, alpha_string)
+        let s_scalar = from_bytes(integer_to_bytearray(True, 32, s))
+        let u = compute_u(y_point, s_scalar, c)
+        let v = compute_v(h, gamma, s_scalar, c)
+        let c_prime = challenge_generation(y_point, h, gamma, u, v)
+        let c_bytes = integer_to_bytearray(True, 16, c)
+        if c_prime == c_bytes {
+          proof_to_hash(pi_string)
+        } else {
+          None
+        }
+      }
+    }
+  }
+}
+
+const q = 0x73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000001
+
+fn compute_u(y: G2Element, s_scalar, c_int: Int) -> G2Element {
+  let sB = scale(generator, s_scalar)
+  let minus_c = q - c_int
+  let minus_c_bytes = integer_to_bytearray(True, 32, minus_c)
+  let cY = scale(y, from_bytes(minus_c_bytes))
+  g2_add(sB, cY)
+}
+
+fn compute_v(h: G2Element, gamma: G2Element, s_scalar, c_int: Int) -> G2Element {
+  let sH = scale(h, s_scalar)
+  let minus_c = q - c_int
+  let minus_c_bytes = integer_to_bytearray(True, 32, minus_c)
+  let cGamma = scale(gamma, from_bytes(minus_c_bytes))
+  g2_add(sH, cGamma)
+}
+
+test verify_1() {
+  let sk = secret_scalar(#"746573745f7365637265745f6b65795f313233343536", "")
+  let (_sk, pk) = keys_from_secret(#"746573745f7365637265745f6b65795f313233343536")
+  let alpha = "test input"
+  let salt = "ECVRF_"
+  let proof = prove(sk, alpha, salt)
+  when verify(pk, alpha, proof, salt, False) is {
+    Some(_beta) -> True
+    None -> False
+  }
+}
+
+test verify_2() {
+  let sk = secret_scalar(#"746573745f7365637265745f6b65795f313233343536", "")
+  let (_sk, pk) = keys_from_secret(#"746573745f7365637265745f6b65795f313233343536")
+  let alpha = "test input"
+  let salt = "ECVRF_"
+  let proof = prove(sk, alpha, salt)
+  when verify(pk, alpha, proof, salt, True) is {
+    Some(_beta) -> True
+    None -> False
+  }
+}
+
+test verify_invalid_proof() {
+  let sk = secret_scalar(#"746573745f7365637265745f6b65795f313233343536", "")
+  let pk = #"93e02b6052719f607dacd3a088274f65596bd0d09920b61ab5da61bbdc7f5049334cf11213945d57e5ac7d055d042b7e024aa2b2f08f0a91260805272dc51051c6e47ad4fa403b02b4510b647ae3d1770bac0326a805bbefd48056c8c121bdb8"
+  let alpha = "test input"
+  let salt = "ECVRF_"
+  let proof = prove(sk, alpha, salt)
+  let tampered_proof = builtin.append_bytearray(builtin.slice_bytearray(0, 143, proof), #"ff")
+  verify(pk, alpha, tampered_proof, salt, False) == None
+}
+
+test verify_wrong_pk() {
+  let sk1 = secret_scalar(#"746573745f7365637265745f6b65795f313233343536", "")
+  let (_, pk2) = keys_from_secret(#"6162636465666768696a6b6c6d6e6f707172737475767778797a")
+  let alpha = "test input"
+  let salt = "ECVRF_"
+  let proof = prove(sk1, alpha, salt)
+  verify(pk2, alpha, proof, salt, False) == None
+}
