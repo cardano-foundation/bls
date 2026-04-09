@@ -330,6 +330,6 @@ The implementation of signature aggregation case using [aiken primitves](https:/
 
 TODO
 
-## VRF using BLS curve primitives
+## VRF using aiken BLS curve primitives
 
-TODO
+The implementation of VRF using [aiken primitves](https://aiken-lang.github.io/stdlib/aiken/crypto/bls12_381/g1.html) is [here](./aiken/vrf)
