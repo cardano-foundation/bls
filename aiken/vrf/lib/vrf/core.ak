@@ -432,3 +432,57 @@ test proof_to_hash_3() {
     None -> False
   }
 }
+
+/// Validates a VRF public key.
+///
+/// Implements ECVRF_validate_key from [IETF RFC 9381](https://www.rfc-editor.org/rfc/rfc9381.html) Section 5.4.5:
+///
+///   1. Let Y' = cofactor*Y
+///   2. If Y' is the identity element of the elliptic curve group, output "INVALID" and stop
+///   3. Output "VALID"
+///
+/// For BLS12-381 G2, cofactor = 1, so Y' = Y. This function checks that the public key
+/// is not the identity point (point at infinity).
+///
+/// Note: The public key Y provided as input to this procedure MUST be a valid point on E.
+///
+/// Arguments:
+/// - pk: PublicKey - compressed public key in G2 (96 bytes)
+///
+/// Returns:
+/// Bool - True if valid, False if invalid (identity point)
+///
+/// ```aiken
+/// let (sk, pk) = keys_from_secret(secret)
+/// let is_valid = validate_key(pk)
+/// ```
+pub fn validate_key(pk: PublicKey) -> Bool {
+  when builtin.slice_bytearray(0, 1, pk) is {
+    #"c0" -> False
+    _ -> True
+  }
+}
+
+test validate_key_1() {
+  let (_sk, pk) = keys_from_secret(#"746573745f7365637265745f6b65795f313233343536")
+  validate_key(pk) == True
+}
+
+test validate_key_2() {
+  let zeros = builtin.integer_to_bytearray(True, 95, 0)
+  let identity_point = builtin.append_bytearray(#"c0", zeros)
+  validate_key(identity_point) == False
+}
+
+/// Verify
+///
+/// Arguments:
+/// - pk: PublicKey - public key expressed as an octet string
+/// - alpha_string: ByteArray - VRF input as an octet string
+/// - pi_string: ByteArray - VRF proof, an octet string of length ptLen+cLen+qLen
+/// - encode_to_curve_salt: Option<ByteArray> - a public salt value, an octet string;
+/// - validate_key: Option<Bool> - a boolean. An implementation MAY support only the option of validate_key = TRUE, or only the option of validate_key = FALSE, in which case this input is not needed. If an implementation supports only one option, it MUST specify which option it supports
+///
+/// Return:
+/// beta_string: Option<ByteString> - VRF hash output, an octet string of length hLen if verification underwent correctly
+/// pub fn verify(pk: PublicKey, alpha_string: ByreArray, pi_string: ByteArray, encode_to_curve_salt: Option<ByteArray>, validate_key: Option<Bool>) Option<ByteArray> {}
