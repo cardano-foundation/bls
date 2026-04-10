@@ -11,7 +11,7 @@ A Verifiable Random Function (VRF) is a cryptographic primitive that provides a 
 
 **Use cases:**
 - **Privacy-protected data structures**: Prevent enumeration attacks on hash-based data structures (e.g., private UTXO sets in blockchains)
-- **Leader selection**: Randomly select leaders in consensus protocols without revealing the winner until after selection
+- **[Leader selection](#leader-selection)**: Randomly select leaders in consensus protocols without revealing the winner until after selection
 - **[Proof of prior possession](#proof-of-prior-possession)**: Demonstrate knowledge of a secret without revealing it
 - **[Non-interactive randomness](#non-interactive-randomness)**: Generate verifiable randomness for lotteries or gaming applications
 
@@ -111,6 +111,45 @@ let random_number = bytearray_to_integer(True, beta) % N
 ```
 
 See [validators/placeholder.ak](./validators/placeholder.ak) for a working test: `test_non_interactive_randomness`
+
+## Leader Selection
+
+**The problem**: Randomly select a leader (or set of leaders) for the next round of a consensus protocol, without anyone being able to predict the winner in advance.
+
+**The VRF solution**:
+1. Each stakeholder has a VRF key pair
+2. For each epoch/round, use the epoch number as input
+3. Each stakeholder computes: `beta = vrf.proof_to_hash(vrf.prove(sk, epoch))`
+4. If `beta < threshold`, the stakeholder is selected as leader
+5. The selection can be verified by anyone using the public key
+
+**Why it works**:
+- VRF output is unpredictable until the epoch is known
+- Only the stakeholder can compute their own selection (proprietary)
+- Anyone can verify the selection is valid
+- The threshold model provides proportional leader election
+
+**Use cases**:
+- Blockchain consensus (e.g., Ouroboros, Algorand)
+- Distributed systems leader election
+- Proof of Stake validation
+
+```aiken
+// Stakeholder:
+let epoch = "epoch_12345"
+let (sk, pk) = vrf.keys_from_secret(stakeholder_secret)
+let pi = vrf.prove(sk, epoch, "ECVRF_")
+let Some(beta) = vrf.proof_to_hash(pi)
+
+// Threshold check: leader if beta < threshold
+let threshold = 1000
+let is_leader = bytearray_to_integer(True, beta) < threshold
+
+// Anyone can verify:
+vrf.verify(pk, epoch, pi, "ECVRF_", False)
+```
+
+See [validators/placeholder.ak](./validators/placeholder.ak) for a working test: `test_leader_selection`
 
 ## Notes on lib/core.ak implementation
 

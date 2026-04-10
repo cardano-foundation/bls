@@ -1,62 +1,44 @@
 use vrf/core as vrf
 
-pub type VrfInput =
-  ByteArray
-
-pub type VrfOutput =
-  ByteArray
-
-pub type VrfProof =
-  ByteArray
-
-pub type VrfSecretKey =
-  ByteArray
-
-pub type VrfPublicKey =
-  ByteArray
-
 const encode_to_curve_salt = #"45535652455f"
 
-pub fn key_gen(secret: VrfSecretKey) -> (VrfSecretKey, VrfPublicKey) {
+pub fn key_gen(secret: ByteArray) -> (ByteArray, ByteArray) {
   vrf.keys_from_secret(secret)
 }
 
-pub fn prove(sk: VrfSecretKey, alpha: VrfInput) -> VrfProof {
+pub fn prove(sk: ByteArray, alpha: ByteArray) -> ByteArray {
   vrf.prove(sk, alpha, encode_to_curve_salt)
 }
 
-pub fn verify(pk: VrfPublicKey, alpha: VrfInput, pi: VrfProof) -> Option<VrfOutput> {
+pub fn verify(pk: ByteArray, alpha: ByteArray, pi: ByteArray) -> Option<ByteArray> {
   vrf.verify(pk, alpha, pi, encode_to_curve_salt, False)
 }
 
-test test_vrf_use_case() {
+test t1() {
   let secret = #"ed69a93f0cf8c9836be3b67c7eeff416612d45ba39a5c099d48fa668bf558c9c"
-  let alpha = "test input"
   let (sk, pk) = key_gen(secret)
-  let pi = prove(sk, alpha)
-  when verify(pk, alpha, pi) is {
-    Some(_) -> True
+  let pi = prove(sk, "test input")
+  verify(pk, "test input", pi) != None
+}
+
+test t2() {
+  let (sk, pk) = key_gen("my_secret_password_12345")
+  let pi = prove(sk, "my_secret_password_12345")
+  verify(pk, "my_secret_password_12345", pi) != None
+}
+
+test t3() {
+  let (sk, pk) = key_gen("block_12345_hash")
+  let pi = prove(sk, "block_12345_hash")
+  when verify(pk, "block_12345_hash", pi) is {
+    Some(beta) -> vrf.proof_to_hash(pi) == Some(beta)
     None -> False
   }
 }
 
-test test_proof_of_prior_possession() {
-  let secret = "my_secret_password_12345"
-  let (sk, pk) = key_gen(secret)
-  let pi = prove(sk, secret)
-  verify(pk, secret, pi) != None
-}
-
-test test_non_interactive_randomness() {
-  let input = "block_12345_hash"
-  let operator_secret = #"a1b2c3d4e5f6071829384756a7b8c9d0"
-  let (sk, pk) = key_gen(operator_secret)
-  let pi = prove(sk, input)
-  when verify(pk, input, pi) is {
-    Some(beta) -> {
-      let beta2 = vrf.proof_to_hash(pi)
-      beta2 == Some(beta)
-    }
-    None -> False
-  }
+test t4() {
+  let epoch = "epoch_12345"
+  let (sk, pk) = key_gen("stakeholder_key")
+  let pi = prove(sk, epoch)
+  verify(pk, epoch, pi) != None
 }
