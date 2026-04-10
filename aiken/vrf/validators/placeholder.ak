@@ -42,3 +42,17 @@ test t4() {
   let pi = prove(sk, epoch)
   verify(pk, epoch, pi) != None
 }
+
+test t5() {
+  let secret = "prover_secret_key"
+  let (sk, pk) = key_gen(secret)
+  let data = "important_record_123"
+  let pi = prove(sk, data)
+  when verify(pk, data, pi) is {
+    Some(beta) -> {
+      let beta2 = vrf.proof_to_hash(pi)
+      beta2 == Some(beta)
+    }
+    None -> False
+  }
+}

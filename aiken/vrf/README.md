@@ -10,7 +10,7 @@ A Verifiable Random Function (VRF) is a cryptographic primitive that provides a 
 - **Pseudorandomness**: The hash output appears random to anyone who doesn't know the secret key
 
 **Use cases:**
-- **Privacy-protected data structures**: Prevent enumeration attacks on hash-based data structures (e.g., private UTXO sets in blockchains)
+- **[Privacy-protected data structures](#privacy-protected-data-structures)**: Prevent enumeration attacks on hash-based data structures (e.g., private UTXO sets in blockchains)
 - **[Leader selection](#leader-selection)**: Randomly select leaders in consensus protocols without revealing the winner until after selection
 - **[Proof of prior possession](#proof-of-prior-possession)**: Demonstrate knowledge of a secret without revealing it
 - **[Non-interactive randomness](#non-interactive-randomness)**: Generate verifiable randomness for lotteries or gaming applications
@@ -111,6 +111,40 @@ let random_number = bytearray_to_integer(True, beta) % N
 ```
 
 See [validators/placeholder.ak](./validators/placeholder.ak) for a working test: `test_non_interactive_randomness`
+
+## Privacy-Protected Data Structures
+
+**The problem**: Store data in a hash-based structure (e.g., UTXO set, Merkle tree) while preventing attackers from enumerating what data is stored.
+
+**The VRF solution**:
+1. Use VRF hash output instead of regular hashes to map entries to tree positions
+2. Only someone with the VRF secret key can compute which branch contains a particular entry
+3. Anyone can verify the structure is valid without learning stored data
+
+**Why it works**: The VRF hash output appears random to anyone without the secret key. Without the key, an attacker cannot determine which data is stored in the structure.
+
+**Use cases**:
+- Private UTXO sets in blockchains (Cardano, etc.)
+- Confidential databases
+- Privacy-preserving membership proofs
+
+```aiken
+// Prover stores data privately:
+let secret = "prover_secret_key"
+let (sk, pk) = vrf.keys_from_secret(secret)
+
+// For each piece of data, compute VRF hash as "address"
+let data = "important_record_123"
+let pi = vrf.prove(sk, data, "ECVRF_")
+let Some(beta) = vrf.proof_to_hash(pi)
+// beta becomes the "address" in the data structure
+
+// Anyone can verify data exists at beta without knowing what data is:
+// (verifier needs pi, pk, and the data)
+// This prevents enumeration attacks
+```
+
+See [validators/placeholder.ak](./validators/placeholder.ak) for a working test: `test_privacy_protected_data`
 
 ## Leader Selection
 
