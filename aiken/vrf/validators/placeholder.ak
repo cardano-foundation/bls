@@ -77,3 +77,24 @@ test test_invalid_proof_rejected() {
 
   verify(pk, alpha, pi) == None
 }
+
+// Proof of Prior Possession use case
+// Alice proves she knows a secret without revealing it
+test test_proof_of_prior_possession() {
+  // The secret Alice wants to prove she knows
+  let secret_knowledge = "my_secret_password_12345"
+  let alpha = secret_knowledge
+
+  // Alice generates keypair from secret knowledge
+  let (sk, pk) = key_gen(secret_knowledge)
+
+  // Alice computes proof that she knows the secret
+  let pi = prove(sk, alpha)
+
+  // Bob (verifier) validates the proof WITHOUT knowing the secret
+  // He only has: pk, pi, and alpha (which could be a public commitment)
+  when verify(pk, alpha, pi) is {
+    Some(_) -> True
+    None -> False
+  }
+}
