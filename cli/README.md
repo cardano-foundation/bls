@@ -6,16 +6,18 @@ Generate a 32-byte random hex-encoded seed.
 
 ```console
 $ cargo run --quiet -- generate-seed ; echo
-bf410498bcb54308b2f9483a488430610fb40e4dd7d84baa1bbb35174231b0e0
+9fb87a5bacb1c54b2e770d6d091da4c04797c1cd760d765ddb026ec3d703d5b2
 ```
 
 ### hkdf
 
-Derive a 32-byte PrivateKey from a seed.
+Derive a 32-byte PrivateKey from a seed using HKDF-SHA256.
 
-**From stdin:**
+From the seed above:
+
 ```console
-$ cargo run --quiet -- hkdf < seed.hex
+$ echo "9fb87a5bacb1c54b2e770d6d091da4c04797c1cd760d765ddb026ec3d703d5b2" | cargo run --quiet -- hkdf
+7be162d67564e3b4c09655baaabecc3725748133e33ab971e565737f189f3f43
 ```
 
 **From file:**
@@ -23,5 +25,8 @@ $ cargo run --quiet -- hkdf < seed.hex
 $ cargo run --quiet -- hkdf --file seed.hex
 ```
 
-If the seed is shorter than 32 bytes, it repeats to fill 32 bytes.
+**From stdin:**
+```console
+$ cargo run --quiet -- hkdf < seed.hex
+```
 
