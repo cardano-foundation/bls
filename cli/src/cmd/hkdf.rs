@@ -1,4 +1,6 @@
 use hex::decode;
+use hkdf::Hkdf;
+use sha2::Sha256;
 use std::error::Error;
 use std::fs::File;
 use std::io::{self, BufRead, BufReader};
@@ -25,12 +27,12 @@ pub fn run(args: Args) -> Result<(), Box<dyn Error>> {
 
     let seed_bytes = decode(&seed).map_err(|_| "invalid hex seed")?;
 
-    let mut private_key = vec![0u8; 32];
-    for i in 0..32 {
-        private_key[i] = seed_bytes[i % seed_bytes.len()];
-    }
+    let hk = Hkdf::<Sha256>::new(None, &seed_bytes);
+    let mut private_key = [0u8; 32];
+    hk.expand(b"", &mut private_key)
+        .map_err(|_| "hkdf expand failed")?;
 
-    print!("{}", hex::encode(&private_key));
+    print!("{}", hex::encode(private_key));
 
     Ok(())
 }
