@@ -1,0 +1,22 @@
+[package]
+name = "bls12-381-aiken-cli"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+readme = "README.md"
+repository = "https://github.com/cardano-foundation/bls"
+homepage = "https://github.com/cardano-foundation/bls"
+categories = ["cryptography"]
+description = "BLS12-381 Aiken CLI tool"
+keywords = ["Crypto", "BLS", "Bls12-381", "Aiken"]
+
+[dependencies]
+clap = { version = "4.5.38", features = ["derive"] }
+hex = "0.4"
+rand = "0.8"
+
+[dev-dependencies]
+assert_cmd = "2.0"
+predicates = "3.1"
+
+[features]
