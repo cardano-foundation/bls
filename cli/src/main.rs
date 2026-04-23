@@ -10,6 +10,9 @@ mod cmd;
 pub enum Command {
     /// Generates 32 bytes secret seed
     GenerateSeed,
+
+    /// Derives PrivateKey from seed (stdin or --file)
+    Hkdf(cmd::hkdf::Args),
 }
 
 #[derive(Debug, Parser)]
@@ -29,5 +32,6 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     match args.command {
         Command::GenerateSeed => cmd::generate_seed::run(),
+        Command::Hkdf(args) => cmd::hkdf::run(args),
     }
 }
