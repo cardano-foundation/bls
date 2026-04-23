@@ -1,3 +1,25 @@
 aiken/signature-aggregation-case/build/
 aiken/publickey-aggregation-case/build/
 aiken/vrf/build/
+
+# Cargo
+Cargo.lock
+*/Cargo.lock
+
+# Build output
+target/
+*/target/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor backups
+*~
+*.bak
