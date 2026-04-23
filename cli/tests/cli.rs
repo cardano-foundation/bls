@@ -69,3 +69,26 @@ fn hkdf_from_file() {
             trimmed.len() == 64 && decode(trimmed).is_ok()
         }));
 }
+
+#[test]
+fn hkdf_matches_rfc5869_testcase3() {
+    let temp_file = NamedTempFile::new().unwrap();
+    fs::write(
+        temp_file.path(),
+        "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+    )
+    .unwrap();
+
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("hkdf").arg("--file").arg(temp_file.path());
+    let output = cmd.output().unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    let expected = "8da4e775a563c18f715f802a063c5a31";
+    assert!(
+        stdout.trim().starts_with(expected),
+        "expected {}..., got {}",
+        expected,
+        stdout.trim()
+    );
+}
