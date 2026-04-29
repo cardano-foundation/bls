@@ -54,3 +54,28 @@ $ cargo run --quiet -- scalar --file private_key.hex
 ```console
 $ cargo run --quiet -- scalar < private_key.hex
 ```
+
+### pk
+
+Generate a BLS12-381 public key (G1 point) from a 32-byte private key.
+
+The command validates that:
+- The input is exactly 32 bytes (64 hex characters)
+- The scalar is within the valid curve order range
+
+From the private key derived above:
+
+```console
+$ echo "7be162d67564e3b4c09655baaabecc3725748133e33ab971e565737f189f3f43" | cargo run --quiet -- pk
+ab21260f2c9d1fb30a46aec117e8c4a0f65f9a8f5b177361c3680da3097eb448b3eb6d0960776f73f4e5bb41d1256371
+```
+
+**From file:**
+```console
+$ cargo run --quiet -- pk --file private_key.hex
+```
+
+**From stdin:**
+```console
+$ cargo run --quiet -- pk < private_key.hex
+```
