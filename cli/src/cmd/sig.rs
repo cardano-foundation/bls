@@ -8,6 +8,18 @@ pub struct Args {
     /// Path to private key file (optional, reads from stdin if not provided)
     #[arg(short, long = "prv")]
     prv: Option<String>,
+
+    /// Message to sign
+    #[arg(short, long)]
+    msg: String,
+
+    /// Domain separation tag (optional)
+    #[arg(short, long, default_value = "")]
+    dst: String,
+
+    /// Augmentation data (optional)
+    #[arg(short, long, default_value = "")]
+    aug: String,
 }
 
 pub fn run(args: Args) -> Result<(), Box<dyn Error>> {
@@ -25,9 +37,15 @@ pub fn run(args: Args) -> Result<(), Box<dyn Error>> {
 
     let private_key_bytes = decode(&private_key_hex).map_err(|_| "invalid hex private key")?;
 
-    let public_key = bls12_381_aiken_cli::sk_to_pk(&private_key_bytes).map_err(|e| e)?;
+    let signature = bls12_381_aiken_cli::hash_to_group(
+        &private_key_bytes,
+        args.msg.as_bytes(),
+        args.dst.as_bytes(),
+        args.aug.as_bytes(),
+    )
+    .map_err(|e| e)?;
 
-    print!("{}", hex::encode(public_key));
+    print!("{}", hex::encode(signature));
 
     Ok(())
 }

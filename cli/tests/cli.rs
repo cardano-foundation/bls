@@ -113,7 +113,7 @@ fn scalar_from_file() {
     .unwrap();
 
     let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
-    cmd.arg("scalar").arg("--file").arg(temp_file.path());
+    cmd.arg("scalar").arg("--prv").arg(temp_file.path());
     cmd.assert().success().stdout(predicate::eq(
         "30417370258289878983951032069403093024210548576862328133794263911723866186107",
     ));
@@ -130,7 +130,7 @@ fn scalar_invalid_length() {
 
 #[test]
 fn scalar_invalid_value() {
-    // Value >= curve order should fail
+    // Value >= curve order should fail (all 0xFFs = 32 bytes)
     let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
     cmd.arg("scalar")
         .write_stdin("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
@@ -162,7 +162,7 @@ fn pk_from_file() {
     .unwrap();
 
     let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
-    cmd.arg("pk").arg("--file").arg(temp_file.path());
+    cmd.arg("pk").arg("--prv").arg(temp_file.path());
     cmd.assert()
         .success()
         .stdout(predicate::function(|output: &str| {
@@ -182,9 +182,69 @@ fn pk_invalid_length() {
 
 #[test]
 fn pk_invalid_value() {
-    // Value >= curve order should fail
+    // Value >= curve order should fail (all 0xFFs = 32 bytes)
     let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
     cmd.arg("pk")
+        .write_stdin("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("not a valid scalar"));
+}
+
+#[test]
+fn sig_from_stdin() {
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("sig")
+        .arg("--msg")
+        .arg("hello world")
+        .write_stdin("7be162d67564e3b4c09655baaabecc3725748133e33ab971e565737f189f3f43");
+    cmd.assert()
+        .success()
+        .stdout(predicate::function(|output: &str| {
+            let trimmed = output.trim();
+            trimmed.len() == 192 && decode(trimmed).is_ok()
+        }));
+}
+
+#[test]
+fn sig_from_file() {
+    let temp_file = NamedTempFile::new().unwrap();
+    fs::write(
+        temp_file.path(),
+        "7be162d67564e3b4c09655baaabecc3725748133e33ab971e565737f189f3f43",
+    )
+    .unwrap();
+
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("sig")
+        .arg("--prv")
+        .arg(temp_file.path())
+        .arg("--msg")
+        .arg("hello world");
+    cmd.assert()
+        .success()
+        .stdout(predicate::function(|output: &str| {
+            let trimmed = output.trim();
+            trimmed.len() == 192 && decode(trimmed).is_ok()
+        }));
+}
+
+#[test]
+fn sig_invalid_length() {
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("sig").arg("--msg").arg("test").write_stdin("1234");
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("private key must be 32 bytes"));
+}
+
+#[test]
+fn sig_invalid_value() {
+    // Value >= curve order should fail (all 0xFFs = 32 bytes)
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("sig")
+        .arg("--msg")
+        .arg("test")
         .write_stdin("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
     cmd.assert()
         .failure()

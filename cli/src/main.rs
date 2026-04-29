@@ -19,6 +19,9 @@ pub enum Command {
 
     /// Generates public key from private key (stdin or --file)
     Pk(cmd::pk::Args),
+
+    /// Generates BLS signature from private key and message (stdin/file + --msg)
+    Sig(cmd::sig::Args),
 }
 
 #[derive(Debug, Parser)]
@@ -41,5 +44,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         Command::Hkdf(args) => cmd::hkdf::run(args),
         Command::Scalar(args) => cmd::scalar::run(args),
         Command::Pk(args) => cmd::pk::run(args),
+        Command::Sig(args) => cmd::sig::run(args),
     }
 }

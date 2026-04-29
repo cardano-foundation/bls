@@ -7,12 +7,12 @@ use std::io::{self, BufRead, BufReader};
 #[derive(Debug, clap::Args)]
 pub struct Args {
     /// Path to private key file (optional, reads from stdin if not provided)
-    #[arg(short, long)]
-    file: Option<String>,
+    #[arg(short, long = "prv")]
+    prv: Option<String>,
 }
 
 pub fn run(args: Args) -> Result<(), Box<dyn Error>> {
-    let private_key_hex = if let Some(path) = args.file {
+    let private_key_hex = if let Some(path) = args.prv {
         let f = File::open(&path)?;
         let mut reader = BufReader::new(f);
         let mut line = String::new();
