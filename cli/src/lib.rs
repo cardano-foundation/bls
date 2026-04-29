@@ -3,3 +3,35 @@
 
 //! Common utilities for seed generation
 pub mod common;
+
+use midnight_curves::BlsScalar;
+
+/// Converts a 32-byte private key to a BLS12-381 scalar.
+///
+/// # Arguments
+///
+/// * `private_key` - A 32-byte private key
+///
+/// # Returns
+///
+/// * `Ok(BlsScalar)` if the private key is valid (32 bytes and within curve order)
+/// * `Err(String)` if the private key is invalid
+pub fn sk_to_scalar(private_key: &[u8]) -> Result<BlsScalar, String> {
+    if private_key.len() != 32 {
+        return Err(format!(
+            "private key must be 32 bytes, got {}",
+            private_key.len()
+        ));
+    }
+
+    let mut bytes = [0u8; 32];
+    bytes.copy_from_slice(private_key);
+
+    let scalar = BlsScalar::from_bytes_le(&bytes);
+
+    if scalar.is_none().into() {
+        return Err("private key is not a valid scalar (>= curve order)".to_string());
+    }
+
+    Ok(scalar.unwrap())
+}

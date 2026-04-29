@@ -16,6 +16,8 @@ hex = "0.4"
 rand = "0.8"
 hkdf = "0.12"
 sha2 = "0.10"
+midnight-curves = "0.2"
+num-bigint = "0.4"
 
 [dev-dependencies]
 assert_cmd = "2.0"
