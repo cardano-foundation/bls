@@ -13,6 +13,9 @@ pub enum Command {
 
     /// Derives PrivateKey from seed (stdin or --file)
     Hkdf(cmd::hkdf::Args),
+
+    /// Converts private key to scalar (stdin or --file)
+    Scalar(cmd::scalar::Args),
 }
 
 #[derive(Debug, Parser)]
@@ -33,5 +36,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     match args.command {
         Command::GenerateSeed => cmd::generate_seed::run(),
         Command::Hkdf(args) => cmd::hkdf::run(args),
+        Command::Scalar(args) => cmd::scalar::run(args),
     }
 }
