@@ -16,6 +16,9 @@ pub enum Command {
 
     /// Converts private key to scalar (stdin or --file)
     Scalar(cmd::scalar::Args),
+
+    /// Generates public key from private key (stdin or --file)
+    Pk(cmd::pk::Args),
 }
 
 #[derive(Debug, Parser)]
@@ -37,5 +40,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         Command::GenerateSeed => cmd::generate_seed::run(),
         Command::Hkdf(args) => cmd::hkdf::run(args),
         Command::Scalar(args) => cmd::scalar::run(args),
+        Command::Pk(args) => cmd::pk::run(args),
     }
 }
