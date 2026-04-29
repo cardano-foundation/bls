@@ -47,7 +47,7 @@ $ echo "7be162d67564e3b4c09655baaabecc3725748133e33ab971e565737f189f3f43" | carg
 
 **From file:**
 ```console
-$ cargo run --quiet -- scalar --file private_key.hex
+$ cargo run --quiet -- scalar --prv private_key.hex
 ```
 
 **From stdin:**
@@ -72,10 +72,47 @@ ab21260f2c9d1fb30a46aec117e8c4a0f65f9a8f5b177361c3680da3097eb448b3eb6d0960776f73
 
 **From file:**
 ```console
-$ cargo run --quiet -- pk --file private_key.hex
+$ cargo run --quiet -- pk --prv private_key.hex
 ```
 
 **From stdin:**
 ```console
 $ cargo run --quiet -- pk < private_key.hex
 ```
+
+### sig
+
+Generate a BLS signature (G2 point) from a private key and message.
+
+The command validates that:
+- The private key is exactly 32 bytes (64 hex characters)
+- The scalar is within the valid curve order range
+
+**Parameters:**
+- `--prv` - Private key (from stdin or file)
+- `--msg` - Message to sign (required)
+- `--dst` - Domain separation tag (optional, defaults to empty)
+- `--aug` - Augmentation data (optional, defaults to empty)
+
+**What are dst and aug?**
+- `dst` (Domain Separation Tag): A byte string that distinguishes between different protocol uses of the hash-to-curve algorithm. This prevents signatures from one context being valid in another.
+- `aug` (Augmentation Data): Additional data that can be included in the signature computation. This is often used for additional context or metadata.
+
+From the private key derived above:
+
+```console
+$ echo "7be162d67564e3b4c09655baaabecc3725748133e33ab971e565737f189f3f43" | cargo run --quiet -- sig --msg "hello world"
+a00ac57c24c5ec4db94fe1fee003f7dd15c100041cafba26ba97c0c6e18e04106c4d0dbd03ab5ba6c08ccea14a9ddc5c06d326a27134b6d150343064697bd1d9ed8883b1cdc60fe97baf7d67da28a1e0f63f0456deb99987389183b94ef60798
+```
+
+**From file with private key and message:**
+```console
+$ cargo run --quiet -- sig --prv private_key.hex --msg "hello world"
+```
+
+**With domain separation tag (dst) and augmentation (aug):**
+```console
+$ cargo run --quiet -- sig --prv private_key.hex --msg "hello" --dst "domain" --aug "extra"
+```
+
+**Note:** Both `--dst` and `--aug` are optional and default to empty strings if not provided. Different values for these parameters will produce different signatures.

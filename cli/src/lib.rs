@@ -4,7 +4,7 @@
 //! Common utilities for seed generation
 pub mod common;
 
-use midnight_curves::bls12_381::{G1Affine, G1Projective};
+use midnight_curves::bls12_381::{G1Affine, G1Projective, G2Affine, G2Projective};
 use midnight_curves::pairing::group::{Group, GroupEncoding};
 use midnight_curves::BlsScalar;
 
@@ -55,6 +55,35 @@ pub fn sk_to_pk(private_key: &[u8]) -> Result<Vec<u8>, String> {
     let public_key = generator * scalar;
     let public_key_affine = G1Affine::from(public_key);
     let compressed = public_key_affine.to_bytes();
+
+    Ok(compressed.as_ref().to_vec())
+}
+
+/// Computes BLS signature: hash message to G2, then multiply by private key scalar.
+///
+/// # Arguments
+///
+/// * `private_key` - A 32-byte private key
+/// * `message` - The message to sign
+/// * `dst` - Domain separation tag (optional, defaults to empty)
+/// * `aug` - Augmentation data (optional, defaults to empty)
+///
+/// # Returns
+///
+/// * `Ok(Vec<u8>)` - compressed G2 signature (96 bytes)
+/// * `Err(String)` if the private key is invalid
+pub fn hash_to_group(
+    private_key: &[u8],
+    message: &[u8],
+    dst: &[u8],
+    aug: &[u8],
+) -> Result<Vec<u8>, String> {
+    let scalar = sk_to_scalar(private_key)?;
+
+    let g2_point = G2Projective::hash_to_curve(message, dst, aug);
+    let signature = g2_point * scalar;
+    let signature_affine = G2Affine::from(signature);
+    let compressed = signature_affine.to_bytes();
 
     Ok(compressed.as_ref().to_vec())
 }
