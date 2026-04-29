@@ -1,5 +1,7 @@
 ### Commands
 
+Run `cargo run --help` or `cargo run -- <command> --help` for detailed information about each command.
+
 ### generate-seed
 
 Generate a 32-byte random hex-encoded seed.
