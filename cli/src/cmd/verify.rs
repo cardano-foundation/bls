@@ -9,7 +9,7 @@ pub struct Args {
     #[arg(short, long)]
     sig: Option<String>,
 
-    /// Message that was signed
+    /// Message that was signed (required)
     #[arg(short, long)]
     msg: String,
 
