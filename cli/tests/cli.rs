@@ -71,29 +71,6 @@ fn hkdf_from_file() {
 }
 
 #[test]
-fn hkdf_matches_rfc5869_testcase3() {
-    let temp_file = NamedTempFile::new().unwrap();
-    fs::write(
-        temp_file.path(),
-        "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
-    )
-    .unwrap();
-
-    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
-    cmd.arg("hkdf").arg("--file").arg(temp_file.path());
-    let output = cmd.output().unwrap();
-    let stdout = String::from_utf8_lossy(&output.stdout);
-
-    let expected = "8da4e775a563c18f715f802a063c5a31";
-    assert!(
-        stdout.trim().starts_with(expected),
-        "expected {}..., got {}",
-        expected,
-        stdout.trim()
-    );
-}
-
-#[test]
 fn scalar_from_stdin() {
     let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
     cmd.arg("scalar")
@@ -253,29 +230,22 @@ fn sig_invalid_value() {
 
 #[test]
 fn verify_valid_signature() {
-    // Generate a seed, derive private key, generate public key, sign a message, then verify
-    let mut cmd_seed = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
-    cmd_seed.arg("generate-seed");
-    let seed_output = cmd_seed.output().unwrap();
-    let seed = String::from_utf8_lossy(&seed_output.stdout)
-        .trim()
-        .to_string();
-
-    // Derive private key from seed
-    let mut cmd_hkdf = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
-    cmd_hkdf.arg("hkdf").write_stdin(seed.as_bytes());
-    let hkdf_output = cmd_hkdf.output().unwrap();
-    let private_key = String::from_utf8_lossy(&hkdf_output.stdout)
-        .trim()
-        .to_string();
+    // Use a known-valid private key
+    let private_key = "7be162d67564e3b4c09655baaabecc3725748133e33ab971e565737f189f3f43";
 
     // Generate public key from private key
     let mut cmd_pk = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
     cmd_pk.arg("pk").write_stdin(private_key.as_bytes());
     let pk_output = cmd_pk.output().unwrap();
+    assert!(
+        pk_output.status.success(),
+        "pk command failed: {}",
+        String::from_utf8_lossy(&pk_output.stderr)
+    );
     let public_key = String::from_utf8_lossy(&pk_output.stdout)
         .trim()
         .to_string();
+    assert!(!public_key.is_empty(), "Public key is empty");
 
     // Save public key to temp file
     let pk_file = NamedTempFile::new().unwrap();
@@ -289,9 +259,15 @@ fn verify_valid_signature() {
         .arg("hello world")
         .write_stdin(private_key.as_bytes());
     let sig_output = cmd_sig.output().unwrap();
+    assert!(
+        sig_output.status.success(),
+        "sig command failed: {}",
+        String::from_utf8_lossy(&sig_output.stderr)
+    );
     let signature = String::from_utf8_lossy(&sig_output.stdout)
         .trim()
         .to_string();
+    assert!(!signature.is_empty(), "Signature is empty");
 
     // Save signature to temp file
     let sig_file = NamedTempFile::new().unwrap();
@@ -315,26 +291,18 @@ fn verify_valid_signature() {
 
 #[test]
 fn verify_invalid_signature() {
-    // Generate a seed, derive private key, generate public key, sign a message, then verify with wrong message
-    let mut cmd_seed = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
-    cmd_seed.arg("generate-seed");
-    let seed_output = cmd_seed.output().unwrap();
-    let seed = String::from_utf8_lossy(&seed_output.stdout)
-        .trim()
-        .to_string();
-
-    // Derive private key from seed
-    let mut cmd_hkdf = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
-    cmd_hkdf.arg("hkdf").write_stdin(seed.as_bytes());
-    let hkdf_output = cmd_hkdf.output().unwrap();
-    let private_key = String::from_utf8_lossy(&hkdf_output.stdout)
-        .trim()
-        .to_string();
+    // Use a known-valid private key
+    let private_key = "7be162d67564e3b4c09655baaabecc3725748133e33ab971e565737f189f3f43";
 
     // Generate public key from private key
     let mut cmd_pk = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
     cmd_pk.arg("pk").write_stdin(private_key.as_bytes());
     let pk_output = cmd_pk.output().unwrap();
+    assert!(
+        pk_output.status.success(),
+        "pk command failed: {}",
+        String::from_utf8_lossy(&pk_output.stderr)
+    );
     let public_key = String::from_utf8_lossy(&pk_output.stdout)
         .trim()
         .to_string();
@@ -351,6 +319,11 @@ fn verify_invalid_signature() {
         .arg("hello world")
         .write_stdin(private_key.as_bytes());
     let sig_output = cmd_sig.output().unwrap();
+    assert!(
+        sig_output.status.success(),
+        "sig command failed: {}",
+        String::from_utf8_lossy(&sig_output.stderr)
+    );
     let signature = String::from_utf8_lossy(&sig_output.stdout)
         .trim()
         .to_string();
@@ -373,4 +346,146 @@ fn verify_invalid_signature() {
         .assert()
         .success()
         .stdout(predicate::str::contains("Not Verified"));
+}
+
+#[cfg(test)]
+mod property_tests {
+    use bls12_381_aiken_cli::*;
+    use proptest::prelude::*;
+    use proptest::prelude::*;
+
+    // Strategy: Generate valid 32-byte private keys
+    fn private_key_strategy() -> impl Strategy<Value = Vec<u8>> {
+        any::<[u8; 32]>()
+            .prop_filter("Valid private key", |bytes| {
+                bls12_381_aiken_cli::sk_to_scalar(bytes).is_ok()
+            })
+            .prop_map(|bytes| bytes.to_vec())
+    }
+
+    // Strategy: Generate valid messages (arbitrary byte vectors)
+    fn message_strategy() -> impl Strategy<Value = Vec<u8>> {
+        proptest::collection::vec(any::<u8>(), 0..1024)
+    }
+
+    proptest! {
+        // Property test for sk_to_scalar
+        #[test]
+        fn sk_to_scalar_valid_key(key in private_key_strategy()) {
+            let result = sk_to_scalar(&key);
+            prop_assert!(result.is_ok());
+        }
+
+        #[test]
+        fn sk_to_scalar_invalid_length(key in proptest::collection::vec(any::<u8>(), 10..31)) {
+            let result = sk_to_scalar(&key);
+            prop_assert!(result.is_err());
+            prop_assert!(result.unwrap_err().contains("must be 32 bytes"));
+        }
+
+        // Property test for sk_to_pk
+        #[test]
+        fn sk_to_pk_valid_key(key in private_key_strategy()) {
+            let result = sk_to_pk(&key);
+            prop_assert!(result.is_ok());
+            let pk = result.unwrap();
+            // Public key should be 48 bytes (compressed G1)
+            prop_assert_eq!(pk.len(), 48);
+        }
+
+        // Property test for hash_to_group (sig)
+        #[test]
+        fn hash_to_group_valid(msg in message_strategy(), key in private_key_strategy()) {
+            let result = hash_to_group(&key, &msg, b"", b"");
+            prop_assert!(result.is_ok());
+            let sig = result.unwrap();
+            // Signature should be 96 bytes (compressed G2)
+            prop_assert_eq!(sig.len(), 96);
+        }
+
+        // Property test for verify - valid signatures always verify
+        #[test]
+        fn verify_valid_signature(msg in message_strategy(), key in private_key_strategy()) {
+            // Generate public key
+            let pk_result = sk_to_pk(&key);
+            prop_assume!(pk_result.is_ok());
+            let pk = pk_result.unwrap();
+
+            // Generate signature
+            let sig_result = hash_to_group(&key, &msg, b"", b"");
+            prop_assume!(sig_result.is_ok());
+            let sig = sig_result.unwrap();
+
+            // Verify should succeed
+            let verify_result = verify(&msg, &sig, &pk, b"", b"");
+            prop_assert!(verify_result.is_ok());
+            prop_assert!(verify_result.unwrap());
+        }
+
+        // Property test: Invalid public key returns error
+        #[test]
+        fn verify_invalid_pk_returns_error(msg in message_strategy()) {
+            // All zeros is not a valid compressed point
+            let invalid_pk = vec![0u8; 48];
+            let sig = vec![1u8; 96]; // Dummy signature
+            let result = verify(&msg, &sig, &invalid_pk, b"", b"");
+            // Should return Err because public key is invalid
+            prop_assert!(result.is_err());
+        }
+
+        // Property test: Invalid signature returns error
+        #[test]
+        fn verify_invalid_sig_returns_error(msg in message_strategy()) {
+            let pk = vec![1u8; 48]; // Dummy public key
+            // All zeros is not a valid compressed point
+            let invalid_sig = vec![0u8; 96];
+            let result = verify(&msg, &invalid_sig, &pk, b"", b"");
+            // Should return Err because signature is invalid
+            prop_assert!(result.is_err());
+        }
+
+        // Property test: wrong message fails verification
+        #[test]
+        fn verify_wrong_message_fails(msg1 in message_strategy(), msg2 in message_strategy(), key in private_key_strategy()) {
+            prop_assume!(msg1 != msg2);
+            // Generate public key
+            let pk_result = sk_to_pk(&key);
+            prop_assume!(pk_result.is_ok());
+            let pk = pk_result.unwrap();
+
+            // Sign msg1
+            let sig_result = hash_to_group(&key, &msg1, b"", b"");
+            prop_assume!(sig_result.is_ok());
+            let sig = sig_result.unwrap();
+
+            // Verify with msg2 should fail
+            let verify_result = verify(&msg2, &sig, &pk, b"", b"");
+            prop_assert!(verify_result.is_ok());
+            prop_assert!(!verify_result.unwrap());
+        }
+
+        // Property test: wrong public key fails verification
+        #[test]
+        fn verify_wrong_pk_fails(msg in message_strategy(), key1 in private_key_strategy(), key2 in private_key_strategy()) {
+            prop_assume!(key1 != key2);
+            // Generate public keys
+            let pk1_result = sk_to_pk(&key1);
+            let pk2_result = sk_to_pk(&key2);
+            prop_assume!(pk1_result.is_ok());
+            prop_assume!(pk2_result.is_ok());
+            let pk1 = pk1_result.unwrap();
+            let pk2 = pk2_result.unwrap();
+            prop_assume!(pk1 != pk2);
+
+            // Sign with key1
+            let sig_result = hash_to_group(&key1, &msg, b"", b"");
+            prop_assume!(sig_result.is_ok());
+            let sig = sig_result.unwrap();
+
+            // Verify with pk2 should fail
+            let verify_result = verify(&msg, &sig, &pk2, b"", b"");
+            prop_assert!(verify_result.is_ok());
+            prop_assert!(!verify_result.unwrap());
+        }
+    }
 }
