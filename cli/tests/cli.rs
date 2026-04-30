@@ -250,3 +250,127 @@ fn sig_invalid_value() {
         .failure()
         .stderr(predicate::str::contains("not a valid scalar"));
 }
+
+#[test]
+fn verify_valid_signature() {
+    // Generate a seed, derive private key, generate public key, sign a message, then verify
+    let mut cmd_seed = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd_seed.arg("generate-seed");
+    let seed_output = cmd_seed.output().unwrap();
+    let seed = String::from_utf8_lossy(&seed_output.stdout)
+        .trim()
+        .to_string();
+
+    // Derive private key from seed
+    let mut cmd_hkdf = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd_hkdf.arg("hkdf").write_stdin(seed.as_bytes());
+    let hkdf_output = cmd_hkdf.output().unwrap();
+    let private_key = String::from_utf8_lossy(&hkdf_output.stdout)
+        .trim()
+        .to_string();
+
+    // Generate public key from private key
+    let mut cmd_pk = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd_pk.arg("pk").write_stdin(private_key.as_bytes());
+    let pk_output = cmd_pk.output().unwrap();
+    let public_key = String::from_utf8_lossy(&pk_output.stdout)
+        .trim()
+        .to_string();
+
+    // Save public key to temp file
+    let pk_file = NamedTempFile::new().unwrap();
+    fs::write(pk_file.path(), public_key.as_bytes()).unwrap();
+
+    // Sign a message
+    let mut cmd_sig = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd_sig
+        .arg("sig")
+        .arg("--msg")
+        .arg("hello world")
+        .write_stdin(private_key.as_bytes());
+    let sig_output = cmd_sig.output().unwrap();
+    let signature = String::from_utf8_lossy(&sig_output.stdout)
+        .trim()
+        .to_string();
+
+    // Save signature to temp file
+    let sig_file = NamedTempFile::new().unwrap();
+    fs::write(sig_file.path(), signature.as_bytes()).unwrap();
+
+    // Verify the signature
+    let mut cmd_verify = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd_verify
+        .arg("verify")
+        .arg("--msg")
+        .arg("hello world")
+        .arg("--sig")
+        .arg(sig_file.path())
+        .arg("--pk")
+        .arg(pk_file.path());
+    cmd_verify
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Verified"));
+}
+
+#[test]
+fn verify_invalid_signature() {
+    // Generate a seed, derive private key, generate public key, sign a message, then verify with wrong message
+    let mut cmd_seed = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd_seed.arg("generate-seed");
+    let seed_output = cmd_seed.output().unwrap();
+    let seed = String::from_utf8_lossy(&seed_output.stdout)
+        .trim()
+        .to_string();
+
+    // Derive private key from seed
+    let mut cmd_hkdf = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd_hkdf.arg("hkdf").write_stdin(seed.as_bytes());
+    let hkdf_output = cmd_hkdf.output().unwrap();
+    let private_key = String::from_utf8_lossy(&hkdf_output.stdout)
+        .trim()
+        .to_string();
+
+    // Generate public key from private key
+    let mut cmd_pk = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd_pk.arg("pk").write_stdin(private_key.as_bytes());
+    let pk_output = cmd_pk.output().unwrap();
+    let public_key = String::from_utf8_lossy(&pk_output.stdout)
+        .trim()
+        .to_string();
+
+    // Save public key to temp file
+    let pk_file = NamedTempFile::new().unwrap();
+    fs::write(pk_file.path(), public_key.as_bytes()).unwrap();
+
+    // Sign a message
+    let mut cmd_sig = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd_sig
+        .arg("sig")
+        .arg("--msg")
+        .arg("hello world")
+        .write_stdin(private_key.as_bytes());
+    let sig_output = cmd_sig.output().unwrap();
+    let signature = String::from_utf8_lossy(&sig_output.stdout)
+        .trim()
+        .to_string();
+
+    // Save signature to temp file
+    let sig_file = NamedTempFile::new().unwrap();
+    fs::write(sig_file.path(), signature.as_bytes()).unwrap();
+
+    // Verify with wrong message (should fail)
+    let mut cmd_verify = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd_verify
+        .arg("verify")
+        .arg("--msg")
+        .arg("wrong message")
+        .arg("--sig")
+        .arg(sig_file.path())
+        .arg("--pk")
+        .arg(pk_file.path());
+    cmd_verify
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Not Verified"));
+}
