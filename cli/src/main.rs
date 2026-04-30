@@ -73,6 +73,24 @@ pub enum Command {
     ///   cargo run -- sig --prv private_key.hex --msg "hello"
     ///   cargo run -- sig --prv key.hex --msg "test" --dst "domain" --aug "extra"
     Sig(cmd::sig::Args),
+
+    /// Verify a BLS signature
+    ///
+    /// This command verifies a BLS signature by checking the pairing equality:
+    /// e(public_key, hash_to_curve(message)) == e(G1_generator, signature)
+    ///
+    /// Parameters:
+    ///   --sig: Signature (from stdin or file, as hex)
+    ///   --msg: Message that was signed (required)
+    ///   --pk: Public key (from stdin or file, as hex)
+    ///   --dst: Domain separation tag (optional, defaults to empty)
+    ///   --aug: Augmentation data (optional, defaults to empty)
+    ///
+    /// Examples:
+    ///   echo "signature_hex" | cargo run -- verify --msg "hello" --pk pk.hex
+    ///   cargo run -- verify --sig sig.hex --msg "hello" --pk pk.hex
+    ///   cargo run -- verify --sig sig.hex --msg "test" --pk key.hex --dst "domain" --aug "extra"
+    Verify(cmd::verify::Args),
 }
 
 #[derive(Debug, Parser)]
@@ -96,5 +114,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         Command::Scalar(args) => cmd::scalar::run(args),
         Command::Pk(args) => cmd::pk::run(args),
         Command::Sig(args) => cmd::sig::run(args),
+        Command::Verify(args) => cmd::verify::run(args),
     }
 }
