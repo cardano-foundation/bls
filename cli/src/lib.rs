@@ -4,9 +4,12 @@
 //! Common utilities for seed generation
 pub mod common;
 
+use blst::{blst_p1_affine, blst_p1_uncompress, blst_p2_affine, blst_p2_uncompress, BLST_ERROR};
 use midnight_curves::bls12_381::{G1Affine, G1Projective, G2Affine, G2Projective};
+use midnight_curves::pairing::group::prime::PrimeCurveAffine;
 use midnight_curves::pairing::group::{Group, GroupEncoding};
 use midnight_curves::BlsScalar;
+use std::mem;
 
 /// Converts a 32-byte private key to a BLS12-381 scalar.
 ///
@@ -86,4 +89,67 @@ pub fn hash_to_group(
     let compressed = signature_affine.to_bytes();
 
     Ok(compressed.as_ref().to_vec())
+}
+
+/// Verifies a BLS signature.
+///
+/// # Arguments
+///
+/// * `message` - The message that was signed
+/// * `signature` - The signature (compressed G2 point, 96 bytes)
+/// * `public_key` - The public key (compressed G1 point, 48 bytes)
+/// * `dst` - Domain separation tag (optional, defaults to empty)
+/// * `aug` - Augmentation data (optional, defaults to empty)
+///
+/// # Returns
+///
+/// * `Ok(bool)` - true if signature is valid, false otherwise
+pub fn verify(
+    message: &[u8],
+    signature: &[u8],
+    public_key: &[u8],
+    dst: &[u8],
+    aug: &[u8],
+) -> Result<bool, String> {
+    // (a) Check public key is not identity - decompress G1 (48 bytes compressed)
+    let pk_bytes: [u8; 48] = public_key
+        .try_into()
+        .map_err(|_| "invalid public key length (must be 48 bytes for compressed)")?;
+    let mut pk_blst = blst_p1_affine::default();
+    let pk_result = unsafe { blst_p1_uncompress(&mut pk_blst, pk_bytes.as_ptr()) };
+    if pk_result != BLST_ERROR::BLST_SUCCESS {
+        return Err("invalid public key".to_string());
+    }
+    let pk_affine = unsafe { mem::transmute::<blst_p1_affine, G1Affine>(pk_blst) };
+    if bool::from(pk_affine.is_identity()) {
+        return Ok(false);
+    }
+
+    // (b) Check signature is not identity - decompress G2 (96 bytes compressed)
+    let sig_bytes: [u8; 96] = signature
+        .try_into()
+        .map_err(|_| "invalid signature length (must be 96 bytes for compressed)")?;
+    let mut sig_blst = blst_p2_affine::default();
+    let sig_result = unsafe { blst_p2_uncompress(&mut sig_blst, sig_bytes.as_ptr()) };
+    if sig_result != BLST_ERROR::BLST_SUCCESS {
+        return Err("invalid signature".to_string());
+    }
+    let sig_affine = unsafe { mem::transmute::<blst_p2_affine, G2Affine>(sig_blst) };
+    if bool::from(sig_affine.is_identity()) {
+        return Ok(false);
+    }
+
+    // (c) Hash message to G2 point
+    let g2_point = G2Projective::hash_to_curve(message, dst, aug);
+    let g2_affine = G2Affine::from(g2_point);
+
+    // (d) Compute pairing1 = e(public_key, hash_msg_to_point)
+    let pairing1 = midnight_curves::bls12_381::pairing(&pk_affine, &g2_affine);
+
+    // (e) Compute pairing2 = e(G1Generator, signature)
+    let generator = G1Affine::from(G1Projective::generator());
+    let pairing2 = midnight_curves::bls12_381::pairing(&generator, &sig_affine);
+
+    // (f) Final verification
+    Ok(pairing1 == pairing2)
 }

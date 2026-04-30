@@ -17,6 +17,7 @@ rand = "0.8"
 hkdf = "0.12"
 sha2 = "0.10"
 midnight-curves = "0.2"
+blst = "0.3"
 num-bigint = "0.4"
 
 [dev-dependencies]
