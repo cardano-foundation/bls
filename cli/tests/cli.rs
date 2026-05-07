@@ -418,6 +418,32 @@ fn mul_g2_from_file() {
 }
 
 #[test]
+fn mul_g1_identity_times_scalar() {
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("mul")
+        .arg("--g1")
+        .arg("--scalar")
+        .arg(SCALAR_ONE)
+        .write_stdin(G1_IDENTITY);
+    cmd.assert()
+        .success()
+        .stdout(predicate::eq(G1_IDENTITY.to_string()));
+}
+
+#[test]
+fn mul_g2_identity_times_scalar() {
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("mul")
+        .arg("--g2")
+        .arg("--scalar")
+        .arg(SCALAR_ONE)
+        .write_stdin(G2_IDENTITY);
+    cmd.assert()
+        .success()
+        .stdout(predicate::eq(G2_IDENTITY.to_string()));
+}
+
+#[test]
 fn mul_g1_matches_pk() {
     let private_key = "7be162d67564e3b4c09655baaabecc3725748133e33ab971e565737f189f3f43";
 
@@ -672,7 +698,6 @@ fn add_wrong_point_length() {
 mod property_tests {
     use bls12_381_aiken_cli::*;
     use proptest::prelude::*;
-    use proptest::prelude::*;
 
     // Strategy: Generate valid 32-byte private keys
     fn private_key_strategy() -> impl Strategy<Value = Vec<u8>> {
@@ -702,6 +727,58 @@ mod property_tests {
                 hash_to_group(key, msg, b"", b"").is_ok()
             })
             .prop_map(|(key, msg)| hash_to_group(&key, &msg, b"", b"").unwrap())
+    }
+
+    // Property test: scalar_mul G1 identity * any scalar = identity
+    #[test]
+    fn scalar_mul_g1_identity_returns_identity() {
+        proptest!(|(key in private_key_strategy())| {
+            let mut identity = vec![0u8; 48];
+            identity[0] = 0xc0;
+            let result = scalar_mul(&CurveGroup::G1, &identity, &key);
+            prop_assert!(result.is_ok());
+            let result = result.unwrap();
+            prop_assert_eq!(result[0], 0xc0);
+            prop_assert!(result[1..].iter().all(|&b| b == 0));
+        });
+    }
+
+    // Property test: scalar_mul G2 identity * any scalar = identity
+    #[test]
+    fn scalar_mul_g2_identity_returns_identity() {
+        proptest!(|(key in private_key_strategy())| {
+            let mut identity = vec![0u8; 96];
+            identity[0] = 0xc0;
+            let result = scalar_mul(&CurveGroup::G2, &identity, &key);
+            prop_assert!(result.is_ok());
+            let result = result.unwrap();
+            prop_assert_eq!(result[0], 0xc0);
+            prop_assert!(result[1..].iter().all(|&b| b == 0));
+        });
+    }
+
+    // Property test: group_add G1 identity + identity = identity
+    #[test]
+    fn group_add_g1_identity_plus_identity() {
+        let mut identity = vec![0u8; 48];
+        identity[0] = 0xc0;
+        let result = group_add(&CurveGroup::G1, &identity, &identity);
+        assert!(result.is_ok());
+        let result = result.unwrap();
+        assert_eq!(result[0], 0xc0);
+        assert!(result[1..].iter().all(|&b| b == 0));
+    }
+
+    // Property test: group_add G2 identity + identity = identity
+    #[test]
+    fn group_add_g2_identity_plus_identity() {
+        let mut identity = vec![0u8; 96];
+        identity[0] = 0xc0;
+        let result = group_add(&CurveGroup::G2, &identity, &identity);
+        assert!(result.is_ok());
+        let result = result.unwrap();
+        assert_eq!(result[0], 0xc0);
+        assert!(result[1..].iter().all(|&b| b == 0));
     }
 
     proptest! {
