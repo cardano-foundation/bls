@@ -127,6 +127,23 @@ pub enum Command {
     ///   echo "point_hex" | cargo run -- mul --g1 --scalar "00...00"
     ///   cargo run -- mul --g2 --point point.hex --scalar "00...00"
     Mul(cmd::mul::Args),
+
+    /// Compress a BLS12-381 point (G1 or G2)
+    ///
+    /// This command validates and compresses a G1 or G2 point.
+    /// Accepts both compressed (48/96 bytes) and uncompressed (96/192 bytes) input.
+    /// The output is always the compressed hex form.
+    ///
+    /// Parameters:
+    ///   --g1: Use G1 group (mutually exclusive with --g2)
+    ///   --g2: Use G2 group (mutually exclusive with --g1)
+    ///   --point: Point (from stdin or file, as hex, or "identity")
+    ///
+    /// Examples:
+    ///   echo "point_hex" | cargo run -- compress --g1
+    ///   cargo run -- compress --g2 --point point.hex
+    ///   cargo run -- compress --g1 --point identity
+    Compress(cmd::compress::Args),
 }
 
 #[derive(Debug, Parser)]
@@ -153,5 +170,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         Command::Verify(args) => cmd::verify::run(args),
         Command::Add(args) => cmd::add::run(args),
         Command::Mul(args) => cmd::mul::run(args),
+        Command::Compress(args) => cmd::compress::run(args),
     }
 }
