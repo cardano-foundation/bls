@@ -11,6 +11,7 @@ use blst::{
 use midnight_curves::bls12_381::{G1Affine, G1Projective, G2Affine, G2Projective};
 use midnight_curves::pairing::group::prime::PrimeCurveAffine;
 use midnight_curves::pairing::group::{Group, GroupEncoding};
+use midnight_curves::serde_traits::SerdeObject;
 use midnight_curves::BlsScalar;
 use midnight_curves::CurveAffine;
 use std::mem;
@@ -376,5 +377,44 @@ fn compress_g2(point: &[u8]) -> Result<Vec<u8>, String> {
             Ok(affine.to_bytes().as_ref().to_vec())
         }
         _ => Err("invalid G2 point length (expected 96 or 192 bytes)".to_string()),
+    }
+}
+
+/// Uncompresses (decompresses) a BLS12-381 G1 or G2 point.
+///
+/// Takes a compressed point (48 bytes for G1, 96 bytes for G2) or identity
+/// and returns the uncompressed form (96 bytes for G1, 192 bytes for G2).
+///
+/// # Arguments
+///
+/// * `group` - The group to operate on (G1 or G2)
+/// * `point` - The compressed point bytes
+///
+/// # Returns
+///
+/// * `Ok(Vec<u8>)` - The uncompressed point bytes (96 for G1, 192 for G2)
+/// * `Err(String)` if the point is invalid
+pub fn uncompress_point(group: &CurveGroup, point: &[u8]) -> Result<Vec<u8>, String> {
+    match group {
+        CurveGroup::G1 => {
+            if is_compressed_identity(point) {
+                return Ok(vec![0u8; 96]);
+            }
+            let bytes: [u8; 48] = point
+                .try_into()
+                .map_err(|_| "invalid G1 point length (must be 48 bytes)")?;
+            let affine = decompress_g1(&bytes)?;
+            Ok(affine.to_raw_bytes())
+        }
+        CurveGroup::G2 => {
+            if is_compressed_identity(point) {
+                return Ok(vec![0u8; 192]);
+            }
+            let bytes: [u8; 96] = point
+                .try_into()
+                .map_err(|_| "invalid G2 point length (must be 96 bytes)")?;
+            let affine = decompress_g2(&bytes)?;
+            Ok(affine.to_raw_bytes())
+        }
     }
 }
