@@ -1,6 +1,80 @@
 # Changelog
 
-## v3.0.0 - UNRELEASED
+## v3.1.0 - 2026-04-25
+
+### Added
+
+- A new module [`aiken/crypto/bls12_381`](https://aiken-lang.github.io/stdlib/aiken/crypto/bls12_381.html) with useful constants for BLS schemes.
+
+- New primitives for [`aiken/collection/dict`](https://aiken-lang.github.io/stdlib/aiken/collection/dict.html):
+  - [`contains`](https://aiken-lang.github.io/stdlib/aiken/collection/dict.html#difference_with): to check whether a dictionnary is contained in another, using some comparison function.
+  - [`difference_with`](https://aiken-lang.github.io/stdlib/aiken/collection/dict.html#difference_with): to efficiently compute the difference of two dicts.
+  - [`foldl2`](https://aiken-lang.github.io/stdlib/aiken/collection/dict.html#foldl2): left-fold double accumulation for dictionnary.
+  - [`foldr2`](https://aiken-lang.github.io/stdlib/aiken/collection/dict.html#foldr2): right-fold double accumulation for dictionnary.
+
+- New primitives for [`aiken/collection/pairs`](https://aiken-lang.github.io/stdlib/aiken/collection/pairs.html):
+  - [`pop_until`](https://aiken-lang.github.io/stdlib/aiken/collection/pairs.html#pop_until): to quickly extract element from an associative list while trimming it, by predicate.
+  - [`pop_until_and_then`](https://aiken-lang.github.io/stdlib/aiken/collection/pairs.html#pop_until_and_then): to quickly extract element from an associative list while trimming it, by predicate.
+  - [`pop_until_key`](https://aiken-lang.github.io/stdlib/aiken/collection/pairs.html#pop_until_key): to quickly extract element from an associative list while trimming it, by key.
+  - [`pop_until_key_and_then`](https://aiken-lang.github.io/stdlib/aiken/collection/pairs.html#pop_until_key_and_then): to quickly extract element from an associative list while trimming it, by key.
+
+- New primitives for [`cardano/assets`](https://aiken-lang.github.io/stdlib/cardano/assets.html):
+  - [`contains`](https://aiken-lang.github.io/stdlib/cardano/assets.html#contains): to efficiently check whether a value contains specific tokens.
+  - [`difference`](https://aiken-lang.github.io/stdlib/cardano/assets.html#difference): to efficiently compute the difference of two `Value`.
+  - [`from_ascending_pairs`](https://aiken-lang.github.io/stdlib/cardano/assets.html#from_ascending_pairs): to turn a pairs of assets back into a `Value`.
+  - [`match_assets`](https://aiken-lang.github.io/stdlib/cardano/assets.html#match_assets): to efficiently match only assets between two `Value`.
+  - [`to_pairs`](https://aiken-lang.github.io/stdlib/cardano/assets.html#to_pairs): a shortcut for turning a `Value` to a `Pairs` directly.
+
+- Forcible versions of various primitives:
+  - `aiken/collection/list`:
+    - [`expect_any`](https://aiken-lang.github.io/stdlib/aiken/collection/list.html#expect_any)
+    - [`expect_at`](https://aiken-lang.github.io/stdlib/aiken/collection/list.html#expect_at)
+    - [`expect_delete`](https://aiken-lang.github.io/stdlib/aiken/collection/list.html#expect_delete)
+    - [`expect_drop`](https://aiken-lang.github.io/stdlib/aiken/collection/list.html#expect_drop)
+    - [`expect_find_map`](https://aiken-lang.github.io/stdlib/aiken/collection/list.html#expect_find_map)
+    - [`expect_find`](https://aiken-lang.github.io/stdlib/aiken/collection/list.html#expect_find)
+    - [`expect_has`](https://aiken-lang.github.io/stdlib/aiken/collection/list.html#expect_has)
+    - [`expect_head`](https://aiken-lang.github.io/stdlib/aiken/collection/list.html#expect_head)
+    - [`expect_index_of`](https://aiken-lang.github.io/stdlib/aiken/collection/list.html#expect_index_of)
+    - [`expect_init`](https://aiken-lang.github.io/stdlib/aiken/collection/list.html#expect_init)
+    - [`expect_last`](https://aiken-lang.github.io/stdlib/aiken/collection/list.html#expect_last)
+    - [`expect_tail`](https://aiken-lang.github.io/stdlib/aiken/collection/list.html#expect_tail)
+    - [`expect_take`](https://aiken-lang.github.io/stdlib/aiken/collection/list.html#expect_take)
+
+  - `aiken/collection/dict`:
+    - [`expect_contains`](https://aiken-lang.github.io/stdlib/aiken/collection/dict.html#expect_contains)
+    - [`expect_delete`](https://aiken-lang.github.io/stdlib/aiken/collection/dict.html#expect_delete)
+    - [`expect_find`](https://aiken-lang.github.io/stdlib/aiken/collection/dict.html#expect_find)
+    - [`expect_get`](https://aiken-lang.github.io/stdlib/aiken/collection/dict.html#expect_get)
+    - [`expect_has_key`](https://aiken-lang.github.io/stdlib/aiken/collection/dict.html#expect_has_key)
+    - [`expect_pop`](https://aiken-lang.github.io/stdlib/aiken/collection/dict.html#expect_pop)
+
+  - `aiken/collection/pairs`:
+    - [`expect_delete_first`](https://aiken-lang.github.io/stdlib/aiken/collection/pairs.html#expect_delete_first)
+    - [`expect_delete_last`](https://aiken-lang.github.io/stdlib/aiken/collection/pairs.html#expect_delete_last)
+    - [`expect_find_first`](https://aiken-lang.github.io/stdlib/aiken/collection/pairs.html#expect_find_first)
+    - [`expect_find_last`](https://aiken-lang.github.io/stdlib/aiken/collection/pairs.html#expect_find_last)
+    - [`expect_get_first`](https://aiken-lang.github.io/stdlib/aiken/collection/pairs.html#expect_get_first)
+    - [`expect_get_last`](https://aiken-lang.github.io/stdlib/aiken/collection/pairs.html#expect_get_last)
+    - [`expect_has_key`](https://aiken-lang.github.io/stdlib/aiken/collection/pairs.html#expect_has_key)
+    - [`expect_pop_until`](https://aiken-lang.github.io/stdlib/aiken/collection/pairs.html#expect_pop_until)
+    - [`expect_pop_until_and_then`](https://aiken-lang.github.io/stdlib/aiken/collection/pairs.html#expect_pop_until_and_then)
+    - [`expect_pop_until_key`](https://aiken-lang.github.io/stdlib/aiken/collection/pairs.html#expect_pop_until_key)
+    - [`expect_pop_until_key_and_then`](https://aiken-lang.github.io/stdlib/aiken/collection/pairs.html#expect_pop_until_key_and_then)
+
+  - `cardano/assets`:
+    - [`expect_contains`](https://aiken-lang.github.io/stdlib/cardano/assets.html#expect_contains)
+    - [`expect_lovelace_of`](https://aiken-lang.github.io/stdlib/cardano/assets.html#expect_lovelace_of)
+    - [`expect_match`](https://aiken-lang.github.io/stdlib/cardano/assets.html#expect_match)
+    - [`expect_match_assets`](https://aiken-lang.github.io/stdlib/cardano/assets.html#expect_match_assets)
+    - [`expect_quantity_of`](https://aiken-lang.github.io/stdlib/cardano/assets.html#expect_quantity_of)
+    - [`expect_tail`](https://aiken-lang.github.io/stdlib/cardano/assets.html#expect_tail)
+
+### Changed
+
+- Various optimisations of `list`, `dict`, `pairs` and `assets` methods.
+
+## v3.0.0 - 2025-10-21
 
 ### Added
 

@@ -32,13 +32,18 @@ jobs:
       - name: 🧰 Install Aiken
         uses: aiken-lang/setup-aiken@v1
         with:
-          version: v1.1.19
+          version: v1.1.21
 
-      - name: 📝 Run fmt
-        run: aiken fmt --check
+      # FIXME: Temporary, re-enable once v1.1.22 is available.
+      #
+      # - name: 📝 Run fmt
+      #   run: aiken fmt --check
 
-      - name: 🔬 Run tests
-        run: aiken check
+      - name: 🔬 Run tests (verbose)
+        run: aiken check -t verbose
+
+      - name: 🔬 Run tests (silent)
+        run: aiken check -t silent
 
   docs:
     strategy:
@@ -56,6 +61,10 @@ jobs:
           - stdlib_version: v2.1.0
 
           - stdlib_version: v2.2.0
+
+          - stdlib_version: v2.2.1
+
+          - stdlib_version: v3.0.0
 
           - stdlib_version: ""
 
@@ -85,10 +94,45 @@ jobs:
       - name: 📘 Generate documentation
         shell: bash
         working-directory: .
-        run: aiken docs -o docs/${{ matrix.stdlib_version || 'latest' }}
+        run: aiken docs -o docs/${{ matrix.stdlib_version }}
+
+        # Make sure that the documentation for v2.2.0 points to v2.2.1 with the
+        # warning comment about foldl2.
+      - name: 🏠 Redirection page for v-less sub-directories
+        if: ${{ matrix.stdlib_version == 'v2.2.0' }}
+        shell: bash
+        working-directory: docs
+        run: |
+          mkdir -p v2.2.0
+          cat > v2.2.0/index.html <<HTML
+            <!DOCTYPE html>
+            <html>
+              <head>
+                <title>Aiken StdLib API reference</title>
+                <link rel="canonical" href="https://aiken-lang.github.io/stdlib"/>
+                <meta name="robots" content="noindex">
+                <meta http-equiv="content-type" content="text/html; charset=utf-8"/>
+                <meta http-equiv="refresh" content="0; url=/stdlib/v2.2.1"/>
+              </head>
+            </html>
+          HTML
+
+          mkdir -p 2.2.0
+          cat > 2.2.0/index.html <<HTML
+            <!DOCTYPE html>
+            <html>
+              <head>
+                <title>Aiken StdLib API reference</title>
+                <link rel="canonical" href="https://aiken-lang.github.io/stdlib"/>
+                <meta name="robots" content="noindex">
+                <meta http-equiv="content-type" content="text/html; charset=utf-8"/>
+                <meta http-equiv="refresh" content="0; url=/stdlib/v2.2.1"/>
+              </head>
+            </html>
+          HTML
 
       - name: 🏠 Redirection page for v-less sub-directories
-        if: ${{ matrix.stdlib_version }}
+        if: ${{ matrix.stdlib_version && matrix.stdlib_version != 'v2.2.0' }}
         shell: bash
         working-directory: docs
         run: |
@@ -123,22 +167,6 @@ jobs:
         with:
           pattern: aiken-docs-*
           merge-multiple: true
-
-      - name: 🏠 Landing page
-        shell: bash
-        run: |
-          cat > index.html <<HTML
-            <!DOCTYPE html>
-            <html>
-              <head>
-                <title>Aiken StdLib API reference</title>
-                <link rel="canonical" href="https://aiken-lang.github.io/stdlib"/>
-                <meta name="robots" content="noindex">
-                <meta http-equiv="content-type" content="text/html; charset=utf-8"/>
-                <meta http-equiv="refresh" content="0; url=/stdlib/latest"/>
-              </head>
-            </html>
-          HTML
 
       - name: 📦 Upload artifact
         uses: actions/upload-pages-artifact@v4
