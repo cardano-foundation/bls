@@ -508,6 +508,166 @@ fn mul_wrong_point_length_for_g2() {
         .stderr(predicate::str::contains("invalid point length"));
 }
 
+// G1 identity compressed (48 bytes, first byte 0xc0)
+const G1_IDENTITY: &str = "c00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
+
+// G2 identity compressed (96 bytes, first byte 0xc0)
+const G2_IDENTITY: &str = "c00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
+
+#[test]
+fn add_g1_identity_plus_generator() {
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("add")
+        .arg("--g1")
+        .arg("--point_right")
+        .arg(G1_GENERATOR)
+        .write_stdin(G1_IDENTITY);
+    cmd.assert()
+        .success()
+        .stdout(predicate::eq(G1_GENERATOR.to_string()));
+}
+
+#[test]
+fn add_g1_generator_plus_identity() {
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("add")
+        .arg("--g1")
+        .arg("--point_left")
+        .arg("identity")
+        .arg("--point_right")
+        .arg(G1_GENERATOR);
+    cmd.assert()
+        .success()
+        .stdout(predicate::eq(G1_GENERATOR.to_string()));
+}
+
+#[test]
+fn add_g2_identity_plus_generator() {
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("add")
+        .arg("--g2")
+        .arg("--point_right")
+        .arg(G2_GENERATOR)
+        .write_stdin(G2_IDENTITY);
+    cmd.assert()
+        .success()
+        .stdout(predicate::eq(G2_GENERATOR.to_string()));
+}
+
+#[test]
+fn add_g2_generator_plus_identity() {
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("add")
+        .arg("--g2")
+        .arg("--point_left")
+        .arg("identity")
+        .arg("--point_right")
+        .arg(G2_GENERATOR);
+    cmd.assert()
+        .success()
+        .stdout(predicate::eq(G2_GENERATOR.to_string()));
+}
+
+#[test]
+fn add_g1_both_identity() {
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("add")
+        .arg("--g1")
+        .arg("--point_left")
+        .arg("identity")
+        .arg("--point_right")
+        .arg("identity");
+    cmd.assert()
+        .success()
+        .stdout(predicate::eq(G1_IDENTITY.to_string()));
+}
+
+#[test]
+fn add_g2_both_identity() {
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("add")
+        .arg("--g2")
+        .arg("--point_left")
+        .arg("identity")
+        .arg("--point_right")
+        .arg("identity");
+    cmd.assert()
+        .success()
+        .stdout(predicate::eq(G2_IDENTITY.to_string()));
+}
+
+#[test]
+fn add_g1_from_file() {
+    let temp_file = NamedTempFile::new().unwrap();
+    fs::write(temp_file.path(), G1_GENERATOR).unwrap();
+
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("add")
+        .arg("--g1")
+        .arg("--point_left")
+        .arg(temp_file.path())
+        .arg("--point_right")
+        .arg("identity");
+    cmd.assert()
+        .success()
+        .stdout(predicate::eq(G1_GENERATOR.to_string()));
+}
+
+#[test]
+fn add_g2_from_file() {
+    let temp_file = NamedTempFile::new().unwrap();
+    fs::write(temp_file.path(), G2_GENERATOR).unwrap();
+
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("add")
+        .arg("--g2")
+        .arg("--point_left")
+        .arg(temp_file.path())
+        .arg("--point_right")
+        .arg("identity");
+    cmd.assert()
+        .success()
+        .stdout(predicate::eq(G2_GENERATOR.to_string()));
+}
+
+#[test]
+fn add_missing_group() {
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("add")
+        .arg("--point_right")
+        .arg(G1_GENERATOR)
+        .write_stdin(G1_IDENTITY);
+    cmd.assert().failure().stderr(predicate::str::contains(
+        "the following required arguments were not provided",
+    ));
+}
+
+#[test]
+fn add_invalid_point() {
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("add")
+        .arg("--g1")
+        .arg("--point_right")
+        .arg("000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000")
+        .write_stdin(G1_GENERATOR);
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("invalid G1 compressed point"));
+}
+
+#[test]
+fn add_wrong_point_length() {
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("add")
+        .arg("--g1")
+        .arg("--point_right")
+        .arg("00") // too short
+        .write_stdin(G1_IDENTITY);
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("invalid right point length"));
+}
+
 #[cfg(test)]
 mod property_tests {
     use bls12_381_aiken_cli::*;
@@ -671,6 +831,66 @@ mod property_tests {
         fn scalar_mul_invalid_scalar(point in g1_point_strategy()) {
             let invalid_scalar = vec![0u8; 16];
             let result = scalar_mul(&CurveGroup::G1, &point, &invalid_scalar);
+            prop_assert!(result.is_err());
+        }
+
+        // Property test: group_add G1 identity + point = point
+        #[test]
+        fn group_add_g1_identity_plus_point(point in g1_point_strategy()) {
+            let mut identity = vec![0u8; 48];
+            identity[0] = 0xc0;
+            let result = group_add(&CurveGroup::G1, &identity, &point);
+            prop_assert!(result.is_ok());
+            let result = result.unwrap();
+            prop_assert_eq!(result, point);
+        }
+
+        // Property test: group_add G1 point + identity = point
+        #[test]
+        fn group_add_g1_point_plus_identity(point in g1_point_strategy()) {
+            let mut identity = vec![0u8; 48];
+            identity[0] = 0xc0;
+            let result = group_add(&CurveGroup::G1, &point, &identity);
+            prop_assert!(result.is_ok());
+            let result = result.unwrap();
+            prop_assert_eq!(result, point);
+        }
+
+        // Property test: group_add G2 identity + point = point
+        #[test]
+        fn group_add_g2_identity_plus_point(point in g2_point_strategy()) {
+            let mut identity = vec![0u8; 96];
+            identity[0] = 0xc0;
+            let result = group_add(&CurveGroup::G2, &identity, &point);
+            prop_assert!(result.is_ok());
+            let result = result.unwrap();
+            prop_assert_eq!(result, point);
+        }
+
+        // Property test: group_add G2 point + identity = point
+        #[test]
+        fn group_add_g2_point_plus_identity(point in g2_point_strategy()) {
+            let mut identity = vec![0u8; 96];
+            identity[0] = 0xc0;
+            let result = group_add(&CurveGroup::G2, &point, &identity);
+            prop_assert!(result.is_ok());
+            let result = result.unwrap();
+            prop_assert_eq!(result, point);
+        }
+
+        // Property test: group_add invalid left point returns error
+        #[test]
+        fn group_add_invalid_left_point(point in g1_point_strategy()) {
+            let invalid = vec![0u8; 48];
+            let result = group_add(&CurveGroup::G1, &invalid, &point);
+            prop_assert!(result.is_err());
+        }
+
+        // Property test: group_add invalid right point returns error
+        #[test]
+        fn group_add_invalid_right_point(point in g1_point_strategy()) {
+            let invalid = vec![0u8; 48];
+            let result = group_add(&CurveGroup::G1, &point, &invalid);
             prop_assert!(result.is_err());
         }
 

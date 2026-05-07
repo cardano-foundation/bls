@@ -1,0 +1,78 @@
+use clap::ArgGroup;
+use hex::decode;
+use std::error::Error;
+use std::fs::File;
+use std::io::{self, BufRead, BufReader};
+
+#[derive(Debug, clap::Args)]
+#[command(group = ArgGroup::new("group").required(true).args(["g1", "g2"]))]
+pub struct Args {
+    /// Use G1 group (48-byte compressed points)
+    #[arg(long = "g1", group = "group")]
+    g1: bool,
+
+    /// Use G2 group (96-byte compressed points)
+    #[arg(long = "g2", group = "group")]
+    g2: bool,
+
+    /// Left point (from stdin or file, as hex). Use "identity" for the identity element.
+    #[arg(long = "point_left")]
+    point_left: Option<String>,
+
+    /// Right point (required, as hex). Use "identity" for the identity element.
+    #[arg(long = "point_right")]
+    point_right: String,
+}
+
+fn resolve_point(value: &str, group: &bls12_381_aiken_cli::CurveGroup) -> Result<Vec<u8>, String> {
+    if value == "identity" {
+        return Ok(match group {
+            bls12_381_aiken_cli::CurveGroup::G1 => {
+                let mut bytes = vec![0xc0u8];
+                bytes.extend(std::iter::repeat(0u8).take(47));
+                bytes
+            }
+            bls12_381_aiken_cli::CurveGroup::G2 => {
+                let mut bytes = vec![0xc0u8];
+                bytes.extend(std::iter::repeat(0u8).take(95));
+                bytes
+            }
+        });
+    }
+    decode(value).map_err(|_| "invalid hex point".to_string())
+}
+
+pub fn run(args: Args) -> Result<(), Box<dyn Error>> {
+    let group = if args.g1 {
+        bls12_381_aiken_cli::CurveGroup::G1
+    } else {
+        bls12_381_aiken_cli::CurveGroup::G2
+    };
+
+    // Resolve left point
+    let left_bytes = if let Some(val) = args.point_left {
+        if val == "identity" {
+            resolve_point("identity", &group)?
+        } else {
+            let f = File::open(&val)?;
+            let mut reader = BufReader::new(f);
+            let mut line = String::new();
+            reader.read_line(&mut line)?;
+            resolve_point(line.trim(), &group)?
+        }
+    } else {
+        let mut line = String::new();
+        io::stdin().read_line(&mut line)?;
+        resolve_point(line.trim(), &group)?
+    };
+
+    // Resolve right point
+    let right_bytes = resolve_point(&args.point_right, &group)?;
+
+    let result =
+        bls12_381_aiken_cli::group_add(&group, &left_bytes, &right_bytes).map_err(|e| e)?;
+
+    print!("{}", hex::encode(result));
+
+    Ok(())
+}
