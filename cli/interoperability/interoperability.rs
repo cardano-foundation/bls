@@ -282,6 +282,90 @@ fn test_interoperability_group_add_g2() {
 }
 
 #[test]
+fn test_interoperability_compress_g1() {
+    // (a) Compressed G1 generator (48 bytes)
+    let g1_gen: [u8; 48] = [
+        151, 241, 211, 167, 49, 151, 215, 148, 38, 149, 99, 140, 79, 169, 172, 15, 195, 104, 140,
+        79, 151, 116, 185, 5, 161, 78, 58, 63, 23, 27, 172, 88, 108, 85, 232, 63, 249, 122, 26,
+        239, 251, 58, 240, 10, 219, 34, 198, 187,
+    ];
+
+    // (b) Rust: compress_point(G1, generator) should return the generator
+    let result = bls12_381_aiken_cli::compress_point(&bls12_381_aiken_cli::CurveGroup::G1, &g1_gen)
+        .expect("compress_point G1 should succeed");
+
+    assert_eq!(result, g1_gen.to_vec());
+
+    // (c) Aiken: bls12_381_g1_compress(generator) produces the same bytes.
+    //     Verified by the interop_g1_compress_generator test in the Aiken project.
+    run_aiken_check(&aiken_project_dir());
+}
+
+#[test]
+fn test_interoperability_compress_g2() {
+    // (a) Compressed G2 generator (96 bytes)
+    let g2_gen: [u8; 96] = [
+        147, 224, 43, 96, 82, 113, 159, 96, 125, 172, 211, 160, 136, 39, 79, 101, 89, 107, 208,
+        208, 153, 32, 182, 26, 181, 218, 97, 187, 220, 127, 80, 73, 51, 76, 241, 18, 19, 148, 93,
+        87, 229, 172, 125, 5, 93, 4, 43, 126, 2, 74, 162, 178, 240, 143, 10, 145, 38, 8, 5, 39, 45,
+        197, 16, 81, 198, 228, 122, 212, 250, 64, 59, 2, 180, 81, 11, 100, 122, 227, 209, 119, 11,
+        172, 3, 38, 168, 5, 187, 239, 212, 128, 86, 200, 193, 33, 189, 184,
+    ];
+
+    // (b) Rust: compress_point(G2, generator) should return the generator
+    let result = bls12_381_aiken_cli::compress_point(&bls12_381_aiken_cli::CurveGroup::G2, &g2_gen)
+        .expect("compress_point G2 should succeed");
+
+    assert_eq!(result, g2_gen.to_vec());
+
+    // (c) Aiken: bls12_381_g2_compress(g2.generator) produces the same bytes.
+    //     Verified by the interop_g2_compress_generator test in the Aiken project.
+    run_aiken_check(&aiken_project_dir());
+}
+
+#[test]
+fn test_interoperability_compress_g1_identity() {
+    // (a) G1 identity: first byte 0xc0, rest zeros
+    let identity = {
+        let mut b = vec![0xc0u8];
+        b.extend(std::iter::repeat(0u8).take(47));
+        b
+    };
+
+    // (b) Rust: compress_point(G1, identity) should return identity
+    let result =
+        bls12_381_aiken_cli::compress_point(&bls12_381_aiken_cli::CurveGroup::G1, &identity)
+            .expect("compress_point G1 identity should succeed");
+
+    assert_eq!(result, identity);
+
+    // (c) Aiken: bls12_381_g1_compress(zero) produces the same bytes.
+    //     Verified by the interop_g1_compress_identity test in the Aiken project.
+    run_aiken_check(&aiken_project_dir());
+}
+
+#[test]
+fn test_interoperability_compress_g2_identity() {
+    // (a) G2 identity: first byte 0xc0, rest zeros
+    let identity = {
+        let mut b = vec![0xc0u8];
+        b.extend(std::iter::repeat(0u8).take(95));
+        b
+    };
+
+    // (b) Rust: compress_point(G2, identity) should return identity
+    let result =
+        bls12_381_aiken_cli::compress_point(&bls12_381_aiken_cli::CurveGroup::G2, &identity)
+            .expect("compress_point G2 identity should succeed");
+
+    assert_eq!(result, identity);
+
+    // (c) Aiken: bls12_381_g2_compress(g2.zero) produces the same bytes.
+    //     Verified by the interop_g2_compress_identity test in the Aiken project.
+    run_aiken_check(&aiken_project_dir());
+}
+
+#[test]
 fn test_interoperability_scalar_mul_g1_identity() {
     // (a) Scalar S = 1 in little-endian for Rust
     let scalar_one_le: [u8; 32] = {
