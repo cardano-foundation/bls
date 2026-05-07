@@ -26,4 +26,8 @@ predicates = "3.1"
 tempfile = "3"
 proptest = "1.6"
 
+[[test]]
+name = "interop"
+path = "interoperability/interoperability.rs"
+
 [features]
