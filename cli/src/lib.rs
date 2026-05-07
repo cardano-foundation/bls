@@ -327,6 +327,11 @@ fn compress_g1(point: &[u8]) -> Result<Vec<u8>, String> {
             Ok(affine.to_bytes().as_ref().to_vec())
         }
         96 => {
+            if point.iter().all(|&b| b == 0) {
+                let mut identity = vec![0xc0u8];
+                identity.extend(std::iter::repeat(0u8).take(47));
+                return Ok(identity);
+            }
             let mut raw = blst_p1_affine::default();
             let result = unsafe { blst_p1_deserialize(&mut raw, point.as_ptr()) };
             if result != BLST_ERROR::BLST_SUCCESS {
@@ -360,6 +365,11 @@ fn compress_g2(point: &[u8]) -> Result<Vec<u8>, String> {
             Ok(affine.to_bytes().as_ref().to_vec())
         }
         192 => {
+            if point.iter().all(|&b| b == 0) {
+                let mut identity = vec![0xc0u8];
+                identity.extend(std::iter::repeat(0u8).take(95));
+                return Ok(identity);
+            }
             let mut raw = blst_p2_affine::default();
             let result = unsafe { blst_p2_deserialize(&mut raw, point.as_ptr()) };
             if result != BLST_ERROR::BLST_SUCCESS {
