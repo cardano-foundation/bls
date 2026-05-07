@@ -1079,6 +1079,38 @@ mod property_tests {
         });
     }
 
+    // Property test: uncompress(compress(val)) == val for G1 (reverse round-trip)
+    #[test]
+    fn uncompress_compress_g1_reverse_roundtrip() {
+        proptest!(|(point in g1_point_strategy())| {
+            let uncompressed = uncompress_point(&CurveGroup::G1, &point);
+            prop_assert!(uncompressed.is_ok());
+            let uncompressed = uncompressed.unwrap();
+            let compressed = compress_point(&CurveGroup::G1, &uncompressed);
+            prop_assert!(compressed.is_ok());
+            let compressed = compressed.unwrap();
+            let reuncompressed = uncompress_point(&CurveGroup::G1, &compressed);
+            prop_assert!(reuncompressed.is_ok());
+            prop_assert_eq!(reuncompressed.unwrap(), uncompressed);
+        });
+    }
+
+    // Property test: uncompress(compress(val)) == val for G2 (reverse round-trip)
+    #[test]
+    fn uncompress_compress_g2_reverse_roundtrip() {
+        proptest!(|(point in g2_point_strategy())| {
+            let uncompressed = uncompress_point(&CurveGroup::G2, &point);
+            prop_assert!(uncompressed.is_ok());
+            let uncompressed = uncompressed.unwrap();
+            let compressed = compress_point(&CurveGroup::G2, &uncompressed);
+            prop_assert!(compressed.is_ok());
+            let compressed = compressed.unwrap();
+            let reuncompressed = uncompress_point(&CurveGroup::G2, &compressed);
+            prop_assert!(reuncompressed.is_ok());
+            prop_assert_eq!(reuncompressed.unwrap(), uncompressed);
+        });
+    }
+
     // Property test: uncompress_point G1 identity returns all zeros
     #[test]
     fn uncompress_g1_identity_all_zeros() {
