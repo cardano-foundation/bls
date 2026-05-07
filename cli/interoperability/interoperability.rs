@@ -136,3 +136,67 @@ fn test_interoperability_hash_to_group() {
     // (d) Both compute the same 96-byte compressed G2 signature.
     run_aiken_check(&aiken_project_dir());
 }
+
+#[test]
+fn test_interoperability_scalar_mul_g1() {
+    // (a) Scalar S = 1 in little-endian for Rust
+    let scalar_one_le: [u8; 32] = {
+        let mut b = [0u8; 32];
+        b[0] = 1;
+        b
+    };
+
+    // (b) Compressed G1 generator (48 bytes)
+    let g1_gen: [u8; 48] = [
+        151, 241, 211, 167, 49, 151, 215, 148, 38, 149, 99, 140, 79, 169, 172, 15, 195, 104, 140,
+        79, 151, 116, 185, 5, 161, 78, 58, 63, 23, 27, 172, 88, 108, 85, 232, 63, 249, 122, 26,
+        239, 251, 58, 240, 10, 219, 34, 198, 187,
+    ];
+
+    // (c) Rust: scalar_mul(G1, generator, scalar=1) should return the generator
+    let result = bls12_381_aiken_cli::scalar_mul(
+        &bls12_381_aiken_cli::CurveGroup::G1,
+        &g1_gen,
+        &scalar_one_le,
+    )
+    .expect("scalar_mul G1 should succeed for S=1");
+
+    assert_eq!(result, g1_gen.to_vec());
+
+    // (d) Aiken: bls12_381_g1_scalar_mul(1, generator) |> compress produces the same bytes.
+    //     Verified by the interop_g1_scalar_mul_s_1 test in the Aiken project.
+    run_aiken_check(&aiken_project_dir());
+}
+
+#[test]
+fn test_interoperability_scalar_mul_g2() {
+    // (a) Scalar S = 1 in little-endian for Rust
+    let scalar_one_le: [u8; 32] = {
+        let mut b = [0u8; 32];
+        b[0] = 1;
+        b
+    };
+
+    // (b) Compressed G2 generator (96 bytes)
+    let g2_gen: [u8; 96] = [
+        147, 224, 43, 96, 82, 113, 159, 96, 125, 172, 211, 160, 136, 39, 79, 101, 89, 107, 208,
+        208, 153, 32, 182, 26, 181, 218, 97, 187, 220, 127, 80, 73, 51, 76, 241, 18, 19, 148, 93,
+        87, 229, 172, 125, 5, 93, 4, 43, 126, 2, 74, 162, 178, 240, 143, 10, 145, 38, 8, 5, 39, 45,
+        197, 16, 81, 198, 228, 122, 212, 250, 64, 59, 2, 180, 81, 11, 100, 122, 227, 209, 119, 11,
+        172, 3, 38, 168, 5, 187, 239, 212, 128, 86, 200, 193, 33, 189, 184,
+    ];
+
+    // (c) Rust: scalar_mul(G2, generator, scalar=1) should return the generator
+    let result = bls12_381_aiken_cli::scalar_mul(
+        &bls12_381_aiken_cli::CurveGroup::G2,
+        &g2_gen,
+        &scalar_one_le,
+    )
+    .expect("scalar_mul G2 should succeed for S=1");
+
+    assert_eq!(result, g2_gen.to_vec());
+
+    // (d) Aiken: bls12_381_g2_scalar_mul(1, generator) |> compress produces the same bytes.
+    //     Verified by the interop_g2_scalar_mul_s_1 test in the Aiken project.
+    run_aiken_check(&aiken_project_dir());
+}
