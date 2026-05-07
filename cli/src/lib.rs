@@ -10,6 +10,15 @@ use midnight_curves::pairing::group::prime::PrimeCurveAffine;
 use midnight_curves::pairing::group::{Group, GroupEncoding};
 use midnight_curves::BlsScalar;
 use std::mem;
+use std::ops::Mul;
+
+/// Group selection for scalar multiplication
+pub enum CurveGroup {
+    /// G1 group (48-byte compressed points)
+    G1,
+    /// G2 group (96-byte compressed points)
+    G2,
+}
 
 /// Converts a 32-byte private key to a BLS12-381 scalar.
 ///
@@ -152,4 +161,53 @@ pub fn verify(
 
     // (f) Final verification
     Ok(pairing1 == pairing2)
+}
+
+/// Performs scalar multiplication on a BLS12-381 G1 or G2 point.
+///
+/// # Arguments
+///
+/// * `group` - The group to operate on (G1 or G2)
+/// * `point` - The compressed point bytes (48 for G1, 96 for G2)
+/// * `scalar` - The 32-byte scalar value
+///
+/// # Returns
+///
+/// * `Ok(Vec<u8>)` - The compressed result point (48 for G1, 96 for G2)
+/// * `Err(String)` if the point or scalar is invalid
+pub fn scalar_mul(group: &CurveGroup, point: &[u8], scalar: &[u8]) -> Result<Vec<u8>, String> {
+    let scalar = sk_to_scalar(scalar)?;
+
+    match group {
+        CurveGroup::G1 => {
+            let bytes: [u8; 48] = point
+                .try_into()
+                .map_err(|_| "invalid point length (must be 48 bytes for G1)")?;
+            let mut affine = blst_p1_affine::default();
+            let result = unsafe { blst_p1_uncompress(&mut affine, bytes.as_ptr()) };
+            if result != BLST_ERROR::BLST_SUCCESS {
+                return Err("invalid G1 compressed point".to_string());
+            }
+            let g1_affine = unsafe { mem::transmute::<blst_p1_affine, G1Affine>(affine) };
+            let g1_projective = G1Projective::from(g1_affine);
+            let result = g1_projective.mul(&scalar);
+            let result_affine = G1Affine::from(result);
+            Ok(result_affine.to_bytes().as_ref().to_vec())
+        }
+        CurveGroup::G2 => {
+            let bytes: [u8; 96] = point
+                .try_into()
+                .map_err(|_| "invalid point length (must be 96 bytes for G2)")?;
+            let mut affine = blst_p2_affine::default();
+            let result = unsafe { blst_p2_uncompress(&mut affine, bytes.as_ptr()) };
+            if result != BLST_ERROR::BLST_SUCCESS {
+                return Err("invalid G2 compressed point".to_string());
+            }
+            let g2_affine = unsafe { mem::transmute::<blst_p2_affine, G2Affine>(affine) };
+            let g2_projective = G2Projective::from(g2_affine);
+            let result = g2_projective.mul(&scalar);
+            let result_affine = G2Affine::from(result);
+            Ok(result_affine.to_bytes().as_ref().to_vec())
+        }
+    }
 }

@@ -118,3 +118,39 @@ $ cargo run --quiet -- sig --prv private_key.hex --msg "hello" --dst "domain" --
 ```
 
 **Note:** Both `--dst` and `--aug` are optional and default to empty strings if not provided. Different values for these parameters will produce different signatures.
+
+### mul
+
+Multiply a BLS12-381 point (G1 or G2) by a scalar value.
+
+The command validates that:
+- Exactly one of `--g1` or `--g2` is provided
+- The point is a valid compressed point for the chosen group
+- The scalar is exactly 32 bytes (64 hex characters) and within the valid curve order range
+
+**Parameters:**
+- `--g1` or `--g2` - Group selection (mutually exclusive, required)
+- `--point` - Point (from stdin or file, as hex)
+- `--scalar` - Scalar value (hex, 32 bytes, required)
+
+**Examples:**
+
+Multiply the G1 generator by scalar 1:
+```console
+$ echo "97f1d3a73197d7942695638c4fa9ac0fc3688c4f9774b905a14e3a3f171bac586c55e83ff97a1aeffb3af00adb22c6bb" | cargo run --quiet -- mul --g1 --scalar "0100000000000000000000000000000000000000000000000000000000000000"
+```
+
+Multiply the G2 generator by scalar 1:
+```console
+$ echo "93e02b6052719f607dacd3a088274f65596bd0d09920b61ab5da61bbdc7f5049334cf11213945d57e5ac7d055d042b7e024aa2b2f08f0a91260805272dc51051c6e47ad4fa403b02b4510b647ae3d1770bac0326a805bbefd48056c8c121bdb8" | cargo run --quiet -- mul --g2 --scalar "0100000000000000000000000000000000000000000000000000000000000000"
+```
+
+**From file:**
+```console
+$ cargo run --quiet -- mul --g1 --point point.hex --scalar "scalar_hex"
+```
+
+**From stdin:**
+```console
+$ cargo run --quiet -- mul --g2 --scalar "scalar_hex" < point.hex
+```

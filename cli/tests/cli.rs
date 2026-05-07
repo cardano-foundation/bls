@@ -348,6 +348,166 @@ fn verify_invalid_signature() {
         .stdout(predicate::str::contains("Not Verified"));
 }
 
+// G1 generator compressed (48 bytes)
+const G1_GENERATOR: &str = "97f1d3a73197d7942695638c4fa9ac0fc3688c4f9774b905a14e3a3f171bac586c55e83ff97a1aeffb3af00adb22c6bb";
+
+// G2 generator compressed (96 bytes)
+const G2_GENERATOR: &str = "93e02b6052719f607dacd3a088274f65596bd0d09920b61ab5da61bbdc7f5049334cf11213945d57e5ac7d055d042b7e024aa2b2f08f0a91260805272dc51051c6e47ad4fa403b02b4510b647ae3d1770bac0326a805bbefd48056c8c121bdb8";
+
+// Scalar value 1 (32 bytes, little-endian encoding)
+const SCALAR_ONE: &str = "0100000000000000000000000000000000000000000000000000000000000000";
+
+#[test]
+fn mul_g1_generator_times_one() {
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("mul")
+        .arg("--g1")
+        .arg("--scalar")
+        .arg(SCALAR_ONE)
+        .write_stdin(G1_GENERATOR);
+    cmd.assert()
+        .success()
+        .stdout(predicate::eq(G1_GENERATOR.to_string()));
+}
+
+#[test]
+fn mul_g1_from_file() {
+    let temp_file = NamedTempFile::new().unwrap();
+    fs::write(temp_file.path(), G1_GENERATOR).unwrap();
+
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("mul")
+        .arg("--g1")
+        .arg("--point")
+        .arg(temp_file.path())
+        .arg("--scalar")
+        .arg(SCALAR_ONE);
+    cmd.assert()
+        .success()
+        .stdout(predicate::eq(G1_GENERATOR.to_string()));
+}
+
+#[test]
+fn mul_g2_generator_times_one() {
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("mul")
+        .arg("--g2")
+        .arg("--scalar")
+        .arg(SCALAR_ONE)
+        .write_stdin(G2_GENERATOR);
+    cmd.assert()
+        .success()
+        .stdout(predicate::eq(G2_GENERATOR.to_string()));
+}
+
+#[test]
+fn mul_g2_from_file() {
+    let temp_file = NamedTempFile::new().unwrap();
+    fs::write(temp_file.path(), G2_GENERATOR).unwrap();
+
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("mul")
+        .arg("--g2")
+        .arg("--point")
+        .arg(temp_file.path())
+        .arg("--scalar")
+        .arg(SCALAR_ONE);
+    cmd.assert()
+        .success()
+        .stdout(predicate::eq(G2_GENERATOR.to_string()));
+}
+
+#[test]
+fn mul_g1_matches_pk() {
+    let private_key = "7be162d67564e3b4c09655baaabecc3725748133e33ab971e565737f189f3f43";
+
+    // Get the expected public key using the pk command
+    let mut cmd_pk = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd_pk.arg("pk").write_stdin(private_key.as_bytes());
+    let pk_output = cmd_pk.output().unwrap();
+    assert!(pk_output.status.success());
+    let expected_pk = String::from_utf8_lossy(&pk_output.stdout)
+        .trim()
+        .to_string();
+
+    // Now multiply G1 generator by the same private key scalar
+    let mut cmd_mul = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd_mul
+        .arg("mul")
+        .arg("--g1")
+        .arg("--scalar")
+        .arg(private_key)
+        .write_stdin(G1_GENERATOR);
+    cmd_mul
+        .assert()
+        .success()
+        .stdout(predicate::eq(expected_pk));
+}
+
+#[test]
+fn mul_invalid_point() {
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("mul")
+        .arg("--g1")
+        .arg("--scalar")
+        .arg(SCALAR_ONE)
+        .write_stdin("000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000");
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("invalid G1 compressed point"));
+}
+
+#[test]
+fn mul_invalid_scalar() {
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("mul")
+        .arg("--g1")
+        .arg("--scalar")
+        .arg("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
+        .write_stdin(G1_GENERATOR);
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("not a valid scalar"));
+}
+
+#[test]
+fn mul_missing_group() {
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("mul")
+        .arg("--scalar")
+        .arg(SCALAR_ONE)
+        .write_stdin(G1_GENERATOR);
+    cmd.assert().failure().stderr(predicate::str::contains(
+        "the following required arguments were not provided",
+    ));
+}
+
+#[test]
+fn mul_wrong_point_length_for_g1() {
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("mul")
+        .arg("--g1")
+        .arg("--scalar")
+        .arg(SCALAR_ONE)
+        .write_stdin("00"); // too short
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("invalid point length"));
+}
+
+#[test]
+fn mul_wrong_point_length_for_g2() {
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("mul")
+        .arg("--g2")
+        .arg("--scalar")
+        .arg(SCALAR_ONE)
+        .write_stdin("00"); // too short
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("invalid point length"));
+}
+
 #[cfg(test)]
 mod property_tests {
     use bls12_381_aiken_cli::*;
@@ -366,6 +526,22 @@ mod property_tests {
     // Strategy: Generate valid messages (arbitrary byte vectors)
     fn message_strategy() -> impl Strategy<Value = Vec<u8>> {
         proptest::collection::vec(any::<u8>(), 0..1024)
+    }
+
+    // Strategy: Generate valid compressed G1 points via sk_to_pk
+    fn g1_point_strategy() -> impl Strategy<Value = Vec<u8>> {
+        private_key_strategy()
+            .prop_filter("valid G1 point", |key| sk_to_pk(key).is_ok())
+            .prop_map(|key| sk_to_pk(&key).unwrap())
+    }
+
+    // Strategy: Generate valid compressed G2 points via hash_to_group
+    fn g2_point_strategy() -> impl Strategy<Value = Vec<u8>> {
+        (private_key_strategy(), message_strategy())
+            .prop_filter("valid G2 point", |(key, msg)| {
+                hash_to_group(key, msg, b"", b"").is_ok()
+            })
+            .prop_map(|(key, msg)| hash_to_group(&key, &msg, b"", b"").unwrap())
     }
 
     proptest! {
@@ -462,6 +638,40 @@ mod property_tests {
             let verify_result = verify(&msg2, &sig, &pk, b"", b"");
             prop_assert!(verify_result.is_ok());
             prop_assert!(!verify_result.unwrap());
+        }
+
+        // Property test: scalar_mul G1 with valid inputs always produces 48 bytes
+        #[test]
+        fn scalar_mul_g1_output_length(point in g1_point_strategy(), key in private_key_strategy()) {
+            let result = scalar_mul(&CurveGroup::G1, &point, &key);
+            prop_assert!(result.is_ok());
+            let result = result.unwrap();
+            prop_assert_eq!(result.len(), 48);
+        }
+
+        // Property test: scalar_mul G2 produces 96 bytes
+        #[test]
+        fn scalar_mul_g2_output_length(point in g2_point_strategy(), key in private_key_strategy()) {
+            let result = scalar_mul(&CurveGroup::G2, &point, &key);
+            prop_assert!(result.is_ok());
+            let result = result.unwrap();
+            prop_assert_eq!(result.len(), 96);
+        }
+
+        // Property test: scalar_mul invalid point returns error
+        #[test]
+        fn scalar_mul_invalid_point(key in private_key_strategy()) {
+            let invalid_point = vec![0u8; 48];
+            let result = scalar_mul(&CurveGroup::G1, &invalid_point, &key);
+            prop_assert!(result.is_err());
+        }
+
+        // Property test: scalar_mul invalid scalar (len != 32) returns error
+        #[test]
+        fn scalar_mul_invalid_scalar(point in g1_point_strategy()) {
+            let invalid_scalar = vec![0u8; 16];
+            let result = scalar_mul(&CurveGroup::G1, &point, &invalid_scalar);
+            prop_assert!(result.is_err());
         }
 
         // Property test: wrong public key fails verification
