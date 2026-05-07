@@ -348,6 +348,116 @@ fn verify_invalid_signature() {
         .stdout(predicate::str::contains("Not Verified"));
 }
 
+#[test]
+fn compress_g1_compressed_generator() {
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("compress").arg("--g1").write_stdin(G1_GENERATOR);
+    cmd.assert()
+        .success()
+        .stdout(predicate::eq(G1_GENERATOR.to_string()));
+}
+
+#[test]
+fn compress_g2_compressed_generator() {
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("compress").arg("--g2").write_stdin(G2_GENERATOR);
+    cmd.assert()
+        .success()
+        .stdout(predicate::eq(G2_GENERATOR.to_string()));
+}
+
+#[test]
+fn compress_g1_identity() {
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("compress")
+        .arg("--g1")
+        .arg("--point")
+        .arg("identity");
+    cmd.assert()
+        .success()
+        .stdout(predicate::eq(G1_IDENTITY.to_string()));
+}
+
+#[test]
+fn compress_g2_identity() {
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("compress")
+        .arg("--g2")
+        .arg("--point")
+        .arg("identity");
+    cmd.assert()
+        .success()
+        .stdout(predicate::eq(G2_IDENTITY.to_string()));
+}
+
+#[test]
+fn compress_g1_from_file() {
+    let temp_file = NamedTempFile::new().unwrap();
+    fs::write(temp_file.path(), G1_GENERATOR).unwrap();
+
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("compress")
+        .arg("--g1")
+        .arg("--point")
+        .arg(temp_file.path());
+    cmd.assert()
+        .success()
+        .stdout(predicate::eq(G1_GENERATOR.to_string()));
+}
+
+#[test]
+fn compress_g2_from_file() {
+    let temp_file = NamedTempFile::new().unwrap();
+    fs::write(temp_file.path(), G2_GENERATOR).unwrap();
+
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("compress")
+        .arg("--g2")
+        .arg("--point")
+        .arg(temp_file.path());
+    cmd.assert()
+        .success()
+        .stdout(predicate::eq(G2_GENERATOR.to_string()));
+}
+
+#[test]
+fn compress_invalid_point() {
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("compress")
+        .arg("--g1")
+        .write_stdin("000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000");
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("invalid G1 compressed point"));
+}
+
+#[test]
+fn compress_missing_group() {
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("compress").write_stdin(G1_GENERATOR);
+    cmd.assert().failure().stderr(predicate::str::contains(
+        "the following required arguments were not provided",
+    ));
+}
+
+#[test]
+fn compress_wrong_point_length_for_g1() {
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("compress").arg("--g1").write_stdin("00");
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("invalid G1 point length"));
+}
+
+#[test]
+fn compress_wrong_point_length_for_g2() {
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("compress").arg("--g2").write_stdin("00");
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("invalid G2 point length"));
+}
+
 // G1 generator compressed (48 bytes)
 const G1_GENERATOR: &str = "97f1d3a73197d7942695638c4fa9ac0fc3688c4f9774b905a14e3a3f171bac586c55e83ff97a1aeffb3af00adb22c6bb";
 
@@ -779,6 +889,53 @@ mod property_tests {
         let result = result.unwrap();
         assert_eq!(result[0], 0xc0);
         assert!(result[1..].iter().all(|&b| b == 0));
+    }
+
+    // Property test: compress_point G1 compressed round-trip
+    #[test]
+    fn compress_g1_compressed_roundtrip() {
+        proptest!(|(point in g1_point_strategy())| {
+            let result = compress_point(&CurveGroup::G1, &point);
+            prop_assert!(result.is_ok());
+            let result = result.unwrap();
+            prop_assert_eq!(result.len(), 48);
+            prop_assert_eq!(result, point);
+        });
+    }
+
+    // Property test: compress_point G1 identity always returns identity
+    #[test]
+    fn compress_g1_identity() {
+        let mut identity = vec![0u8; 48];
+        identity[0] = 0xc0;
+        let result = compress_point(&CurveGroup::G1, &identity);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), identity);
+    }
+
+    // Property test: compress_point G2 identity always returns identity
+    #[test]
+    fn compress_g2_identity() {
+        let mut identity = vec![0u8; 96];
+        identity[0] = 0xc0;
+        let result = compress_point(&CurveGroup::G2, &identity);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), identity);
+    }
+
+    // Property test: compress_point invalid point returns error
+    #[test]
+    fn compress_invalid_point() {
+        let invalid = vec![0u8; 48];
+        let result = compress_point(&CurveGroup::G1, &invalid);
+        assert!(result.is_err());
+    }
+
+    // Property test: compress_point wrong length returns error
+    #[test]
+    fn compress_wrong_length() {
+        let result = compress_point(&CurveGroup::G1, &[0u8; 10]);
+        assert!(result.is_err());
     }
 
     proptest! {

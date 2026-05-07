@@ -1,4 +1,5 @@
 pub mod add;
+pub mod compress;
 pub mod generate_seed;
 pub mod hkdf;
 pub mod mul;

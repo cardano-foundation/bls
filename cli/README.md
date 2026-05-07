@@ -190,3 +190,43 @@ $ cargo run --quiet -- add --g1 --point_left point.hex --point_right "point_hex"
 ```console
 $ cargo run --quiet -- add --g2 --point_right "point_hex" < point.hex
 ```
+
+### compress
+
+Compress (validate and canonicalize) a BLS12-381 point (G1 or G2).
+
+Accepts both compressed (48/96 bytes) and uncompressed (96/192 bytes) input. The output is always the compressed form. This is useful for:
+- Validating that a point is on the curve
+- Converting from uncompressed to compressed format
+- Canonicalizing a compressed point
+
+The command validates that:
+- Exactly one of `--g1` or `--g2` is provided
+- The point is a valid point for the chosen group
+- The input has the correct length for the chosen group
+
+**Parameters:**
+- `--g1` or `--g2` - Group selection (mutually exclusive, required)
+- `--point` - Point (from stdin or file, as hex, or `identity`)
+
+**Examples:**
+
+Validate and re-compress the G1 generator:
+```console
+$ echo "97f1d3a73197d7942695638c4fa9ac0fc3688c4f9774b905a14e3a3f171bac586c55e83ff97a1aeffb3af00adb22c6bb" | cargo run --quiet -- compress --g1
+```
+
+Compress the G2 generator:
+```console
+$ echo "93e02b6052719f607dacd3a088274f65596bd0d09920b61ab5da61bbdc7f5049334cf11213945d57e5ac7d055d042b7e024aa2b2f08f0a91260805272dc51051c6e47ad4fa403b02b4510b647ae3d1770bac0326a805bbefd48056c8c121bdb8" | cargo run --quiet -- compress --g2
+```
+
+Compress the identity element:
+```console
+$ cargo run --quiet -- compress --g1 --point identity
+```
+
+**From file:**
+```console
+$ cargo run --quiet -- compress --g1 --point point.hex
+```

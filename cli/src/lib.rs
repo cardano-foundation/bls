@@ -4,11 +4,15 @@
 //! Common utilities for seed generation
 pub mod common;
 
-use blst::{blst_p1_affine, blst_p1_uncompress, blst_p2_affine, blst_p2_uncompress, BLST_ERROR};
+use blst::{
+    blst_p1_affine, blst_p1_deserialize, blst_p1_uncompress, blst_p2_affine, blst_p2_deserialize,
+    blst_p2_uncompress, BLST_ERROR,
+};
 use midnight_curves::bls12_381::{G1Affine, G1Projective, G2Affine, G2Projective};
 use midnight_curves::pairing::group::prime::PrimeCurveAffine;
 use midnight_curves::pairing::group::{Group, GroupEncoding};
 use midnight_curves::BlsScalar;
+use midnight_curves::CurveAffine;
 use std::mem;
 use std::ops::Add;
 use std::ops::Mul;
@@ -284,5 +288,93 @@ pub fn group_add(group: &CurveGroup, left: &[u8], right: &[u8]) -> Result<Vec<u8
             let result_affine = G2Affine::from(result);
             Ok(result_affine.to_bytes().as_ref().to_vec())
         }
+    }
+}
+
+/// Compresses a BLS12-381 G1 or G2 point.
+///
+/// Accepts both compressed (48/96 bytes) and uncompressed (96/192 bytes) input.
+/// Identity encoded as `c0` + zeros is handled specially. The output is always
+/// the compressed form.
+///
+/// # Arguments
+///
+/// * `group` - The group to operate on (G1 or G2)
+/// * `point` - The point bytes (compressed or uncompressed)
+///
+/// # Returns
+///
+/// * `Ok(Vec<u8>)` - The compressed point bytes (48 for G1, 96 for G2)
+/// * `Err(String)` if the point is invalid
+pub fn compress_point(group: &CurveGroup, point: &[u8]) -> Result<Vec<u8>, String> {
+    match group {
+        CurveGroup::G1 => compress_g1(point),
+        CurveGroup::G2 => compress_g2(point),
+    }
+}
+
+fn compress_g1(point: &[u8]) -> Result<Vec<u8>, String> {
+    match point.len() {
+        48 => {
+            if is_compressed_identity(point) {
+                return Ok(point.to_vec());
+            }
+            let bytes: [u8; 48] = point
+                .try_into()
+                .map_err(|_| "invalid G1 compressed point length")?;
+            let affine = decompress_g1(&bytes)?;
+            Ok(affine.to_bytes().as_ref().to_vec())
+        }
+        96 => {
+            let mut raw = blst_p1_affine::default();
+            let result = unsafe { blst_p1_deserialize(&mut raw, point.as_ptr()) };
+            if result != BLST_ERROR::BLST_SUCCESS {
+                return Err("invalid G1 uncompressed point".to_string());
+            }
+            let affine: G1Affine = unsafe { mem::transmute(raw) };
+            if !bool::from(affine.is_on_curve()) {
+                return Err("G1 point is not on the curve".to_string());
+            }
+            if affine.is_identity().into() {
+                let mut identity = vec![0xc0u8];
+                identity.extend(std::iter::repeat(0u8).take(47));
+                return Ok(identity);
+            }
+            Ok(affine.to_bytes().as_ref().to_vec())
+        }
+        _ => Err("invalid G1 point length (expected 48 or 96 bytes)".to_string()),
+    }
+}
+
+fn compress_g2(point: &[u8]) -> Result<Vec<u8>, String> {
+    match point.len() {
+        96 => {
+            if is_compressed_identity(point) {
+                return Ok(point.to_vec());
+            }
+            let bytes: [u8; 96] = point
+                .try_into()
+                .map_err(|_| "invalid G2 compressed point length")?;
+            let affine = decompress_g2(&bytes)?;
+            Ok(affine.to_bytes().as_ref().to_vec())
+        }
+        192 => {
+            let mut raw = blst_p2_affine::default();
+            let result = unsafe { blst_p2_deserialize(&mut raw, point.as_ptr()) };
+            if result != BLST_ERROR::BLST_SUCCESS {
+                return Err("invalid G2 uncompressed point".to_string());
+            }
+            let affine: G2Affine = unsafe { mem::transmute(raw) };
+            if !bool::from(affine.is_on_curve()) {
+                return Err("G2 point is not on the curve".to_string());
+            }
+            if affine.is_identity().into() {
+                let mut identity = vec![0xc0u8];
+                identity.extend(std::iter::repeat(0u8).take(95));
+                return Ok(identity);
+            }
+            Ok(affine.to_bytes().as_ref().to_vec())
+        }
+        _ => Err("invalid G2 point length (expected 96 or 192 bytes)".to_string()),
     }
 }
