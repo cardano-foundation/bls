@@ -18,8 +18,8 @@ aiken add aiken-lang/stdlib --version v3
 
 stdlib's version(s)                                                 | aiken's version                  | Plutus version
 ---                                                                 | ---                              | ---
-[`>= 3.0.0`](https://aiken-lang.github.io/stdlib/v3.0.0)            | `>= v1.1.17`                     | `V3`
-[`>= 2.1.0 && < 3.0.0`](https://aiken-lang.github.io/stdlib/v2.1.0) | `>= v1.1.3`                      | `V3`
+[`>= 3.0.0`](https://aiken-lang.github.io/stdlib/v3.1.0)            | `>= v1.1.17`                     | `V3`
+[`>= 2.1.0 && < 3.0.0`](https://aiken-lang.github.io/stdlib/v2.2.1) | `>= v1.1.3`                      | `V3`
 [`>= 2.0.0 && < 2.1.0`](https://aiken-lang.github.io/stdlib/v2.0.0) | `v1.1.1`, `v1.1.2`               | `V3`
 [`>= 1.9.0 && < 2.0.0`](https://aiken-lang.github.io/stdlib/v1.9.0) | `v1.0.28-alpha`, `v1.0.29-alpha` | `V2`
 
@@ -65,7 +65,3 @@ validator hello_world {
   }
 }
 ```
-
-## Stats
-
-![Alt](https://repobeats.axiom.co/api/embed/f0a17e7f6133630e165b9e56ec5447bef32fe831.svg "Repobeats analytics image")

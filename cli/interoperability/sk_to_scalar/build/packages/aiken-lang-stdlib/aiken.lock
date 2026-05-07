@@ -3,12 +3,12 @@
 
 [[requirements]]
 name = "aiken-lang/fuzz"
-version = "v2.1.1"
+version = "v2.2.0"
 source = "github"
 
 [[packages]]
 name = "aiken-lang/fuzz"
-version = "v2.1.1"
+version = "v2.2.0"
 requirements = []
 source = "github"
 
