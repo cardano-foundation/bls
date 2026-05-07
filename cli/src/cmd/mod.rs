@@ -6,4 +6,5 @@ pub mod mul;
 pub mod pk;
 pub mod scalar;
 pub mod sig;
+pub mod uncompress;
 pub mod verify;

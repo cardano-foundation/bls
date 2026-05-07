@@ -144,6 +144,23 @@ pub enum Command {
     ///   cargo run -- compress --g2 --point point.hex
     ///   cargo run -- compress --g1 --point identity
     Compress(cmd::compress::Args),
+
+    /// Uncompress (decompress) a BLS12-381 point (G1 or G2)
+    ///
+    /// This command decompresses a compressed G1 or G2 point and outputs
+    /// the uncompressed form. For G1 the output is 192 hex chars (96 bytes),
+    /// for G2 it is 384 hex chars (192 bytes).
+    ///
+    /// Parameters:
+    ///   --g1: Use G1 group (mutually exclusive with --g2)
+    ///   --g2: Use G2 group (mutually exclusive with --g1)
+    ///   --point: Point (from stdin or file, as hex, or "identity")
+    ///
+    /// Examples:
+    ///   echo "point_hex" | cargo run -- uncompress --g1
+    ///   cargo run -- uncompress --g2 --point point.hex
+    ///   cargo run -- uncompress --g1 --point identity
+    Uncompress(cmd::uncompress::Args),
 }
 
 #[derive(Debug, Parser)]
@@ -171,5 +188,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         Command::Add(args) => cmd::add::run(args),
         Command::Mul(args) => cmd::mul::run(args),
         Command::Compress(args) => cmd::compress::run(args),
+        Command::Uncompress(args) => cmd::uncompress::run(args),
     }
 }
