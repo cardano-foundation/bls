@@ -280,3 +280,103 @@ fn test_interoperability_group_add_g2() {
     //     Verified by the interop_g2_add_* tests in the Aiken project.
     run_aiken_check(&aiken_project_dir());
 }
+
+#[test]
+fn test_interoperability_scalar_mul_g1_identity() {
+    // (a) Scalar S = 1 in little-endian for Rust
+    let scalar_one_le: [u8; 32] = {
+        let mut b = [0u8; 32];
+        b[0] = 1;
+        b
+    };
+
+    // (b) G1 identity: first byte 0xc0, rest zeros
+    let identity = {
+        let mut b = vec![0xc0u8];
+        b.extend(std::iter::repeat(0u8).take(47));
+        b
+    };
+
+    // (c) Rust: scalar_mul(G1, identity, scalar=1) should return identity
+    let result = bls12_381_aiken_cli::scalar_mul(
+        &bls12_381_aiken_cli::CurveGroup::G1,
+        &identity,
+        &scalar_one_le,
+    )
+    .expect("scalar_mul G1 identity should succeed");
+
+    assert_eq!(result, identity);
+
+    // (d) Aiken: bls12_381_g1_scalar_mul(1, zero) |> compress produces the same bytes.
+    run_aiken_check(&aiken_project_dir());
+}
+
+#[test]
+fn test_interoperability_scalar_mul_g2_identity() {
+    // (a) Scalar S = 1 in little-endian for Rust
+    let scalar_one_le: [u8; 32] = {
+        let mut b = [0u8; 32];
+        b[0] = 1;
+        b
+    };
+
+    // (b) G2 identity: first byte 0xc0, rest zeros
+    let identity = {
+        let mut b = vec![0xc0u8];
+        b.extend(std::iter::repeat(0u8).take(95));
+        b
+    };
+
+    // (c) Rust: scalar_mul(G2, identity, scalar=1) should return identity
+    let result = bls12_381_aiken_cli::scalar_mul(
+        &bls12_381_aiken_cli::CurveGroup::G2,
+        &identity,
+        &scalar_one_le,
+    )
+    .expect("scalar_mul G2 identity should succeed");
+
+    assert_eq!(result, identity);
+
+    // (d) Aiken: bls12_381_g2_scalar_mul(1, zero) |> compress produces the same bytes.
+    run_aiken_check(&aiken_project_dir());
+}
+
+#[test]
+fn test_interoperability_group_add_g1_identity_plus_identity() {
+    // (a) G1 identity: first byte 0xc0, rest zeros
+    let identity = {
+        let mut b = vec![0xc0u8];
+        b.extend(std::iter::repeat(0u8).take(47));
+        b
+    };
+
+    // (b) Rust: group_add(G1, identity, identity) should return identity
+    let result =
+        bls12_381_aiken_cli::group_add(&bls12_381_aiken_cli::CurveGroup::G1, &identity, &identity)
+            .expect("group_add G1 identity+identity should succeed");
+
+    assert_eq!(result, identity);
+
+    // (c) Aiken: bls12_381_g1_add(zero, zero) |> compress produces the same bytes.
+    run_aiken_check(&aiken_project_dir());
+}
+
+#[test]
+fn test_interoperability_group_add_g2_identity_plus_identity() {
+    // (a) G2 identity: first byte 0xc0, rest zeros
+    let identity = {
+        let mut b = vec![0xc0u8];
+        b.extend(std::iter::repeat(0u8).take(95));
+        b
+    };
+
+    // (b) Rust: group_add(G2, identity, identity) should return identity
+    let result =
+        bls12_381_aiken_cli::group_add(&bls12_381_aiken_cli::CurveGroup::G2, &identity, &identity)
+            .expect("group_add G2 identity+identity should succeed");
+
+    assert_eq!(result, identity);
+
+    // (c) Aiken: bls12_381_g2_add(zero, zero) |> compress produces the same bytes.
+    run_aiken_check(&aiken_project_dir());
+}
