@@ -32,7 +32,7 @@ fn run_aiken_check(aiken_dir: &std::path::Path) {
 fn aiken_project_dir() -> std::path::PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("interoperability")
-        .join("sk_to_scalar")
+        .join("aiken")
 }
 
 #[test]
