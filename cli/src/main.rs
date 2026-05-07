@@ -91,6 +91,24 @@ pub enum Command {
     ///   cargo run -- verify --sig sig.hex --msg "hello" --pk pk.hex
     ///   cargo run -- verify --sig sig.hex --msg "test" --pk key.hex --dst "domain" --aug "extra"
     Verify(cmd::verify::Args),
+
+    /// Multiply a BLS12-381 point by a scalar
+    ///
+    /// This command multiplies a compressed G1 or G2 point by a scalar value.
+    /// The point is decompressed, multiplied, and re-compressed.
+    /// The output is a hex string (96 hex chars for G1, 192 hex chars for G2)
+    /// representing the compressed result point.
+    ///
+    /// Parameters:
+    ///   --g1: Use G1 group (mutually exclusive with --g2)
+    ///   --g2: Use G2 group (mutually exclusive with --g1)
+    ///   --point: Point (from stdin or file, as hex)
+    ///   --scalar: Scalar value (hex, 32 bytes, required)
+    ///
+    /// Examples:
+    ///   echo "point_hex" | cargo run -- mul --g1 --scalar "00...00"
+    ///   cargo run -- mul --g2 --point point.hex --scalar "00...00"
+    Mul(cmd::mul::Args),
 }
 
 #[derive(Debug, Parser)]
@@ -115,5 +133,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         Command::Pk(args) => cmd::pk::run(args),
         Command::Sig(args) => cmd::sig::run(args),
         Command::Verify(args) => cmd::verify::run(args),
+        Command::Mul(args) => cmd::mul::run(args),
     }
 }
