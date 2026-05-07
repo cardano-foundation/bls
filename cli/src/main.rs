@@ -92,6 +92,24 @@ pub enum Command {
     ///   cargo run -- verify --sig sig.hex --msg "test" --pk key.hex --dst "domain" --aug "extra"
     Verify(cmd::verify::Args),
 
+    /// Add two BLS12-381 points (G1 or G2 group)
+    ///
+    /// This command adds two compressed points in the chosen group.
+    /// Both points are decompressed, added, and the result is re-compressed.
+    /// The output is a hex string (96 hex chars for G1, 192 hex chars for G2)
+    /// representing the compressed result point.
+    ///
+    /// Parameters:
+    ///   --g1: Use G1 group (mutually exclusive with --g2)
+    ///   --g2: Use G2 group (mutually exclusive with --g1)
+    ///   --point_left: Left point (from stdin or file, as hex, or "identity")
+    ///   --point_right: Right point (required, as hex, or "identity")
+    ///
+    /// Examples:
+    ///   echo "left_point_hex" | cargo run -- add --g1 --point_right "right_hex"
+    ///   cargo run -- add --g2 --point_left left.hex --point_right "right_hex"
+    Add(cmd::add::Args),
+
     /// Multiply a BLS12-381 point by a scalar
     ///
     /// This command multiplies a compressed G1 or G2 point by a scalar value.
@@ -133,6 +151,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         Command::Pk(args) => cmd::pk::run(args),
         Command::Sig(args) => cmd::sig::run(args),
         Command::Verify(args) => cmd::verify::run(args),
+        Command::Add(args) => cmd::add::run(args),
         Command::Mul(args) => cmd::mul::run(args),
     }
 }

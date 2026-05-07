@@ -154,3 +154,39 @@ $ cargo run --quiet -- mul --g1 --point point.hex --scalar "scalar_hex"
 ```console
 $ cargo run --quiet -- mul --g2 --scalar "scalar_hex" < point.hex
 ```
+
+### add
+
+Add two BLS12-381 points (G1 or G2 group) together.
+
+The command validates that:
+- Exactly one of `--g1` or `--g2` is provided
+- Both points are valid compressed points for the chosen group
+- The special value `identity` can be used for either point to denote the identity element
+
+**Parameters:**
+- `--g1` or `--g2` - Group selection (mutually exclusive, required)
+- `--point_left` - Left point (from stdin or file, as hex, or `identity`)
+- `--point_right` - Right point (required, as hex, or `identity`)
+
+**Examples:**
+
+Add the G1 generator to itself (source from stdin):
+```console
+$ echo "97f1d3a73197d7942695638c4fa9ac0fc3688c4f9774b905a14e3a3f171bac586c55e83ff97a1aeffb3af00adb22c6bb" | cargo run --quiet -- add --g1 --point_right "97f1d3a73197d7942695638c4fa9ac0fc3688c4f9774b905a14e3a3f171bac586c55e83ff97a1aeffb3af00adb22c6bb"
+```
+
+Add G2 identity + G2 generator = G2 generator:
+```console
+$ cargo run --quiet -- add --g2 --point_left "identity" --point_right "93e02b6052719f607dacd3a088274f65596bd0d09920b61ab5da61bbdc7f5049334cf11213945d57e5ac7d055d042b7e024aa2b2f08f0a91260805272dc51051c6e47ad4fa403b02b4510b647ae3d1770bac0326a805bbefd48056c8c121bdb8"
+```
+
+**From file:**
+```console
+$ cargo run --quiet -- add --g1 --point_left point.hex --point_right "point_hex"
+```
+
+**From stdin:**
+```console
+$ cargo run --quiet -- add --g2 --point_right "point_hex" < point.hex
+```

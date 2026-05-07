@@ -1,3 +1,4 @@
+pub mod add;
 pub mod generate_seed;
 pub mod hkdf;
 pub mod mul;

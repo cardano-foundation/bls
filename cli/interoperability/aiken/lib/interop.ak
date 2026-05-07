@@ -1,5 +1,5 @@
 use aiken/builtin
-use aiken/crypto/bls12_381/g1.{generator}
+use aiken/crypto/bls12_381/g1.{generator, zero}
 use aiken/crypto/bls12_381/g2
 
 fn internal_skToPk(sk: ByteArray) -> ByteArray {
@@ -46,6 +46,34 @@ test interop_g1_scalar_mul_s_1() {
 
 test interop_g2_scalar_mul_s_1() {
   let result = builtin.bls12_381_g2_scalar_mul(1, g2.generator)
+    |> builtin.bls12_381_g2_compress
+  let expected: ByteArray = #[147, 224, 43, 96, 82, 113, 159, 96, 125, 172, 211, 160, 136, 39, 79, 101, 89, 107, 208, 208, 153, 32, 182, 26, 181, 218, 97, 187, 220, 127, 80, 73, 51, 76, 241, 18, 19, 148, 93, 87, 229, 172, 125, 5, 93, 4, 43, 126, 2, 74, 162, 178, 240, 143, 10, 145, 38, 8, 5, 39, 45, 197, 16, 81, 198, 228, 122, 212, 250, 64, 59, 2, 180, 81, 11, 100, 122, 227, 209, 119, 11, 172, 3, 38, 168, 5, 187, 239, 212, 128, 86, 200, 193, 33, 189, 184]
+  result == expected
+}
+
+test interop_g1_add_generator_plus_generator() {
+  let result = builtin.bls12_381_g1_add(generator, generator)
+    |> builtin.bls12_381_g1_compress
+  let expected: ByteArray = #[165, 114, 203, 234, 144, 77, 103, 70, 136, 8, 200, 235, 80, 169, 69, 12, 151, 33, 219, 48, 145, 40, 1, 37, 67, 144, 45, 10, 195, 88, 166, 42, 226, 143, 117, 187, 143, 28, 124, 66, 195, 154, 140, 85, 41, 191, 15, 78]
+  result == expected
+}
+
+test interop_g2_add_generator_plus_generator() {
+  let result = builtin.bls12_381_g2_add(g2.generator, g2.generator)
+    |> builtin.bls12_381_g2_compress
+  let expected: ByteArray = #[170, 78, 222, 249, 193, 237, 127, 114, 159, 82, 14, 71, 115, 10, 18, 79, 215, 6, 98, 169, 4, 186, 16, 116, 114, 129, 20, 209, 3, 30, 21, 114, 198, 200, 134, 246, 181, 126, 199, 42, 97, 120, 40, 140, 71, 195, 53, 119, 22, 56, 83, 57, 87, 213, 64, 169, 210, 55, 15, 23, 204, 126, 213, 134, 59, 192, 185, 149, 184, 130, 94, 14, 225, 234, 30, 30, 77, 0, 219, 174, 129, 241, 75, 11, 243, 97, 27, 120, 201, 82, 170, 202, 184, 39, 160, 83]
+  result == expected
+}
+
+test interop_g1_add_identity_plus_generator() {
+  let result = builtin.bls12_381_g1_add(zero, generator)
+    |> builtin.bls12_381_g1_compress
+  let expected: ByteArray = #[151, 241, 211, 167, 49, 151, 215, 148, 38, 149, 99, 140, 79, 169, 172, 15, 195, 104, 140, 79, 151, 116, 185, 5, 161, 78, 58, 63, 23, 27, 172, 88, 108, 85, 232, 63, 249, 122, 26, 239, 251, 58, 240, 10, 219, 34, 198, 187]
+  result == expected
+}
+
+test interop_g2_add_identity_plus_generator() {
+  let result = builtin.bls12_381_g2_add(g2.zero, g2.generator)
     |> builtin.bls12_381_g2_compress
   let expected: ByteArray = #[147, 224, 43, 96, 82, 113, 159, 96, 125, 172, 211, 160, 136, 39, 79, 101, 89, 107, 208, 208, 153, 32, 182, 26, 181, 218, 97, 187, 220, 127, 80, 73, 51, 76, 241, 18, 19, 148, 93, 87, 229, 172, 125, 5, 93, 4, 43, 126, 2, 74, 162, 178, 240, 143, 10, 145, 38, 8, 5, 39, 45, 197, 16, 81, 198, 228, 122, 212, 250, 64, 59, 2, 180, 81, 11, 100, 122, 227, 209, 119, 11, 172, 3, 38, 168, 5, 187, 239, 212, 128, 86, 200, 193, 33, 189, 184]
   result == expected

@@ -10,6 +10,7 @@ use midnight_curves::pairing::group::prime::PrimeCurveAffine;
 use midnight_curves::pairing::group::{Group, GroupEncoding};
 use midnight_curves::BlsScalar;
 use std::mem;
+use std::ops::Add;
 use std::ops::Mul;
 
 /// Group selection for scalar multiplication
@@ -183,12 +184,7 @@ pub fn scalar_mul(group: &CurveGroup, point: &[u8], scalar: &[u8]) -> Result<Vec
             let bytes: [u8; 48] = point
                 .try_into()
                 .map_err(|_| "invalid point length (must be 48 bytes for G1)")?;
-            let mut affine = blst_p1_affine::default();
-            let result = unsafe { blst_p1_uncompress(&mut affine, bytes.as_ptr()) };
-            if result != BLST_ERROR::BLST_SUCCESS {
-                return Err("invalid G1 compressed point".to_string());
-            }
-            let g1_affine = unsafe { mem::transmute::<blst_p1_affine, G1Affine>(affine) };
+            let g1_affine = decompress_g1(&bytes)?;
             let g1_projective = G1Projective::from(g1_affine);
             let result = g1_projective.mul(&scalar);
             let result_affine = G1Affine::from(result);
@@ -198,14 +194,93 @@ pub fn scalar_mul(group: &CurveGroup, point: &[u8], scalar: &[u8]) -> Result<Vec
             let bytes: [u8; 96] = point
                 .try_into()
                 .map_err(|_| "invalid point length (must be 96 bytes for G2)")?;
-            let mut affine = blst_p2_affine::default();
-            let result = unsafe { blst_p2_uncompress(&mut affine, bytes.as_ptr()) };
-            if result != BLST_ERROR::BLST_SUCCESS {
-                return Err("invalid G2 compressed point".to_string());
-            }
-            let g2_affine = unsafe { mem::transmute::<blst_p2_affine, G2Affine>(affine) };
+            let g2_affine = decompress_g2(&bytes)?;
             let g2_projective = G2Projective::from(g2_affine);
             let result = g2_projective.mul(&scalar);
+            let result_affine = G2Affine::from(result);
+            Ok(result_affine.to_bytes().as_ref().to_vec())
+        }
+    }
+}
+
+/// Checks if compressed bytes represent the identity element.
+fn is_compressed_identity(bytes: &[u8]) -> bool {
+    bytes.len() > 0 && bytes[0] == 0xc0 && bytes[1..].iter().all(|&b| b == 0)
+}
+
+/// Decompresses a G1 point, handling identity as a special case since
+/// blst's `blst_p1_uncompress` does not accept the identity encoding.
+fn decompress_g1(bytes: &[u8; 48]) -> Result<G1Affine, String> {
+    if is_compressed_identity(bytes) {
+        return Ok(G1Affine::identity());
+    }
+    let mut blst = blst_p1_affine::default();
+    let result = unsafe { blst_p1_uncompress(&mut blst, bytes.as_ptr()) };
+    if result != BLST_ERROR::BLST_SUCCESS {
+        return Err("invalid G1 compressed point".to_string());
+    }
+    Ok(unsafe { mem::transmute::<blst_p1_affine, G1Affine>(blst) })
+}
+
+/// Decompresses a G2 point, handling identity as a special case since
+/// blst's `blst_p2_uncompress` does not accept the identity encoding.
+fn decompress_g2(bytes: &[u8; 96]) -> Result<G2Affine, String> {
+    if is_compressed_identity(bytes) {
+        return Ok(G2Affine::identity());
+    }
+    let mut blst = blst_p2_affine::default();
+    let result = unsafe { blst_p2_uncompress(&mut blst, bytes.as_ptr()) };
+    if result != BLST_ERROR::BLST_SUCCESS {
+        return Err("invalid G2 compressed point".to_string());
+    }
+    Ok(unsafe { mem::transmute::<blst_p2_affine, G2Affine>(blst) })
+}
+
+/// Adds two BLS12-381 G1 or G2 points.
+///
+/// # Arguments
+///
+/// * `group` - The group to operate on (G1 or G2)
+/// * `left` - The left compressed point bytes (48 for G1, 96 for G2)
+/// * `right` - The right compressed point bytes (48 for G1, 96 for G2)
+///
+/// # Returns
+///
+/// * `Ok(Vec<u8>)` - The compressed result point (48 for G1, 96 for G2)
+/// * `Err(String)` if either point is invalid
+pub fn group_add(group: &CurveGroup, left: &[u8], right: &[u8]) -> Result<Vec<u8>, String> {
+    match group {
+        CurveGroup::G1 => {
+            let left_bytes: [u8; 48] = left
+                .try_into()
+                .map_err(|_| "invalid left point length (must be 48 bytes for G1)")?;
+            let right_bytes: [u8; 48] = right
+                .try_into()
+                .map_err(|_| "invalid right point length (must be 48 bytes for G1)")?;
+
+            let left_affine = decompress_g1(&left_bytes)?;
+            let right_affine = decompress_g1(&right_bytes)?;
+
+            let left_projective = G1Projective::from(left_affine);
+            let right_projective = G1Projective::from(right_affine);
+            let result = left_projective.add(&right_projective);
+            let result_affine = G1Affine::from(result);
+            Ok(result_affine.to_bytes().as_ref().to_vec())
+        }
+        CurveGroup::G2 => {
+            let left_bytes: [u8; 96] = left
+                .try_into()
+                .map_err(|_| "invalid left point length (must be 96 bytes for G2)")?;
+            let right_bytes: [u8; 96] = right
+                .try_into()
+                .map_err(|_| "invalid right point length (must be 96 bytes for G2)")?;
+
+            let left_affine = decompress_g2(&left_bytes)?;
+            let right_affine = decompress_g2(&right_bytes)?;
+
+            let left_projective = G2Projective::from(left_affine);
+            let right_projective = G2Projective::from(right_affine);
+            let result = left_projective.add(&right_projective);
             let result_affine = G2Affine::from(result);
             Ok(result_affine.to_bytes().as_ref().to_vec())
         }
