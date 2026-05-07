@@ -9,6 +9,7 @@ Cargo.lock
 # Build output
 target/
 */target/
+cli/interoperability/sk_to_scalar/build/
 
 # IDE
 .idea/
