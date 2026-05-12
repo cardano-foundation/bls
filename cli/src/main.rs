@@ -16,8 +16,9 @@ pub enum Command {
     /// representing 32 bytes of random data.
     ///
     /// Examples:
-    ///   cargo run --quiet -- generate-seed
-    ///   cargo run --quiet -- generate-seed ; echo
+    ///
+    ///   $ bls-aiken generate-seed
+    #[command(disable_help_flag = true)]
     GenerateSeed,
 
     /// Derive a 32-byte PrivateKey from a seed using HKDF-SHA256
@@ -27,9 +28,13 @@ pub enum Command {
     /// with SHA-256. The output is a 64-character hex string.
     ///
     /// Examples:
-    ///   echo "seed_hex" | cargo run -- hkdf
-    ///   cargo run -- hkdf --file seed.hex
-    ///   cargo run -- hkdf < seed.hex
+    ///
+    ///   $ echo "seed_hex" | bls-aiken hkdf
+    ///
+    ///   $ bls-aiken hkdf --file seed.hex
+    ///
+    ///   $ bls-aiken hkdf < seed.hex
+    #[command(disable_help_flag = true)]
     Hkdf(cmd::hkdf::Args),
 
     /// Convert a 32-byte private key to its BLS12-381 scalar representation
@@ -39,9 +44,13 @@ pub enum Command {
     /// The output is a decimal representation of the scalar.
     ///
     /// Examples:
-    ///   echo "private_key_hex" | cargo run -- scalar
-    ///   cargo run -- scalar --prv private_key.hex
-    ///   cargo run -- scalar < private_key.hex
+    ///
+    ///   $ echo "private_key_hex" | bls-aiken scalar
+    ///
+    ///   $ bls-aiken scalar --prv private_key.hex
+    ///
+    ///   $ bls-aiken scalar < private_key.hex
+    #[command(disable_help_flag = true)]
     Scalar(cmd::scalar::Args),
 
     /// Generate a BLS12-381 public key (G1 point) from a private key
@@ -51,9 +60,13 @@ pub enum Command {
     /// 96-character hex string (48 bytes) representing the compressed G1 point.
     ///
     /// Examples:
-    ///   echo "private_key_hex" | cargo run -- pk
-    ///   cargo run -- pk --prv private_key.hex
-    ///   cargo run -- pk < private_key.hex
+    ///
+    ///   $ echo "private_key_hex" | bls-aiken pk
+    ///
+    ///   $ bls-aiken pk --prv private_key.hex
+    ///
+    ///   $ bls-aiken pk < private_key.hex
+    #[command(disable_help_flag = true)]
     Pk(cmd::pk::Args),
 
     /// Generate a BLS signature (G2 point) from a private key and message
@@ -62,16 +75,14 @@ pub enum Command {
     /// and then multiplying by the scalar derived from the private key.
     /// The output is a 192-character hex string (96 bytes) representing the compressed G2 point.
     ///
-    /// Parameters:
-    ///   --prv: Private key (from stdin or file)
-    ///   --msg: Message to sign (required)
-    ///   --dst: Domain separation tag (optional, defaults to empty)
-    ///   --aug: Augmentation data (optional, defaults to empty)
-    ///
     /// Examples:
-    ///   echo "private_key_hex" | cargo run -- sig --msg "hello"
-    ///   cargo run -- sig --prv private_key.hex --msg "hello"
-    ///   cargo run -- sig --prv key.hex --msg "test" --dst "domain" --aug "extra"
+    ///
+    ///   $ echo "private_key_hex" | bls-aiken sig --msg "hello"
+    ///
+    ///   $ bls-aiken sig --prv private_key.hex --msg "hello"
+    ///
+    ///   $ bls-aiken sig --prv key.hex --msg "test" --dst "domain" --aug "extra"
+    #[command(disable_help_flag = true)]
     Sig(cmd::sig::Args),
 
     /// Verify a BLS signature
@@ -79,17 +90,14 @@ pub enum Command {
     /// This command verifies a BLS signature by checking the pairing equality:
     /// e(public_key, hash_to_curve(message)) == e(G1_generator, signature)
     ///
-    /// Parameters:
-    ///   --sig: Signature (from stdin or file, as hex)
-    ///   --msg: Message that was signed (required)
-    ///   --pk: Public key (from stdin or file, as hex)
-    ///   --dst: Domain separation tag (optional, defaults to empty)
-    ///   --aug: Augmentation data (optional, defaults to empty)
-    ///
     /// Examples:
-    ///   echo "signature_hex" | cargo run -- verify --msg "hello" --pk pk.hex
-    ///   cargo run -- verify --sig sig.hex --msg "hello" --pk pk.hex
-    ///   cargo run -- verify --sig sig.hex --msg "test" --pk key.hex --dst "domain" --aug "extra"
+    ///
+    ///   $ echo "signature_hex" | bls-aiken verify --msg "hello" --pk pk.hex
+    ///
+    ///   $ bls-aiken verify --sig sig.hex --msg "hello" --pk pk.hex
+    ///
+    ///   $ bls-aiken verify --sig sig.hex --msg "test" --pk key.hex --dst "domain" --aug "extra"
+    #[command(disable_help_flag = true)]
     Verify(cmd::verify::Args),
 
     /// Add two BLS12-381 points (G1 or G2 group)
@@ -99,15 +107,12 @@ pub enum Command {
     /// The output is a hex string (96 hex chars for G1, 192 hex chars for G2)
     /// representing the compressed result point.
     ///
-    /// Parameters:
-    ///   --g1: Use G1 group (mutually exclusive with --g2)
-    ///   --g2: Use G2 group (mutually exclusive with --g1)
-    ///   --point_left: Left point (from stdin or file, as hex, or "identity")
-    ///   --point_right: Right point (required, as hex, or "identity")
-    ///
     /// Examples:
-    ///   echo "left_point_hex" | cargo run -- add --g1 --point_right "right_hex"
-    ///   cargo run -- add --g2 --point_left left.hex --point_right "right_hex"
+    ///
+    ///   $ echo "left_point_hex" | bls-aiken add --g1 --point_right "right_hex"
+    ///
+    ///   $ bls-aiken add --g2 --point_left left.hex --point_right "right_hex"
+    #[command(disable_help_flag = true)]
     Add(cmd::add::Args),
 
     /// Multiply a BLS12-381 point by a scalar
@@ -117,15 +122,12 @@ pub enum Command {
     /// The output is a hex string (96 hex chars for G1, 192 hex chars for G2)
     /// representing the compressed result point.
     ///
-    /// Parameters:
-    ///   --g1: Use G1 group (mutually exclusive with --g2)
-    ///   --g2: Use G2 group (mutually exclusive with --g1)
-    ///   --point: Point (from stdin or file, as hex)
-    ///   --scalar: Scalar value (hex, 32 bytes, required)
-    ///
     /// Examples:
-    ///   echo "point_hex" | cargo run -- mul --g1 --scalar "00...00"
-    ///   cargo run -- mul --g2 --point point.hex --scalar "00...00"
+    ///
+    ///   $ echo "point_hex" | bls-aiken mul --g1 --scalar "00...00"
+    ///
+    ///   $ bls-aiken mul --g2 --point point.hex --scalar "00...00"
+    #[command(disable_help_flag = true)]
     Mul(cmd::mul::Args),
 
     /// Compress a BLS12-381 point (G1 or G2)
@@ -134,15 +136,14 @@ pub enum Command {
     /// Accepts both compressed (48/96 bytes) and uncompressed (96/192 bytes) input.
     /// The output is always the compressed hex form.
     ///
-    /// Parameters:
-    ///   --g1: Use G1 group (mutually exclusive with --g2)
-    ///   --g2: Use G2 group (mutually exclusive with --g1)
-    ///   --point: Point (from stdin or file, as hex, or "identity")
-    ///
     /// Examples:
-    ///   echo "point_hex" | cargo run -- compress --g1
-    ///   cargo run -- compress --g2 --point point.hex
-    ///   cargo run -- compress --g1 --point identity
+    ///
+    ///   $ echo "point_hex" | bls-aiken compress --g1
+    ///
+    ///   $ bls-aiken compress --g2 --point point.hex
+    ///
+    ///   $ bls-aiken compress --g1 --point identity
+    #[command(disable_help_flag = true)]
     Compress(cmd::compress::Args),
 
     /// Uncompress (decompress) a BLS12-381 point (G1 or G2)
@@ -151,15 +152,14 @@ pub enum Command {
     /// the uncompressed form. For G1 the output is 192 hex chars (96 bytes),
     /// for G2 it is 384 hex chars (192 bytes).
     ///
-    /// Parameters:
-    ///   --g1: Use G1 group (mutually exclusive with --g2)
-    ///   --g2: Use G2 group (mutually exclusive with --g1)
-    ///   --point: Point (from stdin or file, as hex, or "identity")
-    ///
     /// Examples:
-    ///   echo "point_hex" | cargo run -- uncompress --g1
-    ///   cargo run -- uncompress --g2 --point point.hex
-    ///   cargo run -- uncompress --g1 --point identity
+    ///
+    ///   $ echo "point_hex" | bls-aiken uncompress --g1
+    ///
+    ///   $ bls-aiken uncompress --g2 --point point.hex
+    ///
+    ///   $ bls-aiken uncompress --g1 --point identity
+    #[command(disable_help_flag = true)]
     Uncompress(cmd::uncompress::Args),
 }
 
@@ -169,8 +169,10 @@ pub enum Command {
 #[clap(author = "HAL Team <hal@cardanofoundation.org>")]
 #[clap(version=env!("CARGO_PKG_VERSION"))]
 #[clap(about = "BLS12-381 Aiken CLI tool")]
-#[clap(about, long_about = None)]
+#[command(disable_help_flag = true)]
 pub struct Cli {
+    #[arg(short = 'h', long = "help", global = true, action = clap::ArgAction::HelpLong, help = "Print help")]
+    help: Option<bool>,
     #[command(subcommand)]
     command: Command,
 }
