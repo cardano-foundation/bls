@@ -1,5 +1,6 @@
 use clap::ArgGroup;
 use hex::decode;
+use num_bigint::BigUint;
 use std::error::Error;
 use std::fs::File;
 use std::io::{self, BufRead, BufReader};
@@ -15,36 +16,79 @@ pub struct Args {
     #[arg(long = "g2", group = "group")]
     g2: bool,
 
-    /// Path to point file (optional, reads from stdin if not provided)
+    /// Point to multiply (from stdin or file, as hex). Use "identity" for the identity element.
     #[arg(long)]
     point: Option<String>,
 
-    /// Scalar (hex, 32 bytes, required)
+    /// Scalar value (decimal by default, or hex with 0x prefix)
     #[arg(long)]
     scalar: String,
 }
 
-pub fn run(args: Args) -> Result<(), Box<dyn Error>> {
-    let point_hex = if let Some(path) = args.point {
-        let f = File::open(&path)?;
-        let mut reader = BufReader::new(f);
-        let mut line = String::new();
-        reader.read_line(&mut line)?;
-        line.trim().to_string()
+fn resolve_point(value: &str, group: &bls12_381_aiken_cli::CurveGroup) -> Result<Vec<u8>, String> {
+    if value == "identity" {
+        return Ok(match group {
+            bls12_381_aiken_cli::CurveGroup::G1 => {
+                let mut bytes = vec![0xc0u8];
+                bytes.extend(std::iter::repeat(0u8).take(47));
+                bytes
+            }
+            bls12_381_aiken_cli::CurveGroup::G2 => {
+                let mut bytes = vec![0xc0u8];
+                bytes.extend(std::iter::repeat(0u8).take(95));
+                bytes
+            }
+        });
+    }
+    decode(value).map_err(|_| "invalid hex point".to_string())
+}
+
+fn parse_scalar(s: &str) -> Result<Vec<u8>, String> {
+    let mut bytes = if let Some(hex) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
+        let val = BigUint::parse_bytes(hex.as_bytes(), 16).ok_or("invalid hex scalar")?;
+        val.to_bytes_le()
+    } else if s.len() == 64
+        || s.bytes()
+            .any(|b| b.is_ascii_hexdigit() && b.is_ascii_alphabetic())
+    {
+        decode(s).map_err(|_| "invalid hex scalar")?
+    } else if let Some(val) = BigUint::parse_bytes(s.as_bytes(), 10) {
+        val.to_bytes_le()
     } else {
-        let mut line = String::new();
-        io::stdin().read_line(&mut line)?;
-        line.trim().to_string()
+        return Err("invalid scalar".to_string());
     };
 
-    let point_bytes = decode(&point_hex).map_err(|_| "invalid hex point")?;
-    let scalar_bytes = decode(&args.scalar).map_err(|_| "invalid hex scalar")?;
+    if bytes.len() > 32 {
+        return Err("scalar value exceeds 32 bytes".to_string());
+    }
+    bytes.resize(32, 0u8);
+    Ok(bytes)
+}
 
+pub fn run(args: Args) -> Result<(), Box<dyn Error>> {
     let group = if args.g1 {
         bls12_381_aiken_cli::CurveGroup::G1
     } else {
         bls12_381_aiken_cli::CurveGroup::G2
     };
+
+    let point_bytes = if let Some(val) = args.point {
+        if val == "identity" {
+            resolve_point("identity", &group)?
+        } else {
+            let f = File::open(&val)?;
+            let mut reader = BufReader::new(f);
+            let mut line = String::new();
+            reader.read_line(&mut line)?;
+            resolve_point(line.trim(), &group)?
+        }
+    } else {
+        let mut line = String::new();
+        io::stdin().read_line(&mut line)?;
+        resolve_point(line.trim(), &group)?
+    };
+
+    let scalar_bytes = parse_scalar(&args.scalar)?;
 
     let result =
         bls12_381_aiken_cli::scalar_mul(&group, &point_bytes, &scalar_bytes).map_err(|e| e)?;
