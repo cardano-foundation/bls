@@ -17,7 +17,7 @@ pub enum Command {
     ///
     /// Examples:
     ///
-    ///   $ bls-aiken generate-seed
+    ///   $ bls12-381-aiken generate-seed
     #[command(disable_help_flag = true)]
     GenerateSeed,
 
@@ -29,11 +29,11 @@ pub enum Command {
     ///
     /// Examples:
     ///
-    ///   $ echo "seed_hex" | bls-aiken hkdf
+    ///   $ echo "seed_hex" | bls12-381-aiken hkdf
     ///
-    ///   $ bls-aiken hkdf --file seed.hex
+    ///   $ bls12-381-aiken hkdf --file seed.hex
     ///
-    ///   $ bls-aiken hkdf < seed.hex
+    ///   $ bls12-381-aiken hkdf < seed.hex
     #[command(disable_help_flag = true)]
     Hkdf(cmd::hkdf::Args),
 
@@ -45,11 +45,11 @@ pub enum Command {
     ///
     /// Examples:
     ///
-    ///   $ echo "private_key_hex" | bls-aiken scalar
+    ///   $ echo "private_key_hex" | bls12-381-aiken scalar
     ///
-    ///   $ bls-aiken scalar --prv private_key.hex
+    ///   $ bls12-381-aiken scalar --prv private_key.hex
     ///
-    ///   $ bls-aiken scalar < private_key.hex
+    ///   $ bls12-381-aiken scalar < private_key.hex
     #[command(disable_help_flag = true)]
     Scalar(cmd::scalar::Args),
 
@@ -61,11 +61,11 @@ pub enum Command {
     ///
     /// Examples:
     ///
-    ///   $ echo "private_key_hex" | bls-aiken pk
+    ///   $ echo "private_key_hex" | bls12-381-aiken pk
     ///
-    ///   $ bls-aiken pk --prv private_key.hex
+    ///   $ bls12-381-aiken pk --prv private_key.hex
     ///
-    ///   $ bls-aiken pk < private_key.hex
+    ///   $ bls12-381-aiken pk < private_key.hex
     #[command(disable_help_flag = true)]
     Pk(cmd::pk::Args),
 
@@ -77,11 +77,11 @@ pub enum Command {
     ///
     /// Examples:
     ///
-    ///   $ echo "private_key_hex" | bls-aiken sig --msg "hello"
+    ///   $ echo "private_key_hex" | bls12-381-aiken sig --msg "hello"
     ///
-    ///   $ bls-aiken sig --prv private_key.hex --msg "hello"
+    ///   $ bls12-381-aiken sig --prv private_key.hex --msg "hello"
     ///
-    ///   $ bls-aiken sig --prv key.hex --msg "test" --dst "domain" --aug "extra"
+    ///   $ bls12-381-aiken sig --prv key.hex --msg "test" --dst "domain" --aug "extra"
     #[command(disable_help_flag = true)]
     Sig(cmd::sig::Args),
 
@@ -92,11 +92,11 @@ pub enum Command {
     ///
     /// Examples:
     ///
-    ///   $ echo "signature_hex" | bls-aiken verify --msg "hello" --pk pk.hex
+    ///   $ echo "signature_hex" | bls12-381-aiken verify --msg "hello" --pk pk.hex
     ///
-    ///   $ bls-aiken verify --sig sig.hex --msg "hello" --pk pk.hex
+    ///   $ bls12-381-aiken verify --sig sig.hex --msg "hello" --pk pk.hex
     ///
-    ///   $ bls-aiken verify --sig sig.hex --msg "test" --pk key.hex --dst "domain" --aug "extra"
+    ///   $ bls12-381-aiken verify --sig sig.hex --msg "test" --pk key.hex --dst "domain" --aug "extra"
     #[command(disable_help_flag = true)]
     Verify(cmd::verify::Args),
 
@@ -109,9 +109,9 @@ pub enum Command {
     ///
     /// Examples:
     ///
-    ///   $ echo "left_point_hex" | bls-aiken add --g1 --point_right "right_hex"
+    ///   $ echo "left_point_hex" | bls12-381-aiken add --g1 --point_right "right_hex"
     ///
-    ///   $ bls-aiken add --g2 --point_left left.hex --point_right "right_hex"
+    ///   $ bls12-381-aiken add --g2 --point_left left.hex --point_right "right_hex"
     #[command(disable_help_flag = true)]
     Add(cmd::add::Args),
 
@@ -124,9 +124,9 @@ pub enum Command {
     ///
     /// Examples:
     ///
-    ///   $ echo "point_hex" | bls-aiken mul --g1 --scalar "00...00"
+    ///   $ echo "point_hex" | bls12-381-aiken mul --g1 --scalar "00...00"
     ///
-    ///   $ bls-aiken mul --g2 --point point.hex --scalar "00...00"
+    ///   $ bls12-381-aiken mul --g2 --point point.hex --scalar "00...00"
     #[command(disable_help_flag = true)]
     Mul(cmd::mul::Args),
 
@@ -138,11 +138,11 @@ pub enum Command {
     ///
     /// Examples:
     ///
-    ///   $ echo "point_hex" | bls-aiken compress --g1
+    ///   $ echo "point_hex" | bls12-381-aiken compress --g1
     ///
-    ///   $ bls-aiken compress --g2 --point point.hex
+    ///   $ bls12-381-aiken compress --g2 --point point.hex
     ///
-    ///   $ bls-aiken compress --g1 --point identity
+    ///   $ bls12-381-aiken compress --g1 --point identity
     #[command(disable_help_flag = true)]
     Compress(cmd::compress::Args),
 
@@ -154,18 +154,18 @@ pub enum Command {
     ///
     /// Examples:
     ///
-    ///   $ echo "point_hex" | bls-aiken uncompress --g1
+    ///   $ echo "point_hex" | bls12-381-aiken uncompress --g1
     ///
-    ///   $ bls-aiken uncompress --g2 --point point.hex
+    ///   $ bls12-381-aiken uncompress --g2 --point point.hex
     ///
-    ///   $ bls-aiken uncompress --g1 --point identity
+    ///   $ bls12-381-aiken uncompress --g1 --point identity
     #[command(disable_help_flag = true)]
     Uncompress(cmd::uncompress::Args),
 }
 
 #[derive(Debug, Parser)]
 #[clap(name = "bls12-381-aiken-cli")]
-#[clap(bin_name = "bls-aiken")]
+#[clap(bin_name = "bls12-381-aiken")]
 #[clap(author = "HAL Team <hal@cardanofoundation.org>")]
 #[clap(version=env!("CARGO_PKG_VERSION"))]
 #[clap(about = "BLS12-381 Aiken CLI tool")]
