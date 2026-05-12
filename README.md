@@ -344,8 +344,27 @@ In order to do it the prover can use either G1 or G2 curve. Let's start with the
 
 ```bash
 # verifier side
+λ cargo run --quiet mul --g1 --point generator --scalar 10
+af81da25ecf1c84b577fefbedd61077a81dc43b00304015b2b596ab67f00e41c86bb00ebd0f90d4b125eb0539891aeed
 
+λ cargo run --quiet mul --g1 --point generator --scalar 13
+851f8a0b82a6d86202a61cbc3b0f3db7d19650b914587bde4715ccd372e1e40cab95517779d840416e1679c84a6db24e
 ```
+
+Now the verifier sends those two points in G1 and claims they are the solution of the equation both sides are aware of.
+The prover checks that claim:
+
+```bash
+λ cargo run --quiet mul --g1 --point generator --scalar 23
+8c8b694b04d98a749a0763c72fc020ef61b2bb3f63ebb182cb2e568f6a8b9ca3ae013ae78317599e7e7ba2a528ec754a
+
+λ echo -n af81da25ecf1c84b577fefbedd61077a81dc43b00304015b2b596ab67f00e41c86bb00ebd0f90d4b125eb0539891aeed | \
+> cargo run --quiet add --g1 --point_right 851f8a0b82a6d86202a61cbc3b0f3db7d19650b914587bde4715ccd372e1e40cab95517779d840416e1679c84a6db24e
+8c8b694b04d98a749a0763c72fc020ef61b2bb3f63ebb182cb2e568f6a8b9ca3ae013ae78317599e7e7ba2a528ec754a
+```
+
+Indeed! The claim of the prover is validated! The verifier used homomorphic encryption property, meaning `x+y=23` in both number and point space!
+The same is true when both parties agree to work within G2 groups.
 
 ## Groth16 using BLS12-381 curve primitives
 
