@@ -15,10 +15,13 @@ pub struct Args {
     #[arg(long = "g2", group = "group")]
     g2: bool,
 
-    /// Point to compress (from stdin or file, as hex). Use "identity" for the identity element.
+    /// Point to compress (from stdin or file, as hex). Use "identity" for the point at infinity, or "generator" for the group generator.
     #[arg(long = "point")]
     point: Option<String>,
 }
+
+const G1_GENERATOR: &str = "97f1d3a73197d7942695638c4fa9ac0fc3688c4f9774b905a14e3a3f171bac586c55e83ff97a1aeffb3af00adb22c6bb";
+const G2_GENERATOR: &str = "93e02b6052719f607dacd3a088274f65596bd0d09920b61ab5da61bbdc7f5049334cf11213945d57e5ac7d055d042b7e024aa2b2f08f0a91260805272dc51051c6e47ad4fa403b02b4510b647ae3d1770bac0326a805bbefd48056c8c121bdb8";
 
 fn resolve_point(value: &str, group: &bls12_381_aiken_cli::CurveGroup) -> Result<Vec<u8>, String> {
     if value == "identity" {
@@ -35,6 +38,12 @@ fn resolve_point(value: &str, group: &bls12_381_aiken_cli::CurveGroup) -> Result
             }
         });
     }
+    if value == "generator" {
+        return Ok(match group {
+            bls12_381_aiken_cli::CurveGroup::G1 => decode(G1_GENERATOR).unwrap(),
+            bls12_381_aiken_cli::CurveGroup::G2 => decode(G2_GENERATOR).unwrap(),
+        });
+    }
     decode(value).map_err(|_| "invalid hex point".to_string())
 }
 
@@ -46,8 +55,8 @@ pub fn run(args: Args) -> Result<(), Box<dyn Error>> {
     };
 
     let point_bytes = if let Some(val) = args.point {
-        if val == "identity" {
-            resolve_point("identity", &group)?
+        if val == "identity" || val == "generator" {
+            resolve_point(&val, &group)?
         } else {
             let f = File::open(&val)?;
             let mut reader = BufReader::new(f);
