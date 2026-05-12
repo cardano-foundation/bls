@@ -1,12 +1,13 @@
-# BLS12-381 Elliptic curve, and BLS multi-signatures scheme and VRF based on it
+# BLS12-381 Elliptic curve, BLS multi-signatures scheme and other curve applications
 
 ## Contents
 1. [Introduction](#high-level-introduction)
-2. [BLS12-381 Elliptic curve overview](#bls-elliptic-curves-overview)
-3. [BLS mechanics in sagemath](#bls-mechanics-in-sagemath)
+2. [BLS12-381 Elliptic curve overview](#bls12-381-elliptic-curves-overview)
+3. [BLS12-381 and BLS mechanics in sagemath](#bls12-381-and-bls-mechanics-in-sagemath)
 4. [BLS mechanics in aiken](#bls-mechanics-in-aiken)
-5. [BLS12-381 primitives in aiken](#bls-curve-primitives-in-aiken)
-6. [VRF using BLS12-381 primitives](#vrf-using-bls-curve-primitives)
+5. [BLS12-381 primitives in aiken](#bls12-381-curve-primitives-in-aiken)
+6. [VRF using Aiken BLS12-381 primitives](#vrf-using-bls12-381-curve-primitives)
+7. [Groth16 using Aiken BLS12-381 CLI](#groth16-using-bls12-381-curve-primitives)
 
 ## High level introduction
 
@@ -75,7 +76,7 @@ e(sig_{agg}, g_2)=e(H(m), pk_{agg})
 
 And this is regardless of the number of signatures engaged. 
 
-## BLS elliptic curves overview
+## BLS12-381 elliptic curves overview
 
 Although the same abbreviation, BLS here, stands for Barreto-Lynn-Scott. The family of curves was introduced in this [seminal paper](https://eprint.iacr.org/2002/088.pdf).
 BLS12-381 curve was proposed by [Sean Bowe in the context of ZCash](https://electriccoin.co/blog/new-snark-curve/).
@@ -83,7 +84,7 @@ The usage of this curve was adopted in number of other blockchains, like Ethereu
 There is also support of this curve in Cardano, see for example, [cardano-crypto-class](https://github.com/IntersectMBO/cardano-base/tree/master/cardano-crypto-class) and the curve is exposed also in [aiken from 3.0 release](https://aiken-lang.github.io/stdlib/aiken/crypto.html). The great introduction and motivation for this curve was written in the blog post [BLS12-381 For The Rest Of Us](https://hackmd.io/@benjaminion/bls12-381#Motivation).
 It is especially worth mentioning and repeating that the elliptic curve BLS12-381 is currently in [IETF draft revision 12](https://datatracker.ietf.org/doc/draft-irtf-cfrg-pairing-friendly-curves/12/) stage of ratification and also included in [standard directory](standard/draft-irtf-cfrg-pairing-friendly-curves-12.txt).
 
-## BLS mechanics in sagemath
+## BLS12-381 and BLS mechanics in sagemath
 
 The golden are generated using _SageMath_ and compliant with [IETF draft revision 6](https://datatracker.ietf.org/doc/html/draft-irtf-cfrg-bls-signature-06)
 and also included in [standard directory](standard/draft-irtf-cfrg-bls-signature-06.txt).
@@ -326,10 +327,14 @@ The implementation of public key aggregation case using [aiken primitves](https:
 
 The implementation of signature aggregation case using [aiken primitves](https://aiken-lang.github.io/stdlib/aiken/crypto/bls12_381/g1.html) and [ilap/bls](https://github.com/ilap/bls) is [here](./aiken/signature-aggregation-case)
 
-## BLS curve primitives in aiken
+## BLS12-381 curve primitives in aiken
 
-TODO
+The curve primitives and low-level operations are available through [Aiken BLS12-381 CLI](./cli/README.md)
 
-## VRF using aiken BLS curve primitives
+## VRF using aiken BLS12-381 curve primitives
 
 The implementation of VRF using [aiken primitves](https://aiken-lang.github.io/stdlib/aiken/crypto/bls12_381/g1.html) is [here](./aiken/vrf)
+
+## Groth16 using BLS12-381 curve primitives
+
+TO-DO
