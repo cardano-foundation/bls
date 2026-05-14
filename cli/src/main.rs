@@ -168,7 +168,7 @@ pub enum Command {
 #[clap(bin_name = "bls12-381-aiken")]
 #[clap(author = "HAL Team <hal@cardanofoundation.org>")]
 #[clap(version=env!("CARGO_PKG_VERSION"))]
-#[clap(about = "BLS12-381 Aiken CLI tool")]
+#[clap(about = "BLS12-381 CLI tool compatible with Aiken primitives")]
 #[command(disable_help_flag = true)]
 pub struct Cli {
     #[arg(short = 'h', long = "help", global = true, action = clap::ArgAction::HelpLong, help = "Print help")]
