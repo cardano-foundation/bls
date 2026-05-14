@@ -337,33 +337,31 @@ The output of `10 * G2 + 13 * G2` matches `23 * G2`, confirming the same distrib
 
 ### Compress and uncompress
 
-The `compress` and `uncompress` commands convert between compressed and uncompressed point representations.
+All `mul`, `add`, `compress`, and `uncompress` commands work with compressed points. For example, the result `0x8c8b694b...` from the `x + y = 23` G1 example above is already a compressed point — it can be used directly in `compress` and `uncompress`.
+
+Demonstrating this with `23 * G1` from the equation:
+
+```console
+$ TWENTY_THREE=$(cargo run --quiet -- mul --g1 --point generator --scalar "23")
+
+$ echo "$TWENTY_THREE"
+0x8c8b694b04d98a749a0763c72fc020ef61b2bb3f63ebb182cb2e568f6a8b9ca3ae013ae78317599e7e7ba2a528ec754a
+
+$ echo "$TWENTY_THREE" | cargo run --quiet -- uncompress --g1
+0x0c8b694b04d98a749a0763c72fc020ef61b2bb3f63ebb182cb2e568f6a8b9ca3ae013ae78317599e7e7ba2a528ec754a79e21c0eb0c87e3e2a44f8f5ac0e790bf114393a2c792f90b1e2a58a7b3c8a6f2c30e19f1112d6ca9281422e77ae0ea
+
+$ echo "$TWENTY_THREE" | cargo run --quiet -- compress --g1
+0x8c8b694b04d98a749a0763c72fc020ef61b2bb3f63ebb182cb2e568f6a8b9ca3ae013ae78317599e7e7ba2a528ec754a
+```
+
+The commands convert between compressed and uncompressed point representations:
 
 - **Compressed** (48 bytes for G1, 96 bytes for G2): Compact form storing only the x-coordinate plus a sign bit. Used for storage and transmission.
 - **Uncompressed** (96 bytes for G1, 192 bytes for G2): Full affine coordinates (x, y). Needed for certain operations like pairings.
 
 `compress` also serves as a **validation** tool: it accepts both compressed and uncompressed input, verifies the point is on the curve, and outputs the canonical compressed form. This is useful for ensuring data integrity.
 
-**G1:**
-
-```console
-$ COMPRESSED=$(echo "97f1d3a73197d7942695638c4fa9ac0fc3688c4f9774b905a14e3a3f171bac586c55e83ff97a1aeffb3af00adb22c6bb" | cargo run --quiet -- compress --g1)
-
-$ echo "$COMPRESSED"
-0x97f1d3a73197d7942695638c4fa9ac0fc3688c4f9774b905a14e3a3f171bac586c55e83ff97a1aeffb3af00adb22c6bb
-
-$ UNCOMPRESSED=$(echo "97f1d3a73197d7942695638c4fa9ac0fc3688c4f9774b905a14e3a3f171bac586c55e83ff97a1aeffb3af00adb22c6bb" | cargo run --quiet -- uncompress --g1)
-
-$ echo "$UNCOMPRESSED"
-0x17f1d3a73197d7942695638c4fa9ac0fc3688c4f9774b905a14e3a3f171bac586c55e83ff97a1aeffb3af00adb22c6bb08b3f481e3aaa0f1a09e30ed741d8ae4fcf5e095d5d00af600db18cb2c04b3edd03cc744a2888ae40caa232946c5e7e1
-
-$ echo "$UNCOMPRESSED" | cargo run --quiet -- compress --g1
-0x97f1d3a73197d7942695638c4fa9ac0fc3688c4f9774b905a14e3a3f171bac586c55e83ff97a1aeffb3af00adb22c6bb
-```
-
-The uncompressed form is twice the size and includes both coordinates. Re-compressing it yields the original compressed point, confirming the round-trip.
-
-**G2:**
+**G2 example:**
 
 ```console
 $ COMPRESSED=$(echo "93e02b6052719f607dacd3a088274f65596bd0d09920b61ab5da61bbdc7f5049334cf11213945d57e5ac7d055d042b7e024aa2b2f08f0a91260805272dc51051c6e47ad4fa403b02b4510b647ae3d1770bac0326a805bbefd48056c8c121bdb8" | cargo run --quiet -- compress --g2)
