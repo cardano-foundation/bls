@@ -1,3 +1,4 @@
+use super::strip_0x;
 use hex::decode;
 use hkdf::Hkdf;
 use sha2::Sha256;
@@ -25,14 +26,14 @@ pub fn run(args: Args) -> Result<(), Box<dyn Error>> {
         line.trim().to_string()
     };
 
-    let seed_bytes = decode(&seed).map_err(|_| "invalid hex seed")?;
+    let seed_bytes = decode(strip_0x(&seed)).map_err(|_| "invalid hex seed")?;
 
     let hk = Hkdf::<Sha256>::new(None, &seed_bytes);
     let mut private_key = [0u8; 32];
     hk.expand(b"", &mut private_key)
         .map_err(|_| "hkdf expand failed")?;
 
-    print!("{}", hex::encode(private_key));
+    print!("0x{}", hex::encode(private_key));
 
     Ok(())
 }

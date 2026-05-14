@@ -12,7 +12,7 @@ fn generate_seed_produces_32_bytes() {
         .success()
         .stdout(predicate::function(|output: &str| {
             let trimmed = output.trim();
-            trimmed.len() == 64 && decode(trimmed).is_ok()
+            trimmed.len() == 66 && trimmed.starts_with("0x") && decode(&trimmed[2..]).is_ok()
         }));
 }
 
@@ -39,7 +39,7 @@ fn hkdf_produces_32_bytes() {
         .success()
         .stdout(predicate::function(|output: &str| {
             let trimmed = output.trim();
-            trimmed.len() == 64 && decode(trimmed).is_ok()
+            trimmed.len() == 66 && trimmed.starts_with("0x") && decode(&trimmed[2..]).is_ok()
         }));
 }
 
@@ -51,7 +51,7 @@ fn hkdf_from_stdin() {
         .success()
         .stdout(predicate::function(|output: &str| {
             let trimmed = output.trim();
-            trimmed.len() == 64 && decode(trimmed).is_ok()
+            trimmed.len() == 66 && trimmed.starts_with("0x") && decode(&trimmed[2..]).is_ok()
         }));
 }
 
@@ -66,7 +66,7 @@ fn hkdf_from_file() {
         .success()
         .stdout(predicate::function(|output: &str| {
             let trimmed = output.trim();
-            trimmed.len() == 64 && decode(trimmed).is_ok()
+            trimmed.len() == 66 && trimmed.starts_with("0x") && decode(&trimmed[2..]).is_ok()
         }));
 }
 
@@ -74,10 +74,17 @@ fn hkdf_from_file() {
 fn scalar_from_stdin() {
     let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
     cmd.arg("scalar")
-        .write_stdin("7be162d67564e3b4c09655baaabecc3725748133e33ab971e565737f189f3f43");
+        .write_stdin("0x7be162d67564e3b4c09655baaabecc3725748133e33ab971e565737f189f3f43");
     cmd.assert().success().stdout(predicate::eq(
         "30417370258289878983951032069403093024210548576862328133794263911723866186107",
     ));
+}
+
+#[test]
+fn scalar_from_stdin_decimal() {
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("scalar").write_stdin("1234");
+    cmd.assert().success().stdout(predicate::eq("1234"));
 }
 
 #[test]
@@ -85,7 +92,7 @@ fn scalar_from_file() {
     let temp_file = NamedTempFile::new().unwrap();
     fs::write(
         temp_file.path(),
-        "7be162d67564e3b4c09655baaabecc3725748133e33ab971e565737f189f3f43",
+        "0x7be162d67564e3b4c09655baaabecc3725748133e33ab971e565737f189f3f43",
     )
     .unwrap();
 
@@ -97,12 +104,12 @@ fn scalar_from_file() {
 }
 
 #[test]
-fn scalar_invalid_length() {
+fn scalar_invalid_input() {
     let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
-    cmd.arg("scalar").write_stdin("1234");
+    cmd.arg("scalar").write_stdin("not_a_number");
     cmd.assert()
         .failure()
-        .stderr(predicate::str::contains("private key must be 32 bytes"));
+        .stderr(predicate::str::contains("invalid decimal scalar"));
 }
 
 #[test]
@@ -110,7 +117,7 @@ fn scalar_invalid_value() {
     // Value >= curve order should fail (all 0xFFs = 32 bytes)
     let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
     cmd.arg("scalar")
-        .write_stdin("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
+        .write_stdin("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
     cmd.assert()
         .failure()
         .stderr(predicate::str::contains("not a valid scalar"));
@@ -125,7 +132,7 @@ fn pk_from_stdin() {
         .success()
         .stdout(predicate::function(|output: &str| {
             let trimmed = output.trim();
-            trimmed.len() == 96 && decode(trimmed).is_ok()
+            trimmed.len() == 98 && trimmed.starts_with("0x") && decode(&trimmed[2..]).is_ok()
         }));
 }
 
@@ -144,7 +151,7 @@ fn pk_from_file() {
         .success()
         .stdout(predicate::function(|output: &str| {
             let trimmed = output.trim();
-            trimmed.len() == 96 && decode(trimmed).is_ok()
+            trimmed.len() == 98 && trimmed.starts_with("0x") && decode(&trimmed[2..]).is_ok()
         }));
 }
 
@@ -179,7 +186,7 @@ fn sig_from_stdin() {
         .success()
         .stdout(predicate::function(|output: &str| {
             let trimmed = output.trim();
-            trimmed.len() == 192 && decode(trimmed).is_ok()
+            trimmed.len() == 194 && trimmed.starts_with("0x") && decode(&trimmed[2..]).is_ok()
         }));
 }
 
@@ -202,7 +209,7 @@ fn sig_from_file() {
         .success()
         .stdout(predicate::function(|output: &str| {
             let trimmed = output.trim();
-            trimmed.len() == 192 && decode(trimmed).is_ok()
+            trimmed.len() == 194 && trimmed.starts_with("0x") && decode(&trimmed[2..]).is_ok()
         }));
 }
 
@@ -354,7 +361,7 @@ fn compress_g1_compressed_generator() {
     cmd.arg("compress").arg("--g1").write_stdin(G1_GENERATOR);
     cmd.assert()
         .success()
-        .stdout(predicate::eq(G1_GENERATOR.to_string()));
+        .stdout(predicate::eq(format!("0x{}", G1_GENERATOR)));
 }
 
 #[test]
@@ -363,7 +370,7 @@ fn compress_g2_compressed_generator() {
     cmd.arg("compress").arg("--g2").write_stdin(G2_GENERATOR);
     cmd.assert()
         .success()
-        .stdout(predicate::eq(G2_GENERATOR.to_string()));
+        .stdout(predicate::eq(format!("0x{}", G2_GENERATOR)));
 }
 
 #[test]
@@ -375,7 +382,7 @@ fn compress_g1_identity() {
         .arg("identity");
     cmd.assert()
         .success()
-        .stdout(predicate::eq(G1_IDENTITY.to_string()));
+        .stdout(predicate::eq(format!("0x{}", G1_IDENTITY)));
 }
 
 #[test]
@@ -387,7 +394,7 @@ fn compress_g2_identity() {
         .arg("identity");
     cmd.assert()
         .success()
-        .stdout(predicate::eq(G2_IDENTITY.to_string()));
+        .stdout(predicate::eq(format!("0x{}", G2_IDENTITY)));
 }
 
 #[test]
@@ -402,7 +409,7 @@ fn compress_g1_from_file() {
         .arg(temp_file.path());
     cmd.assert()
         .success()
-        .stdout(predicate::eq(G1_GENERATOR.to_string()));
+        .stdout(predicate::eq(format!("0x{}", G1_GENERATOR)));
 }
 
 #[test]
@@ -417,7 +424,7 @@ fn compress_g2_from_file() {
         .arg(temp_file.path());
     cmd.assert()
         .success()
-        .stdout(predicate::eq(G2_GENERATOR.to_string()));
+        .stdout(predicate::eq(format!("0x{}", G2_GENERATOR)));
 }
 
 #[test]
@@ -466,7 +473,7 @@ fn uncompress_g1_generator() {
         .success()
         .stdout(predicate::function(|output: &str| {
             let trimmed = output.trim();
-            trimmed.len() == 192 && decode(trimmed).is_ok()
+            trimmed.len() == 194 && trimmed.starts_with("0x") && decode(&trimmed[2..]).is_ok()
         }));
 }
 
@@ -478,7 +485,7 @@ fn uncompress_g2_generator() {
         .success()
         .stdout(predicate::function(|output: &str| {
             let trimmed = output.trim();
-            trimmed.len() == 384 && decode(trimmed).is_ok()
+            trimmed.len() == 386 && trimmed.starts_with("0x") && decode(&trimmed[2..]).is_ok()
         }));
 }
 
@@ -490,7 +497,7 @@ fn uncompress_g1_identity() {
         .arg("--point")
         .arg("identity");
     // Uncompressed identity is all zeros (192 hex chars)
-    let expected = "00".repeat(96);
+    let expected = format!("0x{}", "00".repeat(96));
     cmd.assert().success().stdout(predicate::eq(expected));
 }
 
@@ -502,7 +509,7 @@ fn uncompress_g2_identity() {
         .arg("--point")
         .arg("identity");
     // Uncompressed identity is all zeros (384 hex chars)
-    let expected = "00".repeat(192);
+    let expected = format!("0x{}", "00".repeat(192));
     cmd.assert().success().stdout(predicate::eq(expected));
 }
 
@@ -520,7 +527,7 @@ fn uncompress_g1_from_file() {
         .success()
         .stdout(predicate::function(|output: &str| {
             let trimmed = output.trim();
-            trimmed.len() == 192 && decode(trimmed).is_ok()
+            trimmed.len() == 194 && trimmed.starts_with("0x") && decode(&trimmed[2..]).is_ok()
         }));
 }
 
@@ -538,7 +545,7 @@ fn uncompress_g2_from_file() {
         .success()
         .stdout(predicate::function(|output: &str| {
             let trimmed = output.trim();
-            trimmed.len() == 384 && decode(trimmed).is_ok()
+            trimmed.len() == 386 && trimmed.starts_with("0x") && decode(&trimmed[2..]).is_ok()
         }));
 }
 
@@ -577,8 +584,8 @@ const G1_GENERATOR: &str = "97f1d3a73197d7942695638c4fa9ac0fc3688c4f9774b905a14e
 // G2 generator compressed (96 bytes)
 const G2_GENERATOR: &str = "93e02b6052719f607dacd3a088274f65596bd0d09920b61ab5da61bbdc7f5049334cf11213945d57e5ac7d055d042b7e024aa2b2f08f0a91260805272dc51051c6e47ad4fa403b02b4510b647ae3d1770bac0326a805bbefd48056c8c121bdb8";
 
-// Scalar value 1 (32 bytes, little-endian encoding)
-const SCALAR_ONE: &str = "0100000000000000000000000000000000000000000000000000000000000000";
+// Scalar value 1 (32 bytes, little-endian encoding, hex with 0x prefix)
+const SCALAR_ONE: &str = "0x0100000000000000000000000000000000000000000000000000000000000000";
 
 #[test]
 fn mul_g1_generator_times_one() {
@@ -590,7 +597,7 @@ fn mul_g1_generator_times_one() {
         .write_stdin(G1_GENERATOR);
     cmd.assert()
         .success()
-        .stdout(predicate::eq(G1_GENERATOR.to_string()));
+        .stdout(predicate::eq(format!("0x{}", G1_GENERATOR)));
 }
 
 #[test]
@@ -607,7 +614,7 @@ fn mul_g1_from_file() {
         .arg(SCALAR_ONE);
     cmd.assert()
         .success()
-        .stdout(predicate::eq(G1_GENERATOR.to_string()));
+        .stdout(predicate::eq(format!("0x{}", G1_GENERATOR)));
 }
 
 #[test]
@@ -620,7 +627,7 @@ fn mul_g2_generator_times_one() {
         .write_stdin(G2_GENERATOR);
     cmd.assert()
         .success()
-        .stdout(predicate::eq(G2_GENERATOR.to_string()));
+        .stdout(predicate::eq(format!("0x{}", G2_GENERATOR)));
 }
 
 #[test]
@@ -637,7 +644,7 @@ fn mul_g2_from_file() {
         .arg(SCALAR_ONE);
     cmd.assert()
         .success()
-        .stdout(predicate::eq(G2_GENERATOR.to_string()));
+        .stdout(predicate::eq(format!("0x{}", G2_GENERATOR)));
 }
 
 #[test]
@@ -650,7 +657,7 @@ fn mul_g1_identity_times_scalar() {
         .write_stdin(G1_IDENTITY);
     cmd.assert()
         .success()
-        .stdout(predicate::eq(G1_IDENTITY.to_string()));
+        .stdout(predicate::eq(format!("0x{}", G1_IDENTITY)));
 }
 
 #[test]
@@ -663,7 +670,7 @@ fn mul_g2_identity_times_scalar() {
         .write_stdin(G2_IDENTITY);
     cmd.assert()
         .success()
-        .stdout(predicate::eq(G2_IDENTITY.to_string()));
+        .stdout(predicate::eq(format!("0x{}", G2_IDENTITY)));
 }
 
 #[test]
@@ -679,13 +686,13 @@ fn mul_g1_matches_pk() {
         .trim()
         .to_string();
 
-    // Now multiply G1 generator by the same private key scalar
+    // Now multiply G1 generator by the same private key scalar (with 0x prefix)
     let mut cmd_mul = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
     cmd_mul
         .arg("mul")
         .arg("--g1")
         .arg("--scalar")
-        .arg(private_key)
+        .arg(format!("0x{}", private_key))
         .write_stdin(G1_GENERATOR);
     cmd_mul
         .assert()
@@ -712,7 +719,7 @@ fn mul_invalid_scalar() {
     cmd.arg("mul")
         .arg("--g1")
         .arg("--scalar")
-        .arg("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
+        .arg("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
         .write_stdin(G1_GENERATOR);
     cmd.assert()
         .failure()
@@ -773,7 +780,7 @@ fn add_g1_identity_plus_generator() {
         .write_stdin(G1_IDENTITY);
     cmd.assert()
         .success()
-        .stdout(predicate::eq(G1_GENERATOR.to_string()));
+        .stdout(predicate::eq(format!("0x{}", G1_GENERATOR)));
 }
 
 #[test]
@@ -787,7 +794,7 @@ fn add_g1_generator_plus_identity() {
         .arg(G1_GENERATOR);
     cmd.assert()
         .success()
-        .stdout(predicate::eq(G1_GENERATOR.to_string()));
+        .stdout(predicate::eq(format!("0x{}", G1_GENERATOR)));
 }
 
 #[test]
@@ -800,7 +807,7 @@ fn add_g2_identity_plus_generator() {
         .write_stdin(G2_IDENTITY);
     cmd.assert()
         .success()
-        .stdout(predicate::eq(G2_GENERATOR.to_string()));
+        .stdout(predicate::eq(format!("0x{}", G2_GENERATOR)));
 }
 
 #[test]
@@ -814,7 +821,7 @@ fn add_g2_generator_plus_identity() {
         .arg(G2_GENERATOR);
     cmd.assert()
         .success()
-        .stdout(predicate::eq(G2_GENERATOR.to_string()));
+        .stdout(predicate::eq(format!("0x{}", G2_GENERATOR)));
 }
 
 #[test]
@@ -828,7 +835,7 @@ fn add_g1_both_identity() {
         .arg("identity");
     cmd.assert()
         .success()
-        .stdout(predicate::eq(G1_IDENTITY.to_string()));
+        .stdout(predicate::eq(format!("0x{}", G1_IDENTITY)));
 }
 
 #[test]
@@ -842,7 +849,7 @@ fn add_g2_both_identity() {
         .arg("identity");
     cmd.assert()
         .success()
-        .stdout(predicate::eq(G2_IDENTITY.to_string()));
+        .stdout(predicate::eq(format!("0x{}", G2_IDENTITY)));
 }
 
 #[test]
@@ -859,7 +866,7 @@ fn add_g1_from_file() {
         .arg("identity");
     cmd.assert()
         .success()
-        .stdout(predicate::eq(G1_GENERATOR.to_string()));
+        .stdout(predicate::eq(format!("0x{}", G1_GENERATOR)));
 }
 
 #[test]
@@ -876,7 +883,7 @@ fn add_g2_from_file() {
         .arg("identity");
     cmd.assert()
         .success()
-        .stdout(predicate::eq(G2_GENERATOR.to_string()));
+        .stdout(predicate::eq(format!("0x{}", G2_GENERATOR)));
 }
 
 #[test]

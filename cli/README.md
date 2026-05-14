@@ -2,13 +2,15 @@
 
 Run `cargo run --help` or `cargo run -- <command> --help` for detailed information about each command.
 
+All hex inputs accept an optional `0x` prefix. All hex outputs include the `0x` prefix.
+
 ### generate-seed
 
 Generate a 32-byte random hex-encoded seed.
 
 ```console
 $ cargo run --quiet -- generate-seed ; echo
-9fb87a5bacb1c54b2e770d6d091da4c04797c1cd760d765ddb026ec3d703d5b2
+0x9fb87a5bacb1c54b2e770d6d091da4c04797c1cd760d765ddb026ec3d703d5b2
 ```
 
 ### hkdf
@@ -18,8 +20,8 @@ Derive a 32-byte PrivateKey from a seed using HKDF-SHA256.
 From the seed above:
 
 ```console
-$ echo "9fb87a5bacb1c54b2e770d6d091da4c04797c1cd760d765ddb026ec3d703d5b2" | cargo run --quiet -- hkdf
-7be162d67564e3b4c09655baaabecc3725748133e33ab971e565737f189f3f43
+$ echo "0x9fb87a5bacb1c54b2e770d6d091da4c04797c1cd760d765ddb026ec3d703d5b2" | cargo run --quiet -- hkdf
+0x7be162d67564e3b4c09655baaabecc3725748133e33ab971e565737f189f3f43
 ```
 
 **From file:**
@@ -34,17 +36,26 @@ $ cargo run --quiet -- hkdf < seed.hex
 
 ### scalar
 
-Convert a 32-byte private key to its BLS12-381 scalar representation (decimal output).
+Convert a scalar value to its BLS12-381 scalar representation (decimal output).
+
+Accepts input as either:
+- Hex with `0x` prefix (raw 32-byte private key)
+- Decimal number (without prefix)
 
 The command validates that:
-- The input is exactly 32 bytes (64 hex characters)
-- The scalar is within the valid curve order range
+- The input is a valid scalar within the curve order range
 
 From the private key derived above:
 
 ```console
-$ echo "7be162d67564e3b4c09655baaabecc3725748133e33ab971e565737f189f3f43" | cargo run --quiet -- scalar
+$ echo "0x7be162d67564e3b4c09655baaabecc3725748133e33ab971e565737f189f3f43" | cargo run --quiet -- scalar
 30417370258289878983951032069403093024210548576862328133794263911723866186107
+```
+
+**With decimal input:**
+```console
+$ echo "1234" | cargo run --quiet -- scalar
+1234
 ```
 
 **From file:**
@@ -68,8 +79,8 @@ The command validates that:
 From the private key derived above:
 
 ```console
-$ echo "7be162d67564e3b4c09655baaabecc3725748133e33ab971e565737f189f3f43" | cargo run --quiet -- pk
-ab21260f2c9d1fb30a46aec117e8c4a0f65f9a8f5b177361c3680da3097eb448b3eb6d0960776f73f4e5bb41d1256371
+$ echo "0x7be162d67564e3b4c09655baaabecc3725748133e33ab971e565737f189f3f43" | cargo run --quiet -- pk
+0xab21260f2c9d1fb30a46aec117e8c4a0f65f9a8f5b177361c3680da3097eb448b3eb6d0960776f73f4e5bb41d1256371
 ```
 
 **From file:**
@@ -103,8 +114,8 @@ The command validates that:
 From the private key derived above:
 
 ```console
-$ echo "7be162d67564e3b4c09655baaabecc3725748133e33ab971e565737f189f3f43" | cargo run --quiet -- sig --msg "hello world"
-a00ac57c24c5ec4db94fe1fee003f7dd15c100041cafba26ba97c0c6e18e04106c4d0dbd03ab5ba6c08ccea14a9ddc5c06d326a27134b6d150343064697bd1d9ed8883b1cdc60fe97baf7d67da28a1e0f63f0456deb99987389183b94ef60798
+$ echo "0x7be162d67564e3b4c09655baaabecc3725748133e33ab971e565737f189f3f43" | cargo run --quiet -- sig --msg "hello world"
+0xa00ac57c24c5ec4db94fe1fee003f7dd15c100041cafba26ba97c0c6e18e04106c4d0dbd03ab5ba6c08ccea14a9ddc5c06d326a27134b6d150343064697bd1d9ed8883b1cdc60fe97baf7d67da28a1e0f63f0456deb99987389183b94ef60798
 ```
 
 **From file with private key and message:**
@@ -126,33 +137,38 @@ Multiply a BLS12-381 point (G1 or G2) by a scalar value.
 The command validates that:
 - Exactly one of `--g1` or `--g2` is provided
 - The point is a valid compressed point for the chosen group
-- The scalar is exactly 32 bytes (64 hex characters) and within the valid curve order range
+- The scalar is within the valid curve order range
 
 **Parameters:**
 - `--g1` or `--g2` - Group selection (mutually exclusive, required)
 - `--point` - Point (from stdin or file, as hex)
-- `--scalar` - Scalar value (hex, 32 bytes, required)
+- `--scalar` - Scalar value (hex with `0x` prefix, or decimal without prefix)
 
 **Examples:**
 
 Multiply the G1 generator by scalar 1:
 ```console
-$ echo "97f1d3a73197d7942695638c4fa9ac0fc3688c4f9774b905a14e3a3f171bac586c55e83ff97a1aeffb3af00adb22c6bb" | cargo run --quiet -- mul --g1 --scalar "0100000000000000000000000000000000000000000000000000000000000000"
+$ echo "97f1d3a73197d7942695638c4fa9ac0fc3688c4f9774b905a14e3a3f171bac586c55e83ff97a1aeffb3af00adb22c6bb" | cargo run --quiet -- mul --g1 --scalar "0x0100000000000000000000000000000000000000000000000000000000000000"
+```
+
+Using decimal scalar:
+```console
+$ echo "97f1d3a73197d7942695638c4fa9ac0fc3688c4f9774b905a14e3a3f171bac586c55e83ff97a1aeffb3af00adb22c6bb" | cargo run --quiet -- mul --g1 --scalar "1"
 ```
 
 Multiply the G2 generator by scalar 1:
 ```console
-$ echo "93e02b6052719f607dacd3a088274f65596bd0d09920b61ab5da61bbdc7f5049334cf11213945d57e5ac7d055d042b7e024aa2b2f08f0a91260805272dc51051c6e47ad4fa403b02b4510b647ae3d1770bac0326a805bbefd48056c8c121bdb8" | cargo run --quiet -- mul --g2 --scalar "0100000000000000000000000000000000000000000000000000000000000000"
+$ echo "93e02b6052719f607dacd3a088274f65596bd0d09920b61ab5da61bbdc7f5049334cf11213945d57e5ac7d055d042b7e024aa2b2f08f0a91260805272dc51051c6e47ad4fa403b02b4510b647ae3d1770bac0326a805bbefd48056c8c121bdb8" | cargo run --quiet -- mul --g2 --scalar "0x0100000000000000000000000000000000000000000000000000000000000000"
 ```
 
 **From file:**
 ```console
-$ cargo run --quiet -- mul --g1 --point point.hex --scalar "scalar_hex"
+$ cargo run --quiet -- mul --g1 --point point.hex --scalar "0xscalar_hex"
 ```
 
 **From stdin:**
 ```console
-$ cargo run --quiet -- mul --g2 --scalar "scalar_hex" < point.hex
+$ cargo run --quiet -- mul --g2 --scalar "0xscalar_hex" < point.hex
 ```
 
 ### add

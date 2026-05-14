@@ -1,3 +1,4 @@
+use super::strip_0x;
 use hex::decode;
 use std::error::Error;
 use std::fs::File;
@@ -53,8 +54,9 @@ pub fn run(args: Args) -> Result<(), Box<dyn Error>> {
         line.trim().to_string()
     };
 
-    let signature_bytes = decode(&signature_hex).map_err(|_| "invalid hex signature")?;
-    let public_key_bytes = decode(&public_key_hex).map_err(|_| "invalid hex public key")?;
+    let signature_bytes = decode(strip_0x(&signature_hex)).map_err(|_| "invalid hex signature")?;
+    let public_key_bytes =
+        decode(strip_0x(&public_key_hex)).map_err(|_| "invalid hex public key")?;
 
     let is_valid = bls12_381_aiken_cli::verify(
         args.msg.as_bytes(),

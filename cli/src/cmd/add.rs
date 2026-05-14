@@ -1,3 +1,4 @@
+use super::strip_0x;
 use clap::ArgGroup;
 use hex::decode;
 use std::error::Error;
@@ -48,7 +49,7 @@ fn resolve_point(value: &str, group: &bls12_381_aiken_cli::CurveGroup) -> Result
             bls12_381_aiken_cli::CurveGroup::G2 => decode(G2_GENERATOR).unwrap(),
         });
     }
-    decode(value).map_err(|_| "invalid hex point".to_string())
+    decode(strip_0x(value)).map_err(|_| "invalid hex point".to_string())
 }
 
 pub fn run(args: Args) -> Result<(), Box<dyn Error>> {
@@ -81,7 +82,7 @@ pub fn run(args: Args) -> Result<(), Box<dyn Error>> {
     let result =
         bls12_381_aiken_cli::group_add(&group, &left_bytes, &right_bytes).map_err(|e| e)?;
 
-    print!("{}", hex::encode(result));
+    print!("0x{}", hex::encode(result));
 
     Ok(())
 }
