@@ -517,5 +517,39 @@ $ echo "$G1_UNCOMPRESSED" | cargo run --quiet -- pairing --g2 "$TWENTY_SIX_G2"
 
 Both pairing outputs are identical, confirming that `x × y = 26` holds — without the verifier ever learning `x = 13` or `y = 2`.
 
+**Reverse assignment: X in G2, y in G1**
+
+The assignment of values to groups is flexible. The prover could instead send `X = 13·G2` and `Y = 2·G1`. The verifier checks `e(Y, X) = e(2·G1, 13·G2)` against `e(G1, 26·G2)` — the pairing output is identical because `e(2·G1, 13·G2) = e(13·G1, 2·G2)`:
+
+```console
+# Prover: X = 13 * G2 (uncompressed)
+$ X_G2_COMPRESSED=$(cargo run --quiet -- mul --g2 --point generator --scalar "13")
+$ echo "$X_G2_COMPRESSED"
+0x8bf78a97086750eb166986ed8e428ca1d23ae3bbf8b2ee67451d7dd84445311e8bc8ab558b0bc008199f577195fc39b7152110e866f1a6e8c5348f6e005dbd93de671b7d0fbfa04d6614bcdd27a3cb2a70f0deacb3608ba95226268481a0be7c
+
+$ X_G2=$(echo "$X_G2_COMPRESSED" | cargo run --quiet -- uncompress --g2)
+$ echo "$X_G2"
+0x0bf78a97086750eb166986ed8e428ca1d23ae3bbf8b2ee67451d7dd84445311e8bc8ab558b0bc008199f577195fc39b7152110e866f1a6e8c5348f6e005dbd93de671b7d0fbfa04d6614bcdd27a3cb2a70f0deacb3608ba95226268481a0be7c0a298f69fd652551e12219252baacab101768fc6651309450e49c7d3bb52b7547f218d12de64961aa7f059025b8e0cb50845be51ad0d708657bfb0da8eec64cd7779c50d90b59a3ac6a2045cad0561d654af9a84dd105cea5409d2adf286b561
+
+# Prover: Y = 2 * G1 (uncompressed)
+$ Y_G1_COMPRESSED=$(cargo run --quiet -- mul --g1 --point generator --scalar "2")
+$ echo "$Y_G1_COMPRESSED"
+0xa572cbea904d67468808c8eb50a9450c9721db309128012543902d0ac358a62ae28f75bb8f1c7c42c39a8c5529bf0f4e
+
+$ Y_G1=$(echo "$Y_G1_COMPRESSED" | cargo run --quiet -- uncompress --g1)
+$ echo "$Y_G1"
+0x0572cbea904d67468808c8eb50a9450c9721db309128012543902d0ac358a62ae28f75bb8f1c7c42c39a8c5529bf0f4e166a9d8cabc673a322fda673779d8e3822ba3ecb8670e461f73bb9021d5fd76a4c56d9d4cd16bd1bba86881979749d28
+
+# Verifier: e(Y, X) — note Y (G1) comes first, then X (G2)
+$ echo "$Y_G1" | cargo run --quiet -- pairing --g2 "$X_G2"
+0x0390df3dd3d5a63d5c7c2f911b665b134df8eb3ada0181d15aec93e1dd2e783cf47d0f47eeb642c68a566e9d00b30817a879e82adb993a1efb41c4a807c1c707762b102ee490de8ab6a32211c029f019ea8e743edf34e61b0c8ecd6df6566300ed58a2c2f204178bee12aeba33f89ff40d3408d9f485caa6b403b5759a42f1884c45b71433f491d98d2196e02f667716aefb3dfab74dd28a32d8003a8c471a12805b5fbe39481259e4f181c3af1a924319551bbe9758a9a3dbfa01fa5886fb129cf1fd13a2c970e6abe724cac7177e77b0ae2f5c4644192e446b0065da5e9a3f5dd9807783537d49497667225492b00dbf18211d38a9078f6872d9598852b3b28758d34c21782620e823cea6a50be9926206e42060665d6d03b3920cf2216705738d99f55d6611edc37d2722af1c5668b393ee09a8b84a74fc88c513744ece6ad7e4f67bc26b8d5f02e9266f5a0915182626cdc8649c3ddb029a30f67db391f143b17cb4eddae49f45b98e5a2659350dca820001b488d0c34f186cdf9d832a0bfc6090c4545df018615935bd3427b9dcdcd6abb214ce0f2a0ef4a4f029007bd5af8f2409f0683c64dc1c1f49b16bc50dea411b28e2cb0615ebc532efbbe28e8e699c3850fd31d25f0ca8ad43c90b22976556cd4303f638244bbc20ab48a3960460205ce3c61d7266c12bcdaf1505e0f162d0a0777efe391c0c0c8ceb3cb4a3fcdc9a2278ec3015ca84f7a759ade85819a8b7d201b7a4c88692814ec034b369e34550ed450498c7434152b633cd22e06ddba10f0add047fa3a3f99112f7c22417
+
+# Verifier: e(G1, 26 * G2) — same reference check
+$ echo "$G1_UNCOMPRESSED" | cargo run --quiet -- pairing --g2 "$TWENTY_SIX_G2"
+0x0390df3dd3d5a63d5c7c2f911b665b134df8eb3ada0181d15aec93e1dd2e783cf47d0f47eeb642c68a566e9d00b30817a879e82adb993a1efb41c4a807c1c707762b102ee490de8ab6a32211c029f019ea8e743edf34e61b0c8ecd6df6566300ed58a2c2f204178bee12aeba33f89ff40d3408d9f485caa6b403b5759a42f1884c45b71433f491d98d2196e02f667716aefb3dfab74dd28a32d8003a8c471a12805b5fbe39481259e4f181c3af1a924319551bbe9758a9a3dbfa01fa5886fb129cf1fd13a2c970e6abe724cac7177e77b0ae2f5c4644192e446b0065da5e9a3f5dd9807783537d49497667225492b00dbf18211d38a9078f6872d9598852b3b28758d34c21782620e823cea6a50be9926206e42060665d6d03b3920cf2216705738d99f55d6611edc37d2722af1c5668b393ee09a8b84a74fc88c513744ece6ad7e4f67bc26b8d5f02e9266f5a0915182626cdc8649c3ddb029a30f67db391f143b17cb4eddae49f45b98e5a2659350dca820001b488d0c34f186cdf9d832a0bfc6090c4545df018615935bd3427b9dcdcd6abb214ce0f2a0ef4a4f029007bd5af8f2409f0683c64dc1c1f49b16bc50dea411b28e2cb0615ebc532efbbe28e8e699c3850fd31d25f0ca8ad43c90b22976556cd4303f638244bbc20ab48a3960460205ce3c61d7266c12bcdaf1505e0f162d0a0777efe391c0c0c8ceb3cb4a3fcdc9a2278ec3015ca84f7a759ade85819a8b7d201b7a4c88692814ec034b369e34550ed450498c7434152b633cd22e06ddba10f0add047fa3a3f99112f7c22417
+```
+
+The output matches the original case — the verifier accepts either assignment, since `e(13·G1, 2·G2) = e(2·G1, 13·G2)`.
+
 This technique, known as a **quadratic arithmetic program**, is the foundation of zk-SNARKs and other advanced zero-knowledge protocols built on BLS12-381.
 ```
