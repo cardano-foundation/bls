@@ -774,3 +774,97 @@ fn test_interoperability_pairing_xy_equals_26() {
     let gt3 = midnight_curves::bls12_381::pairing(&y_g1, &x_g2);
     assert_eq!(gt1, gt3);
 }
+
+#[test]
+fn test_interoperability_pairing_neg_g1_g2() {
+    use midnight_curves::bls12_381::{G1Affine, G1Projective, G2Affine, G2Projective};
+    use midnight_curves::pairing::group::Group;
+    use std::ops::Neg;
+
+    // (a) Compute e(-G1, G2) and e(G1, -G2)
+    let g1 = G1Affine::from(G1Projective::generator());
+    let g2 = G2Affine::from(G2Projective::generator());
+    let neg_g1 = g1.neg();
+    let neg_g2 = g2.neg();
+
+    let gt1 = midnight_curves::bls12_381::pairing(&neg_g1, &g2);
+    let gt2 = midnight_curves::bls12_381::pairing(&g1, &neg_g2);
+
+    // (b) e(-G1, G2) == e(G1, -G2)
+    assert_eq!(gt1, gt2);
+
+    // (c) Aiken: bls12_381_final_verify(miller_loop(-G1, G2), miller_loop(G1, -G2))
+    run_aiken_check(&aiken_project_dir());
+}
+
+#[test]
+fn test_interoperability_pairing_neg_scaled() {
+    use midnight_curves::bls12_381::{G1Affine, G1Projective, G2Affine, G2Projective};
+    use midnight_curves::pairing::group::Group;
+    use midnight_curves::BlsScalar;
+    use std::ops::Mul;
+    use std::ops::Neg;
+
+    // (a) Compute e(-(13*G1), 2*G2) and e(13*G1, -(2*G2))
+    let x_g1 = G1Affine::from(G1Projective::generator().mul(&BlsScalar::from(13u64)));
+    let y_g2 = G2Affine::from(G2Projective::generator().mul(&BlsScalar::from(2u64)));
+    let neg_x_g1 = x_g1.neg();
+    let neg_y_g2 = y_g2.neg();
+
+    let gt1 = midnight_curves::bls12_381::pairing(&neg_x_g1, &y_g2);
+    let gt2 = midnight_curves::bls12_381::pairing(&x_g1, &neg_y_g2);
+
+    // (b) e(-(13*G1), 2*G2) == e(13*G1, -(2*G2))
+    assert_eq!(gt1, gt2);
+
+    // (c) Aiken: same verification
+    run_aiken_check(&aiken_project_dir());
+}
+
+#[test]
+fn test_interoperability_pairing_neg_add_inverse() {
+    use midnight_curves::bls12_381::{G1Affine, G1Projective, G2Affine, G2Projective};
+    use midnight_curves::pairing::group::prime::PrimeCurveAffine;
+    use midnight_curves::pairing::group::Group;
+    use std::ops::Neg;
+
+    // (a) G1 + (-G1) = identity, so e(G1 + (-G1), G2) == e(identity, G2)
+    let g1 = G1Affine::from(G1Projective::generator());
+    let g2 = G2Affine::from(G2Projective::generator());
+    let neg_g1 = g1.neg();
+    let sum = G1Projective::from(g1) + G1Projective::from(neg_g1);
+
+    let g1_id = G1Affine::identity();
+    let sum_affine = G1Affine::from(sum);
+
+    let gt1 = midnight_curves::bls12_381::pairing(&sum_affine, &g2);
+    let gt2 = midnight_curves::bls12_381::pairing(&g1_id, &g2);
+    assert_eq!(gt1, gt2);
+
+    // (b) Aiken: same verification
+    run_aiken_check(&aiken_project_dir());
+}
+
+#[test]
+fn test_interoperability_pairing_neg_add_inverse_g2() {
+    use midnight_curves::bls12_381::{G1Affine, G1Projective, G2Affine, G2Projective};
+    use midnight_curves::pairing::group::prime::PrimeCurveAffine;
+    use midnight_curves::pairing::group::Group;
+    use std::ops::Neg;
+
+    // (a) G2 + (-G2) = identity, so e(G1, G2 + (-G2)) == e(G1, identity)
+    let g1 = G1Affine::from(G1Projective::generator());
+    let g2 = G2Affine::from(G2Projective::generator());
+    let neg_g2 = g2.neg();
+    let sum = G2Projective::from(g2) + G2Projective::from(neg_g2);
+
+    let g2_id = G2Affine::identity();
+    let sum_affine = G2Affine::from(sum);
+
+    let gt1 = midnight_curves::bls12_381::pairing(&g1, &sum_affine);
+    let gt2 = midnight_curves::bls12_381::pairing(&g1, &g2_id);
+    assert_eq!(gt1, gt2);
+
+    // (b) Aiken: same verification
+    run_aiken_check(&aiken_project_dir());
+}

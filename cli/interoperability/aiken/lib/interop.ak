@@ -262,3 +262,48 @@ test interop_pairing_swap_groups() {
     builtin.bls12_381_miller_loop(y_g1, x_g2),
   )
 }
+
+// Pairing negation: e(-G1, G2) == e(G1, -G2)
+// Negating either input yields the same GT element
+test interop_pairing_neg_g1_g2() {
+  let neg_g1 = builtin.bls12_381_g1_neg(generator)
+  let neg_g2 = builtin.bls12_381_g2_neg(g2.generator)
+  builtin.bls12_381_final_verify(
+    builtin.bls12_381_miller_loop(neg_g1, g2.generator),
+    builtin.bls12_381_miller_loop(generator, neg_g2),
+  )
+}
+
+// Pairing negation: e(-G1, G2) == e(G1, -G2) with scalar multiplication
+// e(-(13*G1), 2*G2) == e(13*G1, -(2*G2))
+test interop_pairing_neg_scaled() {
+  let x_g1 = builtin.bls12_381_g1_scalar_mul(13, generator)
+  let neg_x_g1 = builtin.bls12_381_g1_neg(x_g1)
+  let y_g2 = builtin.bls12_381_g2_scalar_mul(2, g2.generator)
+  let neg_y_g2 = builtin.bls12_381_g2_neg(y_g2)
+  builtin.bls12_381_final_verify(
+    builtin.bls12_381_miller_loop(neg_x_g1, y_g2),
+    builtin.bls12_381_miller_loop(x_g1, neg_y_g2),
+  )
+}
+
+// Pairing with negated add: e(G + (-G), G2) == e(identity, G2)
+// Since G + (-G) = identity, both sides should be identity in GT
+test interop_pairing_neg_add_inverse() {
+  let neg_g1 = builtin.bls12_381_g1_neg(generator)
+  let sum = builtin.bls12_381_g1_add(generator, neg_g1)
+  builtin.bls12_381_final_verify(
+    builtin.bls12_381_miller_loop(sum, g2.generator),
+    builtin.bls12_381_miller_loop(zero, g2.generator),
+  )
+}
+
+// Pairing: e(identity, G2) == e(-G1 + G1, G2)  (G2 variant)
+test interop_pairing_neg_add_inverse_g2() {
+  let neg_g2 = builtin.bls12_381_g2_neg(g2.generator)
+  let sum = builtin.bls12_381_g2_add(g2.generator, neg_g2)
+  builtin.bls12_381_final_verify(
+    builtin.bls12_381_miller_loop(generator, sum),
+    builtin.bls12_381_miller_loop(generator, g2.zero),
+  )
+}
