@@ -389,3 +389,62 @@ $ cargo run --quiet -- compress --g1 --point identity
 $ cargo run --quiet -- uncompress --g1 --point identity
 0x000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 ```
+
+### pairing
+
+Compute the optimal Ate pairing `e(G1, G2)` using the miller loop. Both points must be in **uncompressed** form (96 bytes / 192 hex chars for G1, 192 bytes / 384 hex chars for G2). The output is a 1152-hex-char (576-byte) `Fp12` element.
+
+The `--g1` and `--g2` flags accept the point hex directly. If one is omitted, that point is read from stdin (or from a file via `--g1-file` / `--g2-file`).
+
+**Using the `x + y = 23` G1 result with G2 generator:**
+
+First, get the uncompressed G2 generator. Then run `e(23*G1, G2_gen)`:
+
+```console
+$ G2_UNCOMPRESSED=$(cargo run --quiet -- uncompress --g2 --point generator)
+
+$ TWENTY_THREE=$(cargo run --quiet -- mul --g1 --point generator --scalar "23")
+$ TWENTY_THREE_UNCOMPRESSED=$(echo "$TWENTY_THREE" | cargo run --quiet -- uncompress --g1)
+
+$ echo "$TWENTY_THREE_UNCOMPRESSED" | cargo run --quiet -- pairing --g2 "$G2_UNCOMPRESSED"
+0xc5851fa033e47219382577fd762bd397f9cd6bc96f54cec81406d466733ef6ce80378481273411a625d8c63f8a44f31395699d2eb03163d27d7e79f782a4689d92ea398d24299b9caa0731e1a21c80f466b0bcbd32076ca1780436baafa43c0841b61609db61e2590d963eb2f4b61627459cbda0105be5c8a8ed4d9cd90bdb0bc5aafd57bf9ef88c5e7a779e92b7d612355fe1b08851c85f6563098f3a6ea0342cd62ae0a62631db0b999a7da95a6ffc10c289ebf5552fa189886f923a70231778878271298f58938575ab11865bf643df9f27ecf5aa8331f69dc98ae1d773fab0994ca6a676e1641f8f38588ca79f1712ef2aca110a2a676bf1a32ab5b9110d6e059d69d01244a4a55b1a2277011dc02955736cdecee06639c3dd9f1ea7f50579c662b0a1880ad30483fc355d6ac55a0d291fa8a634c8d0c70737dac23054cdf00a5080f77fc2f0ae2ed7e2a65d240956511b7976062e9f13fe184923c8d1e2f41b563c9f459e4cc1e3d3b9535ee8a32000a7211e120a82cc9ac5418361af15b13a99248c65957cb986a81c7238eb73bc34744749d756528b4a50ea0219a48b6dce860cf8d3a304aa6e68fb874aa61826cf20b91be783bb4539a792ac77522aa046f0949fe50efcf7586078f3cd5871f645f9821b06c17c67e5db9faa47f80357e63461a5db78806e8a99439aecd71c6637991a9a59aab144ee42082ff6a0c9fadf05b6e39b158ec23ff14a0dba860cb1ff526aa0f20fe86c901a7248ca94761485b0033e188375e2e4ce40ddaf67f5fca526e5d2966d9a42221f86499f7e19
+```
+
+**Pairing with identity:**
+
+`e(identity, anything) = e(anything, identity) = 1` (the identity element in GT):
+
+```console
+$ G1_ID_UNCOMPRESSED=$(cargo run --quiet -- uncompress --g1 --point identity)
+$ G2_ID_UNCOMPRESSED=$(cargo run --quiet -- uncompress --g2 --point identity)
+$ G2_UNCOMPRESSED=$(cargo run --quiet -- uncompress --g2 --point generator)
+$ G1_UNCOMPRESSED=$(cargo run --quiet -- uncompress --g1 --point generator)
+
+$ echo "$G1_ID_UNCOMPRESSED" | cargo run --quiet -- pairing --g2 "$G2_UNCOMPRESSED"
+0xfdff02000000097602000cc40b00f4ebba58c7535798485f455752705358ce776dec56a2971a075c93e480fac35ef61500a08708312eade1efb9f6c2ee4d4a6a25eb74abae0954e760d32ecedf7fe8c66196cf887d28c7c00e58e0a6b4c400b47c9d7a4e3bc88c58d300358ae4d03201c7e6d4b139cc11b1db1d30ab66965e9c791af75167572e3317eafeda1b826b13140f866469a68cb324a0199c1bd7b42dfd52c60a06a9c24ae2d86c8efb256e494f78970a2fba8491dc8005f1de66a481d3e7dd781c9b1f57e65ac4855a8932ed6b464df0ac7fd5dc3f7f8f8b5ba8a48a9d4431227fbcc50ec44c5f43e8fe24fa9d3df38f6f795705e2f1d608de324d15b8cf356e70ffffba63f56ea68baa747b8463e5d3f5ffdaebc669560fa38bdf7b8bba3ecf79dc58d1483174b49699d1df04e816e03870eb1500cf25e8bb2069e54232273b6dc5c603321797a8801b51f0ba0e81e3715f1120082d25f71f41f0f800c8b8e8aac133e68faccb851ae0eee16e53b2df5b7c126389010a2bea83d77f18b3e5b4ede0a4f32b70f01cf3bc20877c850da86c27cae3e06e83f20a3ea683eca9105ee627881f4f8c7f19446989b6563dbfb8bbcfd510dc9c065faf4f6502e3f01607e6ea05255065b40c9f1102cfbb914d767b48c77ef254cb68b90b116449f62d5f20168cf61b6e282a54eb244e844f7399e4ec79de135fa29904bddeb18926bde3c1266cb7d9e3d80d0a960a56b9931bab51f1502302362011
+
+$ echo "$G1_UNCOMPRESSED" | cargo run --quiet -- pairing --g2 "$G2_ID_UNCOMPRESSED"
+0xfdff02000000097602000cc40b00f4ebba58c7535798485f455752705358ce776dec56a2971a075c93e480fac35ef61500a08708312eade1efb9f6c2ee4d4a6a25eb74abae0954e760d32ecedf7fe8c66196cf887d28c7c00e58e0a6b4c400b47c9d7a4e3bc88c58d300358ae4d03201c7e6d4b139cc11b1db1d30ab66965e9c791af75167572e3317eafeda1b826b13140f866469a68cb324a0199c1bd7b42dfd52c60a06a9c24ae2d86c8efb256e494f78970a2fba8491dc8005f1de66a481d3e7dd781c9b1f57e65ac4855a8932ed6b464df0ac7fd5dc3f7f8f8b5ba8a48a9d4431227fbcc50ec44c5f43e8fe24fa9d3df38f6f795705e2f1d608de324d15b8cf356e70ffffba63f56ea68baa747b8463e5d3f5ffdaebc669560fa38bdf7b8bba3ecf79dc58d1483174b49699d1df04e816e03870eb1500cf25e8bb2069e54232273b6dc5c603321797a8801b51f0ba0e81e3715f1120082d25f71f41f0f800c8b8e8aac133e68faccb851ae0eee16e53b2df5b7c126389010a2bea83d77f18b3e5b4ede0a4f32b70f01cf3bc20877c850da86c27cae3e06e83f20a3ea683eca9105ee627881f4f8c7f19446989b6563dbfb8bbcfd510dc9c065faf4f6502e3f01607e6ea05255065b40c9f1102cfbb914d767b48c77ef254cb68b90b116449f62d5f20168cf61b6e282a54eb244e844f7399e4ec79de135fa29904bddeb18926bde3c1266cb7d9e3d80d0a960a56b9931bab51f1502302362011
+```
+
+Both produce the same output — the identity element in GT — confirming that pairing with the identity point always yields the identity in the target group.
+
+**All input modes:**
+
+```console
+$ G1_UNCOMPRESSED=$(cargo run --quiet -- uncompress --g1 --point generator)
+$ G2_UNCOMPRESSED=$(cargo run --quiet -- uncompress --g2 --point generator)
+
+# G1 from stdin, G2 via --g2
+$ echo "$G1_UNCOMPRESSED" | cargo run --quiet -- pairing --g2 "$G2_UNCOMPRESSED"
+
+# G2 from stdin, G1 via --g1
+$ echo "$G2_UNCOMPRESSED" | cargo run --quiet -- pairing --g1 "$G1_UNCOMPRESSED"
+
+# Both via --g1 and --g2
+$ cargo run --quiet -- pairing --g1 "$G1_UNCOMPRESSED" --g2 "$G2_UNCOMPRESSED"
+
+# Both from files
+$ echo "$G1_UNCOMPRESSED" > g1.hex && echo "$G2_UNCOMPRESSED" > g2.hex
+$ cargo run --quiet -- pairing --g1-file g1.hex --g2-file g2.hex
+```
