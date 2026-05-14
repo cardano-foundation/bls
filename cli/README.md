@@ -285,3 +285,52 @@ $ cargo run --quiet -- uncompress --g1 --point identity
 ```console
 $ cargo run --quiet -- uncompress --g1 --point point.hex
 ```
+
+### Practical example: solving x + y = 23
+
+Show that `10 * G + 13 * G = 23 * G` for both G1 and G2 groups, demonstrating the homomorphic property of BLS12-381 points. The special value `generator` can be used with `--point` to refer to the group generator.
+
+**G1:**
+
+Compute `10 * G1` and `13 * G1`, then add them and verify the result equals `23 * G1`:
+
+```console
+$ TEN=$(cargo run --quiet -- mul --g1 --point generator --scalar "10")
+$ THIRTEEN=$(cargo run --quiet -- mul --g1 --point generator --scalar "13")
+
+$ echo "$TEN"
+0xaf81da25ecf1c84b577fefbedd61077a81dc43b00304015b2b596ab67f00e41c86bb00ebd0f90d4b125eb0539891aeed
+
+$ echo "$THIRTEEN"
+0x851f8a0b82a6d86202a61cbc3b0f3db7d19650b914587bde4715ccd372e1e40cab95517779d840416e1679c84a6db24e
+
+$ echo "$TEN" | cargo run --quiet -- add --g1 --point_right "$THIRTEEN"
+0x8c8b694b04d98a749a0763c72fc020ef61b2bb3f63ebb182cb2e568f6a8b9ca3ae013ae78317599e7e7ba2a528ec754a
+
+$ cargo run --quiet -- mul --g1 --point generator --scalar "23"
+0x8c8b694b04d98a749a0763c72fc020ef61b2bb3f63ebb182cb2e568f6a8b9ca3ae013ae78317599e7e7ba2a528ec754a
+```
+
+The output of `10 * G1 + 13 * G1` matches `23 * G1`, confirming that scalar multiplication distributes over point addition in G1.
+
+**G2:**
+
+The same property holds for G2:
+
+```console
+$ cargo run --quiet -- mul --g2 --point generator --scalar "10"
+0xafb665f5a7559cb0fa1300048a0e6f1ab5547226e86f8e752dd13c28eda4168492e3d3bf2f8a6b230dd57f79b1afa9911796abe0d9e4a703962be528e6a5cb65c60725886f925db0e2a89107ec248bb39fa332bc63bd91d28ae66e0dfce8f754
+
+$ cargo run --quiet -- mul --g2 --point generator --scalar "13"
+0x8bf78a97086750eb166986ed8e428ca1d23ae3bbf8b2ee67451d7dd84445311e8bc8ab558b0bc008199f577195fc39b7152110e866f1a6e8c5348f6e005dbd93de671b7d0fbfa04d6614bcdd27a3cb2a70f0deacb3608ba95226268481a0be7c
+
+$ cargo run --quiet -- mul --g2 --point generator --scalar "23"
+0x901e147f8bd7682b47b3a6cc0c552c26ce90b9ce0daef21f7f634b3360483afa14a11e6745e7de01a35c65b396a1a127131747485cce9a5c32837a964b8c0689ff70cb4702c6520f2220ab95192d73ae9508c5b998ffb0be40520926846ce3f1
+
+$ TEN=$(cargo run --quiet -- mul --g2 --point generator --scalar "10")
+$ THIRTEEN=$(cargo run --quiet -- mul --g2 --point generator --scalar "13")
+$ echo "$TEN" | cargo run --quiet -- add --g2 --point_right "$THIRTEEN"
+0x901e147f8bd7682b47b3a6cc0c552c26ce90b9ce0daef21f7f634b3360483afa14a11e6745e7de01a35c65b396a1a127131747485cce9a5c32837a964b8c0689ff70cb4702c6520f2220ab95192d73ae9508c5b998ffb0be40520926846ce3f1
+```
+
+The output of `10 * G2 + 13 * G2` matches `23 * G2`, confirming the same distributive property in G2.
