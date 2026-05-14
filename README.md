@@ -345,10 +345,10 @@ In order to do it the prover can use either G1 or G2 curve. Let's start with the
 ```bash
 # verifier side
 λ cargo run --quiet mul --g1 --point generator --scalar 10
-af81da25ecf1c84b577fefbedd61077a81dc43b00304015b2b596ab67f00e41c86bb00ebd0f90d4b125eb0539891aeed
+0xaf81da25ecf1c84b577fefbedd61077a81dc43b00304015b2b596ab67f00e41c86bb00ebd0f90d4b125eb0539891aeed
 
 λ cargo run --quiet mul --g1 --point generator --scalar 13
-851f8a0b82a6d86202a61cbc3b0f3db7d19650b914587bde4715ccd372e1e40cab95517779d840416e1679c84a6db24e
+0x851f8a0b82a6d86202a61cbc3b0f3db7d19650b914587bde4715ccd372e1e40cab95517779d840416e1679c84a6db24e
 ```
 
 Now the verifier sends those two points in G1 and claims they are the solution of the equation both sides are aware of.
@@ -356,15 +356,42 @@ The prover checks that claim:
 
 ```bash
 λ cargo run --quiet mul --g1 --point generator --scalar 23
-8c8b694b04d98a749a0763c72fc020ef61b2bb3f63ebb182cb2e568f6a8b9ca3ae013ae78317599e7e7ba2a528ec754a
+0x8c8b694b04d98a749a0763c72fc020ef61b2bb3f63ebb182cb2e568f6a8b9ca3ae013ae78317599e7e7ba2a528ec754a
 
-λ echo -n af81da25ecf1c84b577fefbedd61077a81dc43b00304015b2b596ab67f00e41c86bb00ebd0f90d4b125eb0539891aeed | \
-> cargo run --quiet add --g1 --point_right 851f8a0b82a6d86202a61cbc3b0f3db7d19650b914587bde4715ccd372e1e40cab95517779d840416e1679c84a6db24e
-8c8b694b04d98a749a0763c72fc020ef61b2bb3f63ebb182cb2e568f6a8b9ca3ae013ae78317599e7e7ba2a528ec754a
+λ echo -n 0xaf81da25ecf1c84b577fefbedd61077a81dc43b00304015b2b596ab67f00e41c86bb00ebd0f90d4b125eb0539891aeed | \
+> cargo run --quiet add --g1 --point_right 0x851f8a0b82a6d86202a61cbc3b0f3db7d19650b914587bde4715ccd372e1e40cab95517779d840416e1679c84a6db24e
+0x8c8b694b04d98a749a0763c72fc020ef61b2bb3f63ebb182cb2e568f6a8b9ca3ae013ae78317599e7e7ba2a528ec754a
 ```
 
 Indeed! The claim of the prover is validated! The verifier used homomorphic encryption property, meaning `x+y=23` in both number and point space!
 The same is true when both parties agree to work within G2 groups.
+
+The non-linear case is where pairings come in. A prover can prove knowledge of `x` and `y` such that `x × y = 26`
+without revealing them — by sending **only points** and relying on bilinearity of pairings.
+
+```bash
+# Prover knows x=13, y=2 and sends X=13*G1 (uncompressed), Y=2*G2 (uncompressed)
+# Verifier checks e(X, Y) == e(G1, 26*G2), a consequence of x*y = 26
+
+# Prover computes points (uncompressed)
+λ X_COMPRESSED=$(cargo run --quiet mul --g1 --point generator --scalar 13)
+λ X=$(echo $X_COMPRESSED | cargo run --quiet uncompress --g1)
+λ Y_COMPRESSED=$(cargo run --quiet mul --g2 --point generator --scalar 2)
+λ Y=$(echo $Y_COMPRESSED | cargo run --quiet uncompress --g2)
+
+# Verifier computes 26*G2 (uncompressed)
+λ TWENTY_SIX_G2=$(echo $(cargo run --quiet mul --g2 --point generator --scalar 26) | cargo run --quiet uncompress --g2)
+
+# Verifier checks e(X, Y) == e(G1, 26*G2)
+λ echo $X | cargo run --quiet pairing --g2 $Y
+0390df3dd3d5a63d5c7c2f911b665b134df8eb3ada0181d15aec93e1dd2e783cf47d0f47eeb642c68a566e9d00b30817a879e82adb993a1efb41c4a807c1c707762b102ee490de8ab6a32211c029f019ea8e743edf34e61b0c8ecd6df6566300ed58a2c2f204178bee12aeba33f89ff40d3408d9f485caa6b403b5759a42f1884c45b71433f491d98d2196e02f667716aefb3dfab74dd28a32d8003a8c471a12805b5fbe39481259e4f181c3af1a924319551bbe9758a9a3dbfa01fa5886fb129cf1fd13a2c970e6abe724cac7177e77b0ae2f5c4644192e446b0065da5e9a3f5dd9807783537d49497667225492b00dbf18211d38a9078f6872d9598852b3b28758d34c21782620e823cea6a50be9926206e42060665d6d03b3920cf2216705738d99f55d6611edc37d2722af1c5668b393ee09a8b84a74fc88c513744ece6ad7e4f67bc26b8d5f02e9266f5a0915182626cdc8649c3ddb029a30f67db391f143b17cb4eddae49f45b98e5a2659350dca820001b488d0c34f186cdf9d832a0bfc6090c4545df018615935bd3427b9dcdcd6abb214ce0f2a0ef4a4f029007bd5af8f2409f0683c64dc1c1f49b16bc50dea411b28e2cb0615ebc532efbbe28e8e699c3850fd31d25f0ca8ad43c90b22976556cd4303f638244bbc20ab48a3960460205ce3c61d7266c12bcdaf1505e0f162d0a0777efe391c0c0c8ceb3cb4a3fcdc9a2278ec3015ca84f7a759ade85819a8b7d201b7a4c88692814ec034b369e34550ed450498c7434152b633cd22e06ddba10f0add047fa3a3f99112f7c22417
+
+λ G1_UNCOMPRESSED=$(cargo run --quiet uncompress --g1 --point generator)
+λ echo $G1_UNCOMPRESSED | cargo run --quiet pairing --g2 $TWENTY_SIX_G2
+0390df3dd3d5a63d5c7c2f911b665b134df8eb3ada0181d15aec93e1dd2e783cf47d0f47eeb642c68a566e9d00b30817a879e82adb993a1efb41c4a807c1c707762b102ee490de8ab6a32211c029f019ea8e743edf34e61b0c8ecd6df6566300ed58a2c2f204178bee12aeba33f89ff40d3408d9f485caa6b403b5759a42f1884c45b71433f491d98d2196e02f667716aefb3dfab74dd28a32d8003a8c471a12805b5fbe39481259e4f181c3af1a924319551bbe9758a9a3dbfa01fa5886fb129cf1fd13a2c970e6abe724cac7177e77b0ae2f5c4644192e446b0065da5e9a3f5dd9807783537d49497667225492b00dbf18211d38a9078f6872d9598852b3b28758d34c21782620e823cea6a50be9926206e42060665d6d03b3920cf2216705738d99f55d6611edc37d2722af1c5668b393ee09a8b84a74fc88c513744ece6ad7e4f67bc26b8d5f02e9266f5a0915182626cdc8649c3ddb029a30f67db391f143b17cb4eddae49f45b98e5a2659350dca820001b488d0c34f186cdf9d832a0bfc6090c4545df018615935bd3427b9dcdcd6abb214ce0f2a0ef4a4f029007bd5af8f2409f0683c64dc1c1f49b16bc50dea411b28e2cb0615ebc532efbbe28e8e699c3850fd31d25f0ca8ad43c90b22976556cd4303f638244bbc20ab48a3960460205ce3c61d7266c12bcdaf1505e0f162d0a0777efe391c0c0c8ceb3cb4a3fcdc9a2278ec3015ca84f7a759ade85819a8b7d201b7a4c88692814ec034b369e34550ed450498c7434152b633cd22e06ddba10f0add047fa3a3f99112f7c22417
+```
+
+Both pairing outputs are identical, confirming that `x × y = 26` holds — without the verifier ever learning `x = 13` or `y = 2`. This technique, known as a **quadratic arithmetic program**, is the foundation of zk-SNARKs built on BLS12-381.
 
 ## Groth16 using BLS12-381 curve primitives
 
