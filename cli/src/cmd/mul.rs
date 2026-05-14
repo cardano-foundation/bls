@@ -1,3 +1,4 @@
+use super::strip_0x;
 use clap::ArgGroup;
 use hex::decode;
 use num_bigint::BigUint;
@@ -20,7 +21,7 @@ pub struct Args {
     #[arg(long)]
     point: Option<String>,
 
-    /// Scalar value (decimal by default, or hex with 0x prefix)
+    /// Scalar value (hex with 0x prefix, or decimal without prefix)
     #[arg(long)]
     scalar: String,
 }
@@ -49,18 +50,12 @@ fn resolve_point(value: &str, group: &bls12_381_aiken_cli::CurveGroup) -> Result
             bls12_381_aiken_cli::CurveGroup::G2 => decode(G2_GENERATOR).unwrap(),
         });
     }
-    decode(value).map_err(|_| "invalid hex point".to_string())
+    decode(strip_0x(value)).map_err(|_| "invalid hex point".to_string())
 }
 
 fn parse_scalar(s: &str) -> Result<Vec<u8>, String> {
     let mut bytes = if let Some(hex) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
-        let val = BigUint::parse_bytes(hex.as_bytes(), 16).ok_or("invalid hex scalar")?;
-        val.to_bytes_le()
-    } else if s.len() == 64
-        || s.bytes()
-            .any(|b| b.is_ascii_hexdigit() && b.is_ascii_alphabetic())
-    {
-        decode(s).map_err(|_| "invalid hex scalar")?
+        decode(hex).map_err(|_| "invalid hex scalar")?
     } else if let Some(val) = BigUint::parse_bytes(s.as_bytes(), 10) {
         val.to_bytes_le()
     } else {
@@ -102,7 +97,7 @@ pub fn run(args: Args) -> Result<(), Box<dyn Error>> {
     let result =
         bls12_381_aiken_cli::scalar_mul(&group, &point_bytes, &scalar_bytes).map_err(|e| e)?;
 
-    print!("{}", hex::encode(result));
+    print!("0x{}", hex::encode(result));
 
     Ok(())
 }

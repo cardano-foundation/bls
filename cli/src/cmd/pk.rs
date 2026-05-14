@@ -1,3 +1,4 @@
+use super::strip_0x;
 use hex::decode;
 use std::error::Error;
 use std::fs::File;
@@ -23,11 +24,12 @@ pub fn run(args: Args) -> Result<(), Box<dyn Error>> {
         line.trim().to_string()
     };
 
-    let private_key_bytes = decode(&private_key_hex).map_err(|_| "invalid hex private key")?;
+    let private_key_bytes =
+        decode(strip_0x(&private_key_hex)).map_err(|_| "invalid hex private key")?;
 
     let public_key = bls12_381_aiken_cli::sk_to_pk(&private_key_bytes).map_err(|e| e)?;
 
-    print!("{}", hex::encode(public_key));
+    print!("0x{}", hex::encode(public_key));
 
     Ok(())
 }

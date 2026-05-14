@@ -1,3 +1,4 @@
+use super::strip_0x;
 use hex::decode;
 use std::error::Error;
 use std::fs::File;
@@ -35,7 +36,8 @@ pub fn run(args: Args) -> Result<(), Box<dyn Error>> {
         line.trim().to_string()
     };
 
-    let private_key_bytes = decode(&private_key_hex).map_err(|_| "invalid hex private key")?;
+    let private_key_bytes =
+        decode(strip_0x(&private_key_hex)).map_err(|_| "invalid hex private key")?;
 
     let signature = bls12_381_aiken_cli::hash_to_group(
         &private_key_bytes,
@@ -45,7 +47,7 @@ pub fn run(args: Args) -> Result<(), Box<dyn Error>> {
     )
     .map_err(|e| e)?;
 
-    print!("{}", hex::encode(signature));
+    print!("0x{}", hex::encode(signature));
 
     Ok(())
 }

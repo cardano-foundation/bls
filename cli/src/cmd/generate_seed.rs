@@ -14,7 +14,7 @@ use std::error::Error;
 pub fn run() -> Result<(), Box<dyn Error>> {
     let mut seed_bytes = [0u8; 32];
     generate_crypto_secure_seed(&mut seed_bytes);
-    print!("{}", hex::encode(seed_bytes));
+    print!("0x{}", hex::encode(seed_bytes));
 
     Ok(())
 }
