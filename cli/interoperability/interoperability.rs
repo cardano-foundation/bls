@@ -675,3 +675,34 @@ fn test_interoperability_pairing_identity() {
     assert_eq!(gt_id_g1, gt_id_g2);
     assert_eq!(gt_id_g1, gt_id_both);
 }
+
+#[test]
+fn test_interoperability_pairing_xy_equals_26() {
+    use midnight_curves::bls12_381::{G1Affine, G1Projective, G2Affine, G2Projective};
+    use midnight_curves::pairing::group::Group;
+    use midnight_curves::BlsScalar;
+    use std::ops::Mul;
+
+    // Exact values from the README xy=26 example
+    let g1 = G1Affine::from(G1Projective::generator());
+    let g2 = G2Affine::from(G2Projective::generator());
+
+    let scalar13 = BlsScalar::from(13u64);
+    let scalar2 = BlsScalar::from(2u64);
+    let scalar26 = BlsScalar::from(26u64);
+
+    let x_g1 = G1Affine::from(G1Projective::generator().mul(&scalar13));
+    let y_g2 = G2Affine::from(G2Projective::generator().mul(&scalar2));
+    let x_g2 = G2Affine::from(G2Projective::generator().mul(&scalar13));
+    let y_g1 = G1Affine::from(G1Projective::generator().mul(&scalar2));
+    let twentysix_g2 = G2Affine::from(G2Projective::generator().mul(&scalar26));
+
+    // e(13*G1, 2*G2) == e(G1, 26*G2)  — scalar accumulates in G2
+    let gt1 = midnight_curves::bls12_381::pairing(&x_g1, &y_g2);
+    let gt2 = midnight_curves::bls12_381::pairing(&g1, &twentysix_g2);
+    assert_eq!(gt1, gt2);
+
+    // e(13*G1, 2*G2) == e(2*G1, 13*G2)  — scalars can swap groups
+    let gt3 = midnight_curves::bls12_381::pairing(&y_g1, &x_g2);
+    assert_eq!(gt1, gt3);
+}

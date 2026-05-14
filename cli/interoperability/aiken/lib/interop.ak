@@ -179,3 +179,26 @@ test interop_pairing_identity() {
     builtin.bls12_381_miller_loop(generator, g2.zero),
   )
 }
+
+// Bilinearity with README xy=26 values: e(13*G1, 2*G2) == e(G1, 26*G2)
+test interop_pairing_xy_equals_26() {
+  let x_g1 = builtin.bls12_381_g1_scalar_mul(13, generator)
+  let y_g2 = builtin.bls12_381_g2_scalar_mul(2, g2.generator)
+  let twentysix_g2 = builtin.bls12_381_g2_scalar_mul(26, g2.generator)
+  builtin.bls12_381_final_verify(
+    builtin.bls12_381_miller_loop(x_g1, y_g2),
+    builtin.bls12_381_miller_loop(generator, twentysix_g2),
+  )
+}
+
+// Swap: e(13*G1, 2*G2) == e(2*G1, 13*G2)  — scalars can swap groups
+test interop_pairing_swap_groups() {
+  let x_g1 = builtin.bls12_381_g1_scalar_mul(13, generator)
+  let y_g2 = builtin.bls12_381_g2_scalar_mul(2, g2.generator)
+  let y_g1 = builtin.bls12_381_g1_scalar_mul(2, generator)
+  let x_g2 = builtin.bls12_381_g2_scalar_mul(13, g2.generator)
+  builtin.bls12_381_final_verify(
+    builtin.bls12_381_miller_loop(x_g1, y_g2),
+    builtin.bls12_381_miller_loop(y_g1, x_g2),
+  )
+}
