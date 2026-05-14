@@ -566,3 +566,112 @@ fn test_interoperability_group_add_g2_identity_plus_identity() {
     // (c) Aiken: bls12_381_g2_add(zero, zero) |> compress produces the same bytes.
     run_aiken_check(&aiken_project_dir());
 }
+
+#[test]
+fn test_interoperability_pairing_generators() {
+    use blst::blst_fp12;
+    use midnight_curves::bls12_381::{G1Affine, G1Projective, G2Affine, G2Projective};
+    use midnight_curves::pairing::group::Group;
+    use std::mem;
+
+    // (a) Get G1 generator and G2 generator
+    let g1 = G1Affine::from(G1Projective::generator());
+    let g2 = G2Affine::from(G2Projective::generator());
+
+    // (b) Compute pairing
+    let gt = midnight_curves::bls12_381::pairing(&g1, &g2);
+    let fp12: blst_fp12 = unsafe { mem::transmute(gt) };
+    let gt_bytes = unsafe {
+        std::slice::from_raw_parts(&fp12 as *const _ as *const u8, mem::size_of::<blst_fp12>())
+    };
+
+    // (c) Expected GT bytes for e(G1_gen, G2_gen)
+    let expected_gt: [u8; 576] = [
+        197, 133, 31, 160, 51, 228, 114, 25, 56, 37, 119, 253, 118, 43, 211, 151, 249, 205, 107,
+        201, 111, 84, 206, 200, 20, 6, 212, 102, 115, 62, 246, 206, 128, 55, 132, 129, 39, 52, 17,
+        166, 37, 216, 198, 63, 138, 68, 243, 19, 149, 105, 157, 46, 176, 49, 99, 210, 125, 126,
+        121, 247, 130, 164, 104, 157, 146, 234, 57, 141, 36, 41, 155, 156, 170, 7, 49, 225, 162,
+        28, 128, 244, 102, 176, 188, 189, 50, 7, 108, 161, 120, 4, 54, 186, 175, 164, 60, 8, 65,
+        182, 22, 9, 219, 97, 226, 89, 13, 150, 62, 178, 244, 182, 22, 39, 69, 156, 189, 160, 16,
+        91, 229, 200, 168, 237, 77, 156, 217, 11, 219, 11, 197, 170, 253, 87, 191, 158, 248, 140,
+        94, 122, 119, 158, 146, 183, 214, 18, 53, 95, 225, 176, 136, 81, 200, 95, 101, 99, 9, 143,
+        58, 110, 160, 52, 44, 214, 42, 224, 166, 38, 49, 219, 11, 153, 154, 125, 169, 90, 111, 252,
+        16, 194, 137, 235, 245, 85, 47, 161, 137, 136, 111, 146, 58, 112, 35, 23, 120, 135, 130,
+        113, 41, 143, 88, 147, 133, 117, 171, 17, 134, 91, 246, 67, 223, 159, 39, 236, 245, 170,
+        131, 49, 246, 157, 201, 138, 225, 215, 115, 250, 176, 153, 76, 166, 166, 118, 225, 100, 31,
+        143, 56, 88, 140, 167, 159, 23, 18, 239, 42, 202, 17, 10, 42, 103, 107, 241, 163, 42, 181,
+        185, 17, 13, 110, 5, 157, 105, 208, 18, 68, 164, 165, 91, 26, 34, 119, 1, 29, 192, 41, 85,
+        115, 108, 222, 206, 224, 102, 57, 195, 221, 159, 30, 167, 245, 5, 121, 198, 98, 176, 161,
+        136, 10, 211, 4, 131, 252, 53, 93, 106, 197, 90, 13, 41, 31, 168, 166, 52, 200, 208, 199,
+        7, 55, 218, 194, 48, 84, 205, 240, 10, 80, 128, 247, 127, 194, 240, 174, 46, 215, 226, 166,
+        93, 36, 9, 86, 81, 27, 121, 118, 6, 46, 159, 19, 254, 24, 73, 35, 200, 209, 226, 244, 27,
+        86, 60, 159, 69, 158, 76, 193, 227, 211, 185, 83, 94, 232, 163, 32, 0, 167, 33, 30, 18, 10,
+        130, 204, 154, 197, 65, 131, 97, 175, 21, 177, 58, 153, 36, 140, 101, 149, 124, 185, 134,
+        168, 28, 114, 56, 235, 115, 188, 52, 116, 71, 73, 215, 86, 82, 139, 74, 80, 234, 2, 25,
+        164, 139, 109, 206, 134, 12, 248, 211, 163, 4, 170, 110, 104, 251, 135, 74, 166, 24, 38,
+        207, 32, 185, 27, 231, 131, 187, 69, 57, 167, 146, 172, 119, 82, 42, 160, 70, 240, 148,
+        159, 229, 14, 252, 247, 88, 96, 120, 243, 205, 88, 113, 246, 69, 249, 130, 27, 6, 193, 124,
+        103, 229, 219, 159, 170, 71, 248, 3, 87, 230, 52, 97, 165, 219, 120, 128, 110, 138, 153,
+        67, 154, 236, 215, 28, 102, 55, 153, 26, 154, 89, 170, 177, 68, 238, 66, 8, 47, 246, 160,
+        201, 250, 223, 5, 182, 227, 155, 21, 142, 194, 63, 241, 74, 13, 186, 134, 12, 177, 255, 82,
+        106, 160, 242, 15, 232, 108, 144, 26, 114, 72, 202, 148, 118, 20, 133, 176, 3, 62, 24, 131,
+        117, 226, 228, 206, 64, 221, 175, 103, 245, 252, 165, 38, 229, 210, 150, 109, 154, 66, 34,
+        31, 134, 73, 159, 126, 25,
+    ];
+
+    assert_eq!(gt_bytes.len(), 576);
+    assert_eq!(gt_bytes, expected_gt);
+
+    // (d) Aiken: bilinearity and identity pairing tests verify
+    //     that Aiken's bls12_381_miller_loop and bls12_381_final_verify
+    //     produce the same pairing results.
+    run_aiken_check(&aiken_project_dir());
+}
+
+#[test]
+fn test_interoperability_pairing_bilinearity_rust() {
+    use midnight_curves::bls12_381::{G1Affine, G1Projective, G2Affine, G2Projective};
+    use midnight_curves::pairing::group::Group;
+
+    // (a) Compute e(2*G1, 3*G2)
+    let g1 = G1Affine::from(G1Projective::generator());
+    let g2 = G2Affine::from(G2Projective::generator());
+    let scalar2 = midnight_curves::BlsScalar::from(2u64);
+    let scalar3 = midnight_curves::BlsScalar::from(3u64);
+    let scalar6 = midnight_curves::BlsScalar::from(6u64);
+
+    let g1_2 = G1Affine::from(G1Projective::generator() * scalar2);
+    let g2_3 = G2Affine::from(G2Projective::generator() * scalar3);
+    let g1_6 = G1Affine::from(G1Projective::generator() * scalar6);
+
+    let gt1 = midnight_curves::bls12_381::pairing(&g1_2, &g2_3);
+    let gt2 = midnight_curves::bls12_381::pairing(&g1_6, &g2);
+
+    // (b) Bilinearity: e(2*G1, 3*G2) should equal e(6*G1, G2)
+    assert_eq!(gt1, gt2);
+
+    // (c) Also verify e(G1, 6*G2) == e(6*G1, G2)
+    let g2_6 = G2Affine::from(G2Projective::generator() * scalar6);
+    let gt3 = midnight_curves::bls12_381::pairing(&g1, &g2_6);
+    assert_eq!(gt2, gt3);
+}
+
+#[test]
+fn test_interoperability_pairing_identity() {
+    use midnight_curves::bls12_381::{G1Affine, G1Projective, G2Affine, G2Projective};
+    use midnight_curves::pairing::group::prime::PrimeCurveAffine;
+    use midnight_curves::pairing::group::Group;
+
+    // (a) e(identity, G2) == e(G1, identity) == GT identity
+    let g1 = G1Affine::from(G1Projective::generator());
+    let g2 = G2Affine::from(G2Projective::generator());
+    let g1_id = G1Affine::identity();
+    let g2_id = G2Affine::identity();
+
+    let gt_id_g1 = midnight_curves::bls12_381::pairing(&g1_id, &g2);
+    let gt_id_g2 = midnight_curves::bls12_381::pairing(&g1, &g2_id);
+    let gt_id_both = midnight_curves::bls12_381::pairing(&g1_id, &g2_id);
+
+    assert_eq!(gt_id_g1, gt_id_g2);
+    assert_eq!(gt_id_g1, gt_id_both);
+}

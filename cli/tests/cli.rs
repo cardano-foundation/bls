@@ -924,6 +924,133 @@ fn add_wrong_point_length() {
         .stderr(predicate::str::contains("invalid right point length"));
 }
 
+// Pairing command tests
+const G1_GENERATOR_UNCOMPRESSED: &str = "17f1d3a73197d7942695638c4fa9ac0fc3688c4f9774b905a14e3a3f171bac586c55e83ff97a1aeffb3af00adb22c6bb08b3f481e3aaa0f1a09e30ed741d8ae4fcf5e095d5d00af600db18cb2c04b3edd03cc744a2888ae40caa232946c5e7e1";
+const G2_GENERATOR_UNCOMPRESSED: &str = "13e02b6052719f607dacd3a088274f65596bd0d09920b61ab5da61bbdc7f5049334cf11213945d57e5ac7d055d042b7e024aa2b2f08f0a91260805272dc51051c6e47ad4fa403b02b4510b647ae3d1770bac0326a805bbefd48056c8c121bdb80606c4a02ea734cc32acd2b02bc28b99cb3e287e85a763af267492ab572e99ab3f370d275cec1da1aaa9075ff05f79be0ce5d527727d6e118cc9cdc6da2e351aadfd9baa8cbdd3a76d429a695160d12c923ac9cc3baca289e193548608b82801";
+const G1_IDENTITY_UNCOMPRESSED: &str = "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
+const G2_IDENTITY_UNCOMPRESSED: &str = "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
+
+fn pairing_expected_gt() -> String {
+    "0xc5851fa033e47219382577fd762bd397f9cd6bc96f54cec81406d466733ef6ce80378481273411a625d8c63f8a44f31395699d2eb03163d27d7e79f782a4689d92ea398d24299b9caa0731e1a21c80f466b0bcbd32076ca1780436baafa43c0841b61609db61e2590d963eb2f4b61627459cbda0105be5c8a8ed4d9cd90bdb0bc5aafd57bf9ef88c5e7a779e92b7d612355fe1b08851c85f6563098f3a6ea0342cd62ae0a62631db0b999a7da95a6ffc10c289ebf5552fa189886f923a70231778878271298f58938575ab11865bf643df9f27ecf5aa8331f69dc98ae1d773fab0994ca6a676e1641f8f38588ca79f1712ef2aca110a2a676bf1a32ab5b9110d6e059d69d01244a4a55b1a2277011dc02955736cdecee06639c3dd9f1ea7f50579c662b0a1880ad30483fc355d6ac55a0d291fa8a634c8d0c70737dac23054cdf00a5080f77fc2f0ae2ed7e2a65d240956511b7976062e9f13fe184923c8d1e2f41b563c9f459e4cc1e3d3b9535ee8a32000a7211e120a82cc9ac5418361af15b13a99248c65957cb986a81c7238eb73bc34744749d756528b4a50ea0219a48b6dce860cf8d3a304aa6e68fb874aa61826cf20b91be783bb4539a792ac77522aa046f0949fe50efcf7586078f3cd5871f645f9821b06c17c67e5db9faa47f80357e63461a5db78806e8a99439aecd71c6637991a9a59aab144ee42082ff6a0c9fadf05b6e39b158ec23ff14a0dba860cb1ff526aa0f20fe86c901a7248ca94761485b0033e188375e2e4ce40ddaf67f5fca526e5d2966d9a42221f86499f7e19".to_string()
+}
+
+#[test]
+fn pairing_g1_stdin_g2_flag() {
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("pairing")
+        .arg("--g2")
+        .arg(G2_GENERATOR_UNCOMPRESSED)
+        .write_stdin(G1_GENERATOR_UNCOMPRESSED);
+    cmd.assert()
+        .success()
+        .stdout(predicate::eq(pairing_expected_gt()));
+}
+
+#[test]
+fn pairing_g2_stdin_g1_flag() {
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("pairing")
+        .arg("--g1")
+        .arg(G1_GENERATOR_UNCOMPRESSED)
+        .write_stdin(G2_GENERATOR_UNCOMPRESSED);
+    cmd.assert()
+        .success()
+        .stdout(predicate::eq(pairing_expected_gt()));
+}
+
+#[test]
+fn pairing_both_flags() {
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("pairing")
+        .arg("--g1")
+        .arg(G1_GENERATOR_UNCOMPRESSED)
+        .arg("--g2")
+        .arg(G2_GENERATOR_UNCOMPRESSED);
+    cmd.assert()
+        .success()
+        .stdout(predicate::eq(pairing_expected_gt()));
+}
+
+#[test]
+fn pairing_both_files() {
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    let mut g1_file = NamedTempFile::new().unwrap();
+    write!(g1_file, "{}", G1_GENERATOR_UNCOMPRESSED).unwrap();
+    let mut g2_file = NamedTempFile::new().unwrap();
+    write!(g2_file, "{}", G2_GENERATOR_UNCOMPRESSED).unwrap();
+
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("pairing")
+        .arg("--g1-file")
+        .arg(g1_file.path())
+        .arg("--g2-file")
+        .arg(g2_file.path());
+    cmd.assert()
+        .success()
+        .stdout(predicate::eq(pairing_expected_gt()));
+}
+
+#[test]
+fn pairing_g1_identity() {
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("pairing")
+        .arg("--g1")
+        .arg(G1_IDENTITY_UNCOMPRESSED)
+        .arg("--g2")
+        .arg(G2_GENERATOR_UNCOMPRESSED);
+    cmd.assert().success();
+}
+
+#[test]
+fn pairing_g2_identity() {
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("pairing")
+        .arg("--g1")
+        .arg(G1_GENERATOR_UNCOMPRESSED)
+        .arg("--g2")
+        .arg(G2_IDENTITY_UNCOMPRESSED);
+    cmd.assert().success();
+}
+
+#[test]
+fn pairing_both_identity() {
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("pairing")
+        .arg("--g1")
+        .arg(G1_IDENTITY_UNCOMPRESSED)
+        .arg("--g2")
+        .arg(G2_IDENTITY_UNCOMPRESSED);
+    cmd.assert().success();
+}
+
+#[test]
+fn pairing_invalid_g1_length() {
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("pairing")
+        .arg("--g1")
+        .arg("00")
+        .arg("--g2")
+        .arg(G2_GENERATOR_UNCOMPRESSED);
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("G1 point must be 96 bytes"));
+}
+
+#[test]
+fn pairing_invalid_g2_length() {
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("pairing")
+        .arg("--g1")
+        .arg(G1_GENERATOR_UNCOMPRESSED)
+        .arg("--g2")
+        .arg("00");
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("G2 point must be 192 bytes"));
+}
+
 #[cfg(test)]
 mod property_tests {
     use bls12_381_aiken_cli::*;

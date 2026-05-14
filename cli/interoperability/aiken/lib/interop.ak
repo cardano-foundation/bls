@@ -158,3 +158,24 @@ test interop_g2_uncompress_identity() {
   let result = builtin.bls12_381_g2_compress(point)
   result == compressed
 }
+
+// Pairing interoperability tests
+//
+// Bilinearity: e(a*G1, b*G2) == e(G1, a*b*G2)
+test interop_pairing_bilinearity() {
+  let a_g1 = builtin.bls12_381_g1_scalar_mul(2, generator)
+  let b_g2 = builtin.bls12_381_g2_scalar_mul(3, g2.generator)
+  let ab_g1 = builtin.bls12_381_g1_scalar_mul(6, generator)
+  builtin.bls12_381_final_verify(
+    builtin.bls12_381_miller_loop(a_g1, b_g2),
+    builtin.bls12_381_miller_loop(ab_g1, g2.generator),
+  )
+}
+
+// Identity property: e(identity, G2) == e(G1, identity)
+test interop_pairing_identity() {
+  builtin.bls12_381_final_verify(
+    builtin.bls12_381_miller_loop(zero, g2.generator),
+    builtin.bls12_381_miller_loop(generator, g2.zero),
+  )
+}
