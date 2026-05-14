@@ -162,6 +162,23 @@ pub enum Command {
     #[command(disable_help_flag = true)]
     Uncompress(cmd::uncompress::Args),
 
+    /// Negate a BLS12-381 point (G1 or G2)
+    ///
+    /// This command computes the additive inverse of a G1 or G2 point.
+    /// The result satisfies: point + (-point) = identity.
+    /// Accepts both compressed (48/96 bytes) and uncompressed (96/192 bytes) input.
+    /// The output is the compressed negated point.
+    ///
+    /// Examples:
+    ///
+    ///   $ echo "point_hex" | bls12-381-aiken neg --g1
+    ///
+    ///   $ bls12-381-aiken neg --g2 --point point.hex
+    ///
+    ///   $ bls12-381-aiken neg --g1 --point identity
+    #[command(disable_help_flag = true)]
+    Neg(cmd::neg::Args),
+
     /// Compute a BLS12-381 pairing (e(G1, G2))
     ///
     /// This command computes the optimal Ate pairing e(G1_point, G2_point)
@@ -212,6 +229,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         Command::Mul(args) => cmd::mul::run(args),
         Command::Compress(args) => cmd::compress::run(args),
         Command::Uncompress(args) => cmd::uncompress::run(args),
+        Command::Neg(args) => cmd::neg::run(args),
         Command::Pairing(args) => cmd::pairing::run(args),
     }
 }

@@ -677,6 +677,74 @@ fn test_interoperability_pairing_identity() {
 }
 
 #[test]
+fn test_interoperability_neg_g1() {
+    use midnight_curves::bls12_381::{G1Affine, G1Projective};
+    use midnight_curves::pairing::group::prime::PrimeCurveAffine;
+    use midnight_curves::pairing::group::Group;
+    use std::ops::Neg;
+
+    // (a) -G1_gen != G1_gen
+    let g1 = G1Affine::from(G1Projective::generator());
+    let neg = g1.neg();
+    assert_ne!(bool::from(g1.eq(&neg)), true);
+
+    // (b) G1_gen + (-G1_gen) = identity
+    let sum = G1Projective::from(g1) + G1Projective::from(neg);
+    assert!(bool::from(sum.is_identity()));
+
+    // (c) -(-G1_gen) = G1_gen
+    let double_neg = neg.neg();
+    assert!(bool::from(g1.eq(&double_neg)));
+
+    run_aiken_check(&aiken_project_dir());
+}
+
+#[test]
+fn test_interoperability_neg_g2() {
+    use midnight_curves::bls12_381::{G2Affine, G2Projective};
+    use midnight_curves::pairing::group::prime::PrimeCurveAffine;
+    use midnight_curves::pairing::group::Group;
+    use std::ops::Neg;
+
+    // (a) -G2_gen != G2_gen
+    let g2 = G2Affine::from(G2Projective::generator());
+    let neg = g2.neg();
+    assert_ne!(bool::from(g2.eq(&neg)), true);
+
+    // (b) G2_gen + (-G2_gen) = identity
+    let sum = G2Projective::from(g2) + G2Projective::from(neg);
+    assert!(bool::from(sum.is_identity()));
+
+    // (c) -(-G2_gen) = G2_gen
+    let double_neg = neg.neg();
+    assert!(bool::from(g2.eq(&double_neg)));
+}
+
+#[test]
+fn test_interoperability_neg_g1_identity() {
+    use midnight_curves::bls12_381::G1Affine;
+    use midnight_curves::pairing::group::prime::PrimeCurveAffine;
+    use std::ops::Neg;
+
+    // -identity = identity (G1)
+    let id = G1Affine::identity();
+    let neg = id.neg();
+    assert!(bool::from(neg.is_identity()));
+}
+
+#[test]
+fn test_interoperability_neg_g2_identity() {
+    use midnight_curves::bls12_381::G2Affine;
+    use midnight_curves::pairing::group::prime::PrimeCurveAffine;
+    use std::ops::Neg;
+
+    // -identity = identity (G2)
+    let id = G2Affine::identity();
+    let neg = id.neg();
+    assert!(bool::from(neg.is_identity()));
+}
+
+#[test]
 fn test_interoperability_pairing_xy_equals_26() {
     use midnight_curves::bls12_381::{G1Affine, G1Projective, G2Affine, G2Projective};
     use midnight_curves::pairing::group::Group;

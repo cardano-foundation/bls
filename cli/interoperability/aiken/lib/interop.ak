@@ -191,6 +191,66 @@ test interop_pairing_xy_equals_26() {
   )
 }
 
+// Negation: -generator != generator (G1)
+test interop_g1_neg_generator() {
+  let neg = builtin.bls12_381_g1_neg(generator)
+  let compressed = builtin.bls12_381_g1_compress(neg)
+  let gen_compressed = builtin.bls12_381_g1_compress(generator)
+  compressed != gen_compressed
+}
+
+// Negation: generator + (-generator) = identity (G1)
+test interop_g1_neg_add_inverse() {
+  let neg = builtin.bls12_381_g1_neg(generator)
+  let sum = builtin.bls12_381_g1_add(generator, neg)
+  let compressed = builtin.bls12_381_g1_compress(sum)
+  let identity: ByteArray = #[192, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+  compressed == identity
+}
+
+// Negation: -(-generator) = generator (G1)
+test interop_g1_neg_double() {
+  let neg = builtin.bls12_381_g1_neg(generator)
+  let double_neg = builtin.bls12_381_g1_neg(neg)
+  builtin.bls12_381_g1_equal(double_neg, generator)
+}
+
+// Negation: -generator != generator (G2)
+test interop_g2_neg_generator() {
+  let neg = builtin.bls12_381_g2_neg(g2.generator)
+  let compressed = builtin.bls12_381_g2_compress(neg)
+  let gen_compressed = builtin.bls12_381_g2_compress(g2.generator)
+  compressed != gen_compressed
+}
+
+// Negation: generator + (-generator) = identity (G2)
+test interop_g2_neg_add_inverse() {
+  let neg = builtin.bls12_381_g2_neg(g2.generator)
+  let sum = builtin.bls12_381_g2_add(g2.generator, neg)
+  let compressed = builtin.bls12_381_g2_compress(sum)
+  let identity: ByteArray = #[192, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+  compressed == identity
+}
+
+// Negation: -(-generator) = generator (G2)
+test interop_g2_neg_double() {
+  let neg = builtin.bls12_381_g2_neg(g2.generator)
+  let double_neg = builtin.bls12_381_g2_neg(neg)
+  builtin.bls12_381_g2_equal(double_neg, g2.generator)
+}
+
+// Negation: -identity = identity (G1)
+test interop_g1_neg_identity() {
+  let neg = builtin.bls12_381_g1_neg(zero)
+  builtin.bls12_381_g1_equal(neg, zero)
+}
+
+// Negation: -identity = identity (G2)
+test interop_g2_neg_identity() {
+  let neg = builtin.bls12_381_g2_neg(g2.zero)
+  builtin.bls12_381_g2_equal(neg, g2.zero)
+}
+
 // Swap: e(13*G1, 2*G2) == e(2*G1, 13*G2)  — scalars can swap groups
 test interop_pairing_swap_groups() {
   let x_g1 = builtin.bls12_381_g1_scalar_mul(13, generator)

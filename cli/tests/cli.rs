@@ -584,6 +584,12 @@ const G1_GENERATOR: &str = "97f1d3a73197d7942695638c4fa9ac0fc3688c4f9774b905a14e
 // G2 generator compressed (96 bytes)
 const G2_GENERATOR: &str = "93e02b6052719f607dacd3a088274f65596bd0d09920b61ab5da61bbdc7f5049334cf11213945d57e5ac7d055d042b7e024aa2b2f08f0a91260805272dc51051c6e47ad4fa403b02b4510b647ae3d1770bac0326a805bbefd48056c8c121bdb8";
 
+// Negated G1 generator compressed (48 bytes)
+const NEG_G1_GENERATOR: &str = "b7f1d3a73197d7942695638c4fa9ac0fc3688c4f9774b905a14e3a3f171bac586c55e83ff97a1aeffb3af00adb22c6bb";
+
+// Negated G2 generator compressed (96 bytes)
+const NEG_G2_GENERATOR: &str = "b3e02b6052719f607dacd3a088274f65596bd0d09920b61ab5da61bbdc7f5049334cf11213945d57e5ac7d055d042b7e024aa2b2f08f0a91260805272dc51051c6e47ad4fa403b02b4510b647ae3d1770bac0326a805bbefd48056c8c121bdb8";
+
 // Scalar value 1 (32 bytes, little-endian encoding, hex with 0x prefix)
 const SCALAR_ONE: &str = "0x0100000000000000000000000000000000000000000000000000000000000000";
 
@@ -1103,6 +1109,193 @@ fn pairing_invalid_g2_length() {
     cmd.assert()
         .failure()
         .stderr(predicate::str::contains("G2 point must be 192 bytes"));
+}
+
+// Negate command tests
+#[test]
+fn neg_g1_generator() {
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("neg").arg("--g1").write_stdin(G1_GENERATOR);
+    cmd.assert()
+        .success()
+        .stdout(predicate::eq(format!("0x{}", NEG_G1_GENERATOR)));
+}
+
+#[test]
+fn neg_g2_generator() {
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("neg").arg("--g2").write_stdin(G2_GENERATOR);
+    cmd.assert()
+        .success()
+        .stdout(predicate::eq(format!("0x{}", NEG_G2_GENERATOR)));
+}
+
+#[test]
+fn neg_g1_identity() {
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("neg").arg("--g1").arg("--point").arg("identity");
+    cmd.assert()
+        .success()
+        .stdout(predicate::eq("0xc00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"));
+}
+
+#[test]
+fn neg_g2_identity() {
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("neg").arg("--g2").arg("--point").arg("identity");
+    cmd.assert()
+        .success()
+        .stdout(predicate::eq("0xc00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"));
+}
+
+#[test]
+fn neg_g1_double_neg() {
+    let result = Command::cargo_bin("bls12-381-aiken-cli")
+        .unwrap()
+        .arg("neg")
+        .arg("--g1")
+        .write_stdin(format!("0x{}", NEG_G1_GENERATOR))
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&result.stdout);
+    assert_eq!(stdout.trim(), format!("0x{}", G1_GENERATOR));
+}
+
+#[test]
+fn neg_g1_add_inverse() {
+    let neg = Command::cargo_bin("bls12-381-aiken-cli")
+        .unwrap()
+        .arg("neg")
+        .arg("--g1")
+        .write_stdin(G1_GENERATOR)
+        .output()
+        .unwrap();
+    let neg_hex = String::from_utf8_lossy(&neg.stdout).trim().to_string();
+
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("add")
+        .arg("--g1")
+        .arg("--point_right")
+        .arg(&neg_hex)
+        .write_stdin(G1_GENERATOR);
+    cmd.assert()
+        .success()
+        .stdout(predicate::eq("0xc00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"));
+}
+
+#[test]
+fn neg_g2_add_inverse() {
+    let neg = Command::cargo_bin("bls12-381-aiken-cli")
+        .unwrap()
+        .arg("neg")
+        .arg("--g2")
+        .write_stdin(G2_GENERATOR)
+        .output()
+        .unwrap();
+    let neg_hex = String::from_utf8_lossy(&neg.stdout).trim().to_string();
+
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("add")
+        .arg("--g2")
+        .arg("--point_right")
+        .arg(&neg_hex)
+        .write_stdin(G2_GENERATOR);
+    cmd.assert()
+        .success()
+        .stdout(predicate::eq("0xc00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"));
+}
+
+#[test]
+fn neg_g1_via_point_flag() {
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("neg").arg("--g1").arg("--point").arg(G1_GENERATOR);
+    cmd.assert()
+        .success()
+        .stdout(predicate::eq(format!("0x{}", NEG_G1_GENERATOR)));
+}
+
+#[test]
+fn neg_g1_via_generator_special() {
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("neg").arg("--g1").arg("--point").arg("generator");
+    cmd.assert()
+        .success()
+        .stdout(predicate::eq(format!("0x{}", NEG_G1_GENERATOR)));
+}
+
+#[test]
+fn neg_g1_from_file() {
+    use std::io::Write;
+
+    let mut file = NamedTempFile::new().unwrap();
+    write!(file, "{}", G1_GENERATOR).unwrap();
+
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("neg").arg("--g1").arg("--point").arg(file.path());
+    cmd.assert()
+        .success()
+        .stdout(predicate::eq(format!("0x{}", NEG_G1_GENERATOR)));
+}
+
+#[test]
+fn neg_g1_uncompressed_input() {
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("neg")
+        .arg("--g1")
+        .write_stdin(G1_GENERATOR_UNCOMPRESSED);
+    cmd.assert()
+        .success()
+        .stdout(predicate::eq(format!("0x{}", NEG_G1_GENERATOR)));
+}
+
+#[test]
+fn neg_g1_identity_uncompressed() {
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("neg")
+        .arg("--g1")
+        .write_stdin(G1_IDENTITY_UNCOMPRESSED);
+    cmd.assert()
+        .success()
+        .stdout(predicate::eq("0xc00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"));
+}
+
+#[test]
+fn neg_invalid_point() {
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("neg")
+        .arg("--g1")
+        .write_stdin("000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000");
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("invalid"));
+}
+
+#[test]
+fn neg_missing_group() {
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("neg").write_stdin(G1_GENERATOR);
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("--g1"))
+        .stderr(predicate::str::contains("--g2"));
+}
+
+#[test]
+fn neg_wrong_point_length() {
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("neg").arg("--g1").write_stdin("00"); // too short
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("invalid G1 point length"));
+}
+
+#[test]
+fn neg_g2_wrong_point_length() {
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("neg").arg("--g2").write_stdin("00"); // too short
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("invalid G2 point length"));
 }
 
 #[cfg(test)]
