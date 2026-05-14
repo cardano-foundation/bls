@@ -161,6 +161,27 @@ pub enum Command {
     ///   $ bls12-381-aiken uncompress --g1 --point identity
     #[command(disable_help_flag = true)]
     Uncompress(cmd::uncompress::Args),
+
+    /// Compute a BLS12-381 pairing (e(G1, G2))
+    ///
+    /// This command computes the optimal Ate pairing e(G1_point, G2_point)
+    /// using the miller loop. Both points must be in uncompressed form
+    /// (96 bytes for G1, 192 bytes for G2).
+    ///
+    /// The G1 point can be provided via --g1, --g1-file, or stdin.
+    /// The G2 point can be provided via --g2, --g2-file, or stdin.
+    ///
+    /// Examples:
+    ///
+    ///   $ echo "G1_uncompressed_hex" | bls12-381-aiken pairing --g2 "G2_uncompressed_hex"
+    ///
+    ///   $ echo "G2_uncompressed_hex" | bls12-381-aiken pairing --g1 "G1_uncompressed_hex"
+    ///
+    ///   $ bls12-381-aiken pairing --g1 "G1_hex" --g2 "G2_hex"
+    ///
+    ///   $ bls12-381-aiken pairing --g1-file g1.hex --g2-file g2.hex
+    #[command(disable_help_flag = true)]
+    Pairing(cmd::pairing::Args),
 }
 
 #[derive(Debug, Parser)]
@@ -191,5 +212,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         Command::Mul(args) => cmd::mul::run(args),
         Command::Compress(args) => cmd::compress::run(args),
         Command::Uncompress(args) => cmd::uncompress::run(args),
+        Command::Pairing(args) => cmd::pairing::run(args),
     }
 }
