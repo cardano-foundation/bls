@@ -338,7 +338,7 @@ The implementation of VRF using [aiken primitves](https://aiken-lang.github.io/s
 
 ## Solving easy linear and non-linear equations using BLS12-381 curve primitives
 
-Let's start with an easy linear equation 'x+y=23'. The setup of interaction is the following: the formula of equation is known for both parties: prover and verifier.
+Let's start with an easy linear equation `x+y=23`. The setup of interaction is the following: the formula of equation is known for both parties: prover and verifier.
 Prover wants to prove it has the solution for the equation and without disclosing them wants the verifier to check his claim.
 In order to do it the prover can use either G1 or G2 curve. Let's start with the G1. The prover comes up with the solution x=10 and y=13. Then in order to hide the solution he finds the corresponding elliptic curves in G1:
 
@@ -366,32 +366,44 @@ The prover checks that claim:
 Indeed! The claim of the prover is validated! The verifier used homomorphic encryption property, meaning `x+y=23` in both number and point space!
 The same is true when both parties agree to work within G2 groups.
 
-The non-linear case is where pairings come in. A prover can prove knowledge of `x` and `y` such that `x × y = 26`
+The non-linear case is where pairings come in. A prover can prove knowledge of `x` and `y` such that `x y = 26`, equations also known by a verifier,
 without revealing them — by sending **only points** and relying on bilinearity of pairings.
 
 ```bash
-# Prover knows x=13, y=2 and sends X=13*G1 (uncompressed), Y=2*G2 (uncompressed)
+# Prover comes up with x=13, y=2 and sends X=13*G1 (uncompressed), Y=2*G2 (uncompressed)
 # Verifier checks e(X, Y) == e(G1, 26*G2), a consequence of x*y = 26
 
 # Prover computes points (uncompressed)
-λ X_COMPRESSED=$(cargo run --quiet mul --g1 --point generator --scalar 13)
-λ X=$(echo $X_COMPRESSED | cargo run --quiet uncompress --g1)
-λ Y_COMPRESSED=$(cargo run --quiet mul --g2 --point generator --scalar 2)
-λ Y=$(echo $Y_COMPRESSED | cargo run --quiet uncompress --g2)
+λ cargo run --quiet mul --g1 --point generator --scalar 13
+0x851f8a0b82a6d86202a61cbc3b0f3db7d19650b914587bde4715ccd372e1e40cab95517779d840416e1679c84a6db24e
+λ X_G1=$(echo -n 0x851f8a0b82a6d86202a61cbc3b0f3db7d19650b914587bde4715ccd372e1e40cab95517779d840416e1679c84a6db24e | cargo run --quiet uncompress --g1)
+λ $X_G1
+0x051f8a0b82a6d86202a61cbc3b0f3db7d19650b914587bde4715ccd372e1e40cab95517779d840416e1679c84a6db24e0b6a63ac48b7d7666ccfcf1e7de0097c5e6e1aacd03507d23fb975d8daec42857b3a471bf3fc471425b63864e045f4df
+
+λ cargo run --quiet mul --g2 --point generator --scalar 2
+0xaa4edef9c1ed7f729f520e47730a124fd70662a904ba1074728114d1031e1572c6c886f6b57ec72a6178288c47c335771638533957d540a9d2370f17cc7ed5863bc0b995b8825e0ee1ea1e1e4d00dbae81f14b0bf3611b78c952aacab827a053
+λ Y_G2=$(echo 0xaa4edef9c1ed7f729f520e47730a124fd70662a904ba1074728114d1031e1572c6c886f6b57ec72a6178288c47c335771638533957d540a9d2370f17cc7ed5863bc0b995b8825e0ee1ea1e1e4d00dbae81f14b0bf3611b78c952aacab827a053 | cargo run --quiet uncompress --g2)
+λ $Y_G2
+0x0a4edef9c1ed7f729f520e47730a124fd70662a904ba1074728114d1031e1572c6c886f6b57ec72a6178288c47c335771638533957d540a9d2370f17cc7ed5863bc0b995b8825e0ee1ea1e1e4d00dbae81f14b0bf3611b78c952aacab827a0530f6d4552fa65dd2638b361543f887136a43253d9c66c411697003f7a13c308f5422e1aa0a59c8967acdefd8b6e36ccf30468fb440d82b0630aeb8dca2b5256789a66da69bf91009cbfe6bd221e47aa8ae88dece9764bf3bd999d95d71e4c9899
 
 # Verifier computes 26*G2 (uncompressed)
 λ TWENTY_SIX_G2=$(echo $(cargo run --quiet mul --g2 --point generator --scalar 26) | cargo run --quiet uncompress --g2)
+λ echo $TWENTY_SIX_G2
+0x0bb319a4550c981ee89e3c7e6dcc434283454847792807940f72fd2dbf3625b092e0a0c03e581fd9bd9cf74f95ccef150029ea93c2f1eb48b195815571ea0148198ff1b19462618cab08d037646b592ecab5a66b4bc660ffd02d1b996ca377da05d04aa0b644faae17d4c76a14aa680c69fdfc6b59fee3ef45641f566165fced60cbbda4ca096e132bb6f58ab45166860abb072b8d9011e81c9f5b23ba86fdb6399c878aa4eadee45fb2486afe594dffc53be643598a23e5428894a36f5ac3ce
 
-# Verifier checks e(X, Y) == e(G1, 26*G2)
-λ echo $X | cargo run --quiet pairing --g2 $Y
+# Verifier checks e(X_G1, Y_G2) == e(G1, TWENTY_SIX_G2)
+# First e(X_G1, Y_G2) 
+λ echo $X_G1 | cargo run --quiet pairing --g2 $Y_G2
 0x0390df3dd3d5a63d5c7c2f911b665b134df8eb3ada0181d15aec93e1dd2e783cf47d0f47eeb642c68a566e9d00b30817a879e82adb993a1efb41c4a807c1c707762b102ee490de8ab6a32211c029f019ea8e743edf34e61b0c8ecd6df6566300ed58a2c2f204178bee12aeba33f89ff40d3408d9f485caa6b403b5759a42f1884c45b71433f491d98d2196e02f667716aefb3dfab74dd28a32d8003a8c471a12805b5fbe39481259e4f181c3af1a924319551bbe9758a9a3dbfa01fa5886fb129cf1fd13a2c970e6abe724cac7177e77b0ae2f5c4644192e446b0065da5e9a3f5dd9807783537d49497667225492b00dbf18211d38a9078f6872d9598852b3b28758d34c21782620e823cea6a50be9926206e42060665d6d03b3920cf2216705738d99f55d6611edc37d2722af1c5668b393ee09a8b84a74fc88c513744ece6ad7e4f67bc26b8d5f02e9266f5a0915182626cdc8649c3ddb029a30f67db391f143b17cb4eddae49f45b98e5a2659350dca820001b488d0c34f186cdf9d832a0bfc6090c4545df018615935bd3427b9dcdcd6abb214ce0f2a0ef4a4f029007bd5af8f2409f0683c64dc1c1f49b16bc50dea411b28e2cb0615ebc532efbbe28e8e699c3850fd31d25f0ca8ad43c90b22976556cd4303f638244bbc20ab48a3960460205ce3c61d7266c12bcdaf1505e0f162d0a0777efe391c0c0c8ceb3cb4a3fcdc9a2278ec3015ca84f7a759ade85819a8b7d201b7a4c88692814ec034b369e34550ed450498c7434152b633cd22e06ddba10f0add047fa3a3f99112f7c22417
 
-λ G1_UNCOMPRESSED=$(cargo run --quiet uncompress --g1 --point generator)
-λ echo $G1_UNCOMPRESSED | cargo run --quiet pairing --g2 $TWENTY_SIX_G2
+λ G1=$(cargo run --quiet uncompress --g1 --point generator)
+λ echo $G1
+0x17f1d3a73197d7942695638c4fa9ac0fc3688c4f9774b905a14e3a3f171bac586c55e83ff97a1aeffb3af00adb22c6bb08b3f481e3aaa0f1a09e30ed741d8ae4fcf5e095d5d00af600db18cb2c04b3edd03cc744a2888ae40caa232946c5e7e1
+λ echo $G1 | cargo run --quiet pairing --g2 $TWENTY_SIX_G2
 0x0390df3dd3d5a63d5c7c2f911b665b134df8eb3ada0181d15aec93e1dd2e783cf47d0f47eeb642c68a566e9d00b30817a879e82adb993a1efb41c4a807c1c707762b102ee490de8ab6a32211c029f019ea8e743edf34e61b0c8ecd6df6566300ed58a2c2f204178bee12aeba33f89ff40d3408d9f485caa6b403b5759a42f1884c45b71433f491d98d2196e02f667716aefb3dfab74dd28a32d8003a8c471a12805b5fbe39481259e4f181c3af1a924319551bbe9758a9a3dbfa01fa5886fb129cf1fd13a2c970e6abe724cac7177e77b0ae2f5c4644192e446b0065da5e9a3f5dd9807783537d49497667225492b00dbf18211d38a9078f6872d9598852b3b28758d34c21782620e823cea6a50be9926206e42060665d6d03b3920cf2216705738d99f55d6611edc37d2722af1c5668b393ee09a8b84a74fc88c513744ece6ad7e4f67bc26b8d5f02e9266f5a0915182626cdc8649c3ddb029a30f67db391f143b17cb4eddae49f45b98e5a2659350dca820001b488d0c34f186cdf9d832a0bfc6090c4545df018615935bd3427b9dcdcd6abb214ce0f2a0ef4a4f029007bd5af8f2409f0683c64dc1c1f49b16bc50dea411b28e2cb0615ebc532efbbe28e8e699c3850fd31d25f0ca8ad43c90b22976556cd4303f638244bbc20ab48a3960460205ce3c61d7266c12bcdaf1505e0f162d0a0777efe391c0c0c8ceb3cb4a3fcdc9a2278ec3015ca84f7a759ade85819a8b7d201b7a4c88692814ec034b369e34550ed450498c7434152b633cd22e06ddba10f0add047fa3a3f99112f7c22417
 ```
 
-Both pairing outputs are identical, confirming that `x × y = 26` holds — without the verifier ever learning `x = 13` or `y = 2`. This technique, known as a **quadratic arithmetic program**, is the foundation of zk-SNARKs built on BLS12-381.
+Both pairing outputs are identical, confirming that `xy = 26` holds — without the verifier ever learning `x = 13` or `y = 2`. This technique, known as a **quadratic arithmetic program**, is the foundation of zk-SNARKs built on BLS12-381.
 
 ## Groth16 using BLS12-381 curve primitives
 
