@@ -17,6 +17,7 @@ use midnight_curves::CurveAffine;
 use std::mem;
 use std::ops::Add;
 use std::ops::Mul;
+use std::ops::Neg;
 
 /// Group selection for scalar multiplication
 pub enum CurveGroup {
@@ -285,6 +286,59 @@ pub fn group_add(group: &CurveGroup, left: &[u8], right: &[u8]) -> Result<Vec<u8
 
             let left_projective = G2Projective::from(left_affine);
             let right_projective = G2Projective::from(right_affine);
+            let result = left_projective.add(&right_projective);
+            let result_affine = G2Affine::from(result);
+            Ok(result_affine.to_bytes().as_ref().to_vec())
+        }
+    }
+}
+
+/// Divides two BLS12-381 G1 or G2 points (left * right^-1).
+///
+/// Computes division as left + (-right), i.e., left plus the negation of right.
+///
+/// # Arguments
+///
+/// * `group` - The group to operate on (G1 or G2)
+/// * `left` - The left compressed point bytes (48 for G1, 96 for G2)
+/// * `right` - The right compressed point bytes (48 for G1, 96 for G2)
+///
+/// # Returns
+///
+/// * `Ok(Vec<u8>)` - The compressed result point (48 for G1, 96 for G2)
+/// * `Err(String)` if either point is invalid
+pub fn group_div(group: &CurveGroup, left: &[u8], right: &[u8]) -> Result<Vec<u8>, String> {
+    match group {
+        CurveGroup::G1 => {
+            let left_bytes: [u8; 48] = left
+                .try_into()
+                .map_err(|_| "invalid left point length (must be 48 bytes for G1)")?;
+            let right_bytes: [u8; 48] = right
+                .try_into()
+                .map_err(|_| "invalid right point length (must be 48 bytes for G1)")?;
+
+            let left_affine = decompress_g1(&left_bytes)?;
+            let right_affine = decompress_g1(&right_bytes)?;
+
+            let left_projective = G1Projective::from(left_affine);
+            let right_projective = G1Projective::from(right_affine.neg());
+            let result = left_projective.add(&right_projective);
+            let result_affine = G1Affine::from(result);
+            Ok(result_affine.to_bytes().as_ref().to_vec())
+        }
+        CurveGroup::G2 => {
+            let left_bytes: [u8; 96] = left
+                .try_into()
+                .map_err(|_| "invalid left point length (must be 96 bytes for G2)")?;
+            let right_bytes: [u8; 96] = right
+                .try_into()
+                .map_err(|_| "invalid right point length (must be 96 bytes for G2)")?;
+
+            let left_affine = decompress_g2(&left_bytes)?;
+            let right_affine = decompress_g2(&right_bytes)?;
+
+            let left_projective = G2Projective::from(left_affine);
+            let right_projective = G2Projective::from(right_affine.neg());
             let result = left_projective.add(&right_projective);
             let result_affine = G2Affine::from(result);
             Ok(result_affine.to_bytes().as_ref().to_vec())

@@ -1298,6 +1298,161 @@ fn neg_g2_wrong_point_length() {
         .stderr(predicate::str::contains("invalid G2 point length"));
 }
 
+// Div command tests
+#[test]
+fn div_g1_generator_minus_generator() {
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("div")
+        .arg("--g1")
+        .arg("--point")
+        .arg(G1_GENERATOR)
+        .write_stdin(G1_GENERATOR);
+    cmd.assert()
+        .success()
+        .stdout(predicate::eq(format!("0x{}", G1_IDENTITY)));
+}
+
+#[test]
+fn div_g1_generator_minus_identity() {
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("div")
+        .arg("--g1")
+        .arg("--point")
+        .arg("identity")
+        .write_stdin(G1_GENERATOR);
+    cmd.assert()
+        .success()
+        .stdout(predicate::eq(format!("0x{}", G1_GENERATOR)));
+}
+
+#[test]
+fn div_g1_identity_minus_generator() {
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("div")
+        .arg("--g1")
+        .arg("--point")
+        .arg("generator")
+        .write_stdin(G1_IDENTITY);
+    cmd.assert()
+        .success()
+        .stdout(predicate::eq(format!("0x{}", NEG_G1_GENERATOR)));
+}
+
+#[test]
+fn div_g2_generator_minus_generator() {
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("div")
+        .arg("--g2")
+        .arg("--point")
+        .arg(G2_GENERATOR)
+        .write_stdin(G2_GENERATOR);
+    cmd.assert()
+        .success()
+        .stdout(predicate::eq(format!("0x{}", G2_IDENTITY)));
+}
+
+#[test]
+fn div_g2_generator_minus_identity() {
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("div")
+        .arg("--g2")
+        .arg("--point")
+        .arg("identity")
+        .write_stdin(G2_GENERATOR);
+    cmd.assert()
+        .success()
+        .stdout(predicate::eq(format!("0x{}", G2_GENERATOR)));
+}
+
+#[test]
+fn div_g2_identity_minus_generator() {
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("div")
+        .arg("--g2")
+        .arg("--point")
+        .arg("generator")
+        .write_stdin(G2_IDENTITY);
+    cmd.assert()
+        .success()
+        .stdout(predicate::eq(format!("0x{}", NEG_G2_GENERATOR)));
+}
+
+#[test]
+fn div_g1_from_file() {
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    let mut file = NamedTempFile::new().unwrap();
+    write!(file, "{}", G1_GENERATOR).unwrap();
+
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("div")
+        .arg("--g1")
+        .arg("--point")
+        .arg(file.path())
+        .write_stdin(G1_GENERATOR);
+    cmd.assert()
+        .success()
+        .stdout(predicate::eq(format!("0x{}", G1_IDENTITY)));
+}
+
+#[test]
+fn div_g2_from_file() {
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    let mut file = NamedTempFile::new().unwrap();
+    write!(file, "{}", G2_GENERATOR).unwrap();
+
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("div")
+        .arg("--g2")
+        .arg("--point")
+        .arg(file.path())
+        .write_stdin(G2_GENERATOR);
+    cmd.assert()
+        .success()
+        .stdout(predicate::eq(format!("0x{}", G2_IDENTITY)));
+}
+
+#[test]
+fn div_missing_group() {
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("div")
+        .arg("--point")
+        .arg(G1_GENERATOR)
+        .write_stdin(G1_IDENTITY);
+    cmd.assert().failure().stderr(predicate::str::contains(
+        "the following required arguments were not provided",
+    ));
+}
+
+#[test]
+fn div_invalid_point() {
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("div")
+        .arg("--g1")
+        .arg("--point")
+        .arg("000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000")
+        .write_stdin(G1_GENERATOR);
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("invalid G1 compressed point"));
+}
+
+#[test]
+fn div_wrong_point_length() {
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("div")
+        .arg("--g1")
+        .arg("--point")
+        .arg("00") // too short
+        .write_stdin(G1_IDENTITY);
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("invalid right point length"));
+}
+
 #[cfg(test)]
 mod property_tests {
     use bls12_381_aiken_cli::*;
