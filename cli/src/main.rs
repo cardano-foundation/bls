@@ -179,6 +179,24 @@ pub enum Command {
     #[command(disable_help_flag = true)]
     Neg(cmd::neg::Args),
 
+    /// Invert (multiplicative inverse of) a BLS12-381 point (G1 or G2 group)
+    ///
+    /// This command computes the multiplicative inverse of a G1 or G2 point.
+    /// In additive notation this is the negation: point^(-1) = -point.
+    /// The result satisfies: point + point^(-1) = identity.
+    /// Accepts both compressed (48/96 bytes) and uncompressed (96/192 bytes) input.
+    /// The output is the compressed inverted point.
+    ///
+    /// Examples:
+    ///
+    ///   $ echo "point_hex" | bls12-381-aiken inv --g1
+    ///
+    ///   $ bls12-381-aiken inv --g2 --point point.hex
+    ///
+    ///   $ bls12-381-aiken inv --g1 --point identity
+    #[command(disable_help_flag = true)]
+    Inv(cmd::inv::Args),
+
     /// Divide two BLS12-381 points (left * right^-1, G1 or G2 group)
     ///
     /// This command computes left - right in the chosen group, which is
@@ -247,6 +265,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         Command::Compress(args) => cmd::compress::run(args),
         Command::Uncompress(args) => cmd::uncompress::run(args),
         Command::Neg(args) => cmd::neg::run(args),
+        Command::Inv(args) => cmd::inv::run(args),
         Command::Div(args) => cmd::div::run(args),
         Command::Pairing(args) => cmd::pairing::run(args),
     }
