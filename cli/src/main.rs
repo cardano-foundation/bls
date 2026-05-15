@@ -179,6 +179,23 @@ pub enum Command {
     #[command(disable_help_flag = true)]
     Neg(cmd::neg::Args),
 
+    /// Divide two BLS12-381 points (left * right^-1, G1 or G2 group)
+    ///
+    /// This command computes left - right in the chosen group, which is
+    /// equivalent to left + (-right). The right point's inverse is computed
+    /// as its additive inverse (negation). Both points are decompressed,
+    /// the right point is negated, added to the left, and the result is
+    /// re-compressed. The output is a hex string (96 hex chars for G1,
+    /// 192 hex chars for G2) representing the compressed result point.
+    ///
+    /// Examples:
+    ///
+    ///   $ echo "identity" | bls12-381-aiken div --g1 --point "generator"
+    ///
+    ///   $ echo "left_hex" | bls12-381-aiken div --g2 --point right_file.hex
+    #[command(disable_help_flag = true)]
+    Div(cmd::div::Args),
+
     /// Compute a BLS12-381 pairing (e(G1, G2))
     ///
     /// This command computes the optimal Ate pairing e(G1_point, G2_point)
@@ -230,6 +247,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         Command::Compress(args) => cmd::compress::run(args),
         Command::Uncompress(args) => cmd::uncompress::run(args),
         Command::Neg(args) => cmd::neg::run(args),
+        Command::Div(args) => cmd::div::run(args),
         Command::Pairing(args) => cmd::pairing::run(args),
     }
 }
