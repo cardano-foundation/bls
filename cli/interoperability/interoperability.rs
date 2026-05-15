@@ -679,7 +679,6 @@ fn test_interoperability_pairing_identity() {
 #[test]
 fn test_interoperability_neg_g1() {
     use midnight_curves::bls12_381::{G1Affine, G1Projective};
-    use midnight_curves::pairing::group::prime::PrimeCurveAffine;
     use midnight_curves::pairing::group::Group;
     use std::ops::Neg;
 
@@ -702,7 +701,6 @@ fn test_interoperability_neg_g1() {
 #[test]
 fn test_interoperability_neg_g2() {
     use midnight_curves::bls12_381::{G2Affine, G2Projective};
-    use midnight_curves::pairing::group::prime::PrimeCurveAffine;
     use midnight_curves::pairing::group::Group;
     use std::ops::Neg;
 
@@ -753,7 +751,7 @@ fn test_interoperability_pairing_xy_equals_26() {
 
     // Exact values from the README xy=26 example
     let g1 = G1Affine::from(G1Projective::generator());
-    let g2 = G2Affine::from(G2Projective::generator());
+    let _g2 = G2Affine::from(G2Projective::generator());
 
     let scalar13 = BlsScalar::from(13u64);
     let scalar2 = BlsScalar::from(2u64);
