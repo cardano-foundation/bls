@@ -1453,6 +1453,150 @@ fn div_wrong_point_length() {
         .stderr(predicate::str::contains("invalid right point length"));
 }
 
+// Inv command tests
+#[test]
+fn inv_g1_generator() {
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("inv").arg("--g1").write_stdin(G1_GENERATOR);
+    cmd.assert()
+        .success()
+        .stdout(predicate::eq(format!("0x{}", NEG_G1_GENERATOR)));
+}
+
+#[test]
+fn inv_g2_generator() {
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("inv").arg("--g2").write_stdin(G2_GENERATOR);
+    cmd.assert()
+        .success()
+        .stdout(predicate::eq(format!("0x{}", NEG_G2_GENERATOR)));
+}
+
+#[test]
+fn inv_g1_identity() {
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("inv").arg("--g1").arg("--point").arg("identity");
+    cmd.assert()
+        .success()
+        .stdout(predicate::eq("0xc00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"));
+}
+
+#[test]
+fn inv_g2_identity() {
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("inv").arg("--g2").arg("--point").arg("identity");
+    cmd.assert()
+        .success()
+        .stdout(predicate::eq("0xc00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"));
+}
+
+#[test]
+fn inv_g1_double_inv() {
+    let result = Command::cargo_bin("bls12-381-aiken-cli")
+        .unwrap()
+        .arg("inv")
+        .arg("--g1")
+        .write_stdin(format!("0x{}", NEG_G1_GENERATOR))
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&result.stdout);
+    assert_eq!(stdout.trim(), format!("0x{}", G1_GENERATOR));
+}
+
+#[test]
+fn inv_g1_via_point_flag() {
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("inv").arg("--g1").arg("--point").arg(G1_GENERATOR);
+    cmd.assert()
+        .success()
+        .stdout(predicate::eq(format!("0x{}", NEG_G1_GENERATOR)));
+}
+
+#[test]
+fn inv_g1_via_generator_special() {
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("inv").arg("--g1").arg("--point").arg("generator");
+    cmd.assert()
+        .success()
+        .stdout(predicate::eq(format!("0x{}", NEG_G1_GENERATOR)));
+}
+
+#[test]
+fn inv_g1_from_file() {
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    let mut file = NamedTempFile::new().unwrap();
+    write!(file, "{}", G1_GENERATOR).unwrap();
+
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("inv").arg("--g1").arg("--point").arg(file.path());
+    cmd.assert()
+        .success()
+        .stdout(predicate::eq(format!("0x{}", NEG_G1_GENERATOR)));
+}
+
+#[test]
+fn inv_g1_uncompressed_input() {
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("inv")
+        .arg("--g1")
+        .write_stdin(G1_GENERATOR_UNCOMPRESSED);
+    cmd.assert()
+        .success()
+        .stdout(predicate::eq(format!("0x{}", NEG_G1_GENERATOR)));
+}
+
+#[test]
+fn inv_g1_identity_uncompressed() {
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("inv")
+        .arg("--g1")
+        .write_stdin(G1_IDENTITY_UNCOMPRESSED);
+    cmd.assert()
+        .success()
+        .stdout(predicate::eq("0xc00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"));
+}
+
+#[test]
+fn inv_invalid_point() {
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("inv")
+        .arg("--g1")
+        .write_stdin("000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000");
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("invalid"));
+}
+
+#[test]
+fn inv_missing_group() {
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("inv").write_stdin(G1_GENERATOR);
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("--g1"))
+        .stderr(predicate::str::contains("--g2"));
+}
+
+#[test]
+fn inv_wrong_point_length() {
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("inv").arg("--g1").write_stdin("00"); // too short
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("invalid G1 point length"));
+}
+
+#[test]
+fn inv_g2_wrong_point_length() {
+    let mut cmd = Command::cargo_bin("bls12-381-aiken-cli").unwrap();
+    cmd.arg("inv").arg("--g2").write_stdin("00"); // too short
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("invalid G2 point length"));
+}
+
 #[cfg(test)]
 mod property_tests {
     use bls12_381_aiken_cli::*;

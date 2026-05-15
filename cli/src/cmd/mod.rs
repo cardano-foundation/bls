@@ -3,6 +3,7 @@ pub mod compress;
 pub mod div;
 pub mod generate_seed;
 pub mod hkdf;
+pub mod inv;
 pub mod mul;
 pub mod neg;
 pub mod pairing;
