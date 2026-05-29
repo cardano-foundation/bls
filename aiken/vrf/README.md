@@ -54,9 +54,9 @@ The relationship: `VRF_hash(SK, alpha) = VRF_proof_to_hash(VRF_prove(SK, alpha))
 ```mermaid
 flowchart LR
     subgraph Prover["Prover (holds SK)"]
-        A["Secret Keying Material"] -->|keys_from_secret| B["SK / PK Pair"]
-        B -->|prove(sk, alpha, salt)| C["Proof pi"]
-        C -->|proof_to_hash| D["Hash Output beta"]
+        A["Secret Keying Material"] -->|"keys_from_secret"| B["SK / PK Pair"]
+        B -->|"prove(sk, alpha, salt)"| C["Proof pi"]
+        C -->|"proof_to_hash"| D["Hash Output beta"]
     end
 ```
 
@@ -65,7 +65,7 @@ flowchart LR
 ```mermaid
 flowchart LR
     subgraph Verifier["Verifier (holds PK)"]
-        E["Public Key PK"] -->|verify(pk, alpha, pi, salt, flag)| F{"Valid?"}
+        E["Public Key PK"] -->|"verify(pk, alpha, pi, salt, flag)"| F{"Valid?"}
         F -->|Yes| G["Hash Output beta"]
         F -->|No| H["None"]
     end
@@ -96,13 +96,18 @@ flowchart TD
     Alpha["Input alpha"]
     Salt["Salt"]
 
-    SK & Alpha & Salt --> Prove["prove(SK, alpha, salt)"]
+    SK --> Prove["prove(SK, alpha, salt)"]
+    Alpha --> Prove
+    Salt --> Prove
     Prove --> Pi["Proof pi"]
 
     Pi --> P2H["proof_to_hash(pi)"]
     P2H --> Beta1["beta"]
 
-    PK["Public Key (PK)"] & Alpha & Salt & Pi --> Verify["verify(PK, alpha, pi, salt, flag)"]
+    PK["Public Key (PK)"] --> Verify["verify(PK, alpha, pi, salt, flag)"]
+    Alpha --> Verify
+    Salt --> Verify
+    Pi --> Verify
     Verify --> Beta2["beta"]
 
     Beta1 -.->|"must equal"| Beta2
@@ -305,7 +310,8 @@ flowchart TD
     subgraph Before["Before Input is Known"]
         I1["Input = ???"]
         SK["Secret Key sk"]
-        I1 & SK -->|"prove + hash"| Q["beta = ???"]
+        I1 -->|"prove + hash"| Q["beta = ???"]
+        SK --> Q
         style Q fill:#ffcccc
         Note1["Nobody can predict beta<br/>without sk"]
     end
@@ -313,7 +319,8 @@ flowchart TD
     subgraph After["After Input is Fixed"]
         I2["Input = block_12345"]
         SK2["Same sk"]
-        I2 & SK2 -->|"prove + hash"| B["beta = 0x7a3f..."]
+        I2 -->|"prove + hash"| B["beta = 0x7a3f..."]
+        SK2 --> B
         style B fill:#ccffcc
         Note2["Deterministic:<br/>same input → same beta"]
     end
@@ -491,9 +498,12 @@ flowchart TD
         R2["record_2"]
         R3["record_3"]
 
-        SK & R1 --> P1["prove(sk, record_1)"]
-        SK & R2 --> P2["prove(sk, record_2)"]
-        SK & R3 --> P3["prove(sk, record_3)"]
+        SK --> P1["prove(sk, record_1)"]
+        R1 --> P1
+        SK --> P2["prove(sk, record_2)"]
+        R2 --> P2
+        SK --> P3["prove(sk, record_3)"]
+        R3 --> P3
 
         P1 --> B1["beta_1"]
         P2 --> B2["beta_2"]
@@ -600,9 +610,12 @@ flowchart TD
         UX2["UTXO data #2"]
         UX3["UTXO data #3"]
 
-        SK & UX1 --> V1["VRF_hash = beta_1"]
-        SK & UX2 --> V2["VRF_hash = beta_2"]
-        SK & UX3 --> V3["VRF_hash = beta_3"]
+        SK --> V1["VRF_hash = beta_1"]
+        UX1 --> V1
+        SK --> V2["VRF_hash = beta_2"]
+        UX2 --> V2
+        SK --> V3["VRF_hash = beta_3"]
+        UX3 --> V3
     end
 
     subgraph Chain["On-chain Merkle Tree"]
@@ -1005,6 +1018,16 @@ VRF is standarized in [standard](https://www.rfc-editor.org/rfc/rfc9381.html#nam
 
 What is important we have standarized for [RSA](https://www.rfc-editor.org/rfc/rfc9381.html#name-rsa-full-domain-hash-vrf-rs) and [elliptic curves](https://www.rfc-editor.org/rfc/rfc9381.html#name-elliptic-curve-vrf-ecvrf).
 In elliptic curves BLS12-381 is not present. Here we show that **we CAN implement VRF using aiken bls12-381 primitives** and how it could be implemented.
+
+### Point compression
+
+All G2 points in this implementation are stored and transmitted in **compressed form** (96 bytes per point). This includes:
+
+- **Public keys**: `pk = compress(scale(generator, sk))`
+- **Proofs**: `pi_string = compress(Gamma) || c || s` → 144 bytes total (`96 + 16 + 32`)
+- **Challenge hashing**: all five G2 points (Y, H, Gamma, U, V) are compressed before being fed into SHA2-256
+
+Decompression (`bls12_381_g2_uncompress`) happens only at verification time when the proof is decoded and the public key is loaded. This keeps wire format and on-chain datums compact at the cost of a small computational overhead at the verifier. No uncompressed points are ever serialized.
 
 ## Building and testing
 
