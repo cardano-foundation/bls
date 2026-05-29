@@ -396,6 +396,149 @@ flowchart LR
 - **Confidential databases**: Store records in a public Merkle tree where only authorized parties know which branches contain which data.
 - **Privacy-preserving membership proofs**: Prove that a user is on an allow-list without revealing the entire list or the user's exact position.
 
+---
+
+### Deep dive: Private UTXO Sets
+
+In UTXO-based blockchains (Bitcoin, Cardano), every unspent transaction output is stored on-chain in plain sight. Anyone can enumerate the entire UTXO set, see which addresses hold funds, and trace the flow of coins. This is a major privacy limitation.
+
+**The goal**: Allow a wallet owner to hide *which* UTXOs they control, while still being able to spend them and convince the network the spend is valid.
+
+**How VRF enables private UTXO sets**:
+1. Instead of publishing a UTXO at a predictable address (e.g., `hash(public_key || nonce)`), the owner publishes it at a VRF-derived position: `beta = VRF_hash(sk, utxo_data)`
+2. The UTXO's commitment `(beta, encrypted_amount, encrypted_script)` is inserted into a public Merkle tree or accumulator
+3. Only the owner (who knows `sk`) can compute `beta` for a given UTXO and find it in the tree
+4. To spend, the owner reveals the UTXO data, provides the VRF proof, and a Merkle path showing the commitment exists
+5. The network verifies: (a) the VRF proof is valid, (b) the Merkle path is correct, (c) the UTXO has not been spent before
+
+*Figure 8 — Standard UTXO model (public and enumerable)*
+
+```mermaid
+flowchart TD
+    subgraph Blockchain["Public Blockchain"]
+        U1["UTXO_1: addr_A, 100 ADA"]
+        U2["UTXO_2: addr_B, 250 ADA"]
+        U3["UTXO_3: addr_C, 50 ADA"]
+        U4["UTXO_4: addr_A, 30 ADA"]
+    end
+
+    subgraph Attacker["Any Observer"]
+        A1["Can enumerate all UTXOs"]
+        A2["Can link UTXOs to addresses"]
+        A3["Can compute balances"]
+    end
+
+    Blockchain --> Attacker
+```
+
+*Figure 9 — Private UTXO model using VRF (hidden but verifiable)*
+
+```mermaid
+flowchart TD
+    subgraph Owner["Wallet Owner (sk)"]
+        SK["Secret Key"]
+        UX1["UTXO data #1"]
+        UX2["UTXO data #2"]
+        UX3["UTXO data #3"]
+
+        SK & UX1 --> V1["VRF_hash = beta_1"]
+        SK & UX2 --> V2["VRF_hash = beta_2"]
+        SK & UX3 --> V3["VRF_hash = beta_3"]
+    end
+
+    subgraph Chain["On-chain Merkle Tree"]
+        MT["Public root + encrypted leaves"]
+        V1 -->|"commit"| MT
+        V2 -->|"commit"| MT
+        V3 -->|"commit"| MT
+    end
+
+    subgraph Observer["Observer (no sk)"]
+        O1["Sees only random betas"]
+        O2["Cannot link to UTXO data"]
+        O3["Cannot enumerate owner's funds"]
+    end
+
+    Chain --> Observer
+```
+
+*Figure 10 — Spending a private UTXO (proving existence without revealing the set)*
+
+```mermaid
+sequenceDiagram
+    participant Owner
+    participant Network
+    participant MerkleTree
+
+    Note over Owner: Wants to spend UTXO #1
+    Owner->>Network: Submit transaction with:<br/>- UTXO data<br/>- VRF proof pi<br/>- Merkle path<br/>- Public key pk
+
+    Network->>Network: beta = verify(pk, utxo_data, pi)
+    Network->>MerkleTree: Check beta exists at Merkle path
+    MerkleTree-->>Network: Confirmed
+
+    Network->>Network: Check UTXO not already spent<br/>(nullifier prevents double-spend)
+
+    Network-->>Owner: Transaction accepted!
+
+    Note over Network: All other UTXOs remain hidden
+```
+
+**Why this is powerful**:
+- **Hiding**: An observer looking at the Merkle tree sees only random-looking `beta` values. They cannot tell which UTXOs belong to which owner, or even how many UTXOs an owner has.
+- **Selective disclosure**: When spending, the owner reveals *only* the specific UTXO being spent, plus proof that it is in the tree. All other UTXOs stay hidden.
+- **No trusted setup**: Unlike zk-SNARK-based privacy (Zcash), VRF-based private UTXOs do not require a trusted ceremony. The security reduces directly to the VRF and the hash function.
+- **Lightweight verification**: Verifying a VRF proof + Merkle path is computationally cheap enough to do on-chain.
+
+**Comparison with other privacy approaches**:
+
+| Approach | Hides UTXO set? | Trusted setup? | On-chain cost | Linkability |
+|----------|-----------------|----------------|---------------|-------------|
+| Plain UTXO (Bitcoin/Cardano today) | No | No | Low | Full |
+| Stealth addresses | Partial | No | Low | Per tx |
+| zk-SNARKs (Zcash) | Yes | Yes | High | Broken per tx |
+| Ring signatures (Monero) | Partial | No | Medium | Ring size |
+| **VRF-based private UTXO** | **Yes** | **No** | **Medium** | **Per-UTXO** |
+
+**Example: private UTXO storage and spend**
+
+```aiken
+// Wallet owner generates their UTXO keys
+let secret = "wallet_master_secret"
+let (sk, pk) = vrf.keys_from_secret(secret)
+
+// Owner creates three UTXOs (in practice, these contain amount + script)
+let utxo_1 = "utxo:100ada:script_v1:nonce_42"
+let utxo_2 = "utxo:250ada:script_v1:nonce_43"
+let utxo_3 = "utxo:50ada:script_v1:nonce_44"
+
+// Compute private "addresses" (betas) for each UTXO
+let pi_1 = vrf.prove(sk, utxo_1, "ECVRF_")
+let Some(beta_1) = vrf.proof_to_hash(pi_1)
+
+let pi_2 = vrf.prove(sk, utxo_2, "ECVRF_")
+let Some(beta_2) = vrf.proof_to_hash(pi_2)
+
+let pi_3 = vrf.prove(sk, utxo_3, "ECVRF_")
+let Some(beta_3) = vrf.proof_to_hash(pi_3)
+
+// On-chain: store (beta_i, encrypted_utxo_i) in a Merkle tree
+// Only the owner knows which betas correspond to which UTXOs
+
+// Later: spending utxo_1
+// Owner submits: utxo_1, pi_1, Merkle_path_to_beta_1, pk
+// Network verifies:
+let Some(beta_verified) = vrf.verify(pk, utxo_1, pi_1, "ECVRF_", False)
+// Then checks beta_verified is in the Merkle tree and not yet spent
+```
+
+**Key design considerations**:
+- **Nullifiers**: To prevent double-spending the same UTXO, a *nullifier* (a deterministic unique identifier derived from the UTXO and secret) must be published when spending. This is separate from the VRF proof but essential for soundness.
+- **Merkle tree vs. accumulator**: A Merkle tree is simple and efficient for inclusion proofs. An RSA or bilinear accumulator can offer smaller proof sizes but is more complex.
+- **Encrypted payloads**: The actual UTXO data (amount, script) can be encrypted with a key derived from the VRF output, ensuring only the owner can read it.
+
+---
+
 **Example: storing multiple private records**
 
 ```aiken
