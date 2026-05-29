@@ -1,3 +1,4 @@
+use aiken/fuzz
 use vrf/core as vrf
 
 const encode_to_curve_salt = #"45535652455f"
@@ -131,3 +132,40 @@ test test_privacy_protected_data() {
   // Without sk, an attacker cannot link beta values to record names.
   verified_1 == beta_1 && verified_2 == beta_2 && verified_3 == beta_3
 }
+
+// Property-based tests: prove/verify round-trip for arbitrary secrets and inputs
+
+test prop_different_secrets_different_keys(
+  pair via fuzz.both(fuzz.bytearray_between(8, 64), fuzz.bytearray_between(8, 64)),
+) {
+  let (secret_1, secret_2) = pair
+  let (_sk_1, pk_1) = key_gen(secret_1)
+  let (_sk_2, pk_2) = key_gen(secret_2)
+  // Different secrets should almost always produce different public keys.
+  // If they are equal, the property is trivially true (same secret).
+  secret_1 == secret_2 || pk_1 != pk_2
+}
+
+test prop_prove_verify_roundtrip(
+  pair via fuzz.both(fuzz.bytearray_between(8, 64), fuzz.bytearray_between(1, 64)),
+) {
+  let (secret, alpha) = pair
+  let (sk, pk) = key_gen(secret)
+  let pi = prove(sk, alpha)
+  verify(pk, alpha, pi) != None
+}
+
+test prop_deterministic_beta(
+  pair via fuzz.both(fuzz.bytearray_between(8, 64), fuzz.bytearray_between(1, 64)),
+) {
+  let (secret, alpha) = pair
+  let (sk, _pk) = key_gen(secret)
+  let pi_1 = prove(sk, alpha)
+  let pi_2 = prove(sk, alpha)
+  let beta_1 = vrf.proof_to_hash(pi_1)
+  let beta_2 = vrf.proof_to_hash(pi_2)
+  beta_1 == beta_2
+}
+
+// Note: adversarial behaviour (wrong alpha / wrong secret) is covered by
+// the unit tests test_proof_of_prior_possession and t1 above.
