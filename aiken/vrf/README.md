@@ -943,6 +943,62 @@ let is_valid_leader = bytearray_to_integer(True, beta_verified) < threshold_bob
 
 See [validators/placeholder.ak](./validators/placeholder.ak) for a working test: `test_leader_selection`
 
+## Design choice: G2 versus G1 for VRF on BLS12-381
+
+This implementation uses **G2** (the larger subgroup of BLS12-381) for all VRF group operations: public keys live in G2, `encode_to_curve` maps inputs to G2 points, and the proof embeds a G2 point (`Gamma`). We could equally have built the same scheme over **G1** (the smaller, faster subgroup). Below is the analysis of the trade-offs and the rationale for the current choice.
+
+### What G2 gives us in this code
+
+| Component | Current (G2) | Hypothetical (G1) |
+|-----------|-------------|-------------------|
+| Compressed public key size | 96 bytes | 48 bytes |
+| `Gamma` point in proof | 96 bytes | 48 bytes |
+| Total proof size | 144 bytes (`96 + 16 + 32`) | 96 bytes (`48 + 16 + 32`) |
+| `hash_to_group` target | G2 | G1 |
+| Scalar field | Same 32-byte scalar for both | Same 32-byte scalar for both |
+
+The 48-byte difference in proof size is not merely a constant overhead: every transaction, every on-chain datum, and every network message that carries a VRF proof pays for those extra bytes. In a blockchain context, proof size translates directly to fees and block-space consumption.
+
+### Trade-off matrix
+
+| Criterion | G2 | G1 | Winner |
+|-----------|----|----|--------|
+| **Proof size** | 144 bytes | 96 bytes | G1 (-33%) |
+| **Public key size** | 96 bytes | 48 bytes | G1 (-50%) |
+| **Point multiplication cost** | Slower (~2–3×) | Faster | G1 |
+| **Hash-to-curve cost** | Slower | Faster | G1 |
+| **BLS signature compatibility** | Natural fit for BLS12-381 PK-in-G2, sig-in-G1 | Inverted (PK-in-G1, sig-in-G2) | G2 |
+| **Embedding degree / security margin** | G2 sits in extension field 𝔽_p²; larger ambient space | G1 sits in base field 𝔽_p | Tie (both secure at 128-bit) |
+| **Implementation availability in Aiken** | `bls12_381/g2` primitives present | `bls12_381/g1` primitives present | Tie |
+
+### Why G2 was chosen for this implementation
+
+1. **Compatibility with BLS signature key infrastructure**
+   Cardano sidechains and many BLS12-381 deployments place *public keys in G2* and *signatures in G1*. By deriving VRF keys from the same G2 public-key format, a single secret can serve both BLS signing and VRF proving without converting between groups. The `ilap/bls` library used for key generation already produces G2 public keys; reusing that path avoids extra encoding logic and keeps the secret-scalar derivation identical.
+
+2. **Alignment with ECVRF over BLS12-381 conventions**
+   While RFC 9381 does not mandate BLS12-381, the broader ecosystem (drand, threshold BLS gadgets, etc.) has converged on G2 as the "public-key group" for this curve. Choosing G2 makes cross-protocol verification easier: the same `pk` bytes can be fed into a BLS aggregate verifier and into this VRF verifier without reinterpretation.
+
+3. **No pairing operations in ECVRF**
+   The ECVRF proving and verifying equations (Schnorr-style challenge, `U = s*G - c*Y`, etc.) do **not** use pairings. Therefore the pairing-friendly property of BLS12-381 is irrelevant here; we are simply using the curve as a plain elliptic-curve group. The choice of G2 is not driven by pairing efficiency but by the above compatibility reasons.
+
+### When G1 would be preferable
+
+- **On-chain cost is paramount**: If every byte of proof matters (e.g., Layer-1 scripts with tight execution-unit budgets), a G1-based VRF saves ~48 bytes per proof and reduces point-scaling CPU cost by a factor of 2–3. For high-frequency use (lottery draws every block, gaming rolls), these savings compound.
+- **Network bandwidth is constrained**: Light clients or P2P gossip protocols that must relay many proofs benefit from the smaller size.
+- **No BLS interoperability needed**: If the VRF keys are standalone and never mixed with BLS signing keys, the compatibility argument for G2 disappears.
+
+### Could we switch?
+
+Yes. The VRF scheme is *group-agnostic*: replace `g2` imports with `g1`, change `ptLen` from 96 to 48, and the same `prove` / `verify` / `proof_to_hash` logic holds unchanged. The scalar arithmetic, nonce generation, and challenge hashing are identical. A G1 variant would be a drop-in mechanical refactor, not a cryptographic redesign.
+
+### Recommendation
+
+- **Use the current G2 variant** when your VRF public keys must interoperate with BLS12-381 public keys from existing libraries (e.g., `ilap/bls`, Cardano sidechains, drand nodes).
+- **Consider a G1 variant** if you need maximal on-chain efficiency and can afford a separate key derivation path, or if you are building a new protocol with no legacy BLS key baggage.
+
+---
+
 ## Notes on lib/core.ak implementation
 
 VRF is standarized in [standard](https://www.rfc-editor.org/rfc/rfc9381.html#name-vrf-algorithms).
