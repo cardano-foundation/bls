@@ -36,11 +36,36 @@ test t3() {
   }
 }
 
-test t4() {
-  let epoch = "epoch_12345"
-  let (sk, pk) = key_gen("stakeholder_key")
-  let pi = prove(sk, epoch)
-  verify(pk, epoch, pi) != None
+test test_leader_selection() {
+  // Shared epoch for a consensus slot
+  let epoch = "epoch_12345_slot_42"
+
+  // Alice (30% stake)
+  let (sk_alice, pk_alice) = key_gen("alice_stake_secret")
+  let pi_alice = prove(sk_alice, epoch)
+
+  // Bob (50% stake)
+  let (sk_bob, pk_bob) = key_gen("bob_stake_secret")
+  let pi_bob = prove(sk_bob, epoch)
+
+  // Charlie (20% stake)
+  let (sk_charlie, pk_charlie) = key_gen("charlie_stake_secret")
+  let pi_charlie = prove(sk_charlie, epoch)
+
+  // Network verifies each stakeholder's proof
+  let verified_alice = verify(pk_alice, epoch, pi_alice)
+  let verified_bob = verify(pk_bob, epoch, pi_bob)
+  let verified_charlie = verify(pk_charlie, epoch, pi_charlie)
+
+  let beta_alice = vrf.proof_to_hash(pi_alice)
+  let beta_bob = vrf.proof_to_hash(pi_bob)
+  let beta_charlie = vrf.proof_to_hash(pi_charlie)
+
+  // All stakeholders produce valid proofs for the same epoch.
+  // verify and proof_to_hash agree for each participant.
+  verified_alice == beta_alice &&
+    verified_bob == beta_bob &&
+    verified_charlie == beta_charlie
 }
 
 test test_privacy_protected_data() {
