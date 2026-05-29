@@ -625,6 +625,88 @@ Naive approaches fail:
 | 5 | — | Verify `vrf.verify(pk, epoch, pi)` returns valid `beta` |
 | 6 | — | Confirm `beta < threshold` to confirm leadership |
 
+**Leader selection flows:**
+
+*Figure 11 — The DDoS problem: public-hash leader selection reveals the winner early*
+
+```mermaid
+sequenceDiagram
+    participant Attacker
+    participant Alice
+    participant Network
+
+    Note over Network: Epoch N is public
+    Network->>Alice: hash(alice_pk || epoch_N) < threshold
+    Note over Alice: Alice is selected
+
+    Attacker->>Attacker: Computes same hash
+    Attacker->>Alice: DDoS attack starts!
+
+    Alice-xNetwork: Cannot broadcast block
+    Note over Network: Slot N is empty
+```
+
+*Figure 12 — VRF leader selection: each stakeholder checks privately, only the winner reveals*
+
+```mermaid
+flowchart LR
+    subgraph Epoch["Epoch = epoch_12345"]
+        E["Public Input"]
+    end
+
+    subgraph Alice["Alice (30% stake)"]
+        SK_A["sk_alice"]
+        E -->|"prove + hash"| B_A["beta_A"]
+        SK_A --> B_A
+        B_A -->|"< threshold_A?"| R_A{"Selected?"}
+        R_A -->|No| Hidden_A["Stays silent"]
+    end
+
+    subgraph Bob["Bob (50% stake)"]
+        SK_B["sk_bob"]
+        E -->|"prove + hash"| B_B["beta_B"]
+        SK_B --> B_B
+        B_B -->|"< threshold_B?"| R_B{"Selected?"}
+        R_B -->|Yes| Reveal_B["Broadcasts (pi_B, block)"]
+    end
+
+    subgraph Charlie["Charlie (20% stake)"]
+        SK_C["sk_charlie"]
+        E -->|"prove + hash"| B_C["beta_C"]
+        SK_C --> B_C
+        B_C -->|"< threshold_C?"| R_C{"Selected?"}
+        R_C -->|No| Hidden_C["Stays silent"]
+    end
+
+    subgraph Network["Network"]
+        V["verify(pk_B, epoch, pi_B)"]
+        T["Check beta_B < threshold_B"]
+        Reveal_B --> V --> T --> OK["✅ Valid leader"]
+    end
+```
+
+*Figure 13 — Timeline: secret leadership across multiple slots*
+
+```mermaid
+sequenceDiagram
+    participant Alice
+    participant Bob
+    participant Charlie
+    participant Network
+
+    Note over Alice,Charlie: Slot 42<br/>All compute privately<br/>Only Bob wins
+    Bob->>Network: Broadcast (epoch_42, pi_bob, block)
+    Network->>Network: verify(pk_bob, epoch_42, pi_bob)<br/>beta_bob < threshold_bob
+
+    Note over Alice,Charlie: Slot 43<br/>All compute privately<br/>Only Alice wins
+    Alice->>Network: Broadcast (epoch_43, pi_alice, block)
+    Network->>Network: verify(pk_alice, epoch_43, pi_alice)<br/>beta_alice < threshold_alice
+
+    Note over Alice,Charlie: Slot 44<br/>All compute privately<br/>Only Charlie wins
+    Charlie->>Network: Broadcast (epoch_44, pi_charlie, block)
+    Network->>Network: verify(pk_charlie, epoch_44, pi_charlie)<br/>beta_charlie < threshold_charlie
+```
+
 **Why it works**:
 - **Unpredictability**: The VRF output is pseudorandom. Before the epoch number is fixed, `beta` is indistinguishable from random for all stakeholders.
 - **Individual secrecy**: Each stakeholder privately computes their own `beta`. No one else can learn whether Alice, Bob, or Charlie was selected until they voluntarily broadcast their proof.
