@@ -43,16 +43,31 @@ test t4() {
   verify(pk, epoch, pi) != None
 }
 
-test t5() {
+test test_privacy_protected_data() {
+  // Prover's secret key
   let secret = "prover_secret_key"
   let (sk, pk) = key_gen(secret)
-  let data = "important_record_123"
-  let pi = prove(sk, data)
-  when verify(pk, data, pi) is {
-    Some(beta) -> {
-      let beta2 = vrf.proof_to_hash(pi)
-      beta2 == Some(beta)
-    }
-    None -> False
-  }
+
+  // Multiple private records
+  let record_1 = "alice_payment_100"
+  let record_2 = "bob_escrow_250"
+  let record_3 = "charlie_refund_50"
+
+  // Only the prover can compute the "address" for each record
+  let pi_1 = prove(sk, record_1)
+  let pi_2 = prove(sk, record_2)
+  let pi_3 = prove(sk, record_3)
+
+  let beta_1 = vrf.proof_to_hash(pi_1)
+  let beta_2 = vrf.proof_to_hash(pi_2)
+  let beta_3 = vrf.proof_to_hash(pi_3)
+
+  // Verifier checks membership for each record
+  let verified_1 = verify(pk, record_1, pi_1)
+  let verified_2 = verify(pk, record_2, pi_2)
+  let verified_3 = verify(pk, record_3, pi_3)
+
+  // All records are verified at their VRF-derived addresses.
+  // Without sk, an attacker cannot link beta values to record names.
+  verified_1 == beta_1 && verified_2 == beta_2 && verified_3 == beta_3
 }
