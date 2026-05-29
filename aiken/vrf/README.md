@@ -320,6 +320,74 @@ See [validators/placeholder.ak](./validators/placeholder.ak) for a working test:
 | 2 | Store `(beta, encrypted_payload)` in public structure | Sees the structure but cannot link `beta` to `data` |
 | 3 | To reveal membership later, send `(data, proof)` | Run `verify(pk, data, proof)` to get `beta`, then check `beta` is in the structure |
 
+**Data structure flows:**
+
+*Figure 5 — Private storage: mapping records to unpredictable addresses*
+
+```mermaid
+flowchart TD
+    subgraph Prover["Prover (secret key holder)"]
+        SK["Secret Key sk"]
+        R1["record_1"]
+        R2["record_2"]
+        R3["record_3"]
+
+        SK & R1 --> P1["prove(sk, record_1)"]
+        SK & R2 --> P2["prove(sk, record_2)"]
+        SK & R3 --> P3["prove(sk, record_3)"]
+
+        P1 --> B1["beta_1"]
+        P2 --> B2["beta_2"]
+        P3 --> B3["beta_3"]
+    end
+
+    subgraph Public["Public Structure"]
+        MT["Merkle Tree / Hash Map"]
+        B1 -->|"store"| MT
+        B2 -->|"store"| MT
+        B3 -->|"store"| MT
+    end
+```
+
+*Figure 6 — Membership proof: revealing one record without leaking the rest*
+
+```mermaid
+sequenceDiagram
+    participant Prover
+    participant Public
+    participant Verifier
+
+    Note over Prover: Computes beta_1 = VRF_hash(sk, record_1)
+    Prover->>Public: Insert beta_1, beta_2, beta_3 (random-looking)
+
+    Note over Verifier: Sees structure but cannot<br/>link betas to record names
+
+    Note over Prover: Wants to prove record_1 exists
+    Prover->>Verifier: Send (record_1, pi_1, pk)
+
+    Verifier->>Verifier: beta_v = verify(pk, record_1, pi_1)
+    Verifier->>Public: Check beta_v is in structure
+
+    Verifier-->>Prover: Membership confirmed!<br/>(record_2, record_3 remain hidden)
+```
+
+*Figure 7 — Why regular hashing fails and VRF wins*
+
+```mermaid
+flowchart LR
+    subgraph Regular["Regular Hash (leaks)"]
+        D1["record_name"] -->|sha2_256| H1["hash"]
+        A1["Attacker"] -->|"enumerates names"| H1
+        A1 -->|"checks hash in tree"| LEAK["❌ Privacy leaked"]
+    end
+
+    subgraph VRF["VRF Hash (protected)"]
+        D2["record_name"] -->|"prove(sk, name) + proof_to_hash"| H2["beta"]
+        A2["Attacker"] -->|"no sk"| H2
+        A2 -->|"cannot compute beta"| SAFE["✅ Privacy preserved"]
+    end
+```
+
 **Why it works**: The VRF output appears random to anyone without the secret key. Without `sk`, an attacker cannot determine which `beta` corresponds to which `data`. Even if the attacker knows the plaintext `data`, they cannot compute its `beta` to test for presence in the structure.
 
 **Use cases**:
