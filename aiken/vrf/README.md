@@ -296,6 +296,98 @@ Centralized solutions like the [NIST randomness beacon](https://beacon.nist.gov/
 | 4 | Publish `(input, beta, pi)` | Everyone receives the triple |
 | 5 | — | Run `verify(pk, input, pi)` to confirm `beta` is valid |
 
+**Randomness beacon flows:**
+
+*Figure 17 — Deterministic yet unpredictable: one shot per input*
+
+```mermaid
+flowchart TD
+    subgraph Before["Before Input is Known"]
+        I1["Input = ???"]
+        SK["Secret Key sk"]
+        I1 & SK -->|"prove + hash"| Q["beta = ???"]
+        style Q fill:#ffcccc
+        Note1["Nobody can predict beta<br/>without sk"]
+    end
+
+    subgraph After["After Input is Fixed"]
+        I2["Input = block_12345"]
+        SK2["Same sk"]
+        I2 & SK2 -->|"prove + hash"| B["beta = 0x7a3f..."]
+        style B fill:#ccffcc
+        Note2["Deterministic:<br/>same input → same beta"]
+    end
+```
+
+*Figure 18 — Non-interactive randomness publication and verification*
+
+```mermaid
+sequenceDiagram
+    participant Operator
+    participant Public
+    participant Verifier
+
+    Note over Operator: Step 1: Publish pk in advance
+    Operator->>Public: Register pk
+
+    Note over Public: Step 2: Input becomes public<br/>e.g., block hash at round N
+
+    Note over Operator: Step 3: Compute privately<br/>beta = proof_to_hash(prove(sk, input))
+    Operator->>Public: Publish (input, beta, pi)
+
+    Note over Verifier: Step 4: Anyone can verify
+    Verifier->>Verifier: verify(pk, input, pi) == beta?
+    Verifier->>Verifier: ✅ Confirmed: operator did not cheat
+```
+
+*Figure 19 — Why centralized beacons and commit-reveal fail*
+
+```mermaid
+flowchart LR
+    subgraph Centralized["Centralized Beacon (NIST)"]
+        A1["Operator generates randomness"] --> B1["Publishes output"]
+        B1 --> C1["❌ Trust required<br/>❌ No cryptographic proof<br/>❌ Single point of failure"]
+    end
+
+    subgraph CommitReveal["Commit-Reveal"]
+        A2["Alice commits hash(secret)"] --> B2["Wait..."]
+        B2 --> C2["Alice reveals secret"]
+        C2 --> D2["❌ Interactive (2 rounds)<br/>❌ Alice can abort<br/>❌ Complex coordination"]
+    end
+
+    subgraph HashOnly["Hash(secret || input)"]
+        A3["Prover publishes hash"] --> B3["Nobody can verify<br/>which secret was used"]
+        B3 --> C3["❌ Not verifiable<br/>❌ Prover can grind"]
+    end
+
+    subgraph VRF["VRF Randomness"]
+        A4["Operator publishes (input, beta, pi)"] --> B4["Anyone verifies with pk"]
+        B4 --> C4["✅ Cryptographically verifiable<br/>✅ Single message<br/>✅ No grinding"]
+    end
+```
+
+*Figure 20 — Multi-round beacon: each round is independently verifiable*
+
+```mermaid
+sequenceDiagram
+    participant Operator
+    participant Verifiers
+
+    Note over Operator: Round 1<br/>Input = genesis_hash
+    Operator->>Verifiers: (genesis_hash, beta_1, pi_1)
+    Verifiers->>Verifiers: verify(pk, genesis_hash, pi_1) == beta_1
+
+    Note over Operator: Round 2<br/>Input = block_100_hash
+    Operator->>Verifiers: (block_100_hash, beta_2, pi_2)
+    Verifiers->>Verifiers: verify(pk, block_100_hash, pi_2) == beta_2
+
+    Note over Operator: Round 3<br/>Input = block_200_hash
+    Operator->>Verifiers: (block_200_hash, beta_3, pi_3)
+    Verifiers->>Verifiers: verify(pk, block_200_hash, pi_3) == beta_3
+
+    Note over Verifiers: Each round independently verifiable.<br/>No state needed between rounds.<br/>Operator cannot change past outputs.
+```
+
 **Why it works**:
 - **Deterministic yet unpredictable**: Before the public input is known, `beta` is indistinguishable from random to anyone without `sk`. Once the input is fixed, the output is uniquely determined and cannot be changed.
 - **Verifiable**: The proof `pi` cryptographically binds the operator's public key to the specific input and output. Anyone can verify this binding without trusting the operator.
