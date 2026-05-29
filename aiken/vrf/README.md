@@ -134,6 +134,73 @@ This is harder than it sounds. Several naive approaches fail:
 | 4 | — | Run `verify(pk, X, pi)` |
 | 5 | — | If `Some(beta)`, Alice possessed X at proof time |
 
+**Proof of possession flows:**
+
+*Figure 14 — Self-binding: the secret is both key and input*
+
+```mermaid
+flowchart TD
+    subgraph Secret["Secret X"]
+        X["'my_secret_password'"]
+    end
+
+    X -->|"keys_from_secret"| KP["(sk, pk) Key Pair"]
+    X -->|"alpha input"| Alpha["VRF Input"]
+    KP -->|"prove(sk, alpha)"| Pi["Proof pi"]
+
+    subgraph Binding["Cryptographic Binding"]
+        Pi -.->|"only valid for this exact X"| Valid["✅ Self-bound to X"]
+    end
+```
+
+*Figure 15 — Non-interactive proof exchange*
+
+```mermaid
+sequenceDiagram
+    participant Alice
+    participant Bob
+
+    Note over Alice: Secret X = "my_secret_password"
+    Alice->>Alice: Derive (sk, pk) from X
+    Alice->>Alice: pi = prove(sk, X)
+
+    Alice->>Bob: Send (pk, pi) in one message
+
+    Note over Bob: No prior shared state needed
+    Bob->>Bob: result = verify(pk, X, pi)
+
+    alt result == Some(beta)
+        Bob-->>Alice: ✅ Confirmed: you know X
+    else result == None
+        Bob-->>Alice: ❌ Rejected: you don't know X
+    end
+```
+
+*Figure 16 — Why other approaches fail and VRF succeeds*
+
+```mermaid
+flowchart LR
+    subgraph PasswordHash["Password Hash"]
+        A1["Alice sends hash(X)"] --> B1["Bob needs pre-stored hash"]
+        B1 --> C1["❌ Replay attack<br/>❌ Brute-force"]
+    end
+
+    subgraph DigitalSig["Digital Signature"]
+        A2["Alice signs with sk"] --> B2["Proves signing key"]
+        B2 --> C2["❌ Key could be extracted<br/>❌ Delegated signing"]
+    end
+
+    subgraph ChallengeResp["Challenge-Response"]
+        A3["Bob sends challenge"] --> B3["Alice signs challenge"]
+        B3 --> C3["❌ Interactive (2 rounds)<br/>❌ Still only proves signing"]
+    end
+
+    subgraph VRF["VRF Proof of Possession"]
+        A4["X derives keypair + is input"] --> B4["Single message: (pk, pi)"]
+        B4 --> C4["✅ Direct possession<br/>✅ Non-interactive<br/>✅ No pre-shared state"]
+    end
+```
+
 **Why it works**:
 - **Self-binding**: Because the secret X is used both to derive the keypair *and* as the VRF input, the resulting proof is cryptographically bound to that exact secret. A proof computed for `X` cannot verify against a different secret `Y`.
 - **Non-extractability**: The proof `pi` does not leak information about `sk` or `X`. Eve can observe `pi` and `pk` but cannot recover the secret.
