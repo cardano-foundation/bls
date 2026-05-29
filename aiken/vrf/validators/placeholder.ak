@@ -21,10 +21,27 @@ test t1() {
   verify(pk, "test input", pi) != None
 }
 
-test t2() {
-  let (sk, pk) = key_gen("my_secret_password_12345")
-  let pi = prove(sk, "my_secret_password_12345")
-  verify(pk, "my_secret_password_12345", pi) != None
+test test_proof_of_prior_possession() {
+  // Alice (legitimate prover) knows the secret
+  let secret_alice = "my_secret_password_12345"
+  let (sk_alice, pk_alice) = key_gen(secret_alice)
+
+  // Alice uses her secret as the VRF input (self-binding)
+  let pi_alice = prove(sk_alice, secret_alice)
+
+  // Bob (verifier) checks Alice's proof
+  let verified_alice = verify(pk_alice, secret_alice, pi_alice)
+
+  // Eve (adversary) tries with the wrong secret
+  let secret_eve = "wrong_password"
+  let (sk_eve, pk_eve) = key_gen(secret_eve)
+  let pi_eve = prove(sk_eve, secret_eve)
+
+  // Bob verifies Eve's proof against Alice's expected secret
+  let verified_eve = verify(pk_eve, secret_alice, pi_eve)
+
+  // Alice's proof is valid; Eve's proof is rejected
+  verified_alice != None && verified_eve == None
 }
 
 test t3() {
