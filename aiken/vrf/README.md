@@ -144,38 +144,104 @@ See [validators/placeholder.ak](./validators/placeholder.ak) for a working test:
 
 ## Non-interactive Randomness
 
-**The problem**: Generate a random number that anyone can verify was generated fairly, without any interaction between the prover and verifier.
+**The problem**: Many applications — from online lotteries to blockchain gaming to committee selection — need a source of randomness that is simultaneously:
+- **Unpredictable**: Nobody can guess the output in advance
+- **Publicly verifiable**: Anyone can confirm the output was generated correctly
+- **Non-interactive**: No back-and-forth communication between prover and verifier is needed
+- **Deterministic**: The same input always yields the same output, preventing manipulation after the fact
+
+Centralized solutions like the [NIST randomness beacon](https://beacon.nist.gov/home) or the [University of Chile beacon](https://random.uchile.cl/en/about/) provide public randomness, but they are not cryptographically verifiable in a decentralized way and require trusting a single operator. Commit-reveal schemes are interactive and complex. Hashing a secret value (`hash(secret || input)`) is not verifiable because nobody can check the prover actually used the claimed secret.
 
 **The VRF solution**:
-1. Use any publicly known input (e.g., block hash, round number, timestamp)
-2. Compute: `beta = vrf.proof_to_hash(vrf.prove(sk, input))`
-3. Anyone can verify the "randomness" was generated correctly by checking the proof
+1. A trusted operator (or oracle) publishes their public VRF key `pk` in advance
+2. For each round, the operator uses a *publicly known input* (e.g., a block hash, round number, or timestamp) as the VRF alpha
+3. The operator computes: `beta = vrf.proof_to_hash(vrf.prove(sk, input))`
+4. The operator publishes `(input, beta, pi)` — anyone can verify the randomness with just `pk`
 
-**Why it works**: VRF hash output appears random to anyone without the secret key. Since VRF is deterministic, the same input always produces the same "random" output, but this is unpredictable before the input is known.
+**How it works**:
+
+| Step | Operator (knows `sk`) | Verifiers / Public |
+|------|----------------------|-------------------|
+| 1 | Publish `pk` in advance | Everyone sees `pk` |
+| 2 | Wait for a public input (e.g., block hash) | Input becomes known |
+| 3 | Compute `beta = proof_to_hash(prove(sk, input))` | — |
+| 4 | Publish `(input, beta, pi)` | Everyone receives the triple |
+| 5 | — | Run `verify(pk, input, pi)` to confirm `beta` is valid |
+
+**Why it works**:
+- **Deterministic yet unpredictable**: Before the public input is known, `beta` is indistinguishable from random to anyone without `sk`. Once the input is fixed, the output is uniquely determined and cannot be changed.
+- **Verifiable**: The proof `pi` cryptographically binds the operator's public key to the specific input and output. Anyone can verify this binding without trusting the operator.
+- **Non-interactive**: The operator publishes a single message. No challenge-response or multi-round protocol is required.
+- **Unbiasable**: Because the input is public and the output is deterministic, the operator cannot grind on inputs to produce a favorable `beta`. They get one shot per input.
+
+**Comparison with other approaches**:
+
+| Approach | Predictable? | Verifiable? | Interactive? | Decentralized? |
+|----------|--------------|-------------|--------------|----------------|
+| Centralized beacon (NIST) | No | No (trust-based) | No | No |
+| Hash of secret + input | No | No | No | No |
+| Commit-reveal | No | Yes | Yes (2 rounds) | Partial |
+| **VRF randomness** | **No** | **Yes** | **No** | **Can be** |
+
+**Real-world VRF-based randomness beacons**:
+
+- **drand (League of Entropy)**: A distributed randomness beacon originally developed at EPFL's DEDIS lab and now stewarded by Randamu. It uses threshold cryptography and bilinear pairings (BLS12-381) to produce collective, publicly verifiable, unbiased random values at fixed intervals. The League of Entropy includes organizations such as Cloudflare, Protocol Labs, and NIST. Clients can verify each beacon output cryptographically without trusting any single node. Since 2024, drand operates three mainnet networks: a default chained network (30s period), a quicknet unchained network (3s period, compatible with timelock encryption), and an EVM-compatible network using BN254.
+- **Chainlink VRF**: A decentralized oracle network that uses VRF to provide on-chain verifiable randomness for smart contracts. Smart contracts request randomness; Chainlink nodes compute the VRF output off-chain and deliver the proof on-chain, where the smart contract verifies it before using the random number.
+- **Cardano's Ouroboros Praos**: The protocol uses VRF-based randomness to determine slot leadership unpredictably. While this is a form of leader selection, it is fundamentally a randomness beacon whose outputs are consumed by the consensus protocol itself.
 
 **Use cases**:
-- Lottery draws: Use a future block hash as input
-- Gaming: Shuffle a deck, roll dice
-- Lotteries: Select winners fairly
+- **Lottery draws and gaming**: Use a future block hash as the input so the operator cannot manipulate the outcome. Players can verify the winning numbers after the draw.
+- **Card shuffling and dice rolling**: Online casinos can prove each shuffle or roll was fair.
+- **Smart contract randomness**: DeFi protocols, NFT mints, and on-chain games can request VRF outputs to assign rarities, select winners, or randomize game states.
+- **Committee selection and sortition**: Randomly select a jury, audit committee, or validator set with cryptographically provable fairness.
+- **Timelock encryption and e-cash**: VRF outputs can serve as decryption-time oracles or as the basis for unlinkable electronic cash schemes.
+
+**Example: single-round randomness generation**
 
 ```aiken
-// Randomness generator (operator):
-let input = "block_12345_hash"  // public input
+// Operator generates randomness for round 42:
+let round_input = "block_12345_hash"
 let (sk, pk) = vrf.keys_from_secret(operator_secret)
-let pi = vrf.prove(sk, input, "ECVRF_")
+let pi = vrf.prove(sk, round_input, "ECVRF_")
 let Some(beta) = vrf.proof_to_hash(pi)
-// beta is a 32-byte random value
+// beta is a deterministic 32-byte pseudorandom value for this round
+
+// Operator publishes (pk, round_input, beta, pi)
 
 // Anyone can verify:
-// The randomness was generated by the operator for this specific input
-vrf.verify(pk, input, pi, "ECVRF_", False)
-// Returns Some(beta) if valid
+let Some(beta_verified) = vrf.verify(pk, round_input, pi, "ECVRF_", False)
+// beta_verified == beta confirms the operator did not cheat
 ```
 
-To extract a number in range [0, N):
-```
+**Example: extracting a fair random number in range [0, N)**
+
+```aiken
+// Given a verified beta (32 bytes), convert to an integer and reduce modulo N
+let N = 100  // e.g., a 100-sided die
 let random_number = bytearray_to_integer(True, beta) % N
+// random_number is now in [0, 99]
 ```
+
+**Example: adversarial operator cannot forge or predict**
+
+```aiken
+// Even if the operator is malicious, they cannot:
+// 1. Predict beta before the input is known (pseudorandomness)
+// 2. Forge a proof for a different beta (uniqueness)
+// 3. Change beta after the input is fixed (determinism)
+
+// If an operator tries to publish a tampered proof:
+let tampered_pi = tamper_with_proof(pi)
+let result = vrf.verify(pk, round_input, tampered_pi, "ECVRF_", False)
+// result == None  -> tampered proof is rejected
+```
+
+**Security properties**:
+- **Unpredictability**: Before the public input is known, `beta` is indistinguishable from random to anyone without `sk`.
+- **Verifiability**: Anyone can check `verify(pk, input, pi)` to confirm the output was computed correctly.
+- **Determinism**: The same `(sk, input)` always yields the same `beta`, preventing post-hoc manipulation.
+- **Uniqueness**: Only one valid `beta` exists per `(pk, input)`, preventing the operator from cherry-picking outcomes.
+- **Unbiasability**: The operator cannot grind on inputs because the input is publicly fixed before the VRF is evaluated.
 
 See [validators/placeholder.ak](./validators/placeholder.ak) for a working test: `test_non_interactive_randomness`
 

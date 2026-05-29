@@ -44,13 +44,31 @@ test test_proof_of_prior_possession() {
   verified_alice != None && verified_eve == None
 }
 
-test t3() {
-  let (sk, pk) = key_gen("block_12345_hash")
-  let pi = prove(sk, "block_12345_hash")
-  when verify(pk, "block_12345_hash", pi) is {
-    Some(beta) -> vrf.proof_to_hash(pi) == Some(beta)
-    None -> False
-  }
+test test_non_interactive_randomness() {
+  // Operator's secret key
+  let operator_secret = "operator_secret_key"
+  let (sk, pk) = key_gen(operator_secret)
+
+  // Round 1: use a block hash as public input
+  let round_1_input = "block_12345_hash"
+  let pi_1 = prove(sk, round_1_input)
+  let beta_1 = vrf.proof_to_hash(pi_1)
+
+  // Round 2: use a different public input
+  let round_2_input = "block_12346_hash"
+  let pi_2 = prove(sk, round_2_input)
+  let beta_2 = vrf.proof_to_hash(pi_2)
+
+  // Verifiers check both rounds independently
+  let verified_1 = verify(pk, round_1_input, pi_1)
+  let verified_2 = verify(pk, round_2_input, pi_2)
+
+  // Each round produces a unique, verifiable random output
+  // Determinism: same (sk, input) always yields the same beta
+  // Uniqueness: different inputs yield different betas
+  verified_1 == beta_1 &&
+    verified_2 == beta_2 &&
+    beta_1 != beta_2
 }
 
 test test_leader_selection() {
