@@ -47,6 +47,67 @@ use vrf/core as vrf
 
 The relationship: `VRF_hash(SK, alpha) = VRF_proof_to_hash(VRF_prove(SK, alpha))`
 
+**Fundamental API flows:**
+
+*Figure 1 — Core VRF data flow (prover side)*
+
+```mermaid
+flowchart LR
+    subgraph Prover["Prover (holds SK)"]
+        A["Secret Keying Material"] -->|keys_from_secret| B["SK / PK Pair"]
+        B -->|prove(sk, alpha, salt)| C["Proof pi"]
+        C -->|proof_to_hash| D["Hash Output beta"]
+    end
+```
+
+*Figure 2 — Verification flow (anyone with PK)*
+
+```mermaid
+flowchart LR
+    subgraph Verifier["Verifier (holds PK)"]
+        E["Public Key PK"] -->|verify(pk, alpha, pi, salt, flag)| F{"Valid?"}
+        F -->|Yes| G["Hash Output beta"]
+        F -->|No| H["None"]
+    end
+```
+
+*Figure 3 — End-to-end non-interactive exchange*
+
+```mermaid
+sequenceDiagram
+    participant Prover
+    participant Verifier
+
+    Note over Prover: Generate (SK, PK)<br/>from secret material
+    Prover->>Verifier: Publish PK
+
+    Note over Prover: Compute<br/>pi = prove(SK, alpha)
+    Prover->>Verifier: Send (alpha, pi)
+
+    Note over Verifier: beta = verify(PK, alpha, pi)
+    Verifier-->>Verifier: Check beta != None
+```
+
+*Figure 4 — Relationship between the two paths*
+
+```mermaid
+flowchart TD
+    SK["Secret Key (SK)"]
+    Alpha["Input alpha"]
+    Salt["Salt"]
+
+    SK & Alpha & Salt --> Prove["prove(SK, alpha, salt)"]
+    Prove --> Pi["Proof pi"]
+
+    Pi --> P2H["proof_to_hash(pi)"]
+    P2H --> Beta1["beta"]
+
+    PK["Public Key (PK)"] & Alpha & Salt & Pi --> Verify["verify(PK, alpha, pi, salt, flag)"]
+    Verify --> Beta2["beta"]
+
+    Beta1 -.->|"must equal"| Beta2
+```
+
 ## Proof of Prior Possession
 
 **The problem**: Alice wants to prove to Bob that she knows a secret X (e.g., a password or BLS secret key) without revealing X to Bob, and she wants Bob to be cryptographically certain that Alice possessed X *at the time the proof was created*.
