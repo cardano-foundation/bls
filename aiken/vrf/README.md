@@ -114,35 +114,77 @@ See [validators/placeholder.ak](./validators/placeholder.ak) for a working test:
 
 ## Privacy-Protected Data Structures
 
-**The problem**: Store data in a hash-based structure (e.g., UTXO set, Merkle tree) while preventing attackers from enumerating what data is stored.
+**The problem**: When you store data in a hash-based structure (e.g., a Merkle tree or a hash map), using regular hashes like `sha2_256(data)` leaks information. An attacker can enumerate common or expected data inputs, compute their hashes, and check if those positions exist in the public structure. This is called an **enumeration attack** and it compromises the confidentiality of the stored dataset.
 
-**The VRF solution**:
-1. Use VRF hash output instead of regular hashes to map entries to tree positions
-2. Only someone with the VRF secret key can compute which branch contains a particular entry
-3. Anyone can verify the structure is valid without learning stored data
+**The VRF solution**: Replace regular hashes with VRF hash outputs. Since `beta = VRF_hash(sk, data)` is pseudorandom and unpredictable to anyone without the secret key `sk`, an attacker cannot enumerate or link positions to specific data items. Only the prover (who holds `sk`) can compute the address of a given record. Yet anyone can verify, using the public key, that a claimed `(data, beta)` pair is valid.
 
-**Why it works**: The VRF hash output appears random to anyone without the secret key. Without the key, an attacker cannot determine which data is stored in the structure.
+**How it works**:
+
+| Step | Prover (knows `sk`) | Verifier (knows `pk`) |
+|------|---------------------|-----------------------|
+| 1 | Derive `beta = proof_to_hash(prove(sk, data))` | — |
+| 2 | Store `(beta, encrypted_payload)` in public structure | Sees the structure but cannot link `beta` to `data` |
+| 3 | To reveal membership later, send `(data, proof)` | Run `verify(pk, data, proof)` to get `beta`, then check `beta` is in the structure |
+
+**Why it works**: The VRF output appears random to anyone without the secret key. Without `sk`, an attacker cannot determine which `beta` corresponds to which `data`. Even if the attacker knows the plaintext `data`, they cannot compute its `beta` to test for presence in the structure.
 
 **Use cases**:
-- Private UTXO sets in blockchains (Cardano, etc.)
-- Confidential databases
-- Privacy-preserving membership proofs
+- **Private UTXO sets** (blockchains like Cardano): Hide which UTXOs exist on-chain while allowing the owner to spend them by proving membership.
+- **Stealth addresses**: A recipient can scan the blockchain for their payments by computing the expected VRF-derived positions, without revealing their viewing key.
+- **Confidential databases**: Store records in a public Merkle tree where only authorized parties know which branches contain which data.
+- **Privacy-preserving membership proofs**: Prove that a user is on an allow-list without revealing the entire list or the user's exact position.
+
+**Example: storing multiple private records**
 
 ```aiken
-// Prover stores data privately:
+// Prover (owner of the secret key):
 let secret = "prover_secret_key"
 let (sk, pk) = vrf.keys_from_secret(secret)
 
-// For each piece of data, compute VRF hash as "address"
-let data = "important_record_123"
-let pi = vrf.prove(sk, data, "ECVRF_")
-let Some(beta) = vrf.proof_to_hash(pi)
-// beta becomes the "address" in the data structure
+// Private records to store
+let record_1 = "alice_payment_100"
+let record_2 = "bob_escrow_250"
+let record_3 = "charlie_refund_50"
 
-// Anyone can verify data exists at beta without knowing what data is:
-// (verifier needs pi, pk, and the data)
-// This prevents enumeration attacks
+// Only the prover can compute the "address" for each record
+let pi_1 = vrf.prove(sk, record_1, "ECVRF_")
+let Some(beta_1) = vrf.proof_to_hash(pi_1)
+// beta_1 is a 32-byte pseudorandom "address"
+
+let pi_2 = vrf.prove(sk, record_2, "ECVRF_")
+let Some(beta_2) = vrf.proof_to_hash(pi_2)
+
+let pi_3 = vrf.prove(sk, record_3, "ECVRF_")
+let Some(beta_3) = vrf.proof_to_hash(pi_3)
+
+// Store (beta_i, encrypted_payload_i) in a public Merkle tree or map.
+// Outsiders cannot enumerate which records exist because they
+// cannot compute beta_i from the record names.
 ```
+
+**Example: membership proof**
+
+```aiken
+// Later, the prover wants to prove that "alice_payment_100" exists.
+// The prover sends the verifier:
+//   - the original data: "alice_payment_100"
+//   - the VRF proof: pi_1
+//   - the public key: pk
+//   - a Merkle path showing beta_1 is in the tree (omitted here for brevity)
+
+// Verifier checks:
+let Some(beta_verified) = vrf.verify(pk, "alice_payment_100", pi_1, "ECVRF_", False)
+// beta_verified == beta_1
+// Verifier then checks that beta_verified is present in the public structure.
+// If both checks pass, the record is proven to exist without ever
+// revealing the other records (record_2, record_3) or their positions.
+```
+
+**Security properties**:
+- **Confidentiality**: Without `sk`, `beta` is indistinguishable from random. An attacker cannot enumerate or link entries.
+- **Verifiability**: Anyone with `pk` can verify that a `(data, beta, proof)` triple is valid.
+- **Uniqueness**: For a given `pk` and `data`, there is exactly one valid `beta`. This prevents collisions and ensures deterministic addressing.
+- **Integrity**: Because the proof binds `data` to `beta`, a malicious prover cannot forge a fake membership proof for arbitrary data.
 
 See [validators/placeholder.ak](./validators/placeholder.ak) for a working test: `test_privacy_protected_data`
 
