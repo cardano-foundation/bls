@@ -190,40 +190,110 @@ See [validators/placeholder.ak](./validators/placeholder.ak) for a working test:
 
 ## Leader Selection
 
-**The problem**: Randomly select a leader (or set of leaders) for the next round of a consensus protocol, without anyone being able to predict the winner in advance.
+**The problem**: In Proof-of-Stake blockchains and distributed consensus protocols, a random leader (or set of leaders) must be selected for each round or slot. The selection mechanism must satisfy several critical properties:
+
+- **Unpredictability**: Nobody should be able to predict the next leader in advance
+- **Individual secrecy**: Only the selected stakeholder should know they won *before* broadcasting, preventing targeted DDoS or bribery attacks
+- **Public verifiability**: Anyone must be able to verify the selection was fair and correct
+- **Proportional fairness**: Selection probability should be proportional to each participant's stake or weight
+
+Naive approaches fail:
+- Public hash of `hash(stakeholder_id || epoch)` reveals the leader immediately, enabling attacks
+- Commit-reveal schemes are interactive, complex, and can be aborted by malicious participants
 
 **The VRF solution**:
-1. Each stakeholder has a VRF key pair
-2. For each epoch/round, use the epoch number as input
-3. Each stakeholder computes: `beta = vrf.proof_to_hash(vrf.prove(sk, epoch))`
-4. If `beta < threshold`, the stakeholder is selected as leader
-5. The selection can be verified by anyone using the public key
+1. Each stakeholder registers a public VRF key with the protocol
+2. For each epoch/slot, all stakeholders use the *same* public epoch identifier as input
+3. Each stakeholder *privately* computes: `beta = vrf.proof_to_hash(vrf.prove(sk, epoch))`
+4. If `beta < threshold(stake)`, that stakeholder is selected as leader for that slot
+5. Only after producing a block does the stakeholder reveal their proof `(epoch, pi)`
+6. The network verifies both the VRF proof validity and the threshold check
+
+**How it works**:
+
+| Step | Stakeholder (knows secret `sk`) | Network / Verifiers |
+|------|--------------------------------|---------------------|
+| 1 | Compute `beta = proof_to_hash(prove(sk, epoch))` | — |
+| 2 | Check if `beta < threshold` (proportional to stake) | — |
+| 3 | If selected, privately prepare the next block | — |
+| 4 | Broadcast the block together with `(epoch, pi, pk)` | — |
+| 5 | — | Verify `vrf.verify(pk, epoch, pi)` returns valid `beta` |
+| 6 | — | Confirm `beta < threshold` to confirm leadership |
 
 **Why it works**:
-- VRF output is unpredictable until the epoch is known
-- Only the stakeholder can compute their own selection (proprietary)
-- Anyone can verify the selection is valid
-- The threshold model provides proportional leader election
+- **Unpredictability**: The VRF output is pseudorandom. Before the epoch number is fixed, `beta` is indistinguishable from random for all stakeholders.
+- **Individual secrecy**: Each stakeholder privately computes their own `beta`. No one else can learn whether Alice, Bob, or Charlie was selected until they voluntarily broadcast their proof.
+- **Public verifiability**: Once revealed, anyone can run `vrf.verify(pk, epoch, pi)` to confirm the leader legitimately won the slot.
+- **Unbiasability**: The epoch input binds the randomness to a specific round. Changing the epoch changes all outputs, preventing grinding attacks.
+- **Proportional fairness**: By calibrating thresholds to stake share, a stakeholder with 30% of total stake has roughly a 30% chance of being selected in any given slot.
+
+**Comparison with other approaches**:
+
+| Approach | Predictable? | Secret? | Verifiable? | Interactive? |
+|----------|--------------|---------|-------------|--------------|
+| Public hash | Yes (everyone knows) | No | Yes | No |
+| Commit-reveal | No | Yes | Yes | Yes (2 rounds) |
+| **VRF** | No | Yes | Yes | **No** |
 
 **Use cases**:
-- Blockchain consensus (e.g., Ouroboros, Algorand)
-- Distributed systems leader election
-- Proof of Stake validation
+- **Blockchain consensus** (e.g., Ouroboros Praos in Cardano, Algorand): Slot leaders propose blocks without revealing identity ahead of time
+- **Distributed systems leader election**: Randomly pick a coordinator for consensus rounds
+- **Proof-of-Stake validation**: Weighted random sampling of validators for committee selection
+
+**Example: multi-stakeholder election**
+
+Consider three stakeholders with different stake weights competing for the same slot:
 
 ```aiken
-// Stakeholder:
-let epoch = "epoch_12345"
-let (sk, pk) = vrf.keys_from_secret(stakeholder_secret)
-let pi = vrf.prove(sk, epoch, "ECVRF_")
-let Some(beta) = vrf.proof_to_hash(pi)
+// Shared public input for this consensus slot
+let epoch = "epoch_12345_slot_42"
 
-// Threshold check: leader if beta < threshold
-let threshold = 1000
-let is_leader = bytearray_to_integer(True, beta) < threshold
+// Alice (30% stake, threshold = max_beta * 0.30)
+let (sk_alice, pk_alice) = vrf.keys_from_secret("alice_stake_secret")
+let pi_alice = vrf.prove(sk_alice, epoch, "ECVRF_")
+let Some(beta_alice) = vrf.proof_to_hash(pi_alice)
+let threshold_alice = 3000  // 30% of range
 
-// Anyone can verify:
-vrf.verify(pk, epoch, pi, "ECVRF_", False)
+// Bob (50% stake, threshold = max_beta * 0.50)
+let (sk_bob, pk_bob) = vrf.keys_from_secret("bob_stake_secret")
+let pi_bob = vrf.prove(sk_bob, epoch, "ECVRF_")
+let Some(beta_bob) = vrf.proof_to_hash(pi_bob)
+let threshold_bob = 5000  // 50% of range
+
+// Charlie (20% stake, threshold = max_beta * 0.20)
+let (sk_charlie, pk_charlie) = vrf.keys_from_secret("charlie_stake_secret")
+let pi_charlie = vrf.prove(sk_charlie, epoch, "ECVRF_")
+let Some(beta_charlie) = vrf.proof_to_hash(pi_charlie)
+let threshold_charlie = 2000  // 20% of range
+
+// Each stakeholder privately checks their own result
+let is_alice_leader = bytearray_to_integer(True, beta_alice) < threshold_alice
+let is_bob_leader = bytearray_to_integer(True, beta_bob) < threshold_bob
+let is_charlie_leader = bytearray_to_integer(True, beta_charlie) < threshold_charlie
 ```
+
+**Example: verifying a claimed leader**
+
+```aiken
+// The network receives Bob's claim that he is the slot leader.
+// Bob broadcasts: (pk_bob, epoch, pi_bob)
+
+// Any validator on the network can verify:
+let Some(beta_verified) = vrf.verify(pk_bob, epoch, pi_bob, "ECVRF_", False)
+
+// Confirm the threshold check
+let is_valid_leader = bytearray_to_integer(True, beta_verified) < threshold_bob
+
+// If is_valid_leader is True, Bob legitimately won the slot.
+// If False, Bob's claim is rejected.
+```
+
+**Security properties**:
+- **Unpredictability**: Nobody can predict who wins a future slot because the VRF output is pseudorandom until the epoch is known.
+- **Individual secrecy**: Only Bob knows he is the leader until he broadcasts. This protects against pre-slot DDoS and bribery.
+- **Public verifiability**: Once Bob reveals `pi_bob`, anyone can verify his leadership claim cryptographically.
+- **Unbiasability**: The epoch binds all outputs to a specific slot. An attacker cannot grind on inputs to manipulate selection.
+- **Proportional fairness**: Thresholds are set in proportion to stake, ensuring no minority stakeholder can dominate.
 
 See [validators/placeholder.ak](./validators/placeholder.ak) for a working test: `test_leader_selection`
 
