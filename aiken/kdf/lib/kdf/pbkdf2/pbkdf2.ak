@@ -7,8 +7,8 @@ use aiken/primitive/bytearray
 
 /// PBKDF2 as specified in RFC 8018, Section 5.2.
 ///
-/// The PRF is supplied by the caller.  For example, using the
-/// SHA-256 builtin available in Aiken / Plutus V3:
+/// The PRF is supplied by the caller.  For example, using a
+/// SHA-2 builtin available in Aiken / Plutus V3:
 ///
 /// ```aiken
 /// fn(pwd, data) { builtin.sha2_256(bytearray.concat(pwd, data)) }
@@ -22,7 +22,7 @@ use aiken/primitive/bytearray
 /// - `dk_len`     – intended length in octets of the derived key
 ///
 /// Returns the derived key as a `ByteArray`.
-pub fn pbkdf2(
+pub fn kdf(
   prf: fn(ByteArray, ByteArray) -> ByteArray,
   password: ByteArray,
   salt: ByteArray,
