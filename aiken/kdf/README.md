@@ -67,25 +67,37 @@ block of output (dkLen == hLen) unless noted otherwise.
 | 4 096     | 32    | ~5.16 B   | ~17.7 M |
 | 4 096     | 24    | ~5.20 B   | ~17.7 M |
 
-### Blake2b (`builtin.blake2b_224`, hLen = 28)
+### SHA-3 (`builtin.sha3_256`, hLen = 32)
 
 | Iterations | dkLen | CPU units | Memory |
 |-----------|-------|-----------|--------|
-| 1         | 28    | ~6.58 M   | ~20.4 K |
-| 2         | 28    | ~7.84 M   | ~24.7 K |
-| 4 096     | 28    | ~5.19 B   | ~17.7 M |
-| 4 096     | 24    | ~5.22 B   | ~17.7 M |
+| 1         | 32    | ~9.24 M   | ~20.4 K |
+| 2         | 32    | ~12.04 M  | ~24.7 K |
+| 4 096     | 32    | ~11.46 B  | ~17.7 M |
+| 4 096     | 24    | ~11.72 B  | ~17.7 M |
 
-**Key observation:** Blake2b is consistently cheaper than SHA-256.  For a single block with
-1–2 iterations the saving is modest (~2–4 %).  At 4 096 iterations the difference becomes
-significant: Blake2b-256 costs roughly **5.16 B CPU units** vs **5.74 B** for SHA-256, a
-saving of about **10 %**.
+### Keccak-256 (`builtin.keccak_256`, hLen = 32)
+
+| Iterations | dkLen | CPU units | Memory |
+|-----------|-------|-----------|--------|
+| 1         | 32    | ~10.93 M  | ~20.6 K |
+| 2         | 32    | ~14.53 M  | ~24.9 K |
+| 4 096     | 32    | ~14.75 B  | ~17.7 M |
+| 4 096     | 24    | ~15.02 B  | ~17.7 M |
+
+**Key observation:** At 4096 iterations, Blake2b-256 is the cheapest at ~5.16 B CPU units,
+followed by Blake2b-224 (~5.19 B), SHA-256 (~5.74 B), SHA3-256 (~11.46 B), and Keccak-256
+(~14.75 B).  Keccak-256 is roughly **2.9× more expensive** than Blake2b-256 and about
+**2.6× more expensive** than SHA-256.  SHA3-256 is roughly **2× more expensive** than
+SHA-256.  At low iteration counts (1–2) the differences are smaller but still significant:
+Keccak-256 costs ~10.9 M vs ~6.6 M for Blake2b-256.
 
 A single block with a modest iteration count (e.g. 1–10) costs only a few million CPU
 units and is easily affordable on-chain.  However, **4 096 iterations already consumes**
-**roughly 5.2–5.8 billion CPU units**, which is a large fraction of the total transaction
-budget.  If you need to run PBKDF2 inside a validator, tune `count` and `dk_len` to stay
-within the remaining budget after your other script logic.
+**roughly 5–15 billion CPU units** depending on the hash chosen, which is a large fraction
+of the total transaction budget.  If you need to run PBKDF2 inside a validator, tune both
+`count` and the choice of hash to stay within the remaining budget after your other script
+logic.
 
 For reference, Cardano protocol parameters currently allow roughly **10 billion CPU units**
 per transaction (subject to change with protocol updates).  Keep in mind that this budget
@@ -98,9 +110,11 @@ The following hash builtins were tested against this Aiken / Plutus V3 version:
 
 | Builtin | Status | hLen |
 |---------|--------|------|
-| `builtin.sha2_256` | ✅ Available | 32 |
 | `builtin.blake2b_256` | ✅ Available | 32 |
 | `builtin.blake2b_224` | ✅ Available | 28 |
+| `builtin.sha2_256` | ✅ Available | 32 |
+| `builtin.sha3_256` | ✅ Available | 32 |
+| `builtin.keccak_256` | ✅ Available | 32 |
 
 Because the PRF is passed as a closure, the implementation itself is completely generic.
 Swapping to a different hash only requires changing the first argument when calling `kdf`.
