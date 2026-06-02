@@ -1,6 +1,6 @@
 use aiken/builtin
 use aiken/primitive/bytearray
-use kdf/pbkdf2
+use kdf/pbkdf2/pbkdf2
 
 // PRF used for all tests:  PRF(P, X) = sha256(P || X)
 fn sha256_prf(pwd: ByteArray, data: ByteArray) -> ByteArray {
