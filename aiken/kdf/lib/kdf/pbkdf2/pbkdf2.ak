@@ -7,8 +7,8 @@ use aiken/primitive/bytearray
 
 /// PBKDF2 as specified in RFC 8018, Section 5.2.
 ///
-/// The PRF is supplied by the caller.  For example, using a
-/// SHA-2 builtin available in Aiken / Plutus V3:
+/// The PRF is supplied by the caller.  For example, using one of the
+/// hash builtins available in Aiken / Plutus V3:
 ///
 /// ```aiken
 /// fn(pwd, data) { builtin.sha2_256(bytearray.concat(pwd, data)) }
