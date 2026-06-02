@@ -1,5 +1,6 @@
 aiken/signature-aggregation-case/build/
 aiken/publickey-aggregation-case/build/
+aiken/kdf/build/
 aiken/vrf/build/
 
 # Cargo
