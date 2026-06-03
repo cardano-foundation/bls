@@ -10,24 +10,109 @@ The base key could also be a private key.
 There are many standards focusing on KDF, namely [HKDF](https://datatracker.ietf.org/doc/html/rfc5869) and
 [PBKDF2](https://datatracker.ietf.org/doc/html/rfc8018).
 
-# PBKDF2
+Both modules share a common `HashAlgo` enum defined in `kdf/kdf`:
 
-The library provides an Aiken-based implementation of the PBKDF2 scheme as outlined in
-[RFC 8018, Section 5.2](https://datatracker.ietf.org/doc/html/rfc8018#page-11).
+```aiken
+use kdf/kdf.{HashAlgo}
+```
+
+Variants: `Sha256`, `Sha3_256`, `Keccak256`, `Blake2b_224`, `Blake2b_256`.
+
+---
+
+# HKDF
+
+An Aiken-based implementation of [RFC 5869](https://datatracker.ietf.org/doc/html/rfc5869)
+(HMAC-based Extract-and-Expand Key Derivation Function).
 
 ## Module
 
-- `kdf/pbkdf2/pbkdf2` – generic PBKDF2 implementation.
+- `kdf/hkdf/hkdf` – single public function `kdf`.
 
 ## Usage
 
 ```aiken
-use aiken/builtin
-use aiken/primitive/bytearray
+use kdf/kdf.{HashAlgo}
+use kdf/hkdf/hkdf
+
+let okm = hkdf.kdf(
+  HashAlgo::Sha256,
+  salt: "my_salt",
+  ikm:  "input_key_material",
+  info: "application_context",
+  length: 32,
+)
+```
+
+`kdf` internally performs **Extract** (salt + IKM → PRK) followed by **Expand**
+(PRK + info → OKM).  The salt and info are both optional; pass empty bytearrays
+if you do not need them.
+
+## Budget considerations
+
+HKDF is much lighter than PBKDF2 because it does **not** iterate.  Each call performs
+exactly two HMAC operations for Extract plus one HMAC per output block for Expand.
+
+Rough numbers from the test suite (Plutus V3 / Aiken v1.1.21):
+
+### SHA-256
+
+| Operation                | Length | CPU units | Memory  |
+|--------------------------|--------|-----------|---------|
+| Extract only             | 32     | ~7.4 M    | ~22.6 K |
+| Expand only (1 block)    | 32     | ~7.4 M    | ~22.6 K |
+| Full KDF (extract+expand)| 32     | ~14.8 M   | ~45.2 K |
+| Full KDF (extract+expand)| 42     | ~22.2 M   | ~67.8 K |
+| Full KDF (extract+expand)| 82 (2 blocks)| ~29.6 M | ~90.4 K |
+
+### Blake2b-256
+
+| Operation                | Length | CPU units | Memory  |
+|--------------------------|--------|-----------|---------|
+| Full KDF (extract+expand)| 32     | ~14.5 M   | ~45.2 K |
+| Full KDF (extract+expand)| 42     | ~21.8 M   | ~67.8 K |
+
+### Keccak-256
+
+| Operation                | Length | CPU units | Memory  |
+|--------------------------|--------|-----------|---------|
+| Full KDF (extract+expand)| 32     | ~25.0 M   | ~45.4 K |
+
+**Key observation:** HKDF costs grow linearly with output length (one extra HMAC
+per `HashLen` block).  A 32-byte output using SHA-256 costs only ~15 M CPU units,
+which is negligible on-chain.  Even an 82-byte output (2 blocks, SHA-256) is still
+under ~30 M CPU units.  This makes HKDF suitable for validator scripts where you
+need to derive session keys or child keys from a shared secret.
+
+## Test vectors
+
+All SHA-256 test vectors from RFC 5869 Appendix A are verified:
+
+| Test case | salt length | info length | L  | Description |
+|-----------|-------------|-------------|-----|-------------|
+| A.1       | 13 bytes    | 10 bytes    | 42 | Basic case |
+| A.2       | 80 bytes    | 80 bytes    | 82 | Long inputs/outputs |
+| A.3       | 0 bytes     | 0 bytes     | 42 | Zero-length salt/info |
+
+---
+
+# PBKDF2
+
+An Aiken-based implementation of the PBKDF2 scheme as outlined in
+[RFC 8018, Section 5.2](https://datatracker.ietf.org/doc/html/rfc8018#page-11).
+
+## Module
+
+- `kdf/pbkdf2/pbkdf2` – single public function `kdf`.
+
+## Usage
+
+```aiken
+use kdf/kdf.{HashAlgo}
 use kdf/pbkdf2/pbkdf2
 
 let dk = pbkdf2.kdf(
-  fn(pwd, data) { builtin.sha2_256(bytearray.concat(pwd, data)) },
+  HashAlgo::Sha256,
   "my_password",
   "my_salt",
   4096,
@@ -35,10 +120,9 @@ let dk = pbkdf2.kdf(
 )
 ```
 
-The function is generic over the pseudorandom function (`prf`).  The example above uses
-`sha2_256` because that is one of the hash builtins exposed as a Plutus V3 builtin
-in Aiken v1.1.21.  If a future Plutus version exposes additional hashes (or any other
-hash), you only need to change the closure passed as the first argument.
+The hash algorithm is selected via the `HashAlgo` enum; the implementation
+is completely generic.  Swapping to a different hash only requires changing
+the first argument.
 
 ## Budget considerations
 
@@ -116,5 +200,25 @@ The following hash builtins were tested against this Aiken / Plutus V3 version:
 | `builtin.sha3_256` | ✅ Available | 32 |
 | `builtin.keccak_256` | ✅ Available | 32 |
 
-Because the PRF is passed as a closure, the implementation itself is completely generic.
-Swapping to a different hash only requires changing the first argument when calling `kdf`.
+---
+
+# Choosing between HKDF and PBKDF2
+
+| | HKDF | PBKDF2 |
+|---|---|---|
+| **Purpose** | Derive keys from high-entropy secrets (DH shared secrets, random seeds, etc.) | Derive keys from low-entropy passwords |
+| **RFC** | [RFC 5869](https://datatracker.ietf.org/doc/html/rfc5869) | [RFC 8018 §5.2](https://datatracker.ietf.org/doc/html/rfc8018#page-11) |
+| **Algorithm** | HMAC-based Extract-then-Expand | HMAC iteration with salt |
+| **Speed** | Fast — only a few HMAC calls | Slow by design — iteration count controls cost |
+| **Parameters** | `salt`, `ikm`, `info`, `length` | `password`, `salt`, `count`, `dk_len` |
+| **On-chain cost (32-byte output, SHA-256)** | ~15 M CPU | ~5.74 B CPU at 4096 iterations |
+| **On-chain feasible?** | ✅ Yes, trivially affordable | ⚠️ Only at low iteration counts (≤10) |
+| **When to use** | Session-key derivation, child-key derivation from a master secret | Password-based key derivation, wallet encryption |
+
+**Rule of thumb:**
+- If your input is a **password or human-memorable secret**, use **PBKDF2** (but keep
+  iteration counts low on-chain, or move the computation off-chain).
+- If your input is already a **pseudorandom or high-entropy key** (e.g. a Diffie-Hellman
+  shared secret, a CSPRNG output, a pre-master secret), use **HKDF**.  It is orders of
+  magnitude cheaper and provides better security guarantees for key separation via
+  the `info` parameter.

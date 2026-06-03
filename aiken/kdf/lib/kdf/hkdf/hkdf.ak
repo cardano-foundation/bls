@@ -6,15 +6,36 @@ use kdf/kdf.{HashAlgo}
 // Public API
 // -------------------------------------------------------------------
 
-/// HKDF-Extract as specified in RFC 5869, Section 2.2.
+/// HKDF as specified in RFC 5869.
+///
+/// Combines Extract (salt + IKM -> PRK) and Expand (PRK + info -> OKM)
+/// into a single call.
 ///
 /// Parameters:
-/// - `algo`  – hash algorithm to use
-/// - `salt`  – optional salt (if empty, defaults to HashLen zero octets)
-/// - `ikm`   – input keying material
+/// - `algo`   – hash algorithm to use
+/// - `salt`   – optional salt (if empty, defaults to HashLen zero octets)
+/// - `ikm`    – input keying material
+/// - `info`   – optional context and application-specific information
+/// - `length` – length of output keying material in octets (> 0, <= 255*HashLen)
 ///
-/// Returns a pseudorandom key `PRK` of `HashLen` octets.
-pub fn extract(algo: HashAlgo, salt: ByteArray, ikm: ByteArray) -> ByteArray {
+/// Returns the output keying material `OKM`.
+pub fn kdf(
+  algo: HashAlgo,
+  salt: ByteArray,
+  ikm: ByteArray,
+  info: ByteArray,
+  length: Int,
+) -> ByteArray {
+  let prk = extract(algo, salt, ikm)
+  expand(algo, prk, info, length)
+}
+
+// -------------------------------------------------------------------
+// Internal helpers
+// -------------------------------------------------------------------
+
+/// HKDF-Extract as specified in RFC 5869, Section 2.2.
+fn extract(algo: HashAlgo, salt: ByteArray, ikm: ByteArray) -> ByteArray {
   let h_len = hash_len(algo)
   let salt_or_default =
     if bytearray.is_empty(salt) {
@@ -26,15 +47,7 @@ pub fn extract(algo: HashAlgo, salt: ByteArray, ikm: ByteArray) -> ByteArray {
 }
 
 /// HKDF-Expand as specified in RFC 5869, Section 2.3.
-///
-/// Parameters:
-/// - `algo`  – hash algorithm to use
-/// - `prk`   – pseudorandom key of at least HashLen octets
-/// - `info`  – optional context (can be empty)
-/// - `length`– length of output keying material in octets (> 0, <= 255*HashLen)
-///
-/// Returns the output keying material `OKM`.
-pub fn expand(algo: HashAlgo, prk: ByteArray, info: ByteArray, length: Int) -> ByteArray {
+fn expand(algo: HashAlgo, prk: ByteArray, info: ByteArray, length: Int) -> ByteArray {
   let h_len = hash_len(algo)
   let max_len = 255 * h_len
 
@@ -47,10 +60,6 @@ pub fn expand(algo: HashAlgo, prk: ByteArray, info: ByteArray, length: Int) -> B
     expand_iter(algo, prk, info, length, h_len, n, 1, #"", #"")
   }
 }
-
-// -------------------------------------------------------------------
-// Internal helpers
-// -------------------------------------------------------------------
 
 /// Return the output length in octets for the given hash algorithm.
 fn hash_len(algo: HashAlgo) -> Int {
@@ -74,7 +83,8 @@ fn hash_from_algo(algo: HashAlgo) -> fn(ByteArray) -> ByteArray {
   }
 }
 
-pub fn hmac(algo: HashAlgo, key: ByteArray, msg: ByteArray) -> ByteArray {
+/// HMAC as specified in RFC 2104.
+fn hmac(algo: HashAlgo, key: ByteArray, msg: ByteArray) -> ByteArray {
   let block_size = 64
   let hash = hash_from_algo(algo)
 
