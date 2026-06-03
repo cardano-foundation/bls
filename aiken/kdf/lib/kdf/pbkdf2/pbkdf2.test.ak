@@ -30,3 +30,18 @@ test sha256_long_password_salt_4096() {
     24,
   ) == #"d2bb3abaee88a46a300fc76618eb2a2c25f094741096be73"
 }
+
+// -------------------------------------------------------------------
+// Embedded NUL bytes (analogous to RFC 6070 test case 6)
+// -------------------------------------------------------------------
+
+test sha256_with_nul_bytes() {
+  // password = "pass\0word", salt = "sa\0lt", c = 4096, dkLen = 16
+  pbkdf2.kdf(
+    Sha256,
+    "pass\x{0000}word",
+    "sa\x{0000}lt",
+    4096,
+    16,
+  ) == #"d0736fb3fd9805265599b751ceea11c5"
+}
