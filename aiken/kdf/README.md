@@ -231,3 +231,108 @@ The test suite covers:
   shared secret, a CSPRNG output, a pre-master secret), use **HKDF**.  It is orders of
   magnitude cheaper and provides better security guarantees for key separation via
   the `info` parameter.
+
+---
+
+# Argon2 (not implemented)
+
+We investigated adding [Argon2](https://www.rfc-editor.org/rfc/rfc9106.txt)
+(RFC 9106, Biryukov et al., "Argon2 Memory-Hard Function") as a third KDF.  The conclusion
+is that **Argon2 is fundamentally incompatible with on-chain execution on Cardano**.
+
+## Why Argon2 cannot run on-chain
+
+### 1. Memory-hard by design
+
+Argon2's security relies on consuming large amounts of RAM.  The RFC's **minimum
+recommended** settings are:
+
+| Profile | Memory | Passes | Lanes |
+|---------|--------|--------|-------|
+| Backend server auth | 4 GiB | t=1 | p=8 |
+| Hard-drive encryption | 6 GiB | t=1 | p=4 |
+| "Low memory" option | 64 MiB | t=3 | p=4 |
+| Smallest test vector | 32 KiB | t=3 | p=4 |
+
+Cardano's on-chain memory budget is roughly **14–17 MB per transaction total**
+(shared across all scripts, minting policies, etc.).  Even the smallest test vector
+(32 KiB) is non-trivial.  The 64 MiB "low memory" option is **4× the entire transaction
+budget**.  The 4 GiB standard option is **300× the budget**.
+
+### 2. BLAKE2b-512 is required, only blake2b_256 is available
+
+Argon2's internal hash function is BLAKE2b with **64-byte outputs** (the full
+BLAKE2b-512).  Plutus V3 only exposes:
+- `builtin.blake2b_224` → 28 bytes
+- `builtin.blake2b_256` → 32 bytes
+
+Implementing BLAKE2b-512 from scratch in Aiken would require:
+- Implementing the full BLAKE2b permutation (the same one used in Argon2's `GB` function)
+- 64-bit arithmetic (which Plutus does not natively support — see below)
+- This alone is a **multi-week project**
+
+### 3. 64-bit arithmetic is mandatory
+
+Argon2's `GB()` function (the core round function inside permutation P) performs:
+
+```
+a = (a + b + 2 * trunc(a) * trunc(b)) mod 2^64
+d = (d XOR a) >>> 32
+c = (c + d + 2 * trunc(c) * trunc(d)) mod 2^64
+b = (b XOR c) >>> 24
+...
+```
+
+Plutus/Aiken has **arbitrary-precision integers**, but:
+- No native 64-bit type
+- No built-in 64-bit bitwise operations
+- No `>>> n` (right rotation) — only bitwise XOR and left-shift-like operations via bytearrays
+
+Every 64-bit addition, multiplication, XOR, and rotation would need to be
+**emulated using bytearray operations** (converting Int → 8-byte bytearray, operating,
+converting back).  This is extremely expensive.
+
+### 4. Data-dependent memory access
+
+Argon2d/Argon2id compute block indices based on the **contents of previously computed
+blocks**.  This means:
+- You cannot skip blocks or compute them out of order
+- You must store the entire memory matrix in state
+- Random access into a large bytearray matrix is costly in Plutus
+
+### 5. Parallelism vs. single-threaded execution
+
+Argon2 uses `p` parallel lanes that synchronize between slices.  Aiken/Plutus is
+**single-threaded**.  We'd need to compute lanes sequentially, further increasing
+execution time.
+
+## Realistic implementation effort
+
+| Component | Effort | Feasible on-chain? |
+|-----------|--------|-------------------|
+| 64-bit arithmetic emulation | ~1 week | Very expensive |
+| BLAKE2b-512 implementation | ~2 weeks | N/A (no native support) |
+| Permutation P / GB() | ~1 week | Extremely expensive |
+| Compression function G | ~3 days | Extremely expensive |
+| Memory matrix management | ~3 days | Budget-exceeded |
+| Full Argon2 algorithm | ~4–5 weeks total | **Completely unusable** |
+
+Even if fully implemented, Argon2 with the **smallest viable parameters** (8 KiB memory,
+1 lane, 1 pass) would likely:
+- Exceed the memory budget
+- Consume billions of CPU units
+- Provide **no meaningful security** (8 KiB is trivially attacked)
+
+## Verdict
+
+**Argon2 should NOT be implemented as an on-chain KDF in Aiken.**  It is fundamentally
+incompatible with Cardano's execution model, which is designed for deterministic,
+low-memory, low-CPU scripts.
+
+If you need Argon2 for a Cardano-related application, the correct architecture is:
+1. **Off-chain computation** — compute Argon2 in the wallet or application layer
+2. **On-chain verification** — verify a pre-image or signature derived from the Argon2 output
+
+For on-chain key derivation, **HKDF** (fast, low memory, secure for high-entropy inputs)
+and **PBKDF2** with very low iteration counts (expensive but manageable for small inputs)
+are the only viable options in the current Plutus V3 environment.
