@@ -188,17 +188,26 @@ per transaction (subject to change with protocol updates).  Keep in mind that th
 must be shared across all scripts, minting policies, and certificate validations in the
 same transaction.
 
-## Hash availability note
+## Test vectors
 
-The following hash builtins were tested against this Aiken / Plutus V3 version:
+The canonical PBKDF2 test vectors are defined in [RFC 6070](https://www.rfc-editor.org/rfc/rfc6070.txt)
+(Josefsson, "PKCS #5: Password-Based Key Derivation Function 2 (PBKDF2) Test Vectors").
+Those vectors use HMAC-SHA1 as the PRF.  SHA-1 is **not** exposed as a Plutus V3 builtin,
+so the exact RFC 6070 outputs cannot be reproduced here.  Instead, the test suite uses
+analogous cases with the same passwords, salts, and iteration counts but computes
+SHA-256-based outputs (the PRF is `sha2_256(password || data)` rather than `HMAC-SHA1`).
 
-| Builtin | Status | hLen |
-|---------|--------|------|
-| `builtin.blake2b_256` | ✅ Available | 32 |
-| `builtin.blake2b_224` | ✅ Available | 28 |
-| `builtin.sha2_256` | ✅ Available | 32 |
-| `builtin.sha3_256` | ✅ Available | 32 |
-| `builtin.keccak_256` | ✅ Available | 32 |
+The test suite covers:
+
+| Case | password | salt | iterations | dkLen | Notes |
+|------|----------|------|------------|-------|-------|
+| 1-block, 1 iter | "password" | "salt" | 1 | 32 | Basic |
+| 1-block, 2 iter | "password" | "salt" | 2 | 32 | RFC 6070 analog |
+| 1-block, 4096 iter | "password" | "salt" | 4096 | 32 | RFC 6070 analog |
+| Truncated | "password" | "salt" | 1 | 16 | Last block trimmed |
+| 2 blocks | "password" | "salt" | 1 | 64 | Multiple blocks |
+| Long P/S, 4096 iter | "passwordPASSWORD" | "saltSALTsaltSALTsalt" | 4096 | 24 | RFC 6070 analog |
+| NUL bytes | "pass\0word" | "sa\0lt" | 4096 | 16 | RFC 6070 case 6 analog |
 
 ---
 
