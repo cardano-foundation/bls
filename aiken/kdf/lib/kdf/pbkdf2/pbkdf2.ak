@@ -47,7 +47,7 @@ pub fn kdf(
 // -------------------------------------------------------------------
 
 /// Compute a single block  Ti = F(P, S, c, i).
-fn f(
+fn compute_block(
   prf: fn(ByteArray, ByteArray) -> ByteArray,
   password: ByteArray,
   salt: ByteArray,
@@ -59,11 +59,11 @@ fn f(
       password,
       bytearray.concat(salt, bytearray.from_int_big_endian(index, 4)),
     )
-  f_iter(prf, password, count - 1, u1, u1)
+  xor_iterate(prf, password, count - 1, u1, u1)
 }
 
 /// Iterate Uj and accumulate the XOR sum.
-fn f_iter(
+fn xor_iterate(
   prf: fn(ByteArray, ByteArray) -> ByteArray,
   password: ByteArray,
   remaining: Int,
@@ -74,7 +74,7 @@ fn f_iter(
     acc
   } else {
     let next = prf(password, prev)
-    f_iter(
+    xor_iterate(
       prf,
       password,
       remaining - 1,
@@ -99,7 +99,7 @@ fn derive_blocks(
   if i > l {
     acc
   } else {
-    let ti = f(prf, password, salt, count, i)
+    let ti = compute_block(prf, password, salt, count, i)
     let ti_trimmed = if i == l { bytearray.take(ti, r) } else { ti }
     derive_blocks(
       prf,
