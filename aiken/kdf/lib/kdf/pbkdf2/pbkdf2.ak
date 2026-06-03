@@ -2,20 +2,26 @@ use aiken/builtin
 use aiken/primitive/bytearray
 
 // -------------------------------------------------------------------
+// Public types
+// -------------------------------------------------------------------
+
+/// Supported hash algorithms for PBKDF2.
+pub type HashAlgo {
+  Sha256
+  Sha3_256
+  Keccak256
+  Blake2b_224
+  Blake2b_256
+}
+
+// -------------------------------------------------------------------
 // Public API
 // -------------------------------------------------------------------
 
 /// PBKDF2 as specified in RFC 8018, Section 5.2.
 ///
-/// The PRF is supplied by the caller.  For example, using one of the
-/// hash builtins available in Aiken / Plutus V3:
-///
-/// ```aiken
-/// fn(pwd, data) { builtin.sha2_256(bytearray.concat(pwd, data)) }
-/// ```
-///
 /// Parameters:
-/// - `prf`        – pseudorandom function `fn(ByteArray, ByteArray) -> ByteArray`
+/// - `algo`       – hash algorithm to use
 /// - `password`   – password or private key (octet string)
 /// - `salt`       – salt (octet string)
 /// - `count`      – iteration count, must be > 0
@@ -23,12 +29,13 @@ use aiken/primitive/bytearray
 ///
 /// Returns the derived key as a `ByteArray`.
 pub fn kdf(
-  prf: fn(ByteArray, ByteArray) -> ByteArray,
+  algo: HashAlgo,
   password: ByteArray,
   salt: ByteArray,
   count: Int,
   dk_len: Int,
 ) -> ByteArray {
+  let prf = prf_from_algo(algo)
   let h_len = bytearray.length(prf(#"", #""))
 
   if count <= 0 {
@@ -45,6 +52,17 @@ pub fn kdf(
 // -------------------------------------------------------------------
 // Internal helpers
 // -------------------------------------------------------------------
+
+/// Map a HashAlgo to its corresponding PRF function.
+fn prf_from_algo(algo: HashAlgo) -> fn(ByteArray, ByteArray) -> ByteArray {
+  when algo is {
+    Sha256 -> fn(pwd, data) { builtin.sha2_256(bytearray.concat(pwd, data)) }
+    Sha3_256 -> fn(pwd, data) { builtin.sha3_256(bytearray.concat(pwd, data)) }
+    Keccak256 -> fn(pwd, data) { builtin.keccak_256(bytearray.concat(pwd, data)) }
+    Blake2b_224 -> fn(pwd, data) { builtin.blake2b_224(bytearray.concat(pwd, data)) }
+    Blake2b_256 -> fn(pwd, data) { builtin.blake2b_256(bytearray.concat(pwd, data)) }
+  }
+}
 
 /// Compute a single block  Ti = F(P, S, c, i).
 fn compute_block(
