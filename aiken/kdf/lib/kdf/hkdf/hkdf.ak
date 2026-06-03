@@ -3,8 +3,65 @@ use aiken/primitive/bytearray
 use kdf/kdf.{HashAlgo}
 
 // -------------------------------------------------------------------
+// Public API
+// -------------------------------------------------------------------
+
+/// HKDF-Extract as specified in RFC 5869, Section 2.2.
+///
+/// Parameters:
+/// - `algo`  – hash algorithm to use
+/// - `salt`  – optional salt (if empty, defaults to HashLen zero octets)
+/// - `ikm`   – input keying material
+///
+/// Returns a pseudorandom key `PRK` of `HashLen` octets.
+pub fn extract(algo: HashAlgo, salt: ByteArray, ikm: ByteArray) -> ByteArray {
+  let h_len = hash_len(algo)
+  let salt_or_default =
+    if bytearray.is_empty(salt) {
+      builtin.replicate_byte(h_len, 0)
+    } else {
+      salt
+    }
+  hmac(algo, salt_or_default, ikm)
+}
+
+/// HKDF-Expand as specified in RFC 5869, Section 2.3.
+///
+/// Parameters:
+/// - `algo`  – hash algorithm to use
+/// - `prk`   – pseudorandom key of at least HashLen octets
+/// - `info`  – optional context (can be empty)
+/// - `length`– length of output keying material in octets (> 0, <= 255*HashLen)
+///
+/// Returns the output keying material `OKM`.
+pub fn expand(algo: HashAlgo, prk: ByteArray, info: ByteArray, length: Int) -> ByteArray {
+  let h_len = hash_len(algo)
+  let max_len = 255 * h_len
+
+  if length <= 0 {
+    fail @"length must be a positive integer"
+  } else if length > max_len {
+    fail @"length too large"
+  } else {
+    let n = (length + h_len - 1) / h_len
+    expand_iter(algo, prk, info, length, h_len, n, 1, #"", #"")
+  }
+}
+
+// -------------------------------------------------------------------
 // Internal helpers
 // -------------------------------------------------------------------
+
+/// Return the output length in octets for the given hash algorithm.
+fn hash_len(algo: HashAlgo) -> Int {
+  when algo is {
+    Sha256 -> 32
+    Sha3_256 -> 32
+    Keccak256 -> 32
+    Blake2b_224 -> 28
+    Blake2b_256 -> 32
+  }
+}
 
 /// Map a HashAlgo to its corresponding hash function.
 fn hash_from_algo(algo: HashAlgo) -> fn(ByteArray) -> ByteArray {
@@ -26,4 +83,24 @@ pub fn hmac(algo: HashAlgo, key: ByteArray, msg: ByteArray) -> ByteArray {
   let o_key = xor_bytearray(True, key, replicate_byte(block_size, 0x5c))
 
   hash(append_bytearray(o_key, hash(append_bytearray(i_key, msg))))
+}
+
+/// Iterate T(1)..T(N) and accumulate.
+fn expand_iter(
+  algo: HashAlgo,
+  prk: ByteArray,
+  info: ByteArray,
+  length: Int,
+  h_len: Int,
+  n: Int,
+  i: Int,
+  prev: ByteArray,
+  acc: ByteArray,
+) -> ByteArray {
+  if i > n {
+    bytearray.take(acc, length)
+  } else {
+    let ti = hmac(algo, prk, bytearray.concat(prev, bytearray.concat(info, bytearray.from_int_big_endian(i, 1))))
+    expand_iter(algo, prk, info, length, h_len, n, i + 1, ti, bytearray.concat(acc, ti))
+  }
 }
