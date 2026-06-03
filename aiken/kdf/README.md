@@ -323,15 +323,33 @@ Even if fully implemented, Argon2 with the **smallest viable parameters** (8 KiB
 - Consume billions of CPU units
 - Provide **no meaningful security** (8 KiB is trivially attacked)
 
+## Balloon hashing (not implemented)
+
+We also briefly investigated **Balloon hashing** (Bonneau et al., 2016) as a simpler
+alternative to Argon2.  Like Argon2, Balloon hashing is a **memory-hard** function:
+it fills a large buffer with pseudorandom blocks and mixes them iteratively.
+
+While its structure is conceptually simpler than Argon2 (single-buffer rather than
+a multi-lane matrix), it suffers from the **same fundamental incompatibility**:
+- It requires a large memory buffer (hundreds of KiB to GiB) to provide any security
+- It needs a cryptographic hash as a building block (SHA-256 or BLAKE2b)
+- It performs data-dependent random accesses into the buffer
+
+A minimal Balloon hashing instance with a 64 KiB buffer and 3 rounds would already
+consume a significant fraction of the on-chain memory budget while offering only
+marginal resistance to hardware-accelerated attacks.  Like Argon2, it belongs
+**off-chain**.
+
 ## Verdict
 
-**Argon2 should NOT be implemented as an on-chain KDF in Aiken.**  It is fundamentally
-incompatible with Cardano's execution model, which is designed for deterministic,
-low-memory, low-CPU scripts.
+**Memory-hard KDFs (Argon2, Balloon hashing, Catena, etc.) should NOT be implemented
+as on-chain KDFs in Aiken.**  They are fundamentally incompatible with Cardano's
+execution model, which is designed for deterministic, low-memory, low-CPU scripts.
 
-If you need Argon2 for a Cardano-related application, the correct architecture is:
-1. **Off-chain computation** — compute Argon2 in the wallet or application layer
-2. **On-chain verification** — verify a pre-image or signature derived from the Argon2 output
+If you need a memory-hard function for a Cardano-related application, the correct
+architecture is:
+1. **Off-chain computation** — compute the KDF in the wallet or application layer
+2. **On-chain verification** — verify a pre-image or signature derived from the output
 
 For on-chain key derivation, **HKDF** (fast, low memory, secure for high-entropy inputs)
 and **PBKDF2** with very low iteration counts (expensive but manageable for small inputs)
