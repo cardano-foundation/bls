@@ -1,5 +1,38 @@
+use aiken/fuzz
+use aiken/primitive/bytearray
 use kdf/kdf.{HashAlgo}
 use kdf/pbkdf2/pbkdf2
+
+// -------------------------------------------------------------------
+// Property-based tests
+// -------------------------------------------------------------------
+
+/// PBKDF2 must always produce an output of exactly `dk_len` bytes.
+test prop_output_length(
+  password via fuzz.bytearray_between(1, 32),
+  salt via fuzz.bytearray_between(1, 16),
+  count via fuzz.int_between(1, 3),
+  dk_len via fuzz.int_between(1, 64),
+) {
+  let out = pbkdf2.kdf(Sha256, password, salt, count, dk_len)
+  bytearray.length(out) == dk_len
+}
+
+/// PBKDF2 must be deterministic: same inputs always yield the same output.
+test prop_determinism(
+  password via fuzz.bytearray_between(1, 32),
+  salt via fuzz.bytearray_between(1, 16),
+  count via fuzz.int_between(1, 3),
+  dk_len via fuzz.int_between(1, 64),
+) {
+  let out1 = pbkdf2.kdf(Sha256, password, salt, count, dk_len)
+  let out2 = pbkdf2.kdf(Sha256, password, salt, count, dk_len)
+  out1 == out2
+}
+
+// -------------------------------------------------------------------
+// Unit tests (RFC 6070 analogs with SHA-256)
+// -------------------------------------------------------------------
 
 test sha256_1_block_1_iter() {
   pbkdf2.kdf(Sha256, "password", "salt", 1, 32) == #"4ade8a4c5397bdb867dbb7e253b4d4562388cdbf599713aaecd87fa7f3202044"
