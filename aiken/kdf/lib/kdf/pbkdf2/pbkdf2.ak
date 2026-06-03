@@ -1,18 +1,6 @@
 use aiken/builtin
 use aiken/primitive/bytearray
-
-// -------------------------------------------------------------------
-// Public types
-// -------------------------------------------------------------------
-
-/// Supported hash algorithms for PBKDF2.
-pub type HashAlgo {
-  Sha256
-  Sha3_256
-  Keccak256
-  Blake2b_224
-  Blake2b_256
-}
+use kdf/kdf.{HashAlgo}
 
 // -------------------------------------------------------------------
 // Public API
