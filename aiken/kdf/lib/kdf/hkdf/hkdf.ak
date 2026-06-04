@@ -88,9 +88,24 @@ fn hmac(algo: HashAlgo, key: ByteArray, msg: ByteArray) -> ByteArray {
   let block_size = 64
   let hash = hash_from_algo(algo)
 
-  let i_key = builtin.xor_bytearray(True, key, builtin.replicate_byte(block_size, 0x36))
+  // If the key is longer than the block size, hash it first.
+  let key_or_hash =
+    if bytearray.length(key) > block_size {
+      hash(key)
+    } else {
+      key
+    }
 
-  let o_key = builtin.xor_bytearray(True, key, builtin.replicate_byte(block_size, 0x5c))
+  // Pad the key (or its hash) with zeros to the block size.
+  let key_padded =
+    builtin.append_bytearray(
+      key_or_hash,
+      builtin.replicate_byte(block_size - bytearray.length(key_or_hash), 0),
+    )
+
+  let i_key = builtin.xor_bytearray(True, key_padded, builtin.replicate_byte(block_size, 0x36))
+
+  let o_key = builtin.xor_bytearray(True, key_padded, builtin.replicate_byte(block_size, 0x5c))
 
   hash(builtin.append_bytearray(o_key, hash(builtin.append_bytearray(i_key, msg))))
 }
