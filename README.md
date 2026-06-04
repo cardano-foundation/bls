@@ -7,8 +7,9 @@
 4. [BLS mechanics in aiken](#bls-mechanics-in-aiken)
 5. [BLS12-381 primitives in aiken](#bls12-381-curve-primitives-in-aiken)
 6. [VRF using Aiken BLS12-381 primitives](#vrf-using-bls12-381-curve-primitives)
-7. [Linear and non-linear equations](#solving-easy-linear-and-non-linear-equations-using-BLS12-381-curve-primitives)
-8. [Groth16 using Aiken BLS12-381 CLI](#groth16-using-bls12-381-curve-primitives)
+7. [KDF using Aiken primitives, also BLS12-381](#kdf-using-aiken-primitives)
+8. [Linear and non-linear equations](#solving-easy-linear-and-non-linear-equations-using-BLS12-381-curve-primitives)
+9. [Groth16 using Aiken BLS12-381 CLI](#groth16-using-bls12-381-curve-primitives)
 
 ## High level introduction
 
@@ -335,6 +336,10 @@ The curve primitives and low-level operations are available through [Aiken BLS12
 ## VRF using BLS12-381 curve primitives
 
 The implementation of VRF using [aiken primitves](https://aiken-lang.github.io/stdlib/aiken/crypto/bls12_381/g1.html) is [here](./aiken/vrf)
+
+## KDF using aiken primitives
+
+The implementation of KDF using [aiken primitves](https://aiken-lang.github.io) is [here](./aiken/kdf)
 
 ## Solving easy linear and non-linear equations using BLS12-381 curve primitives
 
