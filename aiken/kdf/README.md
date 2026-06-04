@@ -1,24 +1,20 @@
 # KDF & Key Generation
 
-This library provides **Key Derivation Functions (KDF)** and **cryptographic key generation**
-tailored for on-chain execution on Cardano.
+This library provides **Key Derivation Functions (KDF)** for on-chain execution on Cardano,
+together with a thin key-generation layer built on top of those KDFs.
 
 ## What is a KDF?
 
 A Key Derivation Function takes some initial keying material — a password, a shared secret,
 or random bytes — and deterministically produces one or more cryptographically strong secret keys.
-It is a foundational building block for:
-
-- **Wallet key hierarchy** (deriving child keys from a master seed)
-- **Session-key agreement** (deriving encryption keys from a DH shared secret)
-- **Password-based encryption** (hardening a weak password into a strong key)
+KDFs are foundational for wallet key hierarchies, session-key agreement, and password-based encryption.
 
 ## What this library offers
 
 | Layer | Module | Purpose |
 |---|---|---|
-| **KDF primitives** | `kdf/hkdf/hkdf`, `kdf/pbkdf2/pbkdf2` | Low-level RFC-compliant KDF implementations |
-| **Key generation** | `kdf/keys` | High-level private / public key pair generation that **uses the KDF primitives internally** |
+| **KDF primitives** (the core) | `kdf/hkdf/hkdf`, `kdf/pbkdf2/pbkdf2` | RFC-compliant HKDF and PBKDF2 implementations |
+| **Key generation** (built on KDF) | `kdf/keys` | Private / public key pair generation that **runs the KDF primitives internally**, then maps the derived material onto the **BLS12-381** curve using Aiken's native primitives (`builtin.bls12_381_*`) |
 
 Both KDF modules share a common `HashAlgo` enum defined in `kdf/kdf`:
 
@@ -183,13 +179,16 @@ need to derive session keys or child keys from a shared secret.
 
 ## Test vectors
 
-All SHA-256 test vectors from RFC 5869 Appendix A are verified:
+<details>
+<summary>Click to expand RFC 5869 Appendix A test vectors</summary>
 
 | Test case | salt length | info length | L  | Description |
 |-----------|-------------|-------------|-----|-------------|
 | A.1       | 13 bytes    | 10 bytes    | 42 | Basic case |
 | A.2       | 80 bytes    | 80 bytes    | 82 | Long inputs/outputs |
 | A.3       | 0 bytes     | 0 bytes     | 42 | Zero-length salt/info |
+
+</details>
 
 ---
 
@@ -289,6 +288,9 @@ same transaction.
 
 ## Test vectors
 
+<details>
+<summary>Click to expand test vector coverage</summary>
+
 The canonical PBKDF2 test vectors are defined in [RFC 6070](https://www.rfc-editor.org/rfc/rfc6070.txt)
 (Josefsson, "PKCS #5: Password-Based Key Derivation Function 2 (PBKDF2) Test Vectors").
 Those vectors use HMAC-SHA1 as the PRF.  SHA-1 is **not** exposed as a Plutus V3 builtin,
@@ -306,7 +308,9 @@ The test suite covers:
 | Truncated | "password" | "salt" | 1 | 16 | Last block trimmed |
 | 2 blocks | "password" | "salt" | 1 | 64 | Multiple blocks |
 | Long P/S, 4096 iter | "passwordPASSWORD" | "saltSALTsaltSALTsalt" | 4096 | 24 | RFC 6070 analog |
-| NUL bytes | "pass\0word" | "sa\0lt" | 4096 | 16 | RFC 6070 case 6 analog |
+| NUL bytes | #"7061737300776f7264" | #"7361006c74" | 4096 | 16 | RFC 6070 case 6 analog |
+
+</details>
 
 ---
 
@@ -415,19 +419,19 @@ Argon2 uses `p` parallel lanes that synchronize between slices.  Aiken/Plutus is
 **single-threaded**.  We'd need to compute lanes sequentially, further increasing
 execution time.
 
-## Realistic implementation effort
+## On-chain feasibility
 
 <details>
 <summary>Click to expand feasibility breakdown</summary>
 
-| Component | Effort | Feasible on-chain? |
-|-----------|--------|-------------------|
-| 64-bit arithmetic emulation | ~1 week | Very expensive |
-| BLAKE2b-512 implementation | ~2 weeks | N/A (no native support) |
-| Permutation P / GB() | ~1 week | Extremely expensive |
-| Compression function G | ~3 days | Extremely expensive |
-| Memory matrix management | ~3 days | Budget-exceeded |
-| Full Argon2 algorithm | ~4–5 weeks total | **Completely unusable** |
+| Component | On-chain feasible? |
+|-----------|-------------------|
+| 64-bit arithmetic emulation | Very expensive |
+| BLAKE2b-512 implementation | N/A (no native support) |
+| Permutation P / GB() | Extremely expensive |
+| Compression function G | Extremely expensive |
+| Memory matrix management | Budget-exceeded |
+| Full Argon2 algorithm | **Completely unusable** |
 
 </details>
 
