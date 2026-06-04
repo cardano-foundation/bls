@@ -9,7 +9,7 @@ use aiken/crypto/bls12_381/g1
 use aiken/crypto/bls12_381/scalar.{prime_field}
 use kdf/hkdf/hkdf
 use kdf/pbkdf2/pbkdf2
-use kdf/kdf.{HashAlgo}
+use kdf/kdf.{HashAlgo, Sha256}
 
 /// Supported schemes for key derivation.
 pub type KeyDerivationScheme {
@@ -50,8 +50,54 @@ pub fn pk_from_sk(method: Cryptography, secret: ByteArray) -> PublicKey {
   }
 }
 
+/// Generate a private / public key pair using **PBKDF2**.
+///
+/// **Choices made here:**
+/// - KDF scheme: `PBKDF2`
+/// - Hash algorithm: `Sha256`
+/// - Iteration count: `10`  (chosen to stay within the on-chain
+///   budget of roughly **10–20 M CPU units** for a 32-byte output)
+/// - Curve: `BLS12_381`
+/// - Output length: **32 bytes** (fixed)
+///
+/// **Note:** 10 iterations is far below the traditional 4096 used
+/// off-chain, but it is the maximum feasible on-chain while keeping
+/// CPU usage affordable. If you need a different count or hash,
+/// use `gen_keys_detail`.
+pub fn gen_keys_pbkdf2(
+  salt: ByteArray,
+  ikm: ByteArray,
+) -> (PrivateKey, PublicKey) {
+  gen_keys_detail(PBKDF2, BLS12_381, Sha256, salt, ikm, 10, #"")
+}
+
+/// Generate a private / public key pair using **HKDF**.
+///
+/// **Choices made here:**
+/// - KDF scheme: `HKDF`
+/// - Hash algorithm: `Sha256`
+/// - Info string: empty (`#""`)
+/// - Curve: `BLS12_381`
+/// - Output length: **32 bytes** (fixed)
+///
+/// HKDF is orders of magnitude cheaper than PBKDF2 (~15 M CPU units
+/// for a 32-byte SHA-256 output) and is the recommended choice for
+/// high-entropy inputs.
+pub fn gen_keys_hkdf(
+  salt: ByteArray,
+  ikm: ByteArray,
+) -> (PrivateKey, PublicKey) {
+  gen_keys_detail(HKDF, BLS12_381, Sha256, salt, ikm, 0, #"")
+}
+
 /// Generate a private / public key pair using the selected KDF scheme
-/// and elliptic-curve system.
+/// and elliptic-curve system. This version exposes every tunable
+/// parameter and is intended for advanced use-cases or when the
+/// shortened helpers (`gen_keys_pbkdf2` / `gen_keys_hkdf`) do not
+/// fit your needs.
+///
+/// The derived secret length is **fixed at 32 bytes** (the standard
+/// scalar size for BLS12-381).
 ///
 /// # Parameters
 ///
@@ -62,10 +108,9 @@ pub fn pk_from_sk(method: Cryptography, secret: ByteArray) -> PublicKey {
 /// - `ikm`          – input keying material / password (used by both schemes)
 /// - `count`        – iteration count, **used only for PBKDF2**
 /// - `info`         – context info, **used only for HKDF**
-/// - `length`       – desired length of the derived secret in bytes
 ///
 /// Returns a tuple `(PrivateKey, PublicKey)`.
-pub fn gen_keys(
+pub fn gen_keys_detail(
   scheme: KeyDerivationScheme,
   cryptography: Cryptography,
   algo: HashAlgo,
@@ -73,18 +118,18 @@ pub fn gen_keys(
   ikm: ByteArray,
   count: Int,
   info: ByteArray,
-  length: Int,
 ) -> (PrivateKey, PublicKey) {
   if cryptography == BLS12_381 {
-    gen_keys_bls12_381(scheme, algo, salt, ikm, count, info, length)
+    gen_keys_bls12_381(scheme, algo, salt, ikm, count, info)
   }
 }
 
 /// BLS12-381 specific key-pair generation.
 ///
-/// Runs the chosen KDF (`PBKDF2` or `HKDF`) and then converts the
-/// derived material into a BLS12-381 private key (reduced modulo the
-/// prime field) and the corresponding compressed public key.
+/// Runs the chosen KDF (`PBKDF2` or `HKDF`) with a fixed 32-byte
+/// output length and then converts the derived material into a
+/// BLS12-381 private key (reduced modulo the prime field) and the
+/// corresponding compressed public key.
 ///
 /// # Parameters
 ///
@@ -94,7 +139,6 @@ pub fn gen_keys(
 /// - `ikm`    – input keying material / password
 /// - `count`  – iteration count (PBKDF2 only)
 /// - `info`   – context info (HKDF only)
-/// - `length` – KDF output length in bytes
 ///
 /// Returns a tuple `(PrivateKey, PublicKey)`.
 pub fn gen_keys_bls12_381(
@@ -104,11 +148,10 @@ pub fn gen_keys_bls12_381(
   ikm: ByteArray,
   count: Int,
   info: ByteArray,
-  length: Int,
 ) -> (PrivateKey, PublicKey) {
   let secret = when scheme is {
-    PBKDF2 -> pbkdf2.kdf(algo, ikm, salt, count, length)
-    HKDF -> hkdf.kdf(algo, salt, ikm, info, length)
+    PBKDF2 -> pbkdf2.kdf(algo, ikm, salt, count, 32)
+    HKDF -> hkdf.kdf(algo, salt, ikm, info, 32)
   }
   let sk = to_pk_bls12_381(secret, 32)
   let pk = pk_from_sk_bls12_381(sk)
