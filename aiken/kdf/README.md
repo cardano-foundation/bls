@@ -20,6 +20,85 @@ Variants: `Sha256`, `Sha3_256`, `Keccak256`, `Blake2b_224`, `Blake2b_256`.
 
 ---
 
+# Key generation (`kdf/keys`)
+
+The `kdf/keys` module provides a high-level interface for generating private / public key pairs from arbitrary input material.  It currently supports the **BLS12-381** curve on the **G1 prime field**.
+
+## Quick start
+
+### Generate a key pair with PBKDF2
+
+```aiken
+use kdf/keys
+
+let (sk, pk) = keys.gen_keys_pbkdf2(
+  salt: "my_salt",
+  ikm:  "my_password",
+)
+```
+
+**Defaults chosen by `gen_keys_pbkdf2`:**
+- Scheme: `PBKDF2`
+- Hash: `Sha256`
+- Iterations: `10` (safe for on-chain budgets, ~160 M CPU units)
+- Curve: `BLS12_381`
+- Output length: **32 bytes**
+
+### Generate a key pair with HKDF
+
+```aiken
+use kdf/keys
+
+let (sk, pk) = keys.gen_keys_hkdf(
+  salt: "my_salt",
+  ikm:  "high_entropy_secret",
+)
+```
+
+**Defaults chosen by `gen_keys_hkdf`:**
+- Scheme: `HKDF`
+- Hash: `Sha256`
+- Info: empty
+- Curve: `BLS12_381`
+- Output length: **32 bytes**
+
+### Full-control generation
+
+If the defaults do not fit your use-case, use `gen_keys_detail` to tune every parameter:
+
+```aiken
+use kdf/keys.{PBKDF2, HKDF, BLS12_381}
+use kdf/kdf.{Sha256}
+
+let (sk, pk) = keys.gen_keys_detail(
+  PBKDF2,
+  BLS12_381,
+  Sha256,
+  salt:   "salt",
+  ikm:    "password",
+  count:  5,            -- PBKDF2 only
+  info:   #"",          -- HKDF only
+)
+```
+
+### Other public helpers
+
+```aiken
+use kdf/keys.{BLS12_381}
+
+-- Reduce arbitrary bytes to a valid BLS12-381 private key
+let sk = keys.to_pk(BLS12_381, #"deadbeef...")
+
+-- Derive the corresponding public key from a secret key
+let pk = keys.pk_from_sk(BLS12_381, sk)
+
+-- BLS12-381 specific helpers (exposed for advanced use)
+let sk2 = keys.to_pk_bls12_381(#"deadbeef...", 32)
+let pk2 = keys.pk_from_sk_bls12_381(sk2)
+```
+
+---
+
 # HKDF
 
 An Aiken-based implementation of [RFC 5869](https://datatracker.ietf.org/doc/html/rfc5869)
