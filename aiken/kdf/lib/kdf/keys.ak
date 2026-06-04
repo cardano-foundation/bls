@@ -7,6 +7,9 @@ use aiken/builtin.{
 }
 use aiken/crypto/bls12_381/g1
 use aiken/crypto/bls12_381/scalar.{prime_field}
+use kdf/hkdf/hkdf
+use kdf/pbkdf2/pbkdf2
+use kdf/kdf.{HashAlgo}
 
 /// Supported schemes for key derivation.
 pub type KeyDerivationScheme {
@@ -45,6 +48,71 @@ pub fn pk_from_sk(method: Cryptography, secret: ByteArray) -> PublicKey {
   if method == BLS12_381 {
     pk_from_sk_bls12_381(secret)
   }
+}
+
+/// Generate a private / public key pair using the selected KDF scheme
+/// and elliptic-curve system.
+///
+/// # Parameters
+///
+/// - `scheme`       – key derivation scheme (`PBKDF2` or `HKDF`)
+/// - `cryptography` – target curve (`BLS12_381`)
+/// - `algo`         – hash algorithm (e.g. `Sha256`, `Blake2b_256`)
+/// - `salt`         – salt byte array (used by both schemes)
+/// - `ikm`          – input keying material / password (used by both schemes)
+/// - `count`        – iteration count, **used only for PBKDF2**
+/// - `info`         – context info, **used only for HKDF**
+/// - `length`       – desired length of the derived secret in bytes
+///
+/// Returns a tuple `(PrivateKey, PublicKey)`.
+pub fn gen_keys(
+  scheme: KeyDerivationScheme,
+  cryptography: Cryptography,
+  algo: HashAlgo,
+  salt: ByteArray,
+  ikm: ByteArray,
+  count: Int,
+  info: ByteArray,
+  length: Int,
+) -> (PrivateKey, PublicKey) {
+  if cryptography == BLS12_381 {
+    gen_keys_bls12_381(scheme, algo, salt, ikm, count, info, length)
+  }
+}
+
+/// BLS12-381 specific key-pair generation.
+///
+/// Runs the chosen KDF (`PBKDF2` or `HKDF`) and then converts the
+/// derived material into a BLS12-381 private key (reduced modulo the
+/// prime field) and the corresponding compressed public key.
+///
+/// # Parameters
+///
+/// - `scheme` – key derivation scheme
+/// - `algo`   – hash algorithm
+/// - `salt`   – salt
+/// - `ikm`    – input keying material / password
+/// - `count`  – iteration count (PBKDF2 only)
+/// - `info`   – context info (HKDF only)
+/// - `length` – KDF output length in bytes
+///
+/// Returns a tuple `(PrivateKey, PublicKey)`.
+pub fn gen_keys_bls12_381(
+  scheme: KeyDerivationScheme,
+  algo: HashAlgo,
+  salt: ByteArray,
+  ikm: ByteArray,
+  count: Int,
+  info: ByteArray,
+  length: Int,
+) -> (PrivateKey, PublicKey) {
+  let secret = when scheme is {
+    PBKDF2 -> pbkdf2.kdf(algo, ikm, salt, count, length)
+    HKDF -> hkdf.kdf(algo, salt, ikm, info, length)
+  }
+  let sk = to_pk_bls12_381(secret, 32)
+  let pk = pk_from_sk_bls12_381(sk)
+  (sk, pk)
 }
 
 /// --- BLS12-381 helpers ---
