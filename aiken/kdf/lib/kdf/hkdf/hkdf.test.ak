@@ -1,6 +1,6 @@
 use aiken/fuzz
 use aiken/primitive/bytearray
-use kdf/kdf.{HashAlgo}
+use kdf/kdf.{HashAlgo, Sha256}
 use kdf/hkdf/hkdf
 
 // -------------------------------------------------------------------
@@ -9,22 +9,28 @@ use kdf/hkdf/hkdf
 
 /// HKDF must always produce an output of exactly `length` bytes.
 test prop_output_length(
-  salt via fuzz.bytearray_between(0, 32),
-  ikm via fuzz.bytearray_between(1, 32),
-  info via fuzz.bytearray_between(0, 32),
-  length via fuzz.int_between(1, 64),
+  args via fuzz.tuple4(
+    fuzz.bytearray_between(0, 32),
+    fuzz.bytearray_between(1, 32),
+    fuzz.bytearray_between(0, 32),
+    fuzz.int_between(1, 64),
+  ),
 ) {
+  let (salt, ikm, info, length) = args
   let out = hkdf.kdf(Sha256, salt, ikm, info, length)
   bytearray.length(out) == length
 }
 
 /// HKDF must be deterministic: same inputs always yield the same output.
 test prop_determinism(
-  salt via fuzz.bytearray_between(0, 32),
-  ikm via fuzz.bytearray_between(1, 32),
-  info via fuzz.bytearray_between(0, 32),
-  length via fuzz.int_between(1, 64),
+  args via fuzz.tuple4(
+    fuzz.bytearray_between(0, 32),
+    fuzz.bytearray_between(1, 32),
+    fuzz.bytearray_between(0, 32),
+    fuzz.int_between(1, 64),
+  ),
 ) {
+  let (salt, ikm, info, length) = args
   let out1 = hkdf.kdf(Sha256, salt, ikm, info, length)
   let out2 = hkdf.kdf(Sha256, salt, ikm, info, length)
   out1 == out2

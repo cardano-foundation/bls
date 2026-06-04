@@ -1,6 +1,6 @@
 use aiken/builtin
 use aiken/primitive/bytearray
-use kdf/kdf.{HashAlgo}
+use kdf/kdf.{HashAlgo, Sha256, Sha3_256, Keccak256, Blake2b_224, Blake2b_256}
 
 // -------------------------------------------------------------------
 // Public API
@@ -88,11 +88,11 @@ fn hmac(algo: HashAlgo, key: ByteArray, msg: ByteArray) -> ByteArray {
   let block_size = 64
   let hash = hash_from_algo(algo)
 
-  let i_key = xor_bytearray(True, key, replicate_byte(block_size, 0x36))
+  let i_key = builtin.xor_bytearray(True, key, builtin.replicate_byte(block_size, 0x36))
 
-  let o_key = xor_bytearray(True, key, replicate_byte(block_size, 0x5c))
+  let o_key = builtin.xor_bytearray(True, key, builtin.replicate_byte(block_size, 0x5c))
 
-  hash(append_bytearray(o_key, hash(append_bytearray(i_key, msg))))
+  hash(builtin.append_bytearray(o_key, hash(builtin.append_bytearray(i_key, msg))))
 }
 
 /// Iterate T(1)..T(N) and accumulate.

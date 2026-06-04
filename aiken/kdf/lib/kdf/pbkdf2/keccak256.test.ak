@@ -1,5 +1,5 @@
 use aiken/primitive/bytearray
-use kdf/kdf.{HashAlgo}
+use kdf/kdf.{HashAlgo, Keccak256}
 use kdf/pbkdf2/pbkdf2
 
 test keccak_256_1_block_1_iter() {

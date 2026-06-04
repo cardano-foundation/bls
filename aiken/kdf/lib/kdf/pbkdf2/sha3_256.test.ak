@@ -1,4 +1,4 @@
-use kdf/kdf.{HashAlgo}
+use kdf/kdf.{HashAlgo, Sha3_256}
 use kdf/pbkdf2/pbkdf2
 
 test sha3_256_1_block_1_iter() {
