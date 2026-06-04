@@ -1,4 +1,4 @@
-use kdf/kdf.{HashAlgo}
+use kdf/kdf.{HashAlgo, Blake2b_256}
 use kdf/pbkdf2/pbkdf2
 
 test blake2b256_1_block_1_iter() {

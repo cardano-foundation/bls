@@ -1,6 +1,6 @@
 use aiken/fuzz
 use aiken/primitive/bytearray
-use kdf/kdf.{HashAlgo}
+use kdf/kdf.{HashAlgo, Sha256}
 use kdf/pbkdf2/pbkdf2
 
 // -------------------------------------------------------------------
@@ -9,22 +9,28 @@ use kdf/pbkdf2/pbkdf2
 
 /// PBKDF2 must always produce an output of exactly `dk_len` bytes.
 test prop_output_length(
-  password via fuzz.bytearray_between(1, 32),
-  salt via fuzz.bytearray_between(1, 16),
-  count via fuzz.int_between(1, 3),
-  dk_len via fuzz.int_between(1, 64),
+  args via fuzz.tuple4(
+    fuzz.bytearray_between(1, 32),
+    fuzz.bytearray_between(1, 16),
+    fuzz.int_between(1, 3),
+    fuzz.int_between(1, 64),
+  ),
 ) {
+  let (password, salt, count, dk_len) = args
   let out = pbkdf2.kdf(Sha256, password, salt, count, dk_len)
   bytearray.length(out) == dk_len
 }
 
 /// PBKDF2 must be deterministic: same inputs always yield the same output.
 test prop_determinism(
-  password via fuzz.bytearray_between(1, 32),
-  salt via fuzz.bytearray_between(1, 16),
-  count via fuzz.int_between(1, 3),
-  dk_len via fuzz.int_between(1, 64),
+  args via fuzz.tuple4(
+    fuzz.bytearray_between(1, 32),
+    fuzz.bytearray_between(1, 16),
+    fuzz.int_between(1, 3),
+    fuzz.int_between(1, 64),
+  ),
 ) {
+  let (password, salt, count, dk_len) = args
   let out1 = pbkdf2.kdf(Sha256, password, salt, count, dk_len)
   let out2 = pbkdf2.kdf(Sha256, password, salt, count, dk_len)
   out1 == out2
@@ -72,8 +78,8 @@ test sha256_with_nul_bytes() {
   // password = "pass\0word", salt = "sa\0lt", c = 4096, dkLen = 16
   pbkdf2.kdf(
     Sha256,
-    "pass\x{0000}word",
-    "sa\x{0000}lt",
+    #"7061737300776f7264",
+    #"7361006c74",
     4096,
     16,
   ) == #"d0736fb3fd9805265599b751ceea11c5"

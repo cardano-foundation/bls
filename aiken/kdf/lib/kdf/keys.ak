@@ -3,24 +3,25 @@
 //// bindings built on top of the G1 prime-field.
 
 use aiken/builtin.{
-  bls12_381_g1_compress, bls12_381_g1_scalar_mul, bytearray_to_integer
+  bls12_381_g1_compress, bls12_381_g1_scalar_mul, bytearray_to_integer,
+  integer_to_bytearray,
 }
 use aiken/crypto/bls12_381/g1
-use aiken/crypto/bls12_381/scalar.{prime_field}
+use aiken/crypto/bls12_381/scalar.{field_prime}
 use kdf/hkdf/hkdf
 use kdf/pbkdf2/pbkdf2
 use kdf/kdf.{HashAlgo, Sha256}
 
 /// Supported schemes for key derivation.
 pub type KeyDerivationScheme {
-  PBKDF2,
-  HKDF,
+  PBKDF2
+  HKDF
 }
 
 /// Supported cryptographic curves / systems used to represent secret
 /// and public keys and to define the correspondence between them.
 pub type Cryptography {
-  BLS12_381,
+  BLS12_381
 }
 
 /// A private key is stored as raw bytes.
@@ -37,16 +38,16 @@ pub type PublicKey =
 /// The secret is reduced modulo the curve prime order and then
 /// serialised back to a `ByteArray` of the requested length.
 pub fn to_pk(method: Cryptography, secret: ByteArray) -> PrivateKey {
-  if method == BLS12_381 {
-    to_pk_bls12_381(secret, 32)
+  when method is {
+    BLS12_381 -> to_pk_bls12_381(secret, 32)
   }
 }
 
 /// Derive a public key from a private key using the chosen
 /// cryptographic method.
 pub fn pk_from_sk(method: Cryptography, secret: ByteArray) -> PublicKey {
-  if method == BLS12_381 {
-    pk_from_sk_bls12_381(secret)
+  when method is {
+    BLS12_381 -> pk_from_sk_bls12_381(secret)
   }
 }
 
@@ -119,8 +120,8 @@ pub fn gen_keys_detail(
   count: Int,
   info: ByteArray,
 ) -> (PrivateKey, PublicKey) {
-  if cryptography == BLS12_381 {
-    gen_keys_bls12_381(scheme, algo, salt, ikm, count, info)
+  when cryptography is {
+    BLS12_381 -> gen_keys_bls12_381(scheme, algo, salt, ikm, count, info)
   }
 }
 
@@ -167,9 +168,9 @@ pub fn gen_keys_bls12_381(
 ///
 /// The secret is interpreted as a big-endian integer, reduced modulo
 /// `field_prime`, and then padded / truncated to `len` bytes.
-pub fn to_pk_bls12_381(secret: ByteArray, len: int) -> PrivateKey {
+pub fn to_pk_bls12_381(secret: ByteArray, len: Int) -> PrivateKey {
   //TO DO - think about possibility of making big endian and little endian option for the user
-  let sk = bytearray.to_int_big_endian(secret) % field_prime
+  let sk = bytearray_to_integer(True, secret) % field_prime
   expect sk != 0
   integer_to_bytearray(True, len, sk)
 }
