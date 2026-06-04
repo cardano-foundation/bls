@@ -443,7 +443,7 @@ Even if fully implemented, Argon2 with the **smallest viable parameters** (8 KiB
 
 ## Balloon hashing (not implemented)
 
-We also briefly investigated **Balloon hashing** (Bonneau et al., 2016) as a simpler
+We also briefly investigated **[Balloon hashing](https://eprint.iacr.org/2016/027)** (Bonneau et al., 2016) as a simpler
 alternative to Argon2.  Like Argon2, Balloon hashing is a **memory-hard** function:
 it fills a large buffer with pseudorandom blocks and mixes them iteratively.
 
