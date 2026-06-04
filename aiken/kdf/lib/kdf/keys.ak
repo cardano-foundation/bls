@@ -12,6 +12,10 @@ use kdf/hkdf/hkdf
 use kdf/pbkdf2/pbkdf2
 use kdf/kdf.{HashAlgo, Sha256}
 
+// -------------------------------------------------------------------
+// Types
+// -------------------------------------------------------------------
+
 /// Supported schemes for key derivation.
 pub type KeyDerivationScheme {
   PBKDF2
@@ -31,6 +35,10 @@ pub type PrivateKey =
 /// A public key is stored as raw bytes.
 pub type PublicKey =
   ByteArray
+
+// -------------------------------------------------------------------
+// Public API
+// -------------------------------------------------------------------
 
 /// Derive a private key from a raw secret using the chosen
 /// cryptographic method.
@@ -159,10 +167,6 @@ pub fn gen_keys_bls12_381(
   (sk, pk)
 }
 
-/// --- BLS12-381 helpers ---
-///
-/// The functions below operate over the BLS12-381 G1 prime field.
-
 /// Convert an arbitrary byte sequence into a valid BLS12-381 private
 /// key that lies inside the prime field.
 ///
@@ -188,6 +192,10 @@ pub fn pk_from_sk_bls12_381(secret: PrivateKey) -> PublicKey {
   bls12_381_g1_scalar_mul(scalar_from_sk_bls12_381(secret), g1.generator)
     |> bls12_381_g1_compress
 }
+
+// -------------------------------------------------------------------
+// Internal helpers
+// -------------------------------------------------------------------
 
 /// Convert a secret key from its byte representation into a scalar
 /// suitable for the BLS12-381 curve.

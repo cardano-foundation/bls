@@ -30,12 +30,12 @@ pub fn kdf(
   expand(algo, prk, info, length)
 }
 
-// -------------------------------------------------------------------
-// Internal helpers
-// -------------------------------------------------------------------
-
 /// HKDF-Extract as specified in RFC 5869, Section 2.2.
-fn extract(algo: HashAlgo, salt: ByteArray, ikm: ByteArray) -> ByteArray {
+///
+/// Derives a pseudorandom key (`PRK`) from the salt and input keying
+/// material.  If `salt` is empty it defaults to a zero octet string of
+/// the hash output length.
+pub fn extract(algo: HashAlgo, salt: ByteArray, ikm: ByteArray) -> ByteArray {
   let h_len = hash_len(algo)
   let salt_or_default =
     if bytearray.is_empty(salt) {
@@ -47,7 +47,12 @@ fn extract(algo: HashAlgo, salt: ByteArray, ikm: ByteArray) -> ByteArray {
 }
 
 /// HKDF-Expand as specified in RFC 5869, Section 2.3.
-fn expand(algo: HashAlgo, prk: ByteArray, info: ByteArray, length: Int) -> ByteArray {
+///
+/// Expands the pseudorandom key `prk` into `length` bytes of output
+/// keying material (`OKM`) using the optional `info` string.
+///
+/// `length` must be between 1 and 255 * hash_len inclusive.
+pub fn expand(algo: HashAlgo, prk: ByteArray, info: ByteArray, length: Int) -> ByteArray {
   let h_len = hash_len(algo)
   let max_len = 255 * h_len
 
@@ -60,6 +65,10 @@ fn expand(algo: HashAlgo, prk: ByteArray, info: ByteArray, length: Int) -> ByteA
     expand_iter(algo, prk, info, length, h_len, n, 1, #"", #"")
   }
 }
+
+// -------------------------------------------------------------------
+// Internal helpers
+// -------------------------------------------------------------------
 
 /// Return the output length in octets for the given hash algorithm.
 fn hash_len(algo: HashAlgo) -> Int {
