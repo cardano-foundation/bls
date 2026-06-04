@@ -1,22 +1,37 @@
-# KDF (Key Derivation Function)
+# KDF & Key Generation
 
-A key derivation function generates DETERMINISTICALLY a derived key from a base key and
-additional parameters. Its goal is to take some source of initial
-keying material and derive from it one or more cryptographically strong secret keys.
-In a password-based key derivation function, the
-base key is a password, and the additional parameters are an iteration count and a salt value.
-The base key could also be a private key.
+This library provides **Key Derivation Functions (KDF)** and **cryptographic key generation**
+tailored for on-chain execution on Cardano.
 
-There are many standards focusing on KDF, namely [HKDF](https://datatracker.ietf.org/doc/html/rfc5869) and
-[PBKDF2](https://datatracker.ietf.org/doc/html/rfc8018).
+## What is a KDF?
 
-Both modules share a common `HashAlgo` enum defined in `kdf/kdf`:
+A Key Derivation Function takes some initial keying material — a password, a shared secret,
+or random bytes — and deterministically produces one or more cryptographically strong secret keys.
+It is a foundational building block for:
+
+- **Wallet key hierarchy** (deriving child keys from a master seed)
+- **Session-key agreement** (deriving encryption keys from a DH shared secret)
+- **Password-based encryption** (hardening a weak password into a strong key)
+
+## What this library offers
+
+| Layer | Module | Purpose |
+|---|---|---|
+| **KDF primitives** | `kdf/hkdf/hkdf`, `kdf/pbkdf2/pbkdf2` | Low-level RFC-compliant KDF implementations |
+| **Key generation** | `kdf/keys` | High-level private / public key pair generation that **uses the KDF primitives internally** |
+
+Both KDF modules share a common `HashAlgo` enum defined in `kdf/kdf`:
 
 ```aiken
 use kdf/kdf.{HashAlgo}
 ```
 
 Variants: `Sha256`, `Sha3_256`, `Keccak256`, `Blake2b_224`, `Blake2b_256`.
+
+### Supported standards
+
+- **[HKDF](https://datatracker.ietf.org/doc/html/rfc5869)** (RFC 5869) — fast, HMAC-based Extract-then-Expand; ideal for high-entropy inputs
+- **[PBKDF2](https://datatracker.ietf.org/doc/html/rfc8018)** (RFC 8018 §5.2) — intentionally slow, iteration-based; ideal for password hardening
 
 ---
 
@@ -132,7 +147,8 @@ if you do not need them.
 HKDF is much lighter than PBKDF2 because it does **not** iterate.  Each call performs
 exactly two HMAC operations for Extract plus one HMAC per output block for Expand.
 
-Rough numbers from the test suite (Plutus V3 / Aiken v1.1.21):
+<details>
+<summary>Click to expand budget tables</summary>
 
 ### SHA-256
 
@@ -156,6 +172,8 @@ Rough numbers from the test suite (Plutus V3 / Aiken v1.1.21):
 | Operation                | Length | CPU units | Memory  |
 |--------------------------|--------|-----------|---------|
 | Full KDF (extract+expand)| 32     | ~25.0 M   | ~45.4 K |
+
+</details>
 
 **Key observation:** HKDF costs grow linearly with output length (one extra HMAC
 per `HashLen` block).  A 32-byte output using SHA-256 costs only ~15 M CPU units,
@@ -209,8 +227,8 @@ PBKDF2 is intentionally expensive (the whole point of the iteration count is to 
 brute-force attacks).  On-chain budgets are finite, so iteration counts and derived-key
 lengths must be chosen carefully.
 
-Rough numbers from the test suite (Plutus V3 / Aiken v1.1.21).  All figures are for a single
-block of output (dkLen == hLen) unless noted otherwise.
+<details>
+<summary>Click to expand budget tables</summary>
 
 ### SHA-2 (`builtin.sha2_256`, hLen = 32)
 
@@ -247,6 +265,8 @@ block of output (dkLen == hLen) unless noted otherwise.
 | 2         | 32    | ~14.53 M  | ~24.9 K |
 | 4 096     | 32    | ~14.75 B  | ~17.7 M |
 | 4 096     | 24    | ~15.02 B  | ~17.7 M |
+
+</details>
 
 **Key observation:** At 4096 iterations, Blake2b-256 is the cheapest at ~5.16 B CPU units,
 followed by Blake2b-224 (~5.19 B), SHA-256 (~5.74 B), SHA3-256 (~11.46 B), and Keccak-256
@@ -292,6 +312,9 @@ The test suite covers:
 
 # Choosing between HKDF and PBKDF2
 
+<details>
+<summary>Click to expand comparison table</summary>
+
 | | HKDF | PBKDF2 |
 |---|---|---|
 | **Purpose** | Derive keys from high-entropy secrets (DH shared secrets, random seeds, etc.) | Derive keys from low-entropy passwords |
@@ -302,6 +325,8 @@ The test suite covers:
 | **On-chain cost (32-byte output, SHA-256)** | ~15 M CPU | ~5.74 B CPU at 4096 iterations |
 | **On-chain feasible?** | ✅ Yes, trivially affordable | ⚠️ Only at low iteration counts (≤10) |
 | **When to use** | Session-key derivation, child-key derivation from a master secret | Password-based key derivation, wallet encryption |
+
+</details>
 
 **Rule of thumb:**
 - If your input is a **password or human-memorable secret**, use **PBKDF2** (but keep
@@ -326,12 +351,17 @@ is that **Argon2 is fundamentally incompatible with on-chain execution on Cardan
 Argon2's security relies on consuming large amounts of RAM.  The RFC's **minimum
 recommended** settings are:
 
+<details>
+<summary>Click to expand memory requirements</summary>
+
 | Profile | Memory | Passes | Lanes |
 |---------|--------|--------|-------|
 | Backend server auth | 4 GiB | t=1 | p=8 |
 | Hard-drive encryption | 6 GiB | t=1 | p=4 |
 | "Low memory" option | 64 MiB | t=3 | p=4 |
 | Smallest test vector | 32 KiB | t=3 | p=4 |
+
+</details>
 
 Cardano's on-chain memory budget is roughly **14–17 MB per transaction total**
 (shared across all scripts, minting policies, etc.).  Even the smallest test vector
@@ -387,6 +417,9 @@ execution time.
 
 ## Realistic implementation effort
 
+<details>
+<summary>Click to expand feasibility breakdown</summary>
+
 | Component | Effort | Feasible on-chain? |
 |-----------|--------|-------------------|
 | 64-bit arithmetic emulation | ~1 week | Very expensive |
@@ -395,6 +428,8 @@ execution time.
 | Compression function G | ~3 days | Extremely expensive |
 | Memory matrix management | ~3 days | Budget-exceeded |
 | Full Argon2 algorithm | ~4–5 weeks total | **Completely unusable** |
+
+</details>
 
 Even if fully implemented, Argon2 with the **smallest viable parameters** (8 KiB memory,
 1 lane, 1 pass) would likely:
