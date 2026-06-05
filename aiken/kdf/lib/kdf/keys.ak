@@ -161,8 +161,10 @@ pub fn gen_keys_detail(
   }
 }
 
-/// BLS12-381 specific key-pair generation.
-///
+// -------------------------------------------------------------------
+// BLS12-381 specific key-pair generation
+// -------------------------------------------------------------------
+
 /// Runs the chosen KDF (`PBKDF2` or `HKDF`) with a fixed 32-byte
 /// output length and then converts the derived material into a
 /// BLS12-381 private key (reduced modulo the prime field) and the

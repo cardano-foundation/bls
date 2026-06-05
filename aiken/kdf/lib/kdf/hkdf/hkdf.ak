@@ -35,6 +35,14 @@ pub fn kdf(
 /// Derives a pseudorandom key (`PRK`) from the salt and input keying
 /// material.  If `salt` is empty it defaults to a zero octet string of
 /// the hash output length.
+///
+/// # Parameters
+///
+/// - `algo`  – hash algorithm to use
+/// - `salt`  – optional salt byte array
+/// - `ikm`   – input keying material
+///
+/// Returns the pseudorandom key `PRK`.
 pub fn extract(algo: HashAlgo, salt: ByteArray, ikm: ByteArray) -> ByteArray {
   let h_len = hash_len(algo)
   let salt_or_default =
@@ -52,6 +60,15 @@ pub fn extract(algo: HashAlgo, salt: ByteArray, ikm: ByteArray) -> ByteArray {
 /// keying material (`OKM`) using the optional `info` string.
 ///
 /// `length` must be between 1 and 255 * hash_len inclusive.
+///
+/// # Parameters
+///
+/// - `algo`    – hash algorithm to use
+/// - `prk`     – pseudorandom key (from `extract`)
+/// - `info`    – optional context and application-specific information
+/// - `length`  – length of output keying material in octets
+///
+/// Returns the output keying material `OKM`.
 pub fn expand(algo: HashAlgo, prk: ByteArray, info: ByteArray, length: Int) -> ByteArray {
   let h_len = hash_len(algo)
   let max_len = 255 * h_len
