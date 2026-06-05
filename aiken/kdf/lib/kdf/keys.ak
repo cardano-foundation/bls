@@ -45,6 +45,13 @@ pub type PublicKey =
 ///
 /// The secret is reduced modulo the curve prime order and then
 /// serialised back to a `ByteArray` of the requested length.
+///
+/// # Parameters
+///
+/// - `method`  – target curve (`BLS12_381`)
+/// - `secret`  – raw secret bytes
+///
+/// Returns a `PrivateKey`.
 pub fn to_pk(method: Cryptography, secret: ByteArray) -> PrivateKey {
   when method is {
     BLS12_381 -> to_pk_bls12_381(secret, 32)
@@ -53,6 +60,13 @@ pub fn to_pk(method: Cryptography, secret: ByteArray) -> PrivateKey {
 
 /// Derive a public key from a private key using the chosen
 /// cryptographic method.
+///
+/// # Parameters
+///
+/// - `method`  – target curve (`BLS12_381`)
+/// - `secret`  – private key bytes
+///
+/// Returns a `PublicKey`.
 pub fn pk_from_sk(method: Cryptography, secret: ByteArray) -> PublicKey {
   when method is {
     BLS12_381 -> pk_from_sk_bls12_381(secret)
@@ -73,6 +87,13 @@ pub fn pk_from_sk(method: Cryptography, secret: ByteArray) -> PublicKey {
 /// off-chain, but it is the maximum feasible on-chain while keeping
 /// CPU usage affordable. If you need a different count or hash,
 /// use `gen_keys_detail`.
+///
+/// # Parameters
+///
+/// - `salt`  – salt byte array
+/// - `ikm`   – input keying material / password
+///
+/// Returns a tuple `(PrivateKey, PublicKey)`.
 pub fn gen_keys_pbkdf2(
   salt: ByteArray,
   ikm: ByteArray,
@@ -92,6 +113,13 @@ pub fn gen_keys_pbkdf2(
 /// HKDF is orders of magnitude cheaper than PBKDF2 (~15 M CPU units
 /// for a 32-byte SHA-256 output) and is the recommended choice for
 /// high-entropy inputs.
+///
+/// # Parameters
+///
+/// - `salt`  – salt byte array
+/// - `ikm`   – input keying material / password
+///
+/// Returns a tuple `(PrivateKey, PublicKey)`.
 pub fn gen_keys_hkdf(
   salt: ByteArray,
   ikm: ByteArray,
@@ -172,6 +200,13 @@ pub fn gen_keys_bls12_381(
 ///
 /// The secret is interpreted as a big-endian integer, reduced modulo
 /// `field_prime`, and then padded / truncated to `len` bytes.
+///
+/// # Parameters
+///
+/// - `secret`  – raw secret bytes
+/// - `len`     – desired output length in bytes
+///
+/// Returns a `PrivateKey`.
 pub fn to_pk_bls12_381(secret: ByteArray, len: Int) -> PrivateKey {
   //TO DO - think about possibility of making big endian and little endian option for the user
   let sk = bytearray_to_integer(True, secret) % field_prime
@@ -188,6 +223,12 @@ pub fn to_pk_bls12_381(secret: ByteArray, len: Int) -> PrivateKey {
 /// ```aiken
 /// let pk = pk_from_sk_bls12_381(secret)
 /// ```
+///
+/// # Parameters
+///
+/// - `secret`  – private key bytes
+///
+/// Returns a `PublicKey`.
 pub fn pk_from_sk_bls12_381(secret: PrivateKey) -> PublicKey {
   bls12_381_g1_scalar_mul(scalar_from_sk_bls12_381(secret), g1.generator)
     |> bls12_381_g1_compress
