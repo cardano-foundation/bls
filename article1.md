@@ -458,4 +458,125 @@ Both are pure Aiken, built entirely from Plutus builtins, and produce determinis
 
 ## VRF
 
+A **Verifiable Random Function (VRF)** is the public-key cousin of a keyed hash. Only the holder of a secret key can compute the hash, but anyone with the public key can verify that the hash was computed correctly. The output is deterministic—same key and input always produce the same result—but to anyone without the secret, it looks perfectly random. The workspace project `aiken/vrf` implements the standard ECVRF scheme over BLS12-381 G2 entirely in Aiken, using nothing but Plutus builtins.
+
+The API is small and regular: you derive a key pair from secret material, generate a proof for an input, and anyone can verify that proof to recover the same pseudorandom output. The proof is 144 bytes (96 bytes for a compressed G2 point, 16 bytes for a challenge, 32 bytes for a Schnorr-style response). The final hash output is a standard 32-byte value.
+
+### Why VRFs matter on-chain
+
+VRFs solve a class of problems that ordinary hashing cannot:
+
+- **Predictability vs. verifiability:** A hash like `sha2_256(secret || input)` is deterministic, but nobody can verify it without learning the secret. A VRF proves the output came from a specific key without revealing the key.
+- **Uniqueness:** For any given public key and input, there is exactly one valid output. The prover cannot cherry-pick or grind alternative results.
+- **Non-interactivity:** The prover sends a single message `(input, proof)`. No challenge-response rounds are needed.
+
+These properties make VRFs ideal for lotteries, leader selection, private data structures, and any protocol that needs randomness or hiding with public verifiability.
+
+### Case 1: Privacy-protected data structures
+
+When you store data in a public hash-based structure—say a Merkle tree or a hash map—using a regular hash like `sha2_256(record_name)` leaks information. An attacker can enumerate common names, compute their hashes, and check which positions exist in the tree. This is called an **enumeration attack**.
+
+A VRF replaces the regular hash with a pseudorandom output that only the data owner can compute. The owner derives a "private address" for each record from the record name and their secret key. Outsiders see only random-looking values and cannot link them to anything.
+
+```aiken
+use vrf/core as vrf
+
+fn store_private_records() {
+  let secret = "prover_secret_key"
+  let (sk, pk) = vrf.keys_from_secret(secret)
+
+  // Private records the owner wants to store
+  let record_1 = "alice_payment_100"
+  let record_2 = "bob_escrow_250"
+  let record_3 = "charlie_refund_50"
+
+  // Only the prover can compute the address for each record
+  let pi_1 = vrf.prove(sk, record_1, "ECVRF_")
+  let Some(beta_1) = vrf.proof_to_hash(pi_1)
+
+  let pi_2 = vrf.prove(sk, record_2, "ECVRF_")
+  let Some(beta_2) = vrf.proof_to_hash(pi_2)
+
+  let pi_3 = vrf.prove(sk, record_3, "ECVRF_")
+  let Some(beta_3) = vrf.proof_to_hash(pi_3)
+
+  // On-chain: store (beta_i, encrypted_payload_i) in a public Merkle tree
+  // Only the owner knows which beta corresponds to which record
+}
+```
+
+**What is happening, step by step:**
+
+1. **Key generation** – `keys_from_secret` derives a 32-byte secret scalar and a 96-byte compressed public key in G2. It uses HKDF internally to ensure the scalar is uniformly distributed and non-zero.
+2. **Proof generation** – `prove` hashes the record name to a point on G2, multiplies it by the secret scalar, and wraps the result in a Schnorr-style proof that binds the output to the public key.
+3. **Hash extraction** – `proof_to_hash` converts the proof into a fixed 32-byte pseudorandom value. This is the "address" of the record.
+4. **Storage** – the contract stores `(beta, encrypted_payload)` pairs. Without the secret key, no one can compute `beta` from the record name, so enumeration is impossible.
+
+Later, to prove that a record exists, the owner simply reveals the original name and the proof:
+
+```aiken
+fn prove_membership(pk, record_name, pi) {
+  // Anyone can verify and recover the exact same beta
+  let Some(beta_verified) = vrf.verify(pk, record_name, pi, "ECVRF_", False)
+  // Check that beta_verified is present in the public Merkle tree
+}
+```
+
+If the verifier passes, the record is confirmed without ever revealing the other records or their positions.
+
+### Case 2: Non-interactive randomness beacon
+
+Many protocols need a source of randomness that is simultaneously unpredictable, verifiable, and non-interactive. Centralized beacons require trust. Commit-reveal schemes require two rounds and can be aborted. A VRF solves all of this in a single message.
+
+The pattern is simple: a trusted operator publishes their public key in advance. For each round, they use a public input—say a block hash or a round number—as the VRF input. They compute the proof privately, then publish `(input, proof, hash)`. Anyone can verify the proof and recover the same hash.
+
+```aiken
+use vrf/core as vrf
+
+fn run_randomness_beacon() {
+  let operator_secret = "operator_secret_key"
+  let (sk, pk) = vrf.keys_from_secret(operator_secret)
+
+  // Round 1: input is a public block hash
+  let round_1_input = "block_12345_hash"
+  let pi_1 = vrf.prove(sk, round_1_input, "ECVRF_")
+  let Some(beta_1) = vrf.proof_to_hash(pi_1)
+
+  // Round 2: different input produces a different, unpredictable output
+  let round_2_input = "block_12346_hash"
+  let pi_2 = vrf.prove(sk, round_2_input, "ECVRF_")
+  let Some(beta_2) = vrf.proof_to_hash(pi_2)
+
+  // Operator publishes (pk, round_input, beta, pi) for each round
+  // Anyone can verify:
+  let verified_1 = vrf.verify(pk, round_1_input, pi_1, "ECVRF_", False)
+  let verified_2 = vrf.verify(pk, round_2_input, pi_2, "ECVRF_", False)
+
+  // verified_1 == Some(beta_1) and verified_2 == Some(beta_2)
+  // beta_1 != beta_2, and neither was predictable before the input was known
+}
+```
+
+**What is happening, step by step:**
+
+1. **Key setup** – the operator generates a long-term key pair and publishes the public key. The secret never leaves their secure environment.
+2. **Private computation** – when a round's public input is known (e.g., a block hash is mined), the operator computes `prove(sk, input, salt)`. The proof is a 144-byte value that cryptographically binds the input, the output, and the public key.
+3. **Hash extraction** – `proof_to_hash` extracts the 32-byte pseudorandom output `beta`. Before the input was known, `beta` was indistinguishable from random to anyone without the secret.
+4. **Publication** – the operator publishes a single tuple `(input, beta, proof)`. No interaction is needed.
+5. **Verification** – anyone runs `verify(pk, input, proof, salt, False)`. If it returns `Some(beta)`, the operator did not cheat. If it returns `None`, the proof is invalid.
+
+Because the input is public and fixed, the operator cannot grind on it to produce a favorable output. They get exactly one shot per round.
+
+### Other use cases
+
+Beyond the two cases above, the `aiken/vrf` project tests several other patterns that are worth mentioning:
+
+- **Leader selection** – In proof-of-stake consensus, each stakeholder privately computes their VRF output for the current epoch. If the output falls below a threshold proportional to their stake, they are selected as the slot leader. Only the winner reveals their proof, preventing pre-slot DDoS attacks.
+- **Proof of prior possession** – A party can prove they knew a secret at a specific time by using the secret itself as the VRF input. The resulting proof is self-bound: it only verifies against that exact secret, and it does not leak the secret itself.
+- **Passwordless authentication** – A server stores `(pk, last_beta)`. The client proves knowledge of their password-derived key by producing a VRF proof, without ever sending the password.
+
+### Summary
+
+The `aiken/vrf` project provides a complete, RFC-compliant ECVRF implementation over BLS12-381 G2 using only Aiken and Plutus builtins. The API is minimal: `keys_from_secret`, `prove`, `verify`, and `proof_to_hash`. With these four functions, you can build privacy-preserving data structures, verifiable randomness beacons, leader-selection protocols, and non-interactive proofs of knowledge. The key insight is always the same: the prover computes a private, deterministic, pseudorandom output; the verifier checks it publicly; and neither the secret nor the output is forgeable.
+
 ## Proof systems
