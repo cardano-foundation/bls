@@ -327,6 +327,135 @@ BLS signatures turn the expensive problem of multi-party verification into a con
 
 ## KDF
 
+In everyday cryptography, you rarely start with a perfectly random 32-byte secret. More often, you have a password, a seed phrase, a shared secret from a handshake, or some other piece of keying material that is not yet curve-ready. A **Key Derivation Function (KDF)** bridges this gap: it takes arbitrary input and deterministically produces a cryptographically strong key that fits inside the prime field of your chosen curve. The workspace project `aiken/kdf` provides two RFC-compliant KDFs—HKDF and PBKDF2—together with a thin layer that maps the derived bytes directly onto BLS12-381 key pairs.
+
+### Why KDFs matter on-chain
+
+On-chain scripts often need to derive keys from information that lives inside the transaction itself: a password supplied in a redeemer, a shared secret from a Diffie-Hellman exchange, or a master seed stored in a datum. Doing this naively—for example, by interpreting the raw bytes directly as a scalar—can produce a value outside the valid prime field, or worse, leak information about the original secret. A proper KDF fixes both problems: it expands or strengthens the input, then reduces the result modulo the curve order so the output is guaranteed to be a valid private key.
+
+The `aiken/kdf` project offers two complementary tools for this job:
+
+- **HKDF** ([RFC 5869](https://datatracker.ietf.org/doc/html/rfc5869)) – fast, HMAC-based Extract-then-Expand. Ideal when your input is already high-entropy (a random seed, a shared secret, another key).
+- **PBKDF2** ([RFC 8018 §5.2](https://datatracker.ietf.org/doc/html/rfc8018#page-11)) – intentionally slow, iteration-based. Ideal when your input is a password or human-memorable secret and you need to raise the cost of brute-force attacks.
+
+Both are built entirely from Aiken/Plutus builtins, so they execute natively on-chain without any foreign code.
+
+### Deriving a BLS12-381 key pair with HKDF
+
+The simplest path is `gen_keys_hkdf`, a one-line helper that runs HKDF internally and then converts the 32-byte output into a valid BLS12-381 private key and its corresponding compressed public key:
+
+```aiken
+use kdf/keys
+
+fn derive_wallet_key() {
+  let (sk, pk) = keys.gen_keys_hkdf(
+    salt: "my_salt",
+    ikm:  "high_entropy_secret",
+  )
+
+  // sk is a 32-byte private key, already reduced modulo the curve prime
+  // pk is a 48-byte compressed public key in G1
+  (sk, pk)
+}
+```
+
+**What is happening, step by step:**
+
+1. **HKDF Extract** – the salt and input keying material (`ikm`) are fed through HMAC to produce a pseudorandom key (`PRK`). This concentrates the entropy and isolates the output from the raw input.
+2. **HKDF Expand** – the `PRK` is expanded to 32 bytes with an optional info string (empty by default). Each output block is another HMAC call, so the cost grows linearly with the number of blocks.
+3. **Field reduction** – the 32-byte output is interpreted as a big integer and reduced modulo the BLS12-381 prime field order. This guarantees a valid scalar even if the raw HKDF output is larger than the field.
+4. **Public key derivation** – the scalar multiplies the G1 generator, and the resulting point is compressed to 48 bytes.
+
+**On-chain cost:** A 32-byte HKDF output using SHA-256 costs roughly **15 M CPU units**, which is negligible inside a typical transaction budget. Even an 82-byte output (two blocks) stays under **30 M CPU units**. This makes HKDF the default choice for session-key derivation, child-key derivation, or any scenario where the input is already strong.
+
+### Deriving a BLS12-381 key pair with PBKDF2
+
+When the input is a password, HKDF is not enough: passwords are low-entropy and vulnerable to dictionary attacks. PBKDF2 solves this by adding iterations—each iteration is a hash call, and the total cost is tuned to make brute-force attacks expensive:
+
+```aiken
+use kdf/keys
+
+fn derive_password_key() {
+  let (sk, pk) = keys.gen_keys_pbkdf2(
+    salt: "my_salt",
+    ikm:  "my_password",
+  )
+
+  // Same guarantees: 32-byte sk, 48-byte compressed pk
+  (sk, pk)
+}
+```
+
+**What is happening, step by step:**
+
+1. **Salted hash iteration** – PBKDF2 mixes the password and salt, then hashes the result repeatedly. The `count` parameter controls how many times. Each round feeds the output of the previous round back into the hash, so an attacker must pay the same iteration cost for every guess.
+2. **Block derivation** – if the desired key length exceeds the hash output size (32 bytes for SHA-256), PBKDF2 derives multiple blocks and concatenates them.
+3. **Field reduction and key derivation** – the same `to_pk_bls12_381` and `pk_from_sk_bls12_381` steps from HKDF are applied, producing a valid curve key pair.
+
+**On-chain cost:** The default `gen_keys_pbkdf2` uses **10 iterations** with SHA-256, costing roughly **160 M CPU units**. This is still well within a typical transaction budget, but it is already far more expensive than HKDF. The traditional off-chain recommendation of 4096 iterations would consume roughly **5.7 B CPU units**—more than half the total transaction budget—so it is generally reserved for off-chain use. If you need PBKDF2 on-chain, keep the iteration count low and choose the fastest hash (Blake2b-256 is roughly 2.9× cheaper than Keccak-256 at high counts).
+
+### Full control with `gen_keys_detail`
+
+If the defaults do not fit your use-case, `gen_keys_detail` exposes every parameter:
+
+```aiken
+use kdf/keys.{PBKDF2, HKDF, BLS12_381}
+use kdf/kdf.{Sha256, Blake2b_256}
+
+fn custom_derivation() {
+  // Low-count PBKDF2 with Blake2b for minimal on-chain cost
+  let (sk, pk) = keys.gen_keys_detail(
+    PBKDF2,
+    BLS12_381,
+    Blake2b_256,
+    salt:   "salt",
+    ikm:    "password",
+    count:  5,
+    info:   #"",
+  )
+
+  // Or HKDF with an explicit info string for domain separation
+  let (sk2, pk2) = keys.gen_keys_detail(
+    HKDF,
+    BLS12_381,
+    Sha256,
+    salt:   "salt",
+    ikm:    "high_entropy_secret",
+    count:  0,
+    info:   "wallet-child-key-42",
+  )
+
+  (sk, pk)
+}
+```
+
+**What is happening, step by step:**
+
+1. **Scheme selection** – `PBKDF2` or `HKDF` determines the core algorithm.
+2. **Hash selection** – `Sha256`, `Sha3_256`, `Keccak256`, `Blake2b_224`, or `Blake2b_256`. The choice affects both speed and, for PBKDF2, the per-iteration cost.
+3. **Salt and IKM** – the salt prevents rainbow-table attacks; the IKM is the raw secret or password.
+4. **Count** – PBKDF2 iteration count (ignored for HKDF).
+5. **Info** – HKDF context string (ignored for PBKDF2). This is the standard way to derive multiple independent keys from the same master secret without leaking relationships between them.
+
+### What you cannot do on-chain: memory-hard KDFs
+
+The `aiken/kdf` project investigated Argon2 and Balloon hashing, two modern memory-hard KDFs designed to resist GPU and ASIC attacks. The conclusion was clear: **they are fundamentally incompatible with on-chain execution**.
+
+- **Memory requirements:** Argon2's minimum recommended settings use 64 MiB to 4 GiB of RAM. Cardano's entire on-chain memory budget per transaction is roughly 14–17 MB.
+- **Missing primitives:** Argon2 requires BLAKE2b-512 (64-byte outputs), but Plutus only exposes 224-bit and 256-bit variants. It also requires 64-bit arithmetic with bitwise rotations, which must be emulated using bytearray operations at enormous cost.
+- **Data-dependent access:** Argon2's memory layout is computed on-the-fly based on previous block contents, making random access into a large buffer mandatory. On-chain, every byte of state costs execution units.
+
+The practical rule is simple: if you need memory-hard password hashing, do it **off-chain** in the wallet or application layer, then verify the result on-chain with a signature or hash comparison.
+
+### Summary
+
+The `aiken/kdf` project gives you two reliable, RFC-compliant paths from raw secrets to BLS12-381 keys:
+
+- **HKDF** for high-entropy inputs: fast, cheap, and domain-separable via the `info` string.
+- **PBKDF2** for passwords: slow by design, but keep iteration counts modest (≤10) to stay within the on-chain budget.
+
+Both are pure Aiken, built entirely from Plutus builtins, and produce deterministic 32-byte private keys and 48-byte compressed public keys ready for the BLS, VRF, or proof-system operations described in the sections below.
+
 ## VRF
 
 ## Proof systems
