@@ -1,4 +1,15 @@
-## BLS12-381 powerhouse available for users
+## Aiken BLS12-381 primitives - wide possibilities available
+
+**Table of Contents**
+
+- [BLS12-381 elliptic curve](#bls12-381-elliptic-curve)
+- [Aiken elliptic curve API](#aiken-elliptic-curve-api)
+- [BLS](#bls)
+- [KDF](#kdf)
+- [VRF](#vrf)
+- [Proof systems](#proof-systems)
+
+---
 
 ## BLS12-381 elliptic curve
 
