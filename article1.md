@@ -606,3 +606,7 @@ Because the on-chain cost is dominated by a small number of pairing evaluations,
 ### Summary
 
 BBS+ signatures turn a list of signed claims into a privacy-preserving credential. The holder can selectively disclose attributes without revealing the underlying signature or hidden data, and the verifier checks everything with a few pairing operations on BLS12-381. The `lambdasistemi/cardano-bbs` library brings this capability to Aiken, composing the same builtins—hash-to-curve, scalar multiplication, and pairing checks—into a higher-level anonymous credential system.
+
+## Further possibilities
+
+Pairing-friendly curves like BLS12-381 are the foundation of modern zero-knowledge proof systems. In the follow-up to this article we will explore how the same Aiken primitives—hash-to-curve, scalar multiplication, and the Miller-loop pairing check—can be composed into succinct non-interactive arguments of knowledge (zk-SNARKs), polynomial commitment schemes, and other on-chain verifiable computation protocols. Stay tuned.
