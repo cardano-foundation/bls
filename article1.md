@@ -7,7 +7,7 @@
 - [BLS](#bls)
 - [KDF](#kdf)
 - [VRF](#vrf)
-- [Proof systems – coming in the next article](#proof-systems--coming-in-the-next-article)
+- [BBS](#bbs)
 
 ---
 
@@ -579,6 +579,30 @@ Beyond the two cases above, the `aiken/vrf` project tests several other patterns
 
 The `aiken/vrf` project provides a complete, RFC-compliant ECVRF implementation over BLS12-381 G2 using only Aiken and Plutus builtins. The API is minimal: `keys_from_secret`, `prove`, `verify`, and `proof_to_hash`. With these four functions, you can build privacy-preserving data structures, verifiable randomness beacons, leader-selection protocols, and non-interactive proofs of knowledge. The key insight is always the same: the prover computes a private, deterministic, pseudorandom output; the verifier checks it publicly; and neither the secret nor the output is forgeable.
 
-## Proof systems – coming in the next article
+## BBS
 
-Pairing-friendly curves like BLS12-381 are the foundation of modern zero-knowledge proof systems. In the follow-up to this article we will explore how the same Aiken primitives—hash-to-curve, scalar multiplication, and the Miller-loop pairing check—can be composed into succinct non-interactive arguments of knowledge (zk-SNARKs), polynomial commitment schemes, and other on-chain verifiable computation protocols. Stay tuned.
+BBS+ signatures (Boneh-Boyen-Shacham) are a pairing-based anonymous credential scheme. Unlike a normal signature where you reveal the message and the signature to the verifier, BBS+ lets a prover show that they hold a valid signature on a set of attributes while revealing only a chosen subset and keeping the rest hidden. The signature itself never leaves the prover's hands.
+
+### Why BBS+ matters on-chain
+
+In a typical credential flow, an issuer signs a list of claims—name, age, citizenship, membership tier—and hands the signature to the holder. Later, the holder can walk up to a smart contract and prove "I am over 18 and a citizen of X" without revealing their exact birth date, name, or the raw signature. The proof is a short, constant-size object that the on-chain script verifies with a pairing check.
+
+This is possible because BBS+ is built on top of pairing-friendly curves. The construction maps every signed message to a point on the curve and embeds them into a signature that lives in G1 and G2. During disclosure, the prover randomizes the signature and generates a zero-knowledge proof that the randomized version still satisfies the pairing equation with the issuer's public key and the disclosed messages.
+
+The [lambdasistemi/cardano-bbs](https://github.com/lambdasistemi/cardano-bbs) project implements the BBS+ signature scheme entirely in Aiken, using the same Plutus BLS12-381 builtins we have seen throughout this article: hash-to-curve for mapping messages to points, G1/G2 scalar multiplication and point addition for signature construction, and the Miller loop with final verification for the pairing checks that anchor the security of the scheme.
+
+### How BLS12-381 is used
+
+At a high level, BBS+ over BLS12-381 works in three stages:
+
+1. **Issuance** – The issuer chooses a secret key `sk` and publishes a public key `pk = sk * G2`. For each message `m_i`, the issuer maps it to a point `H_i = hash_to_curve(m_i)`. The signature is a pair of points in G1 computed from `sk`, the hashed messages, and a random nonce. Because every message is hashed to its own curve point, the issuer can sign an unbounded number of attributes in a single compact signature.
+
+2. **Proof generation (selective disclosure)** – The holder randomizes the signature so that it cannot be linked back to the issuance event. They then construct a proof of knowledge that they know the signature on the full set of messages, while revealing only the subset the verifier asked for. This proof consists of randomized curve points and a Schnorr-style response that ties everything together.
+
+3. **Verification** – The verifier checks the proof using the issuer's public key, the disclosed messages, and the proof elements. Internally, this boils down to a pairing equation over BLS12-381: the verifier computes Miller loops between the randomized signature components and the public key / disclosed message points, then runs `final_verify` to confirm the equation balances. If it does, the proof is valid and the undisclosed messages remain completely hidden.
+
+Because the on-chain cost is dominated by a small number of pairing evaluations, BBS+ proofs are surprisingly practical inside a Plutus transaction. The size of the proof is constant regardless of how many attributes are signed, making it an attractive primitive for privacy-preserving identity, membership, and compliance checks on Cardano.
+
+### Summary
+
+BBS+ signatures turn a list of signed claims into a privacy-preserving credential. The holder can selectively disclose attributes without revealing the underlying signature or hidden data, and the verifier checks everything with a few pairing operations on BLS12-381. The `lambdasistemi/cardano-bbs` library brings this capability to Aiken, composing the same builtins—hash-to-curve, scalar multiplication, and pairing checks—into a higher-level anonymous credential system.
