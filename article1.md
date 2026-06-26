@@ -601,6 +601,120 @@ At a high level, BBS+ over BLS12-381 works in three stages:
 
 3. **Verification** – The verifier checks the proof using the issuer's public key, the disclosed messages, and the proof elements. Internally, this boils down to a pairing equation over BLS12-381: the verifier computes Miller loops between the randomized signature components and the public key / disclosed message points, then runs `final_verify` to confirm the equation balances. If it does, the proof is valid and the undisclosed messages remain completely hidden.
 
+### What the on-chain validator looks like
+
+The `cardano-bbs` on-chain library exposes two modules you need: `bbs/types` for the data structures and `bbs/verify` for the verification logic. Here is a minimal validator that stores a regulator's public key and credential schema in its datum, then accepts a `BBSProof` redeemer:
+
+```aiken
+use bbs/types.{BBSProof, RegulatorRegistry}
+use bbs/verify
+use cardano/transaction.{OutputReference, Transaction}
+
+validator bbs_credential {
+  spend(
+    datum: Option<RegulatorRegistry>,
+    redeemer: BBSProof,
+    own_ref: OutputReference,
+    _self: Transaction,
+  ) {
+    when datum is {
+      Some(registry) ->
+        verify.verify(registry, redeemer, nonce_from_output_reference(own_ref))
+      None -> False
+    }
+  }
+}
+
+fn nonce_from_output_reference(output_ref: OutputReference) -> ByteArray {
+  crypto.blake2b_256(
+    bytearray.concat(
+      output_ref.transaction_id,
+      bytearray.from_int_big_endian(output_ref.output_index, 4),
+    ),
+  )
+}
+```
+
+**What is happening, step by step:**
+
+1. **Datum as trust anchor** – The `RegulatorRegistry` datum contains the issuer's public key (`regulator_pk`, a 96-byte compressed G2 point), the `credential_schema` (a list of attribute identifiers), and an optional `signed_header`. This is the on-chain representation of "who issued this credential and what does it cover."
+2. **Redeemer as the proof** – The holder supplies a `BBSProof` redeemer. This structure holds the randomized curve points (`a_bar`, `b_bar`, `d`), the Schnorr-style responses (`e_hat`, `r1_hat`, `r3_hat`, `m_hat`), the challenge scalar `c`, and the disclosed indices and values.
+3. **Context nonce** – The nonce is derived from the UTxO being spent (via `nonce_from_output_reference`). This binds the proof to a specific transaction output, preventing replay attacks where the same proof is reused in a different context.
+4. **Verification** – `verify.verify` performs a battery of checks: valid point and scalar sizes, correct disclosure shape, sorted disclosure indices, challenge reconstruction, and finally the pairing equation over BLS12-381. If every check passes, the spend is authorized.
+
+### Building the registry datum
+
+Before anyone can verify a proof, the validator must be initialized with a `RegulatorRegistry`. Here is how that datum looks for a credential with ten attributes:
+
+```aiken
+use bbs/types.{G2Element, RegulatorRegistry}
+
+fn sample_registry() -> RegulatorRegistry {
+  RegulatorRegistry {
+    regulator_pk: G2Element {
+      bytes: #"a820f230f6ae38503b86c70dc50b61c58a77e45c39ab25c0652bbaa8fa136f28...",
+    },
+    credential_schema: [
+      #"6d30", #"6d31", #"6d32", #"6d33", #"6d34",
+      #"6d35", #"6d36", #"6d37", #"6d38", #"6d39",
+    ],
+    signed_header: #"",
+  }
+}
+```
+
+The `credential_schema` list defines the attribute slots. In a real application these might be hashes of strings like `"age"`, `"citizenship"`, `"membership_tier"`. The order matters: the holder's proof must reference attributes by their index in this list.
+
+### Selective disclosure in practice
+
+Suppose the credential above contains ten attributes, and the holder wants to disclose only four of them—say, indices `0`, `2`, `4`, and `6`—while keeping the other six hidden. The proof redeemer would look like this:
+
+```aiken
+use bbs/types.{BBSProof, G1Element}
+
+fn sample_proof() -> BBSProof {
+  BBSProof {
+    a_bar: G1Element {
+      bytes: #"81925c2e525d9fbb0ba95b438b5a13fff5874c7c0515c193628d7d143ddc3bb4...",
+    },
+    b_bar: G1Element {
+      bytes: #"abc019bfca62c09b8dafb37e5f09b1d380e084ec3623d071ec38d6b8602af93a...",
+    },
+    d: G1Element {
+      bytes: #"ac310574f509c712bb1a181d64ea3c1ee075c018a2bc773e2480b5c033ccb9bf...",
+    },
+    e_hat:  #"5ff70ce9006d166fd813a81b448a632216521c864594f3f92965974914992f8d",
+    r1_hat: #"1845230915b11680cf44b25886c5670904ac2d88255c8c31aea7b072e9c4eb7e",
+    r3_hat: #"4c3fdd38836ae9d2e9fa271c8d9fd42f669a9938aeeba9d8ae613bf11f489ce9",
+    m_hat: [
+      #"47616f5cbaee95511dfaa5c73d85e4ddd2f29340f821dc2fb40db3eae5f5bc08",
+      #"467eb195e38d7d436b63e556ea653168282a23b53d5792a107f85b1203f82aab",
+      #"46f6940650760e5b320261ffc0ca5f15917b51e7d2ad4bcbec94de792e229db6",
+      #"63abff23af392a5e73ce115c27e8492ec24a0815091c69874dbd9dae2d2eed00",
+      #"0810c748a798a78a804a39034c6e745cee455812cc982eea7105948b2cb55b82",
+      #"278a77237fcbec4748e2d2255af0994dd09dba8ac60515a39b24632a2c1c840c",
+    ],
+    c: #"4a70506add5b2eb0be9ff66e3ea8deae666f198edfbb1391c6834e6df4f1026d",
+    disclosed_indices: [0, 2, 4, 6],
+    disclosed_values: [
+      #"9872ad089e452c7b6e283dfac2a80d58e8d0ff71cc4d5e310a1debdda4a45f02",
+      #"7372e9daa5ed31e6cd5c825eac1b855e84476a1d94932aa348e07b73",
+      #"496694774c5604ab1b2544eababcf0f53278ff50",
+      #"d183ddc6e2665aa4e2f088af",
+    ],
+    nonce: #"b54106044420049bb7ff5444a434b3847077b420c4b8ea4cf7ac6420fe840f0b",
+  }
+}
+```
+
+**What is happening, step by step:**
+
+1. **Randomized points** – `a_bar`, `b_bar`, and `d` are compressed G1 points that encode the randomized signature. They are derived from the original issuer signature but blinded so the transaction cannot be linked back to the issuance event.
+2. **Schnorr responses** – `e_hat`, `r1_hat`, and `r3_hat` are 32-byte scalars that prove knowledge of the secret randomizers used during blinding, without revealing them.
+3. **Hidden attributes** – `m_hat` contains one scalar per *hidden* attribute (six entries in this example). These are the masked values of the undisclosed messages.
+4. **Disclosed attributes** – `disclosed_indices` lists which attribute slots are revealed (`[0, 2, 4, 6]`), and `disclosed_values` contains the actual revealed message scalars in the same order. The verifier uses these to reconstruct the partial hash and check it against the proof.
+5. **Challenge and nonce** – `c` is the Fiat-Shamir challenge computed over all public elements of the proof, and `nonce` binds the proof to a specific transaction context. If either is tampered with, the pairing check fails.
+
 Because the on-chain cost is dominated by a small number of pairing evaluations, BBS+ proofs are surprisingly practical inside a Plutus transaction. The size of the proof is constant regardless of how many attributes are signed, making it an attractive primitive for privacy-preserving identity, membership, and compliance checks on Cardano.
 
 ### Summary
