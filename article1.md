@@ -7,7 +7,7 @@
 - [BLS](#bls)
 - [KDF](#kdf)
 - [VRF](#vrf)
-- [Proof systems](#proof-systems)
+- [Proof systems – coming in the next article](#proof-systems--coming-in-the-next-article)
 
 ---
 
@@ -579,4 +579,6 @@ Beyond the two cases above, the `aiken/vrf` project tests several other patterns
 
 The `aiken/vrf` project provides a complete, RFC-compliant ECVRF implementation over BLS12-381 G2 using only Aiken and Plutus builtins. The API is minimal: `keys_from_secret`, `prove`, `verify`, and `proof_to_hash`. With these four functions, you can build privacy-preserving data structures, verifiable randomness beacons, leader-selection protocols, and non-interactive proofs of knowledge. The key insight is always the same: the prover computes a private, deterministic, pseudorandom output; the verifier checks it publicly; and neither the secret nor the output is forgeable.
 
-## Proof systems
+## Proof systems – coming in the next article
+
+Pairing-friendly curves like BLS12-381 are the foundation of modern zero-knowledge proof systems. In the follow-up to this article we will explore how the same Aiken primitives—hash-to-curve, scalar multiplication, and the Miller-loop pairing check—can be composed into succinct non-interactive arguments of knowledge (zk-SNARKs), polynomial commitment schemes, and other on-chain verifiable computation protocols. Stay tuned.
