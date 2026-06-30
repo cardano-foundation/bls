@@ -244,7 +244,7 @@ Phase 2: Unlocking
 
 ---
 
-## Simple Aiken Demonstration: Step-by-Step
+## Step 1: Simple Aiken Demonstration
 
 This section walks through the simplest valid end-to-end flow: **one issuer**, **one credential** with two fields (`dobYear`, `country`), **one predicate** (`age >= 21 AND country in approved set`), and **one Aiken Gate Script**.
 
@@ -623,6 +623,122 @@ To replicate this flow end-to-end, the following primitives must be available:
 | **Proving** | Happens entirely off-chain in the holder's wallet. No Cardano limits apply. |
 
 **Bottom line**: The cryptographic primitives are live on Cardano mainnet today. The remaining work is engineering — writing the Aiken Groth16 verifier library, optimizing public-input MSM, and ensuring the proof compression format matches between off-chain prover and on-chain parser. This is well within the scope of current zeroj / cardano-client-lib tooling.
+
+---
+
+## Step 2: Twisted ElGamal on Cardano (Optional Extension)
+
+> **When to use this**: Only if your use case requires hiding **amounts** (balances, transfer values) in addition to hiding identity and credential fields. For pure identity verification (age, role, residency), Step 1 is sufficient.
+
+### Can We Use Twisted ElGamal on Cardano?
+
+**Yes.** Twisted ElGamal is conceptually realizable on Cardano with a curve substitution: instead of Ristretto255 (used by Mysten on Sui), you use **BLS12-381 G1** as the underlying group, because that's what Plutus V3 has native built-ins for.
+
+### What Plutus V3 Already Gives Us
+
+| Operation | Needed for Twisted ElGamal | Available in Plutus V3? |
+|-----------|---------------------------|------------------------|
+| Group element type | `G1Element` for ciphertext points | ✅ `bls12_381_G1_element` |
+| Point addition | Homomorphic addition of ciphertexts | ✅ `bls12_381_G1_add` |
+| Scalar multiplication | `r*g`, `m*h`, `r*pk` | ✅ `bls12_381_G1_scalarMul` |
+| Point negation | Subtraction (`c - d/x`) | ✅ `bls12_381_G1_neg` |
+| Point equality | Verify ciphertext integrity | ✅ `bls12_381_G1_equal` |
+| Hash to curve | Derive second generator `h` | ⚠️ Likely available as `bls12_381_G1_hashToGroup`; verify in target node version |
+| Pairings | **Not needed** for ElGamal itself | ✅ Available anyway (for Groth16) |
+
+**No new Plutus built-ins are needed** for the core ElGamal operations. The existing BLS12-381 G1 primitives are sufficient.
+
+### What Changes Architecturally
+
+#### Current Design (Step 1 — Predicate Proofs Only)
+```
+Credential fields → private inputs to Groth16 circuit
+     ↓
+Proof says: "I satisfy predicate P" (no fields revealed)
+     ↓
+Script verifies Groth16 proof → releases funds
+```
+
+#### Extended Design (+ Twisted ElGamal)
+```
+Credential fields → encrypted as G1 points, stored in datum
+     ↓
+Holder proves: "decrypt(my_balance) ≥ transfer_amount
+               AND transfer_amount ≥ 0"
+     ↓
+Proof is Groth16 over constraints that include:
+  - ElGamal homomorphism equations
+  - Range bounds on encrypted limbs
+     ↓
+Script verifies Groth16 proof + adds ciphertexts homomorphically
+```
+
+#### Key Changes
+
+| Aspect | Step 1 Only | + Twisted ElGamal |
+|--------|-------------|-------------------|
+| **On-chain state** | Unit datum (no balance data) | Datum stores encrypted G1 points (active balance, pending balance) |
+| **Transfer logic** | One-shot unlock | Homomorphic point addition updates encrypted balances |
+| **Circuit complexity** | Signature verify + Merkle + comparison | Same + ElGamal equations + range decomposition |
+| **Redeemer size** | ~200 bytes (proof + 5 public inputs) | ~400–600 bytes (proof + multiple ciphertexts) |
+| **What is hidden** | Identity + credential fields | Identity + credential fields + amounts |
+| **What script does** | Verify proof, release funds | Verify proof, add ciphertexts, release funds |
+
+### The Honest Catch: Range Proofs on Encrypted Values
+
+Twisted ElGamal is additively homomorphic, but the **message lives in the exponent**:
+
+```
+decrypt: c - d/x = m*h  →  m = log_h(m*h)
+```
+
+This is only practical for small `m` (because discrete log brute-force is needed). Mysten solves this by splitting amounts into `u16` limbs and encrypting each limb separately. But then the on-chain verifier must ensure:
+1. Each limb is within `[0, 2^16]`
+2. The sum of limbs doesn't overflow
+3. Sender has sufficient balance
+
+These are **range proofs**. In a UTxO model without account state, you need a ZK proof that the homomorphic subtraction is valid and non-negative. You would express these constraints as additional R1CS constraints inside your existing Groth16 circuit, then verify the same Groth16 proof on-chain.
+
+**So the practical architecture becomes:**
+
+```
+Off-chain:
+  1. Split amount into limbs (u16)
+  2. Encrypt each limb with Twisted ElGamal over BLS12-381 G1
+  3. Build Groth16 witness including ElGamal equations + range constraints
+  4. Generate proof
+
+On-chain (Aiken):
+  1. Receive proof + encrypted ciphertexts in redeemer
+  2. Groth16Verify(proof, vk) — checks signature, Merkle, AND ElGamal ranges
+  3. If valid, homomorphically add ciphertexts to update balances
+```
+
+### Use-Case Guidance
+
+**Add Twisted ElGamal if your use case requires hiding amounts.** Examples:
+- Private payroll distribution (prove "is employee" without revealing salary amount)
+- Confidential voting weights (prove "holds governance token" without revealing balance)
+- Anonymous donations (prove "meets eligibility" without revealing donation size)
+
+**Skip it if your use case is identity-only.** Examples:
+- Age verification for venue entry
+- Role verification for healthcare access
+- Country residency for banking KYC
+
+In those cases, adding encrypted balances is pure overhead. The predicate proof already hides identity completely; encrypting a boolean `eligible` flag adds nothing.
+
+### Summary
+
+| Question | Answer |
+|----------|--------|
+| Can we use Twisted ElGamal on Cardano? | **Yes**, using BLS12-381 G1 as the group |
+| Do we need new Plutus built-ins? | **No**, existing G1 ops are sufficient |
+| What changes? | Datum stores G1 ciphertexts; circuit includes ElGamal + range constraints; script does homomorphic addition |
+| Is it harder? | **Moderately**. The cryptography is there, but the circuit grows (more constraints = slower proving), and the datum/redeemer structures become more complex |
+| Should we do it? | Only if amount privacy is a **requirement**. For identity-only selective disclosure, it's unnecessary complexity |
+
+If you go this route, the composition is: **predicate proof for identity + ElGamal encryption for amounts**, verified by a single Groth16 proof checked by the same Aiken Gate Script.
 
 ---
 
