@@ -9,11 +9,12 @@
 1. [Overview](#overview)
 2. [Research & Context](#research--context)
 3. [Design](#design)
-4. [Step 1: Predicate Proofs with Aiken](#step-1-predicate-proofs-with-aiken)
-5. [Step 2: Twisted ElGamal Extension](#step-2-twisted-elgamal-extension)
-6. [Compliance & Auditability](#compliance--auditability)
-7. [Threat Model & Deployment](#threat-model--deployment)
-8. [References](#references)
+4. [Step 0: Groth16 Implementation (Prerequisite)](#step-0-groth16-implementation-prerequisite)
+5. [Step 1: Predicate Proofs with Aiken](#step-1-predicate-proofs-with-aiken)
+6. [Step 2: Twisted ElGamal Extension](#step-2-twisted-elgamal-extension)
+7. [Compliance & Auditability](#compliance--auditability)
+8. [Threat Model & Deployment](#threat-model--deployment)
+9. [References](#references)
 
 ---
 
