@@ -10,7 +10,7 @@ This pattern enables a credential holder to prove they satisfy specific predicat
 
 The authorization to spend or access a resource comes from a **zero-knowledge proof** rather than a direct signature from a known address.
 
-> **Design principle: Data minimization.** Inspired by the W3C Verifiable Credentials data model, the system follows the principle that the holder should share *no more information than strictly necessary*. In this design, the holder does not reveal individual claims at all — they reveal only the truth value of a predicate computed over those claims.
+> **Design principle: Data minimization.** Inspired by the W3C Verifiable Credentials data model and the Panther Protocol principle that "the protocol verifies only what's required — nothing more," the system follows the principle that the holder should share *no more information than strictly necessary*. In this design, the holder does not reveal individual claims at all — they reveal only the truth value of a predicate computed over those claims.
 
 ---
 
@@ -100,7 +100,7 @@ Because the credential is a single signed object (not one signature per claim as
 
 ### 2. Predicate Proof Generation
 
-When the holder wants to access a service, they generate a zero-knowledge proof for that service's specific predicate.
+When the holder wants to access a service, they generate a zero-knowledge proof for that service's specific predicate. The proof is generated **locally in the holder's wallet or device** — the credential fields and signing key never leave the holder's control.
 
 **Public inputs** (visible on-chain):
 - Issuer public key (or commitment to it)
@@ -189,6 +189,7 @@ Phase 2: Unlocking
 |----------|-------------------|
 | **Credential fields hidden** | All fields are private inputs to the ZK circuit; only the predicate result is public |
 | **Transaction address hidden** | The script does not require or verify any holder address; authorization is purely proof-based |
+| **Anonymity set** | When multiple UTxOs are locked at the same Gate Script, any valid proof can unlock any of them; observers cannot link a specific spend to a specific credential holder |
 | **Unlinkable proofs** | Two proofs against different circuits (or even the same circuit with different public inputs) are cryptographically independent; a verifier cannot tell if they came from the same credential |
 | **No linkability across sessions** | The holder can use fresh fee-payer addresses or relayers for each transaction |
 | **Approved sets are upgradeable** | The issuer publishes new Merkle roots; existing credentials remain valid |
@@ -288,6 +289,17 @@ The policy layer is separate from the predicate circuit, so the ZK proof itself 
 | **Freeze** | Issuer or designated admin adds a credential ID to a frozen set; the circuit can include a non-freeze membership check |
 | **Holder coercion resistance** | Because the proof does not reveal field values, a coerced holder cannot be forced to disclose their exact age, country, etc. — they can only be forced to produce (or not produce) a proof for a given predicate |
 
+### 4. Forensic Data Escrow (Advanced)
+
+For regulated environments, the issuer can escrow encrypted credential metadata with a governance-controlled disclosure mechanism.
+
+- At issuance, the holder includes an additional ciphertext encrypting non-sensitive metadata (e.g., credential type, issuance epoch, jurisdiction code) to a **governance multi-sig public key**.
+- This ciphertext is stored off-chain with the credential bundle — it never appears in proof transactions.
+- Under defined circumstances (court order, fraud investigation, lost-key recovery), the governance body can decrypt the escrowed metadata without learning the actual credential field values.
+- The predicate proof system remains unchanged; the escrow is a compliance layer outside the ZK circuit.
+
+This provides a middle ground between absolute privacy and regulatory accountability: the holder's fields stay hidden, but issuers retain a governed path for conditional metadata disclosure.
+
 ---
 
 ## References
@@ -303,3 +315,7 @@ The policy layer is separate from the predicate circuit, so the ZK proof itself 
 4. Mysten Labs, *Confidential Transfers on Sui*, GitHub repository, 2025. https://github.com/MystenLabs/confidential-transfers
 
    Demonstrates a complementary privacy paradigm using Twisted ElGamal homomorphic encryption and zero-knowledge range proofs to hide transfer *amounts* on-chain. Key insights absorbed into this design include **per-credential auditing** (encrypting a decryption key once to auditor keys rather than attaching audit data per transaction) and **permissioned gate flows** (layering KYC/policy checks on top of cryptographic verification). Adapted here from Sui's account model to Cardano's UTxO model.
+
+5. Panther Protocol, "Programmable Privacy Is Live: Panther Protocol Deploys on Polygon," *Panther Protocol Blog*, May 2026. https://blog.pantherprotocol.io/programmable-privacy-is-live-panther-protocol-deploys-on-polygon/
+
+   Introduces **programmable privacy** — confidential on-chain interactions with zero-knowledge credential verification. Insights absorbed into this design include the **UTxO-based anonymity set** (multiple locked UTxOs at the same script create a privacy pool where any valid proof can spend any UTxO), **local proof generation** (proofs generated in the holder's wallet, never on a server), and the principle that *"the protocol verifies only what's required — nothing more."* Also informs the **Forensic Data Escrow** concept for governed conditional disclosure.
