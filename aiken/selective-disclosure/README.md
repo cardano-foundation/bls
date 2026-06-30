@@ -70,6 +70,8 @@ Traditional selective disclosure approaches (as surveyed in SSI literature) fall
 
 The key advancement here is moving from **claim-level selective disclosure** (revealing some fields, hiding others) to **predicate-level zero-knowledge disclosure** (proving a constraint is satisfied without revealing any field values). Because *no claims are disclosed*, the transaction cannot be linked to the holder's identity via the credential contents, and the holder's blockchain address can remain completely hidden.
 
+> **Note on encrypted-balance systems.** A complementary privacy paradigm (e.g., Mysten Labs' [Confidential Transfers on Sui](https://github.com/MystenLabs/confidential-transfers)) uses homomorphic encryption (Twisted ElGamal) to hide *amounts* while sender/receiver addresses remain visible. Predicate-level ZK, by contrast, hides *identity* (no address is checked) while operating on credential fields rather than balances. The two techniques solve different problems and can be composed: a system could require a predicate proof before minting a confidential UTxO, then use encrypted balances for subsequent transfers.
+
 ---
 
 ## Off-Chain Components
@@ -253,6 +255,41 @@ In all cases, the **Gate Script remains unchanged** — it validates only the pr
 
 ---
 
+## Compliance & Auditability
+
+Privacy-by-default does not mean absence of oversight. Production deployments can layer compliance controls on top of the core proof-based authorization.
+
+### 1. Auditor Visibility Without Per-Transaction Overhead
+
+Instead of attaching audit data to every proof submission (which increases transaction size and cost), the issuer can bundle an **auditor-encrypted decryption key** with the credential at issuance time.
+
+- When the credential is issued, the holder's wallet encrypts a credential decryption key to the issuer's designated auditor public keys and includes the ciphertext in the credential bundle.
+- Auditors decrypt this key once off-chain and can then read the full credential contents, verify historical proofs, or inspect Merkle root updates.
+- The holder's individual proof transactions remain unchanged — no extra ciphertext or proof is needed per transaction.
+
+This **per-credential auditing** model (inspired by Mysten Labs' confidential-transfer design, adapted to a UTxO context) is cheaper for holders and simpler for auditors than per-transaction audit trails. In Cardano's UTxO model there is no on-chain account object; the credential and its audit key are simply off-chain data held by the holder.
+
+### 2. Permissioned Gates
+
+A verifier can require a valid ZK proof **plus** an additional on-chain policy check. For example:
+
+- **KYC gating**: The Gate Script checks that the transaction signer (or a referenced policy object) is present in an on-chain KYC registry before accepting the proof.
+- **Rate limiting**: A gate tracks how many times a given proof public-input set has been used in an epoch and rejects further unlocks beyond a threshold.
+- **Allowlists**: Only credentials issued by a specific issuer sub-key are accepted.
+
+The policy layer is separate from the predicate circuit, so the ZK proof itself stays small and the privacy properties remain intact.
+
+### 3. Emergency Controls
+
+| Control | Mechanism |
+|---------|-----------|
+| **Revocation** | Issuer publishes a new revocation Merkle root; the next proof generation automatically includes a non-membership witness showing the credential is not revoked |
+| **Global pause** | Gate operator flips an `is_active` flag in the script; all proof verifications reject until lifted |
+| **Freeze** | Issuer or designated admin adds a credential ID to a frozen set; the circuit can include a non-freeze membership check |
+| **Holder coercion resistance** | Because the proof does not reveal field values, a coerced holder cannot be forced to disclose their exact age, country, etc. — they can only be forced to produce (or not produce) a proof for a given predicate |
+
+---
+
 ## References
 
 1. A. De Salve, A. Lisi, M. Cascino, P. Mori, and L. Ricci, "Selective disclosure approaches in Self-Sovereign Identity: an experimental comparison," *IEEE Access*, 2025. DOI: [10.1109/ACCESS.2025.3649167](https://doi.org/10.1109/ACCESS.2025.3649167)
@@ -262,3 +299,7 @@ In all cases, the **Gate Script remains unchanged** — it validates only the pr
 2. W3C, *Verifiable Credentials Data Model 2.0*, W3C Proposed Recommendation, 2025. https://www.w3.org/TR/vc-data-model-2.0/
 
 3. W3C, *Decentralized Identifiers (DIDs) v1.0*, W3C Recommendation, 2022. https://www.w3.org/TR/did-core/
+
+4. Mysten Labs, *Confidential Transfers on Sui*, GitHub repository, 2025. https://github.com/MystenLabs/confidential-transfers
+
+   Demonstrates a complementary privacy paradigm using Twisted ElGamal homomorphic encryption and zero-knowledge range proofs to hide transfer *amounts* on-chain. Key insights absorbed into this design include **per-credential auditing** (encrypting a decryption key once to auditor keys rather than attaching audit data per transaction) and **permissioned gate flows** (layering KYC/policy checks on top of cryptographic verification). Adapted here from Sui's account model to Cardano's UTxO model.
