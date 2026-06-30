@@ -1,5 +1,22 @@
 # Selective Disclosure with Hidden Transaction Address
 
+> **One-line summary:** A credential holder proves they satisfy a predicate (age, role, residency) without revealing their identity, address, or any credential field. Authorization comes from a zero-knowledge proof verified by an Aiken Gate Script on Cardano.
+
+---
+
+## Table of Contents
+
+1. [Overview](#overview)
+2. [Research & Context](#research--context)
+3. [Design](#design)
+4. [Step 1: Predicate Proofs with Aiken](#step-1-predicate-proofs-with-aiken)
+5. [Step 2: Twisted ElGamal Extension](#step-2-twisted-elgamal-extension)
+6. [Compliance & Auditability](#compliance--auditability)
+7. [Threat Model & Deployment](#threat-model--deployment)
+8. [References](#references)
+
+---
+
 ## Overview
 
 This pattern enables a credential holder to prove they satisfy specific predicates (age, role, membership, etc.) without revealing:
@@ -14,7 +31,40 @@ The authorization to spend or access a resource comes from a **zero-knowledge pr
 
 ---
 
-## Actors
+## Research & Context
+
+**Executive summary:** Traditional selective disclosure (SD-JWT, BBS+, Merkle trees) reveals selected claims in plaintext, which still leaks identity through the disclosed fields. This design moves to **predicate-level zero-knowledge disclosure**, where the holder proves a constraint is satisfied without revealing *any* field values. We draw on SSI literature (IEEE Access survey), Mysten Labs' confidential transfers (per-credential auditing), and Panther Protocol (UTxO anonymity sets, local proof generation) to build a privacy-native authorization layer on Cardano.
+
+<details>
+<summary><b>Click to expand: Claim-Level vs Predicate-Level Disclosure</b></summary>
+
+Traditional selective disclosure approaches (as surveyed in SSI literature) fall into five categories:
+
+| Approach | What the holder reveals | Address hiding possible? |
+|----------|------------------------|------------------------|
+| **Atomic credentials** | One claim per credential; holder picks which credentials to present | No — holder identity is still bound to the presentation |
+| **Hash-based** (e.g., SD-JWT) | Selected claims in plaintext + hash verification | No — disclosed claims may contain identifying data |
+| **Encryption-based** | Selected claims in plaintext + decryption keys | No — same problem as hash-based |
+| **Hash tree-based** (Merkle) | Selected claims in plaintext + Merkle membership proof | No — claims are still revealed |
+| **Signature-based** (BBS+) | Selected claims in plaintext + ZK proof of signature | No — while ZK hides undisclosed claims, the disclosed ones may identify the holder |
+| **Predicate-level ZK** (this design) | **Only the predicate result** (e.g., `eligible = 1`) | **Yes** — no claims are ever revealed |
+
+The key advancement here is moving from **claim-level selective disclosure** (revealing some fields, hiding others) to **predicate-level zero-knowledge disclosure** (proving a constraint is satisfied without revealing any field values). Because *no claims are disclosed*, the transaction cannot be linked to the holder's identity via the credential contents, and the holder's blockchain address can remain completely hidden.
+
+> **Note on encrypted-balance systems.** A complementary privacy paradigm (e.g., Mysten Labs' [Confidential Transfers on Sui](https://github.com/MystenLabs/confidential-transfers)) uses homomorphic encryption (Twisted ElGamal) to hide *amounts* while sender/receiver addresses remain visible. Predicate-level ZK, by contrast, hides *identity* (no address is checked) while operating on credential fields rather than balances. The two techniques solve different problems and can be composed: a system could require a predicate proof before minting a confidential UTxO, then use encrypted balances for subsequent transfers.
+
+</details>
+
+---
+
+## Design
+
+**Executive summary:** The system has four actors: an Issuer who signs rich credentials and publishes Merkle roots; a Holder who stores the credential locally and generates proofs; a Verifier/Gate which is an Aiken script parameterized by a Groth16 verifying key; and an optional Relayer who submits transactions without learning the credential. The holder's proof is generated locally on their device, provided in the transaction redeemer, and verified on-chain. The script never checks an address, staking key, or known signature — only the mathematical validity of the proof.
+
+<details>
+<summary><b>Click to expand: Architecture & Actors</b></summary>
+
+### Actors
 
 | Actor | Role |
 |-------|------|
@@ -23,9 +73,7 @@ The authorization to spend or access a resource comes from a **zero-knowledge pr
 | **Verifier / Gate** | A Cardano script that releases funds or grants access when presented with a valid proof |
 | **Relayer (optional)** | Submits transactions on behalf of the holder; cannot forge proofs |
 
----
-
-## Architecture
+### Architecture Diagram
 
 ```
 ┌─────────────┐      signed credential      ┌─────────────┐
@@ -53,28 +101,10 @@ The authorization to spend or access a resource comes from a **zero-knowledge pr
               └─────────────────────┘  └─────────────────────┘  └─────────────────────┘
 ```
 
----
+</details>
 
-## Selective Disclosure: Claim-Level vs Predicate-Level
-
-Traditional selective disclosure approaches (as surveyed in SSI literature) fall into five categories:
-
-| Approach | What the holder reveals | Address hiding possible? |
-|----------|------------------------|------------------------|
-| **Atomic credentials** | One claim per credential; holder picks which credentials to present | No — holder identity is still bound to the presentation |
-| **Hash-based** (e.g., SD-JWT) | Selected claims in plaintext + hash verification | No — disclosed claims may contain identifying data |
-| **Encryption-based** | Selected claims in plaintext + decryption keys | No — same problem as hash-based |
-| **Hash tree-based** (Merkle) | Selected claims in plaintext + Merkle membership proof | No — claims are still revealed |
-| **Signature-based** (BBS+) | Selected claims in plaintext + ZK proof of signature | No — while ZK hides undisclosed claims, the disclosed ones may identify the holder |
-| **Predicate-level ZK** (this design) | **Only the predicate result** (e.g., `eligible = 1`) | **Yes** — no claims are ever revealed |
-
-The key advancement here is moving from **claim-level selective disclosure** (revealing some fields, hiding others) to **predicate-level zero-knowledge disclosure** (proving a constraint is satisfied without revealing any field values). Because *no claims are disclosed*, the transaction cannot be linked to the holder's identity via the credential contents, and the holder's blockchain address can remain completely hidden.
-
-> **Note on encrypted-balance systems.** A complementary privacy paradigm (e.g., Mysten Labs' [Confidential Transfers on Sui](https://github.com/MystenLabs/confidential-transfers)) uses homomorphic encryption (Twisted ElGamal) to hide *amounts* while sender/receiver addresses remain visible. Predicate-level ZK, by contrast, hides *identity* (no address is checked) while operating on credential fields rather than balances. The two techniques solve different problems and can be composed: a system could require a predicate proof before minting a confidential UTxO, then use encrypted balances for subsequent transfers.
-
----
-
-## Off-Chain Components
+<details>
+<summary><b>Click to expand: Off-Chain Components</b></summary>
 
 ### 1. Credential Issuance
 
@@ -135,9 +165,10 @@ The transaction is signed only to satisfy blockchain transaction validity (payin
 - A relayer's address
 - A coin-mixed address
 
----
+</details>
 
-## On-Chain Components
+<details>
+<summary><b>Click to expand: On-Chain Components</b></summary>
 
 ### Gate Script
 
@@ -181,9 +212,10 @@ Phase 2: Unlocking
 └─────────────────────────────────────┘
 ```
 
----
+</details>
 
-## Privacy Properties
+<details>
+<summary><b>Click to expand: Privacy Properties</b></summary>
 
 | Property | How It Is Achieved |
 |----------|-------------------|
@@ -195,9 +227,10 @@ Phase 2: Unlocking
 | **Approved sets are upgradeable** | The issuer publishes new Merkle roots; existing credentials remain valid |
 | **No external services** | Verification is self-contained in the script; no oracles, DHTs, or registries are needed at proof time |
 
----
+</details>
 
-## Example Workflows
+<details>
+<summary><b>Click to expand: Example Workflows</b></summary>
 
 ### Workflow A: Anonymous Access to a Service
 
@@ -218,37 +251,155 @@ Phase 2: Unlocking
 5. Each DApp's script validates only its own predicate; neither learns Bob's exact age or country
 6. Neither DApp can link the two transactions to the same person
 
----
-
-## Threat Model & Mitigations
-
-| Threat | Mitigation |
-|--------|-----------|
-| Credential theft | **Holder binding:** Bind the credential to a holder secret (e.g., include a holder commitment in the signed message; the proof requires knowledge of the secret) |
-| Proof replay | Add a nonce, epoch number, or transaction hash as a public input to the circuit |
-| Sybil attacks | Issuer ensures one credential per real-world identity (out of scope of the cryptography) |
-| Colluding verifiers | By design, proofs are unlinkable; collusion cannot cryptographically link sessions |
-| Holder coercion | The holder can generate a proof for *any* predicate they satisfy; they cannot be forced to reveal specific field values because the proof does not expose them |
+</details>
 
 ---
 
-## Deployment Checklist
+## Step 0: Groth16 Implementation (Prerequisite)
 
-- [ ] Define credential schema (fields, encoding)
-- [ ] Define predicate circuits per use case
-- [ ] Run trusted setup (universal Powers of Tau + per-circuit Phase 2)
-- [ ] Deploy Gate Scripts parameterized by each circuit's verifying key
-- [ ] Publish issuer public key and Merkle roots via trusted channel
-- [ ] Implement holder-side proof generation
-- [ ] Optional: deploy relayer infrastructure for address-less submission
+**Executive summary:** Before any selective-disclosure flow can run end-to-end, we need a working Groth16 proof system over BLS12-381 that is split into an off-chain prover and an on-chain verifier. The off-chain prover (witness generation + proof construction) is already implemented in the zeroj project. The missing piece is an on-chain Groth16 verifier written in Aiken that uses Plutus V3's native BLS12-381 built-ins. This step also requires agreeing on a proof compression format (compressed vs uncompressed points) and a datum/redeemer serialization scheme so that off-chain prover output and on-chain parser input match exactly.
+
+<details>
+<summary><b>Click to expand: What Already Exists vs What Must Be Built</b></summary>
+
+### Already Implemented (zeroj project)
+
+| Component | Status | Location |
+|-----------|--------|----------|
+| **Circuit DSL** (R1CS compiler, signal builder, constraint generation) | ✅ Done | `zeroj-circuit-dsl`, `zeroj-circuit-lib` |
+| **Poseidon hash** (BLS12-381 scalar field) | ✅ Done | `zeroj-circuit-lib` / `zeroj-mpf-poseidon` |
+| **EdDSA-Jubjub** (sign, verify, in-circuit gadgets) | ✅ Done | `zeroj-circuit-lib` / `zeroj-crypto` |
+| **Groth16 prover** (BLS12-381 witness → proof) | ✅ Done | `zeroj-crypto` (`Groth16ProverBLS381`) |
+| **Trusted setup** (PoT + Phase-2, cacheable) | ✅ Done | `zeroj-crypto` (`PowersOfTauBLS381`, `Groth16SetupBLS381`) |
+| **Proof compression** (Jacobian → compressed bytes) | ✅ Done | `zeroj-onchain-julc` (`SnarkjsToCardano.ProofCompressed`) |
+| **Julc on-chain verifier** (Plutus V3 via Java annotation) | ✅ Done | `zeroj-onchain-julc` (`Groth16BLS12381Lib`) |
+
+### Must Be Built for Aiken
+
+| Component | Status | Why It Is Needed |
+|-----------|--------|------------------|
+| **Aiken Groth16 verifier library** | ❌ Not started | The core on-chain verification logic: pairing check + public-input linear combination, expressed in Aiken using Plutus V3 BLS12-381 built-ins |
+| **Proof format adapter** | ❌ Not started | zeroj emits compressed BLST-format bytes; Aiken must parse the same byte layout into its `bls12_381_G1_element` and `G2_element` types |
+| **Redeemer schema (Aiken types)** | ❌ Not started | Aiken `ProofRedeemer` record must match the field order, byte widths, and integer encoding that the off-chain prover produces |
+| **Validator template** | ❌ Not started | Parameterized Aiken validator that accepts a `vk` at compile time and a `ProofRedeemer` at runtime |
+| **End-to-end serialization test** | ❌ Not started | Prove that a proof generated by zeroj prover is accepted by the Aiken verifier on a local devnet |
+
+</details>
+
+<details>
+<summary><b>Click to expand: Detailed Build Plan</b></summary>
+
+### Phase 0.1 — Proof Format & Serialization Contract
+
+**Goal:** Define the exact byte layout of `pi_a`, `pi_b`, `pi_c`, and public inputs so that zeroj output and Aiken input are bit-for-bit compatible.
+
+**Tasks**
+1. Document the current zeroj compression path:
+   - `JacobianG1BLS381.AffineG1` → BLST `P1_Affine.compress()` → 48 bytes
+   - `JacobianG2BLS381.AffineG2` → BLST `P2_Affine.compress()` → 96 bytes
+2. Verify that Aiken's `bls12_381_G1_element` and `G2_element` built-ins accept the same compressed representation (they should — both follow the ZCash BLS12-381 serialization spec).
+3. Define endianness and padding rules for public inputs (BigInteger → `ByteArray` → minimal or fixed-width?).
+4. Write a cross-language test: generate a random proof in zeroj, serialize, deserialize in Aiken, assert point equality.
+
+**Deliverable:** `SPEC.md` — serialization contract document.
 
 ---
 
-## Step 1: Simple Aiken Demonstration
+### Phase 0.2 — Aiken Groth16 Verifier Core
 
-This section walks through the simplest valid end-to-end flow: **one issuer**, **one credential** with two fields (`dobYear`, `country`), **one predicate** (`age >= 21 AND country in approved set`), and **one Aiken Gate Script**.
+**Goal:** Implement the Groth16 verification equation in pure Aiken.
 
-### High-Level Flow
+**Mathematical reminder**
+```
+e(pi_a, pi_b) == e(alpha, beta) * e(linear_combination(public_inputs, ic), gamma) * e(pi_c, delta)
+```
+
+**Tasks**
+1. Implement `groth16_verify_bls12_381` as an Aiken library function:
+   - Input: `List<ByteArray>` public inputs, `ByteArray` pi_a/pi_b/pi_c, `ByteArray` vk_alpha/vk_beta/vk_gamma/vk_delta, `List<ByteArray>` vk_ic
+   - Step 1: Parse compressed bytes into `bls12_381_G1_element` / `G2_element`
+   - Step 2: Compute public-input linear combination: `sum(pub_i * ic_i)` using `bls12_381_G1_scalarMul` and `bls12_381_G1_add`
+   - Step 3: Compute three pairings via `bls12_381_millerLoop`
+   - Step 4: Final verify via `bls12_381_finalVerify`
+2. Optimize the MSM (multi-scalar multiplication) for public inputs. With 5 public inputs a naive loop is fine; for 20+ inputs consider Pippenger or windowed approaches.
+3. Add extensive unit tests in Aiken using known test vectors (generate a proof in zeroj with fixed inputs, hard-code the expected result as `True`).
+
+**Deliverable:** `groth16.ak` — Aiken library module.
+
+---
+
+### Phase 0.3 — Parameterized Validator Template
+
+**Goal:** Build the Gate Script that wires the verifier library to a specific `vk`.
+
+**Tasks**
+1. Define the `ProofRedeemer` Aiken type matching the serialization contract.
+2. Write the `validator gate(vk_alpha, vk_beta, vk_gamma, vk_delta, vk_ic)` template:
+   - Extract redeemer fields
+   - Hard-check `eligible == #[1]`
+   - Call `groth16_verify_bls12_381(...)`
+3. Compile to UPLC and measure script size and execution units.
+4. Verify the compiled script fits within Cardano's transaction limits.
+
+**Deliverable:** `gate.ak` — deployable validator.
+
+---
+
+### Phase 0.4 — Integration & End-to-End Test
+
+**Goal:** Prove that a zeroj-generated proof is accepted by the Aiken validator on a local devnet.
+
+**Tasks**
+1. Use zeroj to run trusted setup for a toy circuit (e.g., `x * y = z` with 1 public input).
+2. Generate a proof with zeroj prover.
+3. Serialize proof + public inputs according to the Phase 0.1 contract.
+4. Deploy the Aiken validator with the toy `vk` to Yaci DevKit.
+5. Lock ADA at the script.
+6. Build an unlock transaction with the serialized proof in the redeemer.
+7. Submit and confirm acceptance.
+
+**Deliverable:** Working e2e test + CI job.
+
+---
+
+### Phase 0.5 — Circuit Library for Selective Disclosure
+
+**Goal:** Provide reusable Aiken circuit gadgets that the predicate circuits in Step 1 will need.
+
+**Tasks**
+1. Port or wrap essential gadgets:
+   - Poseidon hash (2-input, N-input variants)
+   - Merkle membership verification
+   - EdDSA-Jubjub signature verification
+   - 16-bit / 32-bit range checks
+2. Ensure each gadget is tested against zeroj test vectors.
+3. Document constraint counts per gadget so circuit designers can budget.
+
+**Deliverable:** `circuit-lib.ak` — reusable gadget library.
+
+</details>
+
+<details>
+<summary><b>Click to expand: Risk Register</b></summary>
+
+| Risk | Likelihood | Impact | Mitigation |
+|------|------------|--------|------------|
+| Aiken BLS built-ins differ from BLST compression format | Low | High | Phase 0.1 cross-language test catches this immediately |
+| Groth16 verifier exceeds execution budget | Low | High | Benchmark early (Phase 0.2); optimize MSM; consider Groth16 variant with fewer public inputs |
+| Aiken compiler generates oversized UPLC | Medium | Medium | Use Aiken's `optimize` flag; if still too large, split verifier across multiple validators or use reference scripts |
+| Serialization mismatch between zeroj and Aiken | Medium | High | Strict `SPEC.md` + automated round-trip tests in CI |
+| Plutus V3 built-in behavior changes in future node versions | Low | High | Pin tests to a specific node version; monitor changelogs |
+
+</details>
+
+---
+
+## Step 1: Predicate Proofs with Aiken
+
+**Executive summary:** This is the simplest valid end-to-end flow: one issuer signs a two-field credential (`dobYear`, `country`), the holder generates a Groth16 proof that `age >= 21 AND country in approved set`, and an Aiken Gate Script verifies the proof on-chain before releasing locked ADA. The flow has six steps: trusted setup, issuance, deploy gate, fund gate, proof generation, and unlock. Plutus V3 already has all BLS12-381 primitives needed; no new built-ins are required.
+
+<details>
+<summary><b>Click to expand: High-Level Flow Diagram</b></summary>
 
 ```mermaid
 graph LR
@@ -269,14 +420,15 @@ graph LR
     S4 --> S6
 ```
 
----
+</details>
 
-### Step 1: Trusted Setup & Circuit Compilation (Off-Chain)
+<details>
+<summary><b>Click to expand: Step 1 — Trusted Setup & Circuit Compilation (Off-Chain)</b></summary>
 
-**What happens**
-The predicate circuit is compiled and a trusted setup ceremony is run to produce the proving key (`pk`) and verifying key (`vk`).
+**What happens:** The predicate circuit is compiled and a trusted setup ceremony is run to produce the proving key (`pk`) and verifying key (`vk`).
 
 **Functionality needed**
+
 | Component | Purpose |
 |-----------|---------|
 | Circuit DSL / R1CS compiler | Convert the predicate logic (`age >= 21`, Merkle membership) into Rank-1 Constraint System |
@@ -302,14 +454,15 @@ Secret:  dob_year, country, signature, merkle_proof
 5. assert eligible == 1
 ```
 
----
+</details>
 
-### Step 2: Credential Issuance (Off-Chain)
+<details>
+<summary><b>Click to expand: Step 2 — Credential Issuance (Off-Chain)</b></summary>
 
-**What happens**
-The issuer creates a credential, hashes its fields, signs the hash, and delivers the bundle privately to the holder. The issuer also publishes the approved-country Merkle root.
+**What happens:** The issuer creates a credential, hashes its fields, signs the hash, and delivers the bundle privately to the holder. The issuer also publishes the approved-country Merkle root.
 
 **Functionality needed**
+
 | Component | Purpose |
 |-----------|---------|
 | Poseidon hash | Compute `claims_msg = Hash(dob_year, country)` |
@@ -348,14 +501,15 @@ Issuer (off-chain)
 
 **Important**: The credential bundle lives entirely off-chain in the holder's wallet. Only the `country_root` needs to be publicly available.
 
----
+</details>
 
-### Step 3: Deploy Gate Script (On-Chain)
+<details>
+<summary><b>Click to expand: Step 3 — Deploy Gate Script (On-Chain)</b></summary>
 
-**What happens**
-An Aiken validator parameterized with the verifying key (`vk`) from Step 1 is compiled and deployed to Cardano as a Plutus V3 script.
+**What happens:** An Aiken validator parameterized with the verifying key (`vk`) from Step 1 is compiled and deployed to Cardano as a Plutus V3 script.
 
 **Functionality needed**
+
 | Component | Purpose |
 |-----------|---------|
 | Aiken compiler | Compile validator to Plutus V3 UPLC |
@@ -422,14 +576,15 @@ script_hash  → hash of the compiled Plutus script (used to derive the Gate add
 gate_address → Cardano address derived from script_hash (where funds will be locked)
 ```
 
----
+</details>
 
-### Step 4: Fund the Gate (On-Chain)
+<details>
+<summary><b>Click to expand: Step 4 — Fund the Gate (On-Chain)</b></summary>
 
-**What happens**
-Anyone locks ADA at the Gate script address. The datum is a unit (`()`), carrying no identity information.
+**What happens:** Anyone locks ADA at the Gate script address. The datum is a unit (`()`), carrying no identity information.
 
 **Functionality needed**
+
 | Component | Purpose |
 |-----------|---------|
 | Cardano transaction builder | Construct a `pay-to-script` output |
@@ -465,14 +620,15 @@ Cardano ledger
 
 **Privacy note**: The funder's address is visible, but this is irrelevant to the eventual holder who will unlock. The funder and the holder can be different parties, or the funder can be a relayer.
 
----
+</details>
 
-### Step 5: Proof Generation (Off-Chain)
+<details>
+<summary><b>Click to expand: Step 5 — Proof Generation (Off-Chain)</b></summary>
 
-**What happens**
-The holder uses their credential, the issuer signature, the published `country_root`, and the `proving_key` to generate a zero-knowledge proof.
+**What happens:** The holder uses their credential, the issuer signature, the published `country_root`, and the `proving_key` to generate a zero-knowledge proof.
 
 **Functionality needed**
+
 | Component | Purpose |
 |-----------|---------|
 | Witness calculator | Assign values to all circuit wires (public + private) |
@@ -507,14 +663,15 @@ proof_bundle:
 
 **Privacy note**: The proof is generated entirely on the holder's device. No credential fields, signatures, or Merkle witnesses are transmitted to any server.
 
----
+</details>
 
-### Step 6: Unlock Transaction (On-Chain)
+<details>
+<summary><b>Click to expand: Step 6 — Unlock Transaction (On-Chain)</b></summary>
 
-**What happens**
-The holder (or a relayer) constructs a transaction that spends the locked UTxO from Step 4. The proof and public inputs are provided in the **redeemer**. The Gate script validates the proof and releases the funds.
+**What happens:** The holder (or a relayer) constructs a transaction that spends the locked UTxO from Step 4. The proof and public inputs are provided in the **redeemer**. The Gate script validates the proof and releases the funds.
 
 **Functionality needed**
+
 | Component | Purpose |
 |-----------|---------|
 | Cardano transaction builder | Assemble inputs, outputs, redeemer, and collateral |
@@ -576,7 +733,10 @@ redeemer_log → proof + public inputs (visible on-chain, but reveals no credent
 - The holder's birth year or country
 - Whether this is the same person who used another gate yesterday
 
----
+</details>
+
+<details>
+<summary><b>Click to expand: Summary, Tooling Stack & Feasibility</b></summary>
 
 ### Summary: Data & Functionality per Step
 
@@ -608,8 +768,6 @@ To replicate this flow end-to-end, the following primitives must be available:
 - Proof compression (Jacobian to compressed bytes) to fit redeemers within transaction size limits
 - Aiken / Plutus datum/redeemer serialization matching the off-chain prover's output format
 
----
-
 ### Is Groth16 on Cardano Actually Feasible?
 
 **Yes. Cardano's Plutus V3 has native BLS12-381 support, which is exactly what Groth16 over BLS12-381 requires.**
@@ -624,13 +782,16 @@ To replicate this flow end-to-end, the following primitives must be available:
 
 **Bottom line**: The cryptographic primitives are live on Cardano mainnet today. The remaining work is engineering — writing the Aiken Groth16 verifier library, optimizing public-input MSM, and ensuring the proof compression format matches between off-chain prover and on-chain parser. This is well within the scope of current zeroj / cardano-client-lib tooling.
 
+</details>
+
 ---
 
-## Step 2: Twisted ElGamal on Cardano (Optional Extension)
+## Step 2: Twisted ElGamal Extension
 
-> **When to use this**: Only if your use case requires hiding **amounts** (balances, transfer values) in addition to hiding identity and credential fields. For pure identity verification (age, role, residency), Step 1 is sufficient.
+**Executive summary:** Only use this if your use case requires hiding **amounts** (balances, transfer values) in addition to hiding identity. Twisted ElGamal is realizable on Cardano by substituting Ristretto255 with BLS12-381 G1 — all required operations (point addition, scalar multiplication, negation, equality) are already in Plutus V3. The catch is that messages live in the exponent, so amounts must be split into `u16` limbs and range proofs added to the Groth16 circuit. Skip this if your use case is identity-only.
 
-### Can We Use Twisted ElGamal on Cardano?
+<details>
+<summary><b>Click to expand: Can We Use Twisted ElGamal on Cardano?</b></summary>
 
 **Yes.** Twisted ElGamal is conceptually realizable on Cardano with a curve substitution: instead of Ristretto255 (used by Mysten on Sui), you use **BLS12-381 G1** as the underlying group, because that's what Plutus V3 has native built-ins for.
 
@@ -648,7 +809,10 @@ To replicate this flow end-to-end, the following primitives must be available:
 
 **No new Plutus built-ins are needed** for the core ElGamal operations. The existing BLS12-381 G1 primitives are sufficient.
 
-### What Changes Architecturally
+</details>
+
+<details>
+<summary><b>Click to expand: What Changes Architecturally</b></summary>
 
 #### Current Design (Step 1 — Predicate Proofs Only)
 ```
@@ -684,7 +848,10 @@ Script verifies Groth16 proof + adds ciphertexts homomorphically
 | **What is hidden** | Identity + credential fields | Identity + credential fields + amounts |
 | **What script does** | Verify proof, release funds | Verify proof, add ciphertexts, release funds |
 
-### The Honest Catch: Range Proofs on Encrypted Values
+</details>
+
+<details>
+<summary><b>Click to expand: The Range-Proof Catch & Practical Architecture</b></summary>
 
 Twisted ElGamal is additively homomorphic, but the **message lives in the exponent**:
 
@@ -714,7 +881,10 @@ On-chain (Aiken):
   3. If valid, homomorphically add ciphertexts to update balances
 ```
 
-### Use-Case Guidance
+</details>
+
+<details>
+<summary><b>Click to expand: Use-Case Guidance & Summary</b></summary>
 
 **Add Twisted ElGamal if your use case requires hiding amounts.** Examples:
 - Private payroll distribution (prove "is employee" without revealing salary amount)
@@ -728,8 +898,6 @@ On-chain (Aiken):
 
 In those cases, adding encrypted balances is pure overhead. The predicate proof already hides identity completely; encrypting a boolean `eligible` flag adds nothing.
 
-### Summary
-
 | Question | Answer |
 |----------|--------|
 | Can we use Twisted ElGamal on Cardano? | **Yes**, using BLS12-381 G1 as the group |
@@ -740,25 +908,16 @@ In those cases, adding encrypted balances is pure overhead. The predicate proof 
 
 If you go this route, the composition is: **predicate proof for identity + ElGamal encryption for amounts**, verified by a single Groth16 proof checked by the same Aiken Gate Script.
 
----
-
-## Extension: Hiding the Fee Payer
-
-For full anonymity, even the transaction fee payer can be hidden:
-
-1. **Relayer network**: The holder sends the proof to a relayer who pays fees and submits the tx. The relayer cannot forge the proof.
-2. **Stealth addresses**: The holder derives a one-time address for each transaction.
-3. **Coin mixing**: Fees are paid from mixed UTxOs, breaking the chain of custody.
-
-In all cases, the **Gate Script remains unchanged** — it validates only the proof, not the transaction's origin.
+</details>
 
 ---
 
 ## Compliance & Auditability
 
-Privacy-by-default does not mean absence of oversight. Production deployments can layer compliance controls on top of the core proof-based authorization.
+**Executive summary:** Privacy-by-default does not mean absence of oversight. Production deployments can layer compliance on top of the core proof-based authorization without weakening privacy. Three mechanisms are available: per-credential auditing (encrypt a viewing key to auditor keys at issuance, no per-transaction overhead), permissioned gates (KYC checks layered alongside the ZK proof), and emergency controls (revocation, pause, freeze, coercion resistance). An advanced Forensic Data Escrow allows governed conditional disclosure of encrypted metadata without exposing credential fields.
 
-### 1. Auditor Visibility Without Per-Transaction Overhead
+<details>
+<summary><b>Click to expand: Auditor Visibility Without Per-Transaction Overhead</b></summary>
 
 Instead of attaching audit data to every proof submission (which increases transaction size and cost), the issuer can bundle an **auditor-encrypted decryption key** with the credential at issuance time.
 
@@ -768,7 +927,10 @@ Instead of attaching audit data to every proof submission (which increases trans
 
 This **per-credential auditing** model (inspired by Mysten Labs' confidential-transfer design, adapted to a UTxO context) is cheaper for holders and simpler for auditors than per-transaction audit trails. In Cardano's UTxO model there is no on-chain account object; the credential and its audit key are simply off-chain data held by the holder.
 
-### 2. Permissioned Gates
+</details>
+
+<details>
+<summary><b>Click to expand: Permissioned Gates</b></summary>
 
 A verifier can require a valid ZK proof **plus** an additional on-chain policy check. For example:
 
@@ -778,7 +940,12 @@ A verifier can require a valid ZK proof **plus** an additional on-chain policy c
 
 The policy layer is separate from the predicate circuit, so the ZK proof itself stays small and the privacy properties remain intact.
 
-### 3. Emergency Controls
+</details>
+
+<details>
+<summary><b>Click to expand: Emergency Controls & Forensic Data Escrow</b></summary>
+
+### Emergency Controls
 
 | Control | Mechanism |
 |---------|-----------|
@@ -787,7 +954,7 @@ The policy layer is separate from the predicate circuit, so the ZK proof itself 
 | **Freeze** | Issuer or designated admin adds a credential ID to a frozen set; the circuit can include a non-freeze membership check |
 | **Holder coercion resistance** | Because the proof does not reveal field values, a coerced holder cannot be forced to disclose their exact age, country, etc. — they can only be forced to produce (or not produce) a proof for a given predicate |
 
-### 4. Forensic Data Escrow (Advanced)
+### Forensic Data Escrow (Advanced)
 
 For regulated environments, the issuer can escrow encrypted credential metadata with a governance-controlled disclosure mechanism.
 
@@ -797,6 +964,53 @@ For regulated environments, the issuer can escrow encrypted credential metadata 
 - The predicate proof system remains unchanged; the escrow is a compliance layer outside the ZK circuit.
 
 This provides a middle ground between absolute privacy and regulatory accountability: the holder's fields stay hidden, but issuers retain a governed path for conditional metadata disclosure.
+
+</details>
+
+---
+
+## Threat Model & Deployment
+
+**Executive summary:** The main threats are credential theft (mitigated by holder binding), proof replay (mitigated by nonces/epochs), colluding verifiers (mitigated by unlinkable proofs), and holder coercion (mitigated by the fact that proofs never reveal field values). Deployment requires defining credential schemas and predicate circuits, running trusted setup, deploying parameterized Gate Scripts, publishing issuer public keys, and implementing holder-side local proof generation. Optional relayer infrastructure can hide the fee payer.
+
+<details>
+<summary><b>Click to expand: Threat Model & Mitigations</b></summary>
+
+| Threat | Mitigation |
+|--------|-----------|
+| Credential theft | **Holder binding:** Bind the credential to a holder secret (e.g., include a holder commitment in the signed message; the proof requires knowledge of the secret) |
+| Proof replay | Add a nonce, epoch number, or transaction hash as a public input to the circuit |
+| Sybil attacks | Issuer ensures one credential per real-world identity (out of scope of the cryptography) |
+| Colluding verifiers | By design, proofs are unlinkable; collusion cannot cryptographically link sessions |
+| Holder coercion | The holder can generate a proof for *any* predicate they satisfy; they cannot be forced to reveal specific field values because the proof does not expose them |
+
+</details>
+
+<details>
+<summary><b>Click to expand: Deployment Checklist</b></summary>
+
+- [ ] Define credential schema (fields, encoding)
+- [ ] Define predicate circuits per use case
+- [ ] Run trusted setup (universal Powers of Tau + per-circuit Phase 2)
+- [ ] Deploy Gate Scripts parameterized by each circuit's verifying key
+- [ ] Publish issuer public key and Merkle roots via trusted channel
+- [ ] Implement holder-side proof generation
+- [ ] Optional: deploy relayer infrastructure for address-less submission
+
+</details>
+
+<details>
+<summary><b>Click to expand: Hiding the Fee Payer</b></summary>
+
+For full anonymity, even the transaction fee payer can be hidden:
+
+1. **Relayer network**: The holder sends the proof to a relayer who pays fees and submits the tx. The relayer cannot forge the proof.
+2. **Stealth addresses**: The holder derives a one-time address for each transaction.
+3. **Coin mixing**: Fees are paid from mixed UTxOs, breaking the chain of custody.
+
+In all cases, the **Gate Script remains unchanged** — it validates only the proof, not the transaction's origin.
+
+</details>
 
 ---
 
