@@ -244,6 +244,329 @@ Phase 2: Unlocking
 
 ---
 
+## Simple Aiken Demonstration: Step-by-Step
+
+This section walks through the simplest valid end-to-end flow: **one issuer**, **one credential** with two fields (`dobYear`, `country`), **one predicate** (`age >= 21 AND country in approved set`), and **one Aiken Gate Script**.
+
+### High-Level Flow
+
+```
+Off-Chain                              On-Chain (Cardano)
+─────────                              ──────────────────
+
+Step 1: Trusted Setup
+  Circuit → R1CS → SRS → vk + pk
+
+Step 2: Issuance
+  Issuer signs credential
+  |
+  v
+Step 5: Proof Generation
+  Holder generates ZK proof
+  |
+  +------------------> Step 3: Deploy Gate
+  |                      Aiken validator (vk)
+  |                    Step 4: Fund Gate
+  |                      Lock ADA at script
+  |                      |
+  v                      v
+Step 6: Unlock tx  -->  Script verifies proof
+                         Releases ADA
+```
+
+---
+
+### Step 1: Trusted Setup & Circuit Compilation (Off-Chain)
+
+**What happens**
+The predicate circuit is compiled and a trusted setup ceremony is run to produce the proving key (`pk`) and verifying key (`vk`).
+
+**Functionality needed**
+| Component | Purpose |
+|-----------|---------|
+| Circuit DSL / R1CS compiler | Convert the predicate logic (`age >= 21`, Merkle membership) into Rank-1 Constraint System |
+| Powers of Tau (universal SRS) | Generate a structured reference string independent of the circuit |
+| Phase-2 setup | Derive circuit-specific `pk` and `vk` from the SRS |
+
+**Data created**
+```
+proving_key      → used by the holder to generate proofs (kept off-chain)
+verifying_key    → embedded into the Aiken Gate Script (on-chain parameter)
+circuit_hash     → fingerprint of the circuit for cache validation
+```
+
+**Example circuit (pseudocode)**
+```
+Public:  issuer_pk, current_year, country_root, eligible
+Secret:  dob_year, country, signature, merkle_proof
+
+1. claims_msg = Poseidon(dob_year, country)
+2. EdDSA_Verify(issuer_pk, claims_msg, signature)
+3. assert dob_year <= current_year - 21
+4. Merkle_Verify(country, country_root, merkle_proof)
+5. assert eligible == 1
+```
+
+---
+
+### Step 2: Credential Issuance (Off-Chain)
+
+**What happens**
+The issuer creates a credential, hashes its fields, signs the hash, and delivers the bundle privately to the holder. The issuer also publishes the approved-country Merkle root.
+
+**Functionality needed**
+| Component | Purpose |
+|-----------|---------|
+| Poseidon hash | Compute `claims_msg = Hash(dob_year, country)` |
+| EdDSA (Jubjub) | Sign `claims_msg` with issuer secret key |
+| Merkle tree builder | Construct approved-country set and compute `country_root` |
+
+**Data created & flow**
+```
+Issuer (off-chain)
+  │
+  ├─> Credential bundle ────────> Holder (off-chain, private channel)
+  │     ├─ dob_year: 1990
+  │     ├─ country: 276        (DEU)
+  │     ├─ claims_msg: Hash(...)
+  │     └─ issuer_signature
+  │
+  └─> country_root ────────────> Published (on-chain datum or IPFS)
+```
+
+**Important**: The credential bundle lives entirely off-chain in the holder's wallet. Only the `country_root` needs to be publicly available.
+
+---
+
+### Step 3: Deploy Gate Script (On-Chain)
+
+**What happens**
+An Aiken validator parameterized with the verifying key (`vk`) from Step 1 is compiled and deployed to Cardano as a Plutus V3 script.
+
+**Functionality needed**
+| Component | Purpose |
+|-----------|---------|
+| Aiken compiler | Compile validator to Plutus V3 UPLC |
+| Groth16 verifier library (Aiken) | BLS12-381 pairing check callable from Aiken (either as a library or via Plutus built-ins) |
+| Cardano CLI / client | Submit the script reference or use it directly in transactions |
+
+**Aiken validator skeleton**
+```aiken
+use aiken/builtin
+
+// Groth16 proof elements passed in the redeemer
+type ProofRedeemer {
+  pi_a: ByteArray,      // G1 point
+  pi_b: ByteArray,      // G2 point
+  pi_c: ByteArray,      // G1 point
+  pk_u: ByteArray,      // issuer pubkey coordinate
+  pk_v: ByteArray,      // issuer pubkey coordinate
+  current_year: ByteArray,
+  country_root: ByteArray,
+  eligible: ByteArray,  // must be 1
+}
+
+validator gate(
+  vk_alpha: ByteArray,
+  vk_beta: ByteArray,
+  vk_gamma: ByteArray,
+  vk_delta: ByteArray,
+  vk_ic: List<ByteArray>,
+) {
+  fn spend(_datum: Void, redeemer: ProofRedeemer, _ctx: ScriptContext) -> Bool {
+    // 1. Hard predicate: eligible must be exactly 1
+    expect redeemer.eligible == #[1]
+
+    // 2. Reconstruct public inputs as field elements
+    let public_inputs = [
+      redeemer.pk_u,
+      redeemer.pk_v,
+      redeemer.current_year,
+      redeemer.country_root,
+      redeemer.eligible,
+    ]
+
+    // 3. Verify the Groth16 proof against the embedded vk
+    groth16_verify_bls12_381(
+      public_inputs,
+      redeemer.pi_a,
+      redeemer.pi_b,
+      redeemer.pi_c,
+      vk_alpha,
+      vk_beta,
+      vk_gamma,
+      vk_delta,
+      vk_ic,
+    )
+  }
+}
+```
+
+> **Note**: `groth16_verify_bls12_381` performs three pairings on the BLS12-381 curve. In a production Aiken deployment this is either imported from a verified Aiken library or implemented via Plutus V3 built-in cryptographic primitives.
+
+**Data created**
+```
+script_hash  → hash of the compiled Plutus script (used to derive the Gate address)
+gate_address → Cardano address derived from script_hash (where funds will be locked)
+```
+
+---
+
+### Step 4: Fund the Gate (On-Chain)
+
+**What happens**
+Anyone locks ADA at the Gate script address. The datum is a unit (`()`), carrying no identity information.
+
+**Functionality needed**
+| Component | Purpose |
+|-----------|---------|
+| Cardano transaction builder | Construct a `pay-to-script` output |
+| Wallet | Sign and submit the funding transaction |
+
+**Data flow**
+```
+Funder wallet
+     │
+     │ Tx: pay 100 ADA to gate_address
+     │     datum = ()
+     │
+     v
+Cardano ledger
+     │
+     └─> New UTxO created:
+         address = gate_address
+         value   = 100 ADA
+         datum   = ()
+```
+
+**Privacy note**: The funder's address is visible, but this is irrelevant to the eventual holder who will unlock. The funder and the holder can be different parties, or the funder can be a relayer.
+
+---
+
+### Step 5: Proof Generation (Off-Chain)
+
+**What happens**
+The holder uses their credential, the issuer signature, the published `country_root`, and the `proving_key` to generate a zero-knowledge proof.
+
+**Functionality needed**
+| Component | Purpose |
+|-----------|---------|
+| Witness calculator | Assign values to all circuit wires (public + private) |
+| Groth16 prover (BLS12-381) | Generate `pi_a`, `pi_b`, `pi_c` given the witness and `pk` |
+| Merkle proof provider | Look up `country = 276` in the approved set and produce siblings + path bits |
+
+**Inputs to the prover**
+```
+Public inputs (will appear on-chain in the redeemer):
+  issuer_pk.u, issuer_pk.v
+  current_year = 2026
+  country_root = 0xabc123...
+  eligible     = 1
+
+Private inputs (never leave the holder's device):
+  dob_year     = 1990
+  country      = 276
+  signature.r, signature.s
+  k_mod_l, k_quotient       // EdDSA reduction witnesses
+  merkle_siblings[0..3]
+  merkle_path_bits[0..3]
+```
+
+**Data created**
+```
+proof_bundle:
+  pi_a: G1 point (48 bytes compressed)
+  pi_b: G2 point (96 bytes compressed)
+  pi_c: G1 point (48 bytes compressed)
+  public_inputs: [ByteArray; 5]
+```
+
+**Privacy note**: The proof is generated entirely on the holder's device. No credential fields, signatures, or Merkle witnesses are transmitted to any server.
+
+---
+
+### Step 6: Unlock Transaction (On-Chain)
+
+**What happens**
+The holder (or a relayer) constructs a transaction that spends the locked UTxO from Step 4. The proof and public inputs are provided in the **redeemer**. The Gate script validates the proof and releases the funds.
+
+**Functionality needed**
+| Component | Purpose |
+|-----------|---------|
+| Cardano transaction builder | Assemble inputs, outputs, redeemer, and collateral |
+| Script evaluator (Aiken/Plutus) | Execute the Gate validator during transaction validation |
+| Wallet / relayer | Provide transaction fee and signing |
+
+**Data flow**
+```
+Holder wallet (or Relayer)
+     │
+     │ Tx:
+     │   Input[0]: UTxO at gate_address (from Step 4)
+     │              redeemer = ProofRedeemer { pi_a, pi_b, pi_c, ... }
+     │
+     │   Output[0]: 95 ADA to recipient_address
+     │              (can be a fresh one-time address)
+     │
+     │   Collateral: provided by fee payer
+     │
+     v
+Cardano ledger / Script evaluator
+     │
+     ├─> Gate script runs:
+     │     1. eligible == 1              ✓
+     │     2. Groth16Verify(...)         ✓
+     │     → script returns True
+     │
+     └─> Tx accepted. UTxO consumed.
+         Funds transferred to recipient_address.
+```
+
+**Data created**
+```
+tx_hash      → on-chain evidence that the proof was accepted
+redeemer_log → proof + public inputs (visible on-chain, but reveals no credential fields)
+```
+
+**Privacy outcome**: An observer sees that *someone* produced a valid proof for the "adult resident" gate and claimed the funds. They cannot determine:
+- Who the holder is (no address in datum/redeemer binds identity)
+- The holder's birth year or country
+- Whether this is the same person who used another gate yesterday
+
+---
+
+### Summary: Data & Functionality per Step
+
+| Step | Location | Functionality | Data In | Data Out |
+|------|----------|---------------|---------|----------|
+| 1. Setup | Off-chain | R1CS compiler, PoT, Phase-2 | Circuit definition | `pk`, `vk`, `circuit_hash` |
+| 2. Issuance | Off-chain | Poseidon, EdDSA sign, Merkle tree | Credential fields, issuer sk | Signed credential, `country_root` |
+| 3. Deploy | On-chain | Aiken compiler, Groth16 lib | `vk` bytes | `script_hash`, `gate_address` |
+| 4. Fund | On-chain | Tx builder, wallet | ADA, `gate_address` | Locked UTxO |
+| 5. Prove | Off-chain | Witness calculator, Groth16 prover | Credential, `pk`, `country_root` | `pi_a`, `pi_b`, `pi_c`, public inputs |
+| 6. Unlock | On-chain | Tx builder, script evaluator | Proof, UTxO, fee | Spent UTxO, released funds |
+
+### Minimal Viable Tooling Stack
+
+To replicate this flow end-to-end, the following primitives must be available:
+
+**Off-chain**
+- Poseidon hash over BLS12-381 scalar field
+- EdDSA signature over Jubjub curve
+- Groth16 prover over BLS12-381
+- Merkle tree builder and proof generator
+
+**On-chain (Aiken / Plutus V3)**
+- BLS12-381 curve operations (already available as Plutus V3 built-ins)
+- Groth16 verifier (pairing check + public input linear combination)
+- ByteArray <-> integer conversions for parsing redeemers
+
+**Cross-layer**
+- Proof compression (Jacobian to compressed bytes) to fit redeemers within transaction size limits
+- Aiken / Plutus datum/redeemer serialization matching the off-chain prover's output format
+
+---
+
 ## Extension: Hiding the Fee Payer
 
 For full anonymity, even the transaction fee payer can be hidden:
