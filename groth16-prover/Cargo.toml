@@ -1,0 +1,17 @@
+[package]
+name = "groth16-prover"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Groth16 prover over BLS12-381 using arkworks"
+
+[dependencies]
+ark-bls12-381 = "0.4"
+ark-ff = "0.4"
+ark-ec = "0.4"
+ark-poly = "0.4"
+ark-serialize = "0.4"
+ark-std = { version = "0.4", default-features = false }
+
+[dev-dependencies]
+ark-std = { version = "0.4", features = ["std"] }

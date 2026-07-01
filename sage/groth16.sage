@@ -45,7 +45,35 @@ O = matrix([[0,0,0,0,0,0,1,0],
 lhs = (L * vector(a_vec)).pairwise_product(R * vector(a_vec))
 rhs = O * vector(a_vec)
 assert lhs == rhs, "R1CS relation does not hold"
-print("R1CS relation verified.")
+
+# ---------------------------------------------------------------------------
+# Step 1.1 explicit printouts for cross-checking with Rust / arkworks
+# ---------------------------------------------------------------------------
+print("=== Step 1.1: R1CS Matrices and Witness ===\n")
+print("Witness a =", a_vec)
+print("\nL matrix:")
+for row in L.rows():
+    print(" ", list(row))
+print("\nR matrix:")
+for row in R.rows():
+    print(" ", list(row))
+print("\nO matrix:")
+for row in O.rows():
+    print(" ", list(row))
+
+la = L * vector(a_vec)
+ra = R * vector(a_vec)
+oa = O * vector(a_vec)
+print("\nL · a =", list(la))
+print("R · a =", list(ra))
+print("O · a =", list(oa))
+
+print("\nElement-wise (L·a) * (R·a):")
+for i in range(len(la)):
+    prod = la[i] * ra[i]
+    print("  constraint {}: {} * {} = {} (O·a = {})".format(i, la[i], ra[i], prod, oa[i]))
+
+print("\n✓ R1CS relation verified.")
 
 # ---------------------------------------------------------------------------
 # 2. Finite field & polynomial ring over the BLS12-381 scalar field F_q
