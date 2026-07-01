@@ -39,6 +39,62 @@ R1CS matrices `L`, `R`, `O` (3 constraints × 8 variables) are defined in the no
 
 ---
 
+## Sage Reference Implementation
+
+Before building the production Rust tooling, we maintain a **pure-Sage prototype** at `../sage/groth16.sage` that mirrors the concrete example end-to-end. It serves as:
+
+- A **readable reference** for the mathematics (polynomial interpolation, SRS construction, pairing check).
+- A **sanity-check** for expected proof/verification key values that the Rust implementation must reproduce.
+- A **comparison baseline** for BLS12-381 point and pairing arithmetic (the Sage script uses a pure-Sage curve definition, while arkworks uses its own optimized implementation).
+
+### What `../sage/groth16.sage` contains
+
+| Section | Description |
+|---------|-------------|
+| **1. R1CS** | Hard-codes the `L`, `R`, `O` matrices and witness `a = [1, 48, 2, 2, 3, 4, 4, 12]`, then verifies `(L·a) ∘ (R·a) = O·a`. |
+| **2. Finite field & polynomials** | Builds `GF(q)` (BLS12-381 scalar field) and interpolates each column of `L/R/O` to obtain `u_i(x)`, `v_i(x)`, `w_i(x)`. Also constructs the target polynomial `T(x) = (x-0)(x-1)(x-2)`. |
+| **3. Trusted Setup** | Draws random `tau, alpha, beta, gamma, delta`, computes the SRS (`G1·tau^i`, `G2·tau^i`, `G1·T(tau)·tau^i/delta`), and derives the CRS points `alpha·G1`, `beta·G2`, `gamma·G2`, `delta·G2`, plus the `Psi_V_G1` (public) and `Psi_P_G1` (private) vectors. |
+| **4. Prover** | Computes `l(x)`, `r(x)`, `o(x)`, the quotient `h(x) = (l·r - o)/T`, then evaluates everything in the exponent to produce the proof `(A, B, C)`. |
+| **5. Verifier** | Recomputes the public-input commitment `V` and runs the Groth16 pairing equation using the pure-Sage `atePairing` from `bls13-381.sage`. |
+
+### Dependencies
+
+- **SageMath** (tested with Sage ≥ 9.x)
+- `../sage/bls13-381.sage` — loaded at the top of `groth16.sage`; defines the BLS12-381 curve parameters, generators `g1`, `g2`, subgroup order `q`, and the `atePairing` function.
+
+### Running it
+
+```bash
+cd ../sage
+sage groth16.sage
+```
+
+Expected output:
+```
+R1CS relation verified.
+Trusted setup complete.
+l(x) = ...
+r(x) = ...
+o(x) = ...
+h(x) = ...
+Proof generated.
+Pairing check PASSED.  The proof is valid.
+```
+
+### Relationship to the Rust / Aiken pipeline
+
+| Concern | Sage script | Production stack |
+|---------|-------------|------------------|
+| Curve & pairings | Pure Sage (`bls13-381.sage`) | `ark-bls12-381` |
+| Polynomials | Sage `PolynomialRing` | `ark-poly` |
+| Field arithmetic | Sage `GF(q)` | `ark-ff` / `ark-bls12_381::Fr` |
+| Serialization | None (in-memory only) | `ark-serialize` (compressed) |
+| On-chain verification | N/A | Aiken BLS12-381 builtins |
+
+> **Note:** The Sage script does not output serialized keys or proofs. Its purpose is to validate the algorithmic steps and produce known-good intermediate values (e.g., polynomial coefficients, SRS points) that can be cross-checked against the Rust implementation during development.
+
+---
+
 ## Step 1: Concrete Example Circuit
 
 ### 1.1 Off-chain Trusted Setup (using arkworks)
