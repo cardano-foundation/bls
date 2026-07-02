@@ -135,7 +135,12 @@ print()
 for i in range(len(ws)):
     print("w_{} coeffs =".format(i), list(ws[i].coefficients(sparse=False)))
 
-print("\nQAP verification at constraint points:")
+print("\n✓ Step 1.3 coefficient printouts complete.")
+
+# ---------------------------------------------------------------------------
+# Step 1.5 explicit verification: QAP polynomials reproduce R1CS columns
+# ---------------------------------------------------------------------------
+print("\n=== Step 1.5: QAP Verification at Constraint Points ===\n")
 for j in range(len(xs)):
     xj = xs[j]
     for i in range(L.ncols()):
@@ -144,7 +149,7 @@ for j in range(len(xs)):
         assert ws[i](xj) == Fq(O[j, i]), "w_{}({}) mismatch".format(i, j)
     print("  x = {}: all u_i, v_i, w_i match L, R, O columns".format(j))
 
-print("\n✓ QAP interpolation and evaluation verified.")
+print("\n✓ All 24 evaluations (8 variables × 3 points) pass.")
 
 # Target polynomial T(x) = (x-0)(x-1)(x-2)
 T = prod(x - xi for xi in xs)
