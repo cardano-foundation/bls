@@ -70,8 +70,8 @@ print("O · a =", list(oa))
 
 print("\nElement-wise (L·a) * (R·a):")
 for i in range(len(la)):
-    prod = la[i] * ra[i]
-    print("  constraint {}: {} * {} = {} (O·a = {})".format(i, la[i], ra[i], prod, oa[i]))
+    constraint_prod = la[i] * ra[i]
+    print("  constraint {}: {} * {} = {} (O·a = {})".format(i, la[i], ra[i], constraint_prod, oa[i]))
 
 print("\n✓ R1CS relation verified.")
 
@@ -80,19 +80,71 @@ print("\n✓ R1CS relation verified.")
 # ---------------------------------------------------------------------------
 
 Fq = GF(q)
+
+# ---------------------------------------------------------------------------
+# Step 1.2 explicit printouts for cross-checking with Rust / arkworks
+# ---------------------------------------------------------------------------
+print("\n=== Step 1.2: BLS12-381 Scalar Field F_q ===\n")
+print("Field modulus q =", q)
+
+a = Fq(5)
+b = Fq(7)
+print("\nSample operations:")
+print("  a =", a)
+print("  b =", b)
+print("  a + b =", a + b)
+print("  a * b =", a * b)
+print("  a^-1  =", a^(-1))
+
+c = Fq(123456789)
+d = Fq(987654321)
+print("\nLarger sample operations:")
+print("  c =", c)
+print("  d =", d)
+print("  c + d =", c + d)
+print("  c * d =", c * d)
+print("  c^-1  =", c^(-1))
+
+print("\n✓ Field arithmetic cross-check values printed.")
+
 PR.<x> = PolynomialRing(Fq)
 
 xs = [Fq(0), Fq(1), Fq(2)]   # one evaluation point per constraint
 
 def interpolate(col):
     """Lagrange interpolation of a column over xs."""
-    points = list(zip(xs, [Fq(v) for v in col]))
+    points = list(zip(xs, [Fq(v) for v in col.list()]))
     return PR.lagrange_polynomial(points)
 
 # Interpolate each column of L, R, O -> u_i(x), v_i(x), w_i(x)
 us = [interpolate(L[:, i]) for i in range(L.ncols())]
 vs = [interpolate(R[:, i]) for i in range(R.ncols())]
 ws = [interpolate(O[:, i]) for i in range(O.ncols())]
+
+# ---------------------------------------------------------------------------
+# Step 1.3 explicit printouts for cross-checking with Rust / arkworks
+# ---------------------------------------------------------------------------
+print("\n=== Step 1.3: QAP Polynomial Interpolation ===\n")
+
+for i in range(len(us)):
+    print("u_{} coeffs =".format(i), list(us[i].coefficients(sparse=False)))
+print()
+for i in range(len(vs)):
+    print("v_{} coeffs =".format(i), list(vs[i].coefficients(sparse=False)))
+print()
+for i in range(len(ws)):
+    print("w_{} coeffs =".format(i), list(ws[i].coefficients(sparse=False)))
+
+print("\nQAP verification at constraint points:")
+for j in range(len(xs)):
+    xj = xs[j]
+    for i in range(L.ncols()):
+        assert us[i](xj) == Fq(L[j, i]), "u_{}({}) mismatch".format(i, j)
+        assert vs[i](xj) == Fq(R[j, i]), "v_{}({}) mismatch".format(i, j)
+        assert ws[i](xj) == Fq(O[j, i]), "w_{}({}) mismatch".format(i, j)
+    print("  x = {}: all u_i, v_i, w_i match L, R, O columns".format(j))
+
+print("\n✓ QAP interpolation and evaluation verified.")
 
 # Target polynomial T(x) = (x-0)(x-1)(x-2)
 T = prod(x - xi for xi in xs)
