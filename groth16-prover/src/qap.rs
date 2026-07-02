@@ -1,7 +1,7 @@
 use ark_bls12_381::Fr;
 use ark_ff::Field;
 use ark_poly::{univariate::DensePolynomial, DenseUVPolynomial};
-use ark_std::vec::Vec;
+use ark_std::{One, vec::Vec};
 
 /// Lagrange interpolation for three fixed evaluation points x ∈ {0, 1, 2}.
 /// Given values y0, y1, y2 returns the unique degree ≤ 2 polynomial p(x)
@@ -57,6 +57,17 @@ pub fn build_qap_polynomials(
     }
 
     (us, vs, ws)
+}
+
+/// Build the target polynomial T(x) = ∏(x - xi) for the given constraint points.
+/// For points [0, 1, 2] this yields x³ - 3x² + 2x.
+pub fn build_target_polynomial(points: &[Fr]) -> DensePolynomial<Fr> {
+    let mut result = DensePolynomial::from_coefficients_vec(vec![Fr::one()]);
+    for &p in points {
+        let factor = DensePolynomial::from_coefficients_vec(vec![-p, Fr::one()]);
+        result = result.naive_mul(&factor);
+    }
+    result
 }
 
 /// Pretty-print a polynomial with named coefficients.
@@ -144,6 +155,27 @@ mod tests {
         assert_eq!(poly.evaluate(&Fr::zero()), Fr::zero());
         assert_eq!(poly.evaluate(&Fr::one()), Fr::one());
         assert_eq!(poly.evaluate(&Fr::from(2u64)), Fr::from(2u64));
+    }
+
+    #[test]
+    fn test_target_polynomial() {
+        let points = [Fr::zero(), Fr::one(), Fr::from(2u64)];
+        let t = build_target_polynomial(&points);
+
+        // T(x) = x(x-1)(x-2) = x³ - 3x² + 2x
+        assert_eq!(t.degree(), 3);
+        assert_eq!(t.evaluate(&Fr::zero()), Fr::zero());
+        assert_eq!(t.evaluate(&Fr::one()), Fr::zero());
+        assert_eq!(t.evaluate(&Fr::from(2u64)), Fr::zero());
+
+        // Check coefficients: [0, 2, -3, 1]
+        let expected = DensePolynomial::from_coefficients_vec(vec![
+            Fr::zero(),
+            Fr::from(2u64),
+            -Fr::from(3u64),
+            Fr::one(),
+        ]);
+        assert_eq!(t, expected);
     }
 
 }

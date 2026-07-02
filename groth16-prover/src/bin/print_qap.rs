@@ -1,4 +1,4 @@
-use groth16_prover::qap::{build_qap_polynomials, print_poly};
+use groth16_prover::qap::{build_qap_polynomials, build_target_polynomial, print_poly};
 use groth16_prover::r1cs::{L, R, O};
 
 fn main() {
@@ -43,4 +43,23 @@ fn main() {
     }
 
     println!("\n✓ QAP interpolation and evaluation verified.");
+
+    // ------------------------------------------------------------------------
+    // Step 1.4 explicit printouts for cross-checking with Sage
+    // ------------------------------------------------------------------------
+    println!("\n=== Step 1.4: Target Polynomial T(x) ===\n");
+
+    let t = build_target_polynomial(&xs);
+    print_poly("T", &t);
+
+    println!("\nT(x) vanishes at all constraint points:");
+    for j in 0..3 {
+        let val = t.evaluate(&xs[j]);
+        let s = val.to_string();
+        let display = if s.is_empty() { "0" } else { &s };
+        println!("  T({}) = {}", j, display);
+        assert_eq!(val, Fr::zero(), "T({}) should be zero", j);
+    }
+
+    println!("\n✓ Target polynomial verified.");
 }
