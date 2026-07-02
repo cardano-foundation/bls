@@ -29,7 +29,7 @@ For every sub-step in [README.md](README.md):
 | 1.1 | R1CS matrices `L`, `R`, `O` and witness `a` | ✅ **VERIFIED** | Identical hard-coded values; element-wise products match. |
 | 1.2 | BLS12-381 scalar field `Fr` modulus | ✅ **VERIFIED** | `q` matches exactly; sample add/mul/inv agree. |
 | 1.3 | Polynomial interpolation `u_i`, `v_i`, `w_i` | ✅ **VERIFIED** | Coefficient vectors match; QAP evaluation assertions pass at x = 0, 1, 2. |
-| 1.4 | Target polynomial `T(x)` | ⏳ pending | Will compare coefficients. |
+| 1.4 | Target polynomial `T(x)` | ✅ **VERIFIED** | Coefficients match; vanishes at x = 0, 1, 2. |
 | 1.5 | QAP verification at constraint points | ⏳ pending | Will assert `u_i(j) == L[j][i]`. |
 | 1.6 | Toxic waste `tau, alpha, beta, gamma, delta` | ⏳ pending | Will use fixed deterministic values. |
 | 1.7 | SRS: `G1·tau^i`, `G2·tau^i`, `G1·T(tau)·tau^i/delta` | ⏳ pending | Will compare point coordinates. |
@@ -197,6 +197,54 @@ cargo test
 cd sage
 sage groth16.sage
 ```
+
+---
+
+## Step 1.4 — Detailed Verification
+
+### Target polynomial
+
+For three constraint points `x ∈ {0, 1, 2}`, the target polynomial is:
+
+```
+T(x) = (x - 0)(x - 1)(x - 2) = x³ - 3x² + 2x
+```
+
+Over the BLS12-381 scalar field `Fr`, the coefficient vector `[c0, c1, c2, c3]` is:
+
+| Implementation | `c0` | `c1` | `c2` | `c3` |
+|----------------|------|------|------|------|
+| **Rust** / arkworks | `0` | `2` | `52435875175126190479447740508185965837690552500527637822603658699938581184510` | `1` |
+| **Sage** / Python | `0` | `2` | `52435875175126190479447740508185965837690552500527637822603658699938581184510` | `1` |
+
+The coefficient `c2 = q - 3` because `-3 (mod q)` is represented as the positive residue.
+
+### Vanishing check
+
+Both implementations assert that `T(x)` evaluates to zero at every constraint point:
+
+| Point | Rust `T(x)` | Sage `T(x)` |
+|-------|-------------|-------------|
+| `x = 0` | `0` | `0` |
+| `x = 1` | `0` | `0` |
+| `x = 2` | `0` | `0` |
+
+### Commands to reproduce
+
+**Rust:**
+```bash
+cd groth16-prover
+cargo run --bin print_qap
+cargo test
+```
+
+**Sage:**
+```bash
+cd sage
+sage groth16.sage
+```
+
+*(If Sage is unavailable, the same coefficients and vanishing check were verified with Python.)*
 
 ---
 

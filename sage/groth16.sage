@@ -150,6 +150,20 @@ print("\n✓ QAP interpolation and evaluation verified.")
 T = prod(x - xi for xi in xs)
 
 # ---------------------------------------------------------------------------
+# Step 1.4 explicit printouts for cross-checking with Rust / arkworks
+# ---------------------------------------------------------------------------
+print("\n=== Step 1.4: Target Polynomial T(x) ===\n")
+print("T coeffs =", list(T.coefficients(sparse=False)))
+
+print("\nT(x) vanishes at all constraint points:")
+for j in range(len(xs)):
+    val = T(xs[j])
+    print("  T({}) = {}".format(j, val))
+    assert val == 0, "T({}) should be zero".format(j)
+
+print("\n✓ Target polynomial verified.")
+
+# ---------------------------------------------------------------------------
 # 3. Trusted Setup
 # ---------------------------------------------------------------------------
 
