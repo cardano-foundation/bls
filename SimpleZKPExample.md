@@ -294,7 +294,7 @@ The matrices, witness, and all intermediate polynomial coefficients used above a
 - `groth16-prover/src/qap.rs` — interpolation and target polynomial
 - `sage/groth16.sage` — full Sage reference with explicit prints
 
-Running `cargo run --bin print_qap` prints every `uᵢ, vᵢ, wᵢ` and `T(x)` so you can compare them to the hand-calculated values.
+Running `cargo run --bin print_qap` prints every `uᵢ, vᵢ, wᵢ` and `T(x)` so you can compare them to the hand-calculated values. It also **asserts** that each polynomial evaluates back to the original matrix entry at `x = 0, 1, 2` — exactly the sanity check described above.
 
 ---
 

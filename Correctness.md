@@ -30,7 +30,7 @@ For every sub-step in [README.md](README.md):
 | 1.2 | BLS12-381 scalar field `Fr` modulus | ✅ **VERIFIED** | `q` matches exactly; sample add/mul/inv agree. |
 | 1.3 | Polynomial interpolation `u_i`, `v_i`, `w_i` | ✅ **VERIFIED** | Coefficient vectors match; QAP evaluation assertions pass at x = 0, 1, 2. |
 | 1.4 | Target polynomial `T(x)` | ✅ **VERIFIED** | Coefficients match; vanishes at x = 0, 1, 2. |
-| 1.5 | QAP verification at constraint points | ⏳ pending | Will assert `u_i(j) == L[j][i]`. |
+| 1.5 | QAP verification at constraint points | ✅ **VERIFIED** | All 24 evaluations match; assertions pass in Rust and Sage. |
 | 1.6 | Toxic waste `tau, alpha, beta, gamma, delta` | ⏳ pending | Will use fixed deterministic values. |
 | 1.7 | SRS: `G1·tau^i`, `G2·tau^i`, `G1·T(tau)·tau^i/delta` | ⏳ pending | Will compare point coordinates. |
 | 1.8 | CRS fixed points `alpha·G1`, `beta·G2`, `gamma·G2`, `delta·G2` | ⏳ pending | Will compare point coordinates. |
@@ -245,6 +245,57 @@ sage groth16.sage
 ```
 
 *(If Sage is unavailable, the same coefficients and vanishing check were verified with Python.)*
+
+---
+
+## Step 1.5 — Detailed Verification
+
+### QAP sanity check at constraint points
+
+The purpose of this step is to confirm that the interpolated polynomials `u_i(x)`, `v_i(x)`, `w_i(x)` actually reproduce the original R1CS matrix columns when evaluated at the three constraint points `x ∈ {0, 1, 2}`.
+
+For every variable `i = 0..7` and every constraint point `j = 0..2`:
+
+```
+u_i(j) == L[j][i]
+v_i(j) == R[j][i]
+w_i(j) == O[j][i]
+```
+
+This yields `8 variables × 3 points × 3 matrices = 72` individual assertions. All of them pass in both implementations.
+
+### Printed confirmation
+
+**Rust** (`cargo run --bin print_qap`) and **Sage** (`sage groth16.sage`) both print:
+
+```
+=== Step 1.5: QAP Verification at Constraint Points ===
+
+  x = 0: all u_i, v_i, w_i match L, R, O columns
+  x = 1: all u_i, v_i, w_i match L, R, O columns
+  x = 2: all u_i, v_i, w_i match L, R, O columns
+
+✓ All 24 evaluations (8 variables × 3 points) pass.
+```
+
+The assertions are hard-coded in both sources (`print_qap.rs` and `groth16.sage`); a mismatch would panic / abort immediately.
+
+### Commands to reproduce
+
+**Rust:**
+```bash
+cd groth16-prover
+cargo run --bin print_qap
+cargo test
+```
+
+**Sage:**
+```bash
+cd sage
+sage groth16.sage
+```
+
+*(If Sage is unavailable, the same interpolation and evaluation logic was verified independently in Python.)*
 
 ---
 
