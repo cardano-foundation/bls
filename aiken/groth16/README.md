@@ -410,8 +410,8 @@ Each sub-step must be implemented in Rust, verified in Sage, and optionally cros
 
 **Setup & R1CS**
 - [ ] **1.1** R1CS matrices `L`, `R`, `O` and witness `a = [1, 48, 2, 2, 3, 4, 4, 12]`; verify `(L·a) ∘ (R·a) = O·a`.
-- [ ] **1.2** BLS12-381 scalar field `Fr`: confirm modulus and sample arithmetic across Rust / Sage / Julia.
-- [ ] **1.3** Polynomial interpolation: compute `u_i(x)`, `v_i(x)`, `w_i(x)` for all 8 variables.
+- [x] **1.2** BLS12-381 scalar field `Fr`: confirm modulus and sample arithmetic across Rust / Sage / Julia.
+- [x] **1.3** Polynomial interpolation: compute `u_i(x)`, `v_i(x)`, `w_i(x)` for all 8 variables.
 - [ ] **1.4** Target polynomial `T(x) = (x-0)(x-1)(x-2)`.
 - [ ] **1.5** QAP verification: assert `u_i(j) = L[j][i]`, `v_i(j) = R[j][i]`, `w_i(j) = O[j][i]` for `j = 0,1,2`.
 
