@@ -39,6 +39,52 @@ R1CS matrices `L`, `R`, `O` (3 constraints × 8 variables) are defined in the no
 
 ---
 
+## Why the Prover Must Stay Off-Chain
+
+Aiken is designed for **on-chain validators** (the verifier side), not for heavy off-chain computation. A Groth16 prover requires operations that are impractical inside a Cardano script:
+
+| Prover Step | What it requires | On-chain reality |
+|-------------|----------------|------------------|
+| **Polynomial interpolation** | FFTs over large vectors (O(n log n)) | No FFT primitives; naive O(n²) Lagrange exceeds execution units. |
+| **Polynomial multiplication** `l(x)·r(x)` | FFT-based convolution or O(n²) coefficient multiplication | Too expensive for validator budgets. |
+| **Quotient** `h(x) = (l·r - o) / T` | Polynomial long division or FFT | Not available in Aiken's standard library. |
+| **Multi-scalar multiplication (MSM)** `∑ cᵢ · G₁` | Large MSM in `G₁` and `G₂` — the bulk of proving time | Aiken has scalar multiplication, but thousands of them in a single script exceed memory/CPU limits. |
+| **Random toxic waste** `τ, α, β, δ` | Secure random sampling and secure deletion | Cannot generate or discard secrets securely inside an on-chain script. |
+
+Even for a toy circuit with 3 constraints, the prover performs polynomial arithmetic of degree ~6 and MSMs of length ~6. While that might technically "fit" in a literal sense, Aiken lacks polynomial rings, FFTs, and MSM batching. Implementing all of that from scratch in a language optimized for tiny deterministic scripts is neither practical nor aligned with Cardano's execution model.
+
+### What Aiken *is* perfect for
+
+Aiken's `bls12_381` module (`G1Element`, `G2Element`, `ml_result`, pairing) is ideal for the **Groth16 verifier**:
+
+```aiken
+let lhs = bls12_381.pairing(a, b)
+let rhs = bls12_381.pairing(alpha_g1, beta_g2)
+  |> bls12_381.ml_result_mul( bls12_381.pairing(c, delta_g2) )
+  |> bls12_381.ml_result_mul( bls12_381.pairing(v, gamma_g2) )
+
+lhs == rhs
+```
+
+The verifier only needs:
+- 3 pairings
+- 2 `G1` scalar multiplications (for `V` and `C` if they aren't precomputed)
+- A few point additions
+
+That's exactly what Aiken / Plutus V2 is built for.
+
+### Recommended architecture
+
+| Component | Where it runs | Technology |
+|-----------|---------------|------------|
+| **Trusted setup / SRS generation** | Off-chain, air-gapped | Rust / arkworks / snarkjs |
+| **Prover** | Off-chain, user's machine | Rust / arkworks (this crate) |
+| **Verifier** | On-chain, Cardano validator | Aiken / Plutus |
+
+If the goal is a Cardano-native ZK verifier, keep the prover in Rust and write the verifier in Aiken. That is the standard and sensible path.
+
+---
+
 ## Sage Reference Implementation
 
 Before building the production Rust tooling, we maintain a **pure-Sage prototype** at `../sage/groth16.sage` that mirrors the concrete example end-to-end. It serves as:
