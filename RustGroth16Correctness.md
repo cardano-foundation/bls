@@ -34,7 +34,7 @@ For every sub-step in [README.md](README.md):
 | 1.6 | Toxic waste `tau, alpha, beta, gamma, delta` | ✅ **VERIFIED** | Same five hard-coded primes in both; all non-zero, distinct, and invertible. |
 | 1.7 | SRS: `G1·tau^i`, `G2·tau^i`, `G1·T(tau)·tau^i/delta` | ✅ **VERIFIED** | Scalar values match exactly; G1 point coordinates match bit-for-bit; G2 coordinates differ only by field embedding (F₁₂ in Sage vs F_q² in Rust). |
 | 1.8 | CRS fixed points `alpha·G1`, `beta·G2`, `gamma·G2`, `delta·G2` | ✅ **VERIFIED** | Scalars match exactly; alpha·G1 coordinates match bit-for-bit; G2 coordinates differ only by field embedding. |
-| 1.9 | Per-variable CRS `Psi_V_G1`, `Psi_P_G1` | ⏳ pending | Will compare point coordinates. |
+| 1.9 | Per-variable CRS `Psi_V_G1`, `Psi_P_G1` | ✅ **VERIFIED** | Intermediate scalars (`u_i(tau)`, `v_i(tau)`, `w_i(tau)`, combined, `psi_scalar`) match exactly; G1 point coordinates match bit-for-bit for all variables. |
 | 1.10 | Witness polynomials `l(x)`, `r(x)`, `o(x)` | ⏳ pending | Will compare coefficients. |
 | 1.11 | Quotient polynomial `h(x)` | ⏳ pending | Will compare coefficients + zero remainder. |
 | 1.12 | Proof element `A` | ⏳ pending | Will compare point coordinates. |
@@ -481,6 +481,81 @@ Both implementations assert that the resulting points are non-zero (scalar multi
 ```bash
 cd groth16-prover
 cargo run --bin print_crs
+```
+
+**Sage:**
+```bash
+cd sage
+docker run --rm --entrypoint bash \
+  -v "$(pwd):/mnt/sage" \
+  sagemath/sagemath:latest \
+  -c "cp -r /mnt/sage /tmp/sage && cd /tmp/sage && sage groth16.sage"
+```
+
+---
+
+## Step 1.9 — Detailed Verification
+
+### Per-variable CRS formula
+
+For each variable `i`, the Groth16 CRS defines:
+
+```
+Ψ_i = (v_i(τ)·α + u_i(τ)·β + w_i(τ)) · G1
+```
+
+- **Public inputs** (variables 0 and 1): `Psi_V_G1[i] = Ψ_i / γ`
+- **Private inputs** (variables 2..7): `Psi_P_G1[i-2] = Ψ_i / δ`
+
+Both implementations evaluate `u_i(τ)`, `v_i(τ)`, `w_i(τ)` at `τ = 3` using the QAP polynomials from Step 1.3, then compute the combined scalar and divide by the appropriate toxic-waste parameter.
+
+### Intermediate scalar values
+
+| Variable | `u_i(τ)` | `v_i(τ)` | `w_i(τ)` | Combined `v·α+u·β+w` | `psi_scalar` |
+|----------|----------|----------|----------|----------------------|--------------|
+| 0 | `0` | `0` | `0` | `0` | `0` (point at infinity) |
+| 1 | `0` | `0` | `3` | `3` | `3/γ = 38135181945546320348689265824135247881956765454929191143711751781773513588737` |
+| 2 | `1` | `0` | `0` | `7` | `7/δ = 48402346315501098904105606622940891542483586923563973374711069569174074939551` |
+| 3 | `0` | `1` | `0` | `5` | `5/δ = 12100586578875274726026401655735222885620896730890993343677767392293518734888` |
+| 4 | `-3` | `0` | `0` | `-21` | `-21/δ = 12100586578875274726026401655735222885620896730890993343677767392293518734886` |
+| 5 | `0` | `-3` | `0` | `-15` | `-15/δ = 16134115438500366301368535540980297180827862307854657791570356523058024979849` |
+| 6 | `3` | `0` | `1` | `22` | `22/δ = 32268230877000732602737071081960594361655724615709315583140713046116049959702` |
+| 7 | `0` | `3` | `-3` | `12` | `12/δ = 8067057719250183150684267770490148590413931153927328895785178261529012489926` |
+
+All scalar values match bit-for-bit between Rust and Sage.
+
+### G1 point coordinates
+
+For every variable, the resulting G1 point coordinates match exactly. A selection:
+
+**Variable 1 (public, `w_1(τ)/γ · G1`):**
+```
+x = 81367861186093683725415536995441937835185051344933726757555734290444439656698447934803741703946152152045337171725
+y = 3760468985469776503436344758932544920234541482648436146215695546487915742697285652366880681770843519948278232907118
+```
+
+**Variable 2 (private, `u_2(τ)·β/δ · G1`):**
+```
+x = 241762981041424036339378596747179409297460582911272017058154373197451021542552527935715165823129002449576373219796
+y = 235973889660695178171707091242138352838746308494076871019815741084289205206162419325244318472749706920882083000990
+```
+
+**Variable 6 (private, `(u_6(τ)·β + w_6(τ))/δ · G1`):**
+```
+x = 1969519195907078274508144740538245489070078038394024037201447654414999556248919497800765490138165989331682795174860
+y = 2804313383022075242711792943597553318090410582879148606781783363223004691594852495764508135220292480239908913988381
+```
+
+### Sanity checks
+
+Both implementations assert that for variable 0 (the constant `1`), all three polynomials evaluate to zero at `τ`, yielding the point at infinity for `Psi_V_G1[0]`.
+
+### Commands to reproduce
+
+**Rust:**
+```bash
+cd groth16-prover
+cargo run --bin print_psi
 ```
 
 **Sage:**
