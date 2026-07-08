@@ -4,7 +4,7 @@ A **didactic, end-to-end Groth16 prover** in Rust over the BLS12-381 curve.
 
 > **Purpose.** This crate demonstrates the full Groth16 pipeline—from hard-coded R1CS matrices to a valid zero-knowledge proof—using [arkworks](https://arkworks.rs/) primitives. It is intentionally simplistic (hard-coded circuit, dense monomial polynomials, no randomizers) so that every intermediate value can be printed, inspected, and compared against an independent reference implementation.
 
-> **Correctness guarantee.** The entire implementation has been cross-checked line-by-line against a [Sage](https://www.sagemath.org/) script that implements the same mathematics from scratch. See [`RustGroth16Correctness.md`](../RustGroth16Correctness.md) for the bit-for-bit comparison of every sub-step.
+> **Correctness guarantee.** The entire implementation has been cross-checked line-by-line against a [Sage](https://www.sagemath.org/) script that implements the same mathematics from scratch. See [`RustGroth16Correctness.md`](RustGroth16Correctness.md) for the bit-for-bit comparison of every sub-step.
 
 ---
 
@@ -44,7 +44,7 @@ All 7 library tests pass (R1CS relation, QAP interpolation, target polynomial, f
 
 ### 2. Print and inspect every step
 
-Each binary corresponds to a numbered sub-step in [`RustGroth16Correctness.md`](../RustGroth16Correctness.md).
+Each binary corresponds to a numbered sub-step in [`RustGroth16Correctness.md`](RustGroth16Correctness.md).
 
 ```bash
 # Step 1.1 — R1CS matrices and witness
