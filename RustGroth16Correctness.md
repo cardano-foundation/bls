@@ -37,7 +37,7 @@ For every sub-step in [README.md](README.md):
 | 1.9 | Per-variable CRS `Psi_V_G1`, `Psi_P_G1` | ✅ **VERIFIED** | Intermediate scalars (`u_i(tau)`, `v_i(tau)`, `w_i(tau)`, combined, `psi_scalar`) match exactly; G1 point coordinates match bit-for-bit for all variables. |
 | 1.10 | Witness polynomials `l(x)`, `r(x)`, `o(x)` | ✅ **VERIFIED** | Coefficients match exactly; degree and evaluation at constraint points match. |
 | 1.11 | Quotient polynomial `h(x)` | ✅ **VERIFIED** | `h(x) = 3` in both; zero remainder confirmed by `p(x) == T(x) * h(x)`. |
-| 1.12 | Proof element `A` | ⏳ pending | Will compare point coordinates. |
+| 1.12 | Proof element `A` | ✅ **VERIFIED** | `l(tau)` and `alpha` match; G1 point coordinates match bit-for-bit. |
 | 1.13 | Proof element `B` | ⏳ pending | Will compare point coordinates. |
 | 1.14 | Proof element `C` | ⏳ pending | Will compare point coordinates. |
 | 1.15 | Public-input commitment `V` | ⏳ pending | Will compare point coordinates. |
@@ -664,6 +664,57 @@ h(x) = 3
 ```bash
 cd groth16-prover
 cargo run --bin print_quotient
+```
+
+**Sage:**
+```bash
+cd sage
+docker run --rm --entrypoint bash \
+  -v "$(pwd):/mnt/sage" \
+  sagemath/sagemath:latest \
+  -c "cp -r /mnt/sage /tmp/sage && cd /tmp/sage && sage groth16.sage"
+```
+
+---
+
+## Step 1.12 — Detailed Verification
+
+### Proof element A
+
+The Groth16 proof element **A** is computed as:
+
+```
+A = l(τ) · G1 + α · G1
+```
+
+where `l(x) = Σ a_i · u_i(x)` is the left witness polynomial.
+
+**Intermediate scalar values:**
+
+| Value | Rust | Sage |
+|-------|------|------|
+| `l(x)` | `x + 2` | `x + 2` |
+| `l(τ)` (τ = 3) | `5` | `5` |
+| `α` | `5` | `5` |
+| `l(τ) + α` | `10` | `10` |
+
+All scalar values match bit-for-bit. The combined scalar is `10`, so `A = 10 · G1`.
+
+**G1 point coordinates:**
+
+```
+x = 2386781901035473772144341182407687860118005925033428055218509614629770831545237878364312588177396809142590665502445
+y = 2721985711015193199868848835229056819857651383925471979786755635273858421658233285328399263507021600622741844499993
+```
+
+Rust and Sage produce identical G1 coordinates.
+
+### Commands to reproduce
+
+**Rust:**
+```bash
+cd groth16-prover
+cargo run --bin print_proof_a
 ```
 
 **Sage:**
