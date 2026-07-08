@@ -162,6 +162,64 @@ T(x) = (x - 0)(x - 1)(x - 2) = x³ - 3x² + 2x
 
 ---
 
+## 6.5 The FFT shortcut (production path)
+
+The dense interpolation above is perfect for learning because you can read every coefficient. For a 3-gate circuit it is also fast enough. But real-world circuits have **thousands or millions** of gates, and building each column polynomial one-by-one with the Lagrange formula becomes impossibly slow.
+
+The industry standard shortcut is the **Fast Fourier Transform (FFT)** over **roots of unity**.
+
+### What stays the same
+
+- The R1CS matrices `L`, `R`, `O` are unchanged.
+- The witness vector `a` is unchanged.
+- The proof elements `A`, `B`, `C` and the final pairing check use **exactly the same formulas**.
+
+### What changes
+
+**1. The gate points are no longer `{0, 1, 2}`.**
+
+Instead we pick the smallest power of two that fits all gates. For 3 gates we pad to `N = 4`. The gates now live on the **4-th roots of unity**:
+
+```
+1,  ω,  ω²,  ω³     where ω⁴ = 1
+```
+
+(The 4th root is a special number inside the finite field `Fr`.)
+
+**2. QAP polynomials are built by IFFT, not by hand.**
+
+Take column 2 of `L` again. Its values at the 4 roots are `[1, 0, 0, 0]` (padded with one zero). Instead of solving three equations by hand, we run the **Inverse FFT** (IFFT) algorithm, which turns these 4 evaluations into 4 coefficients in the monomial basis `[c₀, c₁, c₂, c₃]`. The resulting polynomial is still degree ≤ 2 (the extra coefficient is forced to zero by the padding), but it is expressed differently.
+
+**3. The target polynomial becomes `T(x) = x⁴ − 1`.**
+
+Because the gates are now on the 4-th roots of unity, `T(x)` must vanish at all of them. The simplest such polynomial is `x⁴ − 1`, which factors as `(x − 1)(x − ω)(x − ω²)(x − ω³)`.
+
+**4. The quotient `h(x)` is computed on a "coset" instead of by long division.**
+
+Instead of multiplying the dense polynomials `l(x)·r(x) − o(x)` and dividing by `T(x)`, we:
+1. Evaluate `l`, `r`, `o` on a second set of points (a **coset** of the 8-th roots of unity).
+2. Compute `h` **point-by-point**: `h(cosetᵢ) = (l·r − o) / T(cosetᵢ)`.
+3. Run one final IFFT to turn those point values back into coefficients.
+
+This avoids any dense polynomial multiplication or division entirely and runs in `O(N log N)` time.
+
+**5. The SRS uses Lagrange basis instead of monomial powers.**
+
+In the dense path the SRS contains `G1, τ·G1, τ²·G1, …`. In the FFT path the SRS contains `L₀(τ)·G1, L₁(τ)·G1, …, L_{N−1}(τ)·G1`, where `Lᵢ` are the Lagrange basis polynomials for the roots of unity. Both are valid SRS structures; they are just different linear combinations of the same underlying group elements.
+
+### Why both paths give valid proofs
+
+The dense path and the FFT path start from the **same gate values** and end with the **same mathematical QAP**. They just travel through different algebraic representations:
+
+- Dense path: coefficients → evaluate at `{0,1,2}`.
+- FFT path: evaluations on roots of unity → IFFT → coefficients → evaluate at `τ`.
+
+Because the Groth16 proof formulas only care about the **value of each polynomial at `τ`**, both paths produce a valid proof. The coordinates of `A`, `B`, `C` will differ between the two paths (because the QAP polynomials evaluate to different numbers at the same `τ`), but each proof is self-consistent and passes its own verifier.
+
+> **Practical note:** For a 3-gate circuit the FFT path is actually *more* work than the dense path (padding to 4 points, extra IFFT steps). The payoff only appears once the circuit has hundreds or thousands of gates, where `O(N log N)` beats `O(n²)` by orders of magnitude.
+
+---
+
 ## 7. Folding the Witness into One Polynomial
 
 Alice now folds her witness vector into three big polynomials:
@@ -277,8 +335,8 @@ If Alice cheated (wrong witness, or no witness at all), the equation fails with 
 |------|--------------|-------------|------------|
 | 1 | Pick secrets and public output | Alice | Grade-school arithmetic |
 | 2 | Write R1CS matrices `L, R, O` | Circuit designer | Sparse matrix bookkeeping |
-| 3 | Build QAP polynomials `uᵢ, vᵢ, wᵢ` | Prover software | Lagrange interpolation |
-| 4 | Compute `l(x), r(x), o(x), h(x)` | Prover software | Polynomial mul/div |
+| 3 | Build QAP polynomials `uᵢ, vᵢ, wᵢ` | Prover software | Lagrange interpolation (dense path) or FFT/IFFT (production path) |
+| 4 | Compute `l(x), r(x), o(x), h(x)` | Prover software | Polynomial mul/div (dense path) or coset-FFT division (production path) |
 | 5 | Trusted setup → SRS/CRS | Ceremony / test RNG | Random scalars + MSM |
 | 6 | Assemble proof `(A, B, C)` | Prover | Scalar mul + point add |
 | 7 | Recompute `V` from public inputs | Verifier | Small MSM |
@@ -291,22 +349,24 @@ If Alice cheated (wrong witness, or no witness at all), the equation fails with 
 The matrices, witness, and all intermediate polynomial coefficients used above are exactly the ones hard-coded in:
 
 - `src/r1cs.rs` — witness and matrices
-- `src/qap.rs` — interpolation and target polynomial
+- `src/qap.rs` — dense Lagrange interpolation and target polynomial `T(x)`
 - [`../sage/groth16.sage`](../sage/groth16.sage) — full Sage reference with explicit prints
+
+> **Note on the two paths.** The numbers shown in this walkthrough come from the **dense path** (Lagrange over `{0, 1, 2}`). An alternative **FFT path** (roots of unity, coset quotient) is described in §6.5. Both paths produce valid proofs, but the internal coefficient vectors and proof coordinates differ because the QAP polynomials are expressed in different bases. The [`groth16-prover/README.md`](README.md) §"Step 2 — FFT / Lagrange basis path" lists every sub-step and labels each one as **REUSED**, **SWITCHABLE**, or **NEW**.
 
 You can see the actual numbers by running the dedicated binaries in this crate:
 
 ```bash
-# Print every QAP polynomial coefficient
+# Step 1.3–1.5 — print every QAP polynomial coefficient (dense path)
 cargo run --bin print_qap
 
-# Print the witness polynomials l(x), r(x), o(x)
+# Step 1.10 — print the witness polynomials l(x), r(x), o(x)
 cargo run --bin print_witness_polys
 
-# Print the quotient h(x)
+# Step 1.11 — print the quotient h(x)
 cargo run --bin print_quotient
 
-# Print the full proof (A, B, C) and run the pairing check
+# Step 1.16 — print the full proof (A, B, C) and run the pairing check
 cargo run --bin print_pairing
 ```
 
