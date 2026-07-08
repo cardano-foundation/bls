@@ -209,12 +209,53 @@ print("✓ Step 1.6 printouts complete.")
 
 n = L.nrows()   # number of constraints == SRS length bound
 
+# ---------------------------------------------------------------------------
+# Step 1.7 explicit printouts for cross-checking with Rust / arkworks
+# ---------------------------------------------------------------------------
+print("\n=== Step 1.7: SRS Points ===\n")
+
+print("T(tau) =", T(tau), " (tau =", tau, ", T(x) = x^3 - 3x^2 + 2x)")
+
+n = L.nrows()   # number of constraints == SRS length bound
+
 # SRS1 : g1 * tau^i   (G1)
 SRS1 = [ZZ(tau^i) * g1 for i in range(n)]
 # SRS2 : g2 * tau^i   (G2)
 SRS2 = [ZZ(tau^i) * g2 for i in range(n)]
 # SRS3 : g1 * T(tau) * tau^i / delta   (G1)
 SRS3 = [ZZ(T(tau) * (tau^i) / delta) * g1 for i in range(n - 1)]
+
+print("\n--- SRS1 : G1 * tau^i ---")
+for i in range(n):
+    scalar = ZZ(tau^i)
+    pt = SRS1[i]
+    print("SRS1[{}] scalar = tau^{} = {}".format(i, i, scalar))
+    print("         x =", pt[0])
+    print("         y =", pt[1])
+
+print("\n--- SRS2 : G2 * tau^i ---")
+for i in range(n):
+    scalar = ZZ(tau^i)
+    pt = SRS2[i]
+    print("SRS2[{}] scalar = tau^{} = {}".format(i, i, scalar))
+    print("         x =", pt[0])
+    print("         y =", pt[1])
+
+print("\n--- SRS3 : G1 * T(tau) * tau^i / delta ---")
+base_scalar = ZZ(T(tau) / delta)
+print("Base scalar = T(tau)/delta =", base_scalar)
+for i in range(n - 1):
+    scalar = ZZ(T(tau) * (tau^i) / delta)
+    pt = SRS3[i]
+    print("SRS3[{}] scalar = T(tau)*tau^{}/delta = {}".format(i, i, scalar))
+    print("         x =", pt[0])
+    print("         y =", pt[1])
+
+# Sanity checks
+assert SRS1[0] == g1, "SRS1[0] must be the G1 generator"
+assert SRS2[0] == g2, "SRS2[0] must be the G2 generator"
+print("\n✓ SRS sanity checks passed.")
+print("✓ Step 1.7 printouts complete.")
 
 # CRS points
 alphaG1 = ZZ(alpha) * g1

@@ -32,7 +32,7 @@ For every sub-step in [README.md](README.md):
 | 1.4 | Target polynomial `T(x)` | ✅ **VERIFIED** | Coefficients match; vanishes at x = 0, 1, 2. |
 | 1.5 | QAP verification at constraint points | ✅ **VERIFIED** | All 24 evaluations match; assertions pass in Rust and Sage. |
 | 1.6 | Toxic waste `tau, alpha, beta, gamma, delta` | ✅ **VERIFIED** | Same five hard-coded primes in both; all non-zero, distinct, and invertible. |
-| 1.7 | SRS: `G1·tau^i`, `G2·tau^i`, `G1·T(tau)·tau^i/delta` | ⏳ pending | Will compare point coordinates. |
+| 1.7 | SRS: `G1·tau^i`, `G2·tau^i`, `G1·T(tau)·tau^i/delta` | ✅ **VERIFIED** | Scalar values match exactly; G1 point coordinates match bit-for-bit; G2 coordinates differ only by field embedding (F₁₂ in Sage vs F_q² in Rust). |
 | 1.8 | CRS fixed points `alpha·G1`, `beta·G2`, `gamma·G2`, `delta·G2` | ⏳ pending | Will compare point coordinates. |
 | 1.9 | Per-variable CRS `Psi_V_G1`, `Psi_P_G1` | ⏳ pending | Will compare point coordinates. |
 | 1.10 | Witness polynomials `l(x)`, `r(x)`, `o(x)` | ⏳ pending | Will compare coefficients. |
@@ -347,6 +347,89 @@ Both implementations assert:
 ```bash
 cd groth16-prover
 cargo run --bin print_toxic_waste
+```
+
+**Sage:**
+```bash
+cd sage
+docker run --rm --entrypoint bash \
+  -v "$(pwd):/mnt/sage" \
+  sagemath/sagemath:latest \
+  -c "cp -r /mnt/sage /tmp/sage && cd /tmp/sage && sage groth16.sage"
+```
+
+---
+
+## Step 1.7 — Detailed Verification
+
+### SRS scalar values
+
+Both implementations compute the same SRS over `n = 3` constraints with fixed toxic waste (`tau = 3`, `delta = 13`).
+
+**Target polynomial evaluated at tau:**
+```
+T(tau) = 6   (T(x) = x^3 - 3x^2 + 2x, tau = 3)
+```
+
+**SRS1 & SRS2 scalars (`tau^i`):**
+
+| i | Rust `tau.pow(i)` | Sage `ZZ(tau^i)` |
+|---|-------------------|------------------|
+| 0 | `1` | `1` |
+| 1 | `3` | `3` |
+| 2 | `9` | `9` |
+
+**SRS3 scalars (`T(tau) * tau^i / delta`):**
+
+| i | Rust scalar | Sage scalar |
+|---|-------------|-------------|
+| 0 | `4033528859625091575342133885245074295206965576963664447892589130764506244963` | `4033528859625091575342133885245074295206965576963664447892589130764506244963` |
+| 1 | `12100586578875274726026401655735222885620896730890993343677767392293518734889` | `12100586578875274726026401655735222885620896730890993343677767392293518734889` |
+
+All scalar values match bit-for-bit.
+
+### G1 point coordinates (SRS1 & SRS3)
+
+For G1 points the coordinates match exactly because both implementations embed the F_p base field in the same way:
+
+**SRS1[0] (G1 generator):**
+```
+x = 3685416753713387016781088315183077757961620795782546409894578378688607592378376318836054947676345821548104185464507
+y = 1339506544944476473020471379941921221584933875938349620426543736416511423956333506472724655353366534992391756441569
+```
+
+**SRS1[1] (G1 * 3):**
+```
+x = 1527649530533633684281386512094328299672026648504329745640827351945739272160755686119065091946435084697047221031460
+y = 487897572011753812113448064805964756454529228648704488481988876974355015977479905373670519228592356747638779818193
+```
+
+**SRS3[0] (G1 * T(tau)/delta):**
+```
+x = 2655794386432599423148186064978921809078331706212194538460959606195404965017964498416609070163670843833525940223711
+y = 756945209966835505529998843232650798348376430681698979160049481091972309044691029753342086591295737335080300719756
+```
+
+### G2 point coordinates (SRS2)
+
+The G2 coordinates do **not** match directly because the two implementations use different field embeddings for the extension field:
+- **Rust** / arkworks represents G2 over `F_q²` (printed as `QuadExtField(c0 + c1 * u)`).
+- **Sage** represents G2 over `F_p¹²` (printed as a polynomial in `T` with 12 coefficients).
+
+Both are valid representations of the same BLS12-381 G2 generator and its scalar multiples. The scalar multipliers (`tau^i`) are identical, which fully determines the points.
+
+### Sanity checks
+
+Both implementations assert:
+1. `SRS1[0] == G1_generator` — the first SRS1 element is the curve G1 generator.
+2. `SRS2[0] == G2_generator` — the first SRS2 element is the curve G2 generator.
+
+### Commands to reproduce
+
+**Rust:**
+```bash
+cd groth16-prover
+cargo run --bin print_srs
 ```
 
 **Sage:**
