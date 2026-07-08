@@ -92,16 +92,16 @@ Every step asserts its own correctness and prints the exact values that the Rust
 | 2.5 | ✅ done | **SWITCHABLE** | **Target polynomial** `T(x) = x^4 − 1`. | 1.4 |
 | 2.6 | ✅ done | **SWITCHABLE** | **Sanity check:** evaluate each FFT-derived QAP polynomial on `1, ω, ω², ω³` and assert it equals the original matrix entry. | 1.5 |
 | 2.7 | ✅ done | **REUSED** from 1.6 | Deterministic toxic waste `τ, α, β, γ, δ` | — |
-| 2.8 | ⏳ not in Sage | **SWITCHABLE** | **Lagrange-basis SRS.** Compute `L_i(τ)` for `i = 0..3`, then build `L_i(τ)·G1`. Implemented in Rust `FftQapEngine`; Sage reuses monomial SRS for proof assembly. | 1.7 |
+| 2.8 | ✅ done | **SWITCHABLE** | **Lagrange-basis scalar evaluation.** Compute `L_i(τ)` for `i = 0..3` and use them to evaluate per-variable QAP at `τ`. Group-element SRS (`L_i(τ)·G1`) is not built in Sage; the script reuses the monomial SRS for proof assembly. | 1.7 |
 | 2.9 | ✅ done | **REUSED** from 1.8 | CRS fixed points `α·G1`, `β·G2`, `γ·G2`, `δ·G2` | — |
 | 2.10 | ✅ done | **SWITCHABLE** | **Per-variable QAP at τ** via Lagrange basis dot product. `u_s(τ)`, `v_s(τ)`, `w_s(τ)` computed with `evaluate_qap_at_tau_fft`. | 1.9 |
 | 2.11 | ✅ done | **SWITCHABLE** | **Witness polynomials** `l(x)`, `r(x)`, `o(x)` as sums of FFT-derived `u_i`, `v_i`, `w_i`. | 1.10 |
 | 2.12 | ✅ done | **SWITCHABLE** | **Quotient `h(x)`** via dense division `p // T_fft`. For large N, coset FFT would be used instead. | 1.11 |
-| 2.13 | ⏳ reuse dense | **REUSED** from 1.12 | Proof element `A = l(τ)·G1 + α·G1`. Sage uses dense `l(τ)` for the printed proof; FFT `l_fft(τ)` is printed for comparison only. | — |
-| 2.14 | ⏳ reuse dense | **REUSED** from 1.13 | Proof element `B = r(τ)·G2 + β·G2`. Same note as above. | — |
-| 2.15 | ⏳ reuse dense | **REUSED** from 1.14 | Proof element `C = Σ a_i·Ψ_P_G1 + h(τ)·T(τ)/δ·G1`. Same note as above. | — |
-| 2.16 | ⏳ reuse dense | **REUSED** from 1.15 | Public-input commitment `V = Σ a_i·Ψ_V_G1`. Same note as above. | — |
-| 2.17 | ⏳ reuse dense | **REUSED** from 1.16 | Pairing check. Same note as above. | — |
+| 2.13 | ✅ done | **REUSED** from 1.12 | Proof element `A = l(τ)·G1 + α·G1`. Sage uses the dense-path `l(τ)` for the printed proof; FFT `l_fft(τ)` is printed for comparison only. | — |
+| 2.14 | ✅ done | **REUSED** from 1.13 | Proof element `B = r(τ)·G2 + β·G2`. Same note as above. | — |
+| 2.15 | ✅ done | **REUSED** from 1.14 | Proof element `C = Σ a_i·Ψ_P_G1 + h(τ)·T(τ)/δ·G1`. Same note as above. | — |
+| 2.16 | ✅ done | **REUSED** from 1.15 | Public-input commitment `V = Σ a_i·Ψ_V_G1`. Same note as above. | — |
+| 2.17 | ✅ done | **REUSED** from 1.16 | Pairing check. Same note as above. | — |
 
 ### Why both paths are in Sage
 

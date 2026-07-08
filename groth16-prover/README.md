@@ -118,7 +118,7 @@ Compare the printed intermediate values with the Rust output. They match bit-for
 | **Dense monomial basis** | `u_i(x)`, `v_i(x)`, `w_i(x)` are stored as dense coefficient vectors. This makes printing and comparison trivial. It is `O(n²)` and therefore unsuitable for production circuits with millions of constraints, but it is ideal for learning. |
 | **No randomizers (`r = s = 0`)** | Proof elements `A`, `B`, `C` use the textbook formulas without blinding. This removes entropy and makes the outputs deterministic and reproducible. A production prover would add random `r` and `s` for zero-knowledge. |
 | **Deterministic toxic waste** | `tau=3`, `alpha=5`, `beta=7`, `gamma=11`, `delta=13` are hard-coded small primes. In a real deployment these would be generated securely and destroyed; here they are fixed so that two independent codebases can produce the exact same curve points. |
-| **No FFT** | Polynomial interpolation uses the classical Lagrange formula rather than FFT over roots of unity. Again, this is pedagogical: you can read the coefficient formula and verify it with pen and paper. |
+| **Two switchable paths** | The dense path (classical Lagrange over `{0,1,2}`) is the default for pedagogical clarity. The FFT path (roots of unity, IFFT, `T(x)=x^N−1`) is implemented via the `QapEngine` trait and cross-checked against Sage bit-for-bit. Both paths share the same downstream proof-assembly code. |
 
 ---
 
@@ -153,7 +153,7 @@ The table below maps out every sub-step and labels each one as **REUSED** (same 
 | 2.5 | ✅ done | **SWITCHABLE** | **Target polynomial** `T(x) = x^N − 1` over the FFT domain (vanishes at every `ω^i`). | 1.4 |
 | 2.6 | ✅ done | **SWITCHABLE** | **Sanity check:** evaluate each FFT-derived QAP polynomial on the roots `ω^i` and assert it equals the original matrix entry. | 1.5 |
 | 2.7 | ✅ done | **REUSED** from 1.6 | Deterministic toxic waste `τ, α, β, γ, δ` | — |
-| 2.8 | ⏳ planned | **SWITCHABLE** | **Lagrange-basis SRS.** Compute `L_i(τ)` (Lagrange basis at `τ`) for `i = 0..N−1`, then build group elements `L_i(τ)·G1` and `L_i(τ)·G2`. This is the FFT-equivalent of `τ^i·G1`. | 1.7 |
+| 2.8 | ✅ done (scalars) / ⏳ group elements | **SWITCHABLE** | **Lagrange-basis scalar evaluation.** `FftQapEngine::evaluate_qap_at_tau` computes `L_i(τ)` and uses them for per-variable QAP evaluation. Building group elements `L_i(τ)·G1` (the FFT-equivalent SRS) is not yet implemented; the FFT path currently reuses the monomial SRS for proof assembly. | 1.7 |
 | 2.9 | ✅ done | **REUSED** from 1.8 | CRS fixed points `α·G1`, `β·G2`, `γ·G2`, `δ·G2` | — |
 | 2.10 | ✅ done | **SWITCHABLE** | **Per-variable CRS** `Ψ_V_G1` and `Ψ_P_G1` via FFT-evaluated QAP. Same formula, but `u_s(τ)`, `v_s(τ)`, `w_s(τ)` come from the FFT path. | 1.9 |
 | 2.11 | ✅ done | **SWITCHABLE** | **Witness polynomials** `l(x)`, `r(x)`, `o(x)` as sums of FFT-derived `u_i`, `v_i`, `w_i`. | 1.10 |
@@ -215,7 +215,7 @@ The current crate is a **reference implementation** for correctness verification
 
 ### (a) FFT / Lagrange basis as an alternative to dense monomials
 
-- **Status:** ✅ **Partially implemented.** The `QapEngine` trait, `DenseQapEngine`, and `FftQapEngine` are all in `src/engine.rs` with passing parity tests. Steps 2.3–2.12 are complete. Steps 2.8 (Lagrange-basis SRS) and full proof assembly via the FFT engine remain as future work.
+- **Status:** ✅ **Implemented.** The `QapEngine` trait, `DenseQapEngine`, and `FftQapEngine` are all in `src/engine.rs` with passing parity tests. Steps 2.3–2.12 are complete: FFT domain setup, QAP construction via IFFT, target polynomial `T(x)=x^N−1`, per-variable QAP evaluation via Lagrange basis scalars, witness polynomials, and quotient computation via `divide_by_vanishing_poly` are all working. The only remaining gap is building the group-element SRS in the Lagrange basis (`L_i(τ)·G1` instead of `τ^i·G1`); the FFT path currently reuses the monomial SRS for proof assembly, which is mathematically valid but not the most efficient production pattern.
 - **Reference:** zeroj uses `FieldFFTBLS381` for coset FFT: constraint evaluations → IFFT → coefficient form; quotient `h(x)` is computed point-wise on the coset and inverse-FFT'd back. The Lagrange basis SRS (`u_s(tau)·G1`) is also more efficient than monomial SRS for FFT-based provers.
 - **Benefit:** Enables proving for realistic circuits (e.g., Poseidon hash, Merkle membership) in seconds rather than minutes.
 

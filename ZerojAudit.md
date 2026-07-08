@@ -287,7 +287,7 @@ delta = 13
 |---------|-----------------|------------|
 | **Curve** | BLS12-381 | BLS12-381 ✅ |
 | **Circuit definition** | Hard-coded matrices | Circuit DSL → R1CS |
-| **Interpolation** | Dense Lagrange (pedagogical) | FFT over roots of unity (performant) |
+| **Interpolation** | Dense Lagrange + FFT over roots of unity (both implemented and cross-checked) | FFT over roots of unity (performant) |
 | **Trusted setup** | Deterministic test RNG | `SecureRandom` (dev); snarkjs MPC (prod) |
 | **Prover** | Rust / arkworks | Pure Java + Pippenger MSM |
 | **Serialization** | ark-serialize canonical | BLST compressed |
@@ -352,7 +352,7 @@ The test prints:
 
 ## 5. Validation Strategy — End-to-End Checks Without 16-Step Intermediates
 
-Our Rust / Sage stack has been cross-checked at **every intermediate step** (1.1–1.16 in `RustGroth16Correctness.md`). This gives us a high-confidence **golden reference** for the entire Groth16 pipeline. Because zeroj uses different internal representations (FFT / Lagrange basis instead of dense monomials), a step-by-step coefficient comparison is impractical. Instead, we can validate zeroj through a small set of **end-to-end algebraic checks** that exercise the same formulas without exposing internal data structures.
+Our Rust / Sage stack has been cross-checked at **every intermediate step** for both the dense path (1.1–1.16 in `RustGroth16Correctness.md`) and the FFT path (Steps 2.3–2.12, verified bit-for-bit in [`sage/README.md`](sage/README.md)). This gives us a high-confidence **golden reference** for the entire Groth16 pipeline. The dense path is impractical for a step-by-step coefficient comparison against zeroj because zeroj uses FFT while the dense path uses Lagrange over `{0,1,2}`. The FFT path is now aligned with zeroj's domain convention, so a direct coefficient comparison is feasible and planned as the next step. In the meantime, we validate zeroj through a small set of **end-to-end algebraic checks** that exercise the same formulas without exposing internal data structures.
 
 ### 5.1 Check 1 — Field modulus agreement
 
@@ -380,7 +380,9 @@ Our Rust / Sage stack has been cross-checked at **every intermediate step** (1.1
 
 **How:** After deterministic setup, print `IC[0]` and `IC[1]` from zeroj, and `Psi_V_G1[0]` and `Psi_V_G1[1]` from Rust. Compare coordinates.
 
-**Expected result:** If both implementations used the same QAP domain (e.g. both FFT over the same roots of unity, or both dense Lagrange over `{0,1,2}`), the G1 coordinates would match bit-for-bit. With the current setups, they **differ** because zeroj evaluates QAP polynomials over a 4-point FFT domain while Rust evaluates over a 3-point dense Lagrange domain, producing different values at the same `tau`.
+**Expected result (dense path):** With the current setups, they **differ** because zeroj evaluates QAP polynomials over a 4-point FFT domain while Rust dense path evaluates over a 3-point dense Lagrange domain, producing different values at the same `tau`.
+
+**Expected result (FFT path):** Rust now has `FftQapEngine` using the same 4-point FFT domain. A direct comparison against zeroj is the next pending step; the coefficients and evaluations are already verified against Sage bit-for-bit.
 
 **What it validates:** The per-variable CRS formula is structurally identical; any mismatch is attributable to the QAP domain choice, not a bug in curve arithmetic or the CRS formula.
 
@@ -390,7 +392,9 @@ Our Rust / Sage stack has been cross-checked at **every intermediate step** (1.1
 
 **How:** Run zeroj's `proveDeterministic(...)` with `r=0, s=0` (unblinded), and our Rust `print_pairing` with the same toxic waste. Compare `A` (G1), `B` (G2), `C` (G1).
 
-**Expected result:** As with Check 3, a perfect bit-for-bit match requires the same QAP domain convention on both sides. With the current setups the coordinates **differ**, but each proof is still valid within its own verifier (see Check 5).
+**Expected result (dense path):** As with Check 3, the coordinates **differ** because the QAP domains differ. Each proof is still valid within its own verifier (see Check 5).
+
+**Expected result (FFT path):** Rust `FftQapEngine` uses the same 4-point FFT domain as zeroj. A direct bit-for-bit comparison is the next pending step.
 
 **What it validates:** The proof construction logic (witness MSM, quotient addition, randomizer handling) is structurally identical. Any coordinate mismatch is again attributable to the different QAP domain conventions, not to a bug in point arithmetic or the proof formula.
 
@@ -517,16 +521,19 @@ Below is the concise executive summary of the cross-check executed against the d
 |-------|-------------------|--------|-------|
 | 1. Field modulus | `MontFr381.modulus()` vs `Fr::MODULUS` | **PASS** ✅ | Both equal `52435875175126190479447740508185965837690552500527637822603658699938581184513` |
 | 2. CRS fixed points | `alpha·G1`, `beta·G2`, `gamma·G2`, `delta·G2` coordinates | **PASS** ✅ | All G1 and G2 coordinates match bit-for-bit for the same toxic waste |
-| 3. IC / public-input bases | `IC[1]` (public-input commitment base) | **MISMATCH** ⚠️ (dense path) / **PENDING** (FFT path) | Dense path: coordinates differ because zeroj uses a 4-point root-of-unity FFT domain while Rust dense path uses a 3-point `{0,1,2}` Lagrange domain. FFT path: Rust now has `FftQapEngine` using the same 4-point domain; a direct comparison against zeroj is the next step. |
+| 3. IC / public-input bases | `IC[1]` (public-input commitment base) | **MISMATCH** ⚠️ (dense path) / **PENDING** (FFT path) | Dense path: coordinates differ because zeroj uses a 4-point root-of-unity FFT domain while Rust dense path uses a 3-point `{0,1,2}` Lagrange domain. FFT path: Rust `FftQapEngine` uses the same 4-point domain and has been verified against Sage bit-for-bit; a direct comparison against zeroj is the next step. |
 | 4. Proof A, B, C | Unblinded proof coordinates (`r=s=0`) | **MISMATCH** ⚠️ (dense path) / **PENDING** (FFT path) | Same root cause as Check 3 for the dense path. The FFT path is implemented and verified against Sage; zeroj comparison is pending. |
 | 5. Pairing verification | `e(A,B) == e(alpha·G1, beta·G2) · e(V, gamma·G2) · e(C, delta·G2)` | **PASS** ✅ | The zeroj proof verifies successfully with zeroj's pure Java pairing engine. The Rust proof verifies successfully with `ark_ec::pairing`. Cross-verifying a zeroj proof with the Rust verifier (or vice versa) would fail because the VK components (IC, pointsA, pointsB, etc.) are circuit-specific and depend on the QAP domain. |
 
-**Why Checks 3 and 4 differ (and why this is expected):**
+**Why the dense path mismatches (and why this is expected):**
 
-- **Rust / Sage** interpolates each QAP column polynomial over the *dense* points `{0, 1, 2}` using the classical Lagrange formula. This yields degree-2 polynomials with trivial coefficients.
+- **Rust / Sage dense path** interpolates each QAP column polynomial over the *dense* points `{0, 1, 2}` using the classical Lagrange formula. This yields degree-2 polynomials with trivial coefficients.
 - **zeroj** pads the 3 constraints to a domain of size `N = 4` (next power of 2) and performs FFT/IFFT over the 4-th roots of unity. The resulting polynomials are still degree ≤ 2, but they are expressed in the monomial basis via the FFT matrix. Evaluating these FFT-derived polynomials at the same `tau` produces a *different* scalar than evaluating the dense Lagrange polynomials at `tau`.
 - Because the QAP evaluation at `tau` differs, every circuit-dependent SRS point (`pointsA`, `pointsB`, `pointsC`, `pointsH`, `ic`, `pointsL`) gets a different scalar multiplier. Consequently the proof elements `A`, `B`, `C` and the IC bases also differ.
 - **This is not a bug** — both implementations compute valid proofs that verify under their own verifiers. The difference is purely an internal representation choice (dense monomial vs. FFT/Lagrange basis).
+
+**Status of the FFT path:**
+- Rust now has `FftQapEngine` which uses the same 4-th roots of unity domain as zeroj. It has been cross-checked against Sage FFT bit-for-bit (see [`sage/README.md`](sage/README.md)). The next pending step is to run the Rust FFT path against zeroj's deterministic fixture and verify that Check 3 and Check 4 now match.
 
 **Recommendation for full bit-for-bit cross-check:**
 - **Option A (completed):** The Rust prover now has an `FftQapEngine` that uses FFT over the same 4-th roots of unity as zeroj. It has been verified against Sage FFT bit-for-bit (see [`sage/README.md`](sage/README.md)). The next step is to run the Rust FFT path against zeroj's deterministic fixture and compare proof coordinates directly.
@@ -635,8 +642,8 @@ All binaries use the **same** hard-coded toxic waste (`tau=3, alpha=5, beta=7, g
 |-------|--------------|-------------|----------|
 | Field modulus | printed by `MontFr381.modulus()` | printed by `print_field` | Identical ✅ |
 | CRS fixed points | printed by deterministic test | printed by `print_crs` | Identical ✅ |
-| IC[1] / public-input base | printed by deterministic test | printed by `print_public_input` | **Different** ⚠️ (QAP domain mismatch) |
-| Proof A, B, C | printed by deterministic test | printed by `print_proof_a/b/c` | **Different** ⚠️ (same root cause) |
+| IC[1] / public-input base | printed by deterministic test | printed by `print_public_input` | **Different** ⚠️ (dense path only; QAP domain mismatch). FFT path comparison is pending. |
+| Proof A, B, C | printed by deterministic test | printed by `print_proof_a/b/c` | **Different** ⚠️ (dense path only; same root cause). FFT path comparison is pending. |
 | Pairing check | `Pairing verification: PASSED` | `✓ Pairing check PASSED` | Both pass ✅ (internally consistent) |
 
 If you want a **bit-for-bit** match of proof coordinates, align the QAP domains first (see §8 recommendation). For the audit, the combination of identical curve arithmetic (Checks 1 & 2) and independently passing pairing checks (Check 5) is sufficient.
