@@ -472,8 +472,37 @@ print("  y =", B[1])
 print("\n✓ Proof element B computed.")
 print("✓ Step 1.13 printouts complete.")
 
-# Assemble remaining proof element C in G1
+# ---------------------------------------------------------------------------
+# Step 1.14 explicit printouts for cross-checking with Rust / arkworks
+# ---------------------------------------------------------------------------
+print("\n=== Step 1.14: Proof Element C ===\n")
+
+print("--- Psi_P_G1 accumulation ---")
+for i in range(len(a_vec) - 2):
+    psi_scalar = (vs[i+2](tau) * alpha + us[i+2](tau) * beta + ws[i+2](tau)) / delta
+    contrib = a_vec[i+2] * psi_scalar
+    print("Variable {}: a_i = {}, psi_scalar = {}, contribution scalar = {}".format(
+        i+2, a_vec[i+2], psi_scalar, contrib))
+
+print("\nT(tau) =", T(tau))
+print("h(x) =", h)
+h_tau_scalar = h(tau) * T(tau) / delta
+print("h_tau_G1 scalar = h * T(tau) / delta =", h_tau_scalar)
+
 C = Psi_with_a + h_tau_G1
+print("\nC = sum(a_i * Psi_P_G1) + h_tau_G1")
+print("  x =", C[0])
+print("  y =", C[1])
+
+# Sanity: compute total scalar directly
+total_scalar = sum(
+    a_vec[i] * (vs[i](tau) * alpha + us[i](tau) * beta + ws[i](tau)) / delta
+    for i in range(2, len(a_vec))
+) + h_tau_scalar
+print("\nTotal combined scalar =", total_scalar)
+
+print("\n✓ Proof element C computed.")
+print("✓ Step 1.14 printouts complete.")
 
 print("Proof generated.")
 
