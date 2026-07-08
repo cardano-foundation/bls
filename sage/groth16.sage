@@ -360,6 +360,11 @@ print("Trusted setup complete.")
 # 4. Prover
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Step 1.10 explicit printouts for cross-checking with Rust / arkworks
+# ---------------------------------------------------------------------------
+print("\n=== Step 1.10: Witness Polynomials l(x), r(x), o(x) ===\n")
+
 a_Fq = vector(Fq, a_vec)
 
 # l(x) = sum a_i * u_i(x),   r(x) = sum a_i * v_i(x),   o(x) = sum a_i * w_i(x)
@@ -367,14 +372,31 @@ l = sum(a_Fq[i] * us[i] for i in range(len(a_vec)))
 r = sum(a_Fq[i] * vs[i] for i in range(len(a_vec)))
 o = sum(a_Fq[i] * ws[i] for i in range(len(a_vec)))
 
-# Quotient polynomial h(x) = (l(x)*r(x) - o(x)) / T(x)
-assert (l * r - o) % T == 0, "Polynomial division has non-zero remainder!"
-h = (l * r - o) // T
-
+print("Witness a =", a_vec)
+print()
 print("l(x) =", l)
 print("r(x) =", r)
 print("o(x) =", o)
-print("h(x) =", h)
+
+# Sanity check: evaluate at constraint points x = 0, 1, 2
+xs_check = [Fq(0), Fq(1), Fq(2)]
+print("\nEvaluation at constraint points:")
+for j, xj in enumerate(xs_check):
+    l_val = l(xj)
+    r_val = r(xj)
+    o_val = o(xj)
+    print("  x = {}: l(x) = {}, r(x) = {}, o(x) = {}".format(j, l_val, r_val, o_val))
+    assert l_val * r_val == o_val, "l({}) * r({}) != o({})".format(j, j, j)
+
+print("\n✓ l(x)*r(x) == o(x) at all constraint points.")
+print("✓ Step 1.10 printouts complete.")
+
+# ---------------------------------------------------------------------------
+# Step 1.11: Quotient polynomial h(x)
+# ---------------------------------------------------------------------------
+assert (l * r - o) % T == 0, "Polynomial division has non-zero remainder!"
+h = (l * r - o) // T
+print("\nh(x) =", h)
 
 def eval_in_exponent(poly_coeffs, srs):
     """

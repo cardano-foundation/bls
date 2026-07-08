@@ -35,7 +35,7 @@ For every sub-step in [README.md](README.md):
 | 1.7 | SRS: `G1·tau^i`, `G2·tau^i`, `G1·T(tau)·tau^i/delta` | ✅ **VERIFIED** | Scalar values match exactly; G1 point coordinates match bit-for-bit; G2 coordinates differ only by field embedding (F₁₂ in Sage vs F_q² in Rust). |
 | 1.8 | CRS fixed points `alpha·G1`, `beta·G2`, `gamma·G2`, `delta·G2` | ✅ **VERIFIED** | Scalars match exactly; alpha·G1 coordinates match bit-for-bit; G2 coordinates differ only by field embedding. |
 | 1.9 | Per-variable CRS `Psi_V_G1`, `Psi_P_G1` | ✅ **VERIFIED** | Intermediate scalars (`u_i(tau)`, `v_i(tau)`, `w_i(tau)`, combined, `psi_scalar`) match exactly; G1 point coordinates match bit-for-bit for all variables. |
-| 1.10 | Witness polynomials `l(x)`, `r(x)`, `o(x)` | ⏳ pending | Will compare coefficients. |
+| 1.10 | Witness polynomials `l(x)`, `r(x)`, `o(x)` | ✅ **VERIFIED** | Coefficients match exactly; degree and evaluation at constraint points match. |
 | 1.11 | Quotient polynomial `h(x)` | ⏳ pending | Will compare coefficients + zero remainder. |
 | 1.12 | Proof element `A` | ⏳ pending | Will compare point coordinates. |
 | 1.13 | Proof element `B` | ⏳ pending | Will compare point coordinates. |
@@ -556,6 +556,59 @@ Both implementations assert that for variable 0 (the constant `1`), all three po
 ```bash
 cd groth16-prover
 cargo run --bin print_psi
+```
+
+**Sage:**
+```bash
+cd sage
+docker run --rm --entrypoint bash \
+  -v "$(pwd):/mnt/sage" \
+  sagemath/sagemath:latest \
+  -c "cp -r /mnt/sage /tmp/sage && cd /tmp/sage && sage groth16.sage"
+```
+
+---
+
+## Step 1.10 — Detailed Verification
+
+### Witness polynomials
+
+The witness polynomials are linear combinations of the QAP basis polynomials weighted by the witness vector `a = [1, 48, 2, 2, 3, 4, 4, 12]`:
+
+```
+l(x) = Σ a_i · u_i(x)
+r(x) = Σ a_i · v_i(x)
+o(x) = Σ a_i · w_i(x)
+```
+
+**Rust** and **Sage** outputs:
+
+| Polynomial | Rust coeffs `[c0, c1, c2]` | Sage expression |
+|------------|---------------------------|-----------------|
+| `l(x)` | `[2, 1]` | `x + 2` |
+| `r(x)` | `[2, 52435875175126190479447740508185965837690552500527637822603658699938581184512, 3]` | `3x² - x + 2` |
+| `o(x)` | `[4, 52435875175126190479447740508185965837690552500527637822603658699938581184507, 14]` | `14x² - 6x + 4` |
+
+All coefficients match bit-for-bit. Note that the Rust print shows the positive residue for negative coefficients (e.g., `-1 ≡ q-1 (mod q)`), which is identical to Sage's representation.
+
+### Evaluation at constraint points
+
+At the three constraint points `x ∈ {0, 1, 2}`, both implementations assert `l(x) · r(x) == o(x)`:
+
+| Point | `l(x)` | `r(x)` | `l(x)·r(x)` | `o(x)` |
+|-------|--------|--------|-------------|--------|
+| `x = 0` | `2` | `2` | `4` | `4` |
+| `x = 1` | `3` | `4` | `12` | `12` |
+| `x = 2` | `4` | `12` | `48` | `48` |
+
+These values reproduce the original R1CS constraint evaluations from Step 1.1.
+
+### Commands to reproduce
+
+**Rust:**
+```bash
+cd groth16-prover
+cargo run --bin print_witness_polys
 ```
 
 **Sage:**
