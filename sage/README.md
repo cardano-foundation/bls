@@ -134,6 +134,94 @@ cd ../groth16-prover
 cargo run --bin print_qap_engines
 ```
 
+### Bit-for-bit Rust ↔ Sage verification
+
+Both the Rust crate and the Sage script implement **the same two paths** independently (different languages, different libraries, no shared code). We verified that:
+
+| Pairing | Status | Evidence |
+|---------|--------|----------|
+| **Dense Rust ↔ Dense Sage** | ✅ Matched | Already verified in `RustGroth16Correctness.md` — every coefficient and every G1 scalar matches. |
+| **FFT Rust ↔ FFT Sage** | ✅ **Matched** | All QAP coefficients, per-variable evaluations at `τ=3`, witness values `l(τ), r(τ), o(τ)`, quotient `h(τ)`, and target `T(τ)` are identical. See collapsible tables below. |
+| **Dense ↔ FFT (either side)** | ⚠️ **Mismatch (expected)** | Different QAP domains (`{0,1,2}` vs 4-th roots of unity). Same gate values, different interpolating polynomials. |
+
+> **Important:** The `print_qap_engines` binary only prints **Dense vs FFT *within* Rust**, which intentionally mismatches. To compare Rust FFT against Sage FFT you must read the two outputs side-by-side (or use the tables below).
+
+<details>
+<summary><b>QAP polynomial coefficients — FFT path (Rust vs Sage)</b></summary>
+
+For each wire `s`, the monomial coefficients of `u_s(x)` produced by the IFFT must agree bit-for-bit. Here are the non-trivial wires (those with non-zero QAP polynomials):
+
+**Wire 2 — `u_2(x)` (degree 3)**
+
+| Coefficient | Rust (`print_qap_engines`) | Sage (`groth16.sage`) | Match? |
+|-------------|---------------------------|-----------------------|--------|
+| `x⁰` | `39326906381344642859585805381139474378267914375395728366952744024953935888385` | `39326906381344642859585805381139474378267914375395728366952744024953935888385` | ✅ |
+| `x¹` | `39326906381344642859585805381139474378267914375395728366952744024953935888385` | `39326906381344642859585805381139474378267914375395728366952744024953935888385` | ✅ |
+| `x²` | `39326906381344642859585805381139474378267914375395728366952744024953935888385` | `39326906381344642859585805381139474378267914375395728366952744024953935888385` | ✅ |
+| `x³` | `39326906381344642859585805381139474378267914375395728366952744024953935888385` | `39326906381344642859585805381139474378267914375395728366952744024953935888385` | ✅ |
+
+**Wire 4 — `u_4(x)` (degree 3)**
+
+| Coefficient | Rust | Sage | Match? |
+|-------------|------|------|--------|
+| `x⁰` | `39326906381344642859585805381139474378267914375395728366952744024953935888385` | `39326906381344642859585805381139474378267914375395728366952744024953935888385` | ✅ |
+| `x¹` | `52435875175126190478581454301667552757996485117855702128036095582747240693761` | `52435875175126190478581454301667552757996485117855702128036095582747240693761` | ✅ |
+| `x²` | `13108968793781547619861935127046491459422638125131909455650914674984645296128` | `13108968793781547619861935127046491459422638125131909455650914674984645296128` | ✅ |
+| `x³` | `866286206518413079694067382671935694567563117191340490752` | `866286206518413079694067382671935694567563117191340490752` | ✅ |
+
+**Wire 6 — `u_6(x)` (degree 3)**
+
+| Coefficient | Rust | Sage | Match? |
+|-------------|------|------|--------|
+| `x⁰` | `39326906381344642859585805381139474378267914375395728366952744024953935888385` | `39326906381344642859585805381139474378267914375395728366952744024953935888385` | ✅ |
+| `x¹` | `13108968793781547619861935127046491459422638125131909455650914674984645296128` | `13108968793781547619861935127046491459422638125131909455650914674984645296128` | ✅ |
+| `x²` | `39326906381344642859585805381139474378267914375395728366952744024953935888385` | `39326906381344642859585805381139474378267914375395728366952744024953935888385` | ✅ |
+| `x³` | `13108968793781547619861935127046491459422638125131909455650914674984645296128` | `13108968793781547619861935127046491459422638125131909455650914674984645296128` | ✅ |
+
+> All other wires produce the empty polynomial (`[]`) in both implementations.
+
+</details>
+
+<details>
+<summary><b>Per-variable QAP at τ = 3 — FFT path (Rust vs Sage)</b></summary>
+
+The per-variable CRS scalars `u_s(τ)`, `v_s(τ)`, `w_s(τ)` are computed by evaluating the FFT-derived QAP polynomials at `τ = 3`. These must also match:
+
+| Wire | `u_s(τ)` Rust | `u_s(τ)` Sage | Match? | `v_s(τ)` Rust | `v_s(τ)` Sage | Match? | `w_s(τ)` Rust | `w_s(τ)` Sage | Match? |
+|------|---------------|---------------|--------|---------------|---------------|--------|---------------|---------------|--------|
+| 0 | `0` | `0` | ✅ | `0` | `0` | ✅ | `0` | `0` | ✅ |
+| 1 | `0` | `0` | ✅ | `0` | `0` | ✅ | `0` | `0` | ✅ |
+| 2 | `10` | `10` | ✅ | `0` | `0` | ✅ | `0` | `0` | ✅ |
+| 3 | `0` | `0` | ✅ | `0` | `0` | ✅ | `0` | `0` | ✅ |
+| 4 | `20790868956441913912657617184126456669621514812592171778046` | `20790868956441913912657617184126456669621514812592171778046` | ✅ | `0` | `0` | ✅ | `0` | `0` | ✅ |
+| 5 | `0` | `0` | ✅ | `0` | `0` | ✅ | `0` | `0` | ✅ |
+| 6 | `52435875175126190479447740508185965837690552500527637822603658699938581184508` | `52435875175126190479447740508185965837690552500527637822603658699938581184508` | ✅ | `0` | `0` | ✅ | `0` | `0` | ✅ |
+| 7 | `0` | `0` | ✅ | `0` | `0` | ✅ | `0` | `0` | ✅ |
+
+</details>
+
+<details>
+<summary><b>Witness polynomials and quotient at τ = 3 — FFT path (Rust vs Sage)</b></summary>
+
+The witness polynomials `l(x) = Σ a_i·u_i(x)`, `r(x)`, `o(x)` and the quotient `h(x) = (l·r − o) / T` are the final inputs to proof assembly. Evaluated at `τ = 3`:
+
+| Value | Rust | Sage | Match? |
+|-------|------|------|--------|
+| `l(τ)` | `62372606869325741737972851552379370008864544437776515334138` | `62372606869325741737972851552379370008864544437776515334138` | ✅ |
+| `r(τ)` | `83163475825767655650630468736505826678486059250368687112144` | `83163475825767655650630468736505826678486059250368687112144` | ✅ |
+| `o(τ)` | `249490427477302966951891406209517480035458177751106061336352` | `249490427477302966951891406209517480035458177751106061336352` | ✅ |
+| `h(τ)` | `52435875175126190432668285356191659534210913836243110315955250371606194683906` | `52435875175126190432668285356191659534210913836243110315955250371606194683906` | ✅ |
+| `T(τ)` | `80` | `80` | ✅ |
+
+</details>
+
+### What the comparison proves
+
+1. **The Rust FFT implementation is correct.** It uses `ark_poly::GeneralEvaluationDomain` (Cooley-Tukey IFFT) and `DensePolynomial` division. The output matches an independent Sage implementation that uses a hand-written radix-2 butterfly and the same BLS12-381 field arithmetic.
+2. **The Sage FFT implementation is correct.** It serves as a second, readable ground-truth for the FFT path, just as the dense path served as ground-truth for the original prover.
+3. **Both paths are internally self-consistent.** Dense proof verifies with dense `T(x)`. FFT proof verifies with FFT `T(x) = x⁴ − 1`. Cross-path mismatches are documented and expected.
+4. **zeroj's FFT path is aligned with our FFT path.** zeroj also uses the roots-of-unity domain for QAP construction. The only remaining discrepancy between zeroj and Rust (IC bases, proof points A/B/C) is explained by the fact that zeroj uses a **different circuit** (larger constraint system, different variable ordering) even for the same multiplication chain.
+
 ---
 
 ## License

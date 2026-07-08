@@ -200,6 +200,11 @@ Because the two paths use **different QAP domains** (dense points `{0,1,2}` vs. 
 - `assert_ne!(dense_us_tau[2], fft_us_tau[2])` — documented difference at `τ`.
 - Run both proofs through their own verifiers and assert both pass.
 
+**3. Cross-implementation check (Rust ↔ Sage)**
+- The Sage script also implements the FFT path independently (hand-written radix-2 butterfly, same BLS12-381 field).
+- Every FFT QAP coefficient, every per-variable evaluation at `τ=3`, and every witness/quotient value (`l(τ)`, `r(τ)`, `o(τ)`, `h(τ)`, `T(τ)`) matches bit-for-bit between Rust and Sage.
+- Full tables are in [`sage/README.md`](../sage/README.md).
+
 To achieve a true bit-for-bit parity (identical coefficients and proof points), both engines would need to use the **same QAP domain** (either both dense over `{0,1,2}` or both FFT over the same roots of unity). The current implementation intentionally keeps the domains different so that the dense path stays pedagogical and the FFT path stays production-standard.
 
 ---
