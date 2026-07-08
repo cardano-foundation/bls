@@ -1,6 +1,6 @@
 # A Simple Zero-Knowledge Proof Example
 
-This document walks through a **complete, concrete Groth16 proof** that can be followed almost on paper. We use the same 3-constraint circuit that the Rust and Sage implementations exercise, but explain every step in plain language.
+This document walks through a **complete, concrete Groth16 proof** that can be followed almost on paper. We use the same 3-constraint circuit that the Rust, Sage, and [zeroj](../ZerojAudit.md) implementations exercise, but explain every step in plain language.
 
 > **Goal:** Prove that you know numbers `x1, x2, x3, x4` such that  
 > `((x1 · x2) · (x3 · x4)) = 48`  
@@ -290,11 +290,27 @@ If Alice cheated (wrong witness, or no witness at all), the equation fails with 
 
 The matrices, witness, and all intermediate polynomial coefficients used above are exactly the ones hard-coded in:
 
-- `groth16-prover/src/r1cs.rs` — witness and matrices
-- `groth16-prover/src/qap.rs` — interpolation and target polynomial
-- `sage/groth16.sage` — full Sage reference with explicit prints
+- `src/r1cs.rs` — witness and matrices
+- `src/qap.rs` — interpolation and target polynomial
+- [`../sage/groth16.sage`](../sage/groth16.sage) — full Sage reference with explicit prints
 
-Running `cargo run --bin print_qap` prints every `uᵢ, vᵢ, wᵢ` and `T(x)` so you can compare them to the hand-calculated values. It also **asserts** that each polynomial evaluates back to the original matrix entry at `x = 0, 1, 2` — exactly the sanity check described above.
+You can see the actual numbers by running the dedicated binaries in this crate:
+
+```bash
+# Print every QAP polynomial coefficient
+cargo run --bin print_qap
+
+# Print the witness polynomials l(x), r(x), o(x)
+cargo run --bin print_witness_polys
+
+# Print the quotient h(x)
+cargo run --bin print_quotient
+
+# Print the full proof (A, B, C) and run the pairing check
+cargo run --bin print_pairing
+```
+
+Each binary asserts its own sanity checks (e.g. `print_qap` verifies that every interpolated polynomial evaluates back to the original matrix entry at `x = 0, 1, 2`). A complete step-by-step cross-check table against Sage is recorded in [`RustGroth16Correctness.md`](RustGroth16Correctness.md).
 
 ---
 
