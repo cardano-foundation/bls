@@ -38,7 +38,7 @@ For every sub-step in [README.md](README.md):
 | 1.10 | Witness polynomials `l(x)`, `r(x)`, `o(x)` | ✅ **VERIFIED** | Coefficients match exactly; degree and evaluation at constraint points match. |
 | 1.11 | Quotient polynomial `h(x)` | ✅ **VERIFIED** | `h(x) = 3` in both; zero remainder confirmed by `p(x) == T(x) * h(x)`. |
 | 1.12 | Proof element `A` | ✅ **VERIFIED** | `l(tau)` and `alpha` match; G1 point coordinates match bit-for-bit. |
-| 1.13 | Proof element `B` | ⏳ pending | Will compare point coordinates. |
+| 1.13 | Proof element `B` | ✅ **VERIFIED** | `r(tau)` and `beta` match; combined scalar `33` matches; G2 coordinates differ only by field embedding. |
 | 1.14 | Proof element `C` | ⏳ pending | Will compare point coordinates. |
 | 1.15 | Public-input commitment `V` | ⏳ pending | Will compare point coordinates. |
 | 1.16 | Pairing check | ⏳ pending | Will assert `lhs == rhs` in both. |
@@ -715,6 +715,52 @@ Rust and Sage produce identical G1 coordinates.
 ```bash
 cd groth16-prover
 cargo run --bin print_proof_a
+```
+
+**Sage:**
+```bash
+cd sage
+docker run --rm --entrypoint bash \
+  -v "$(pwd):/mnt/sage" \
+  sagemath/sagemath:latest \
+  -c "cp -r /mnt/sage /tmp/sage && cd /tmp/sage && sage groth16.sage"
+```
+
+---
+
+## Step 1.13 — Detailed Verification
+
+### Proof element B
+
+The Groth16 proof element **B** is computed as:
+
+```
+B = r(τ) · G2 + β · G2
+```
+
+where `r(x) = Σ a_i · v_i(x)` is the right witness polynomial.
+
+**Intermediate scalar values:**
+
+| Value | Rust | Sage |
+|-------|------|------|
+| `r(x)` | `[2, q-1, 3]` | `3x² - x + 2` |
+| `r(τ)` (τ = 3) | `26` | `26` |
+| `β` | `7` | `7` |
+| `r(τ) + β` | `33` | `33` |
+
+All scalar values match bit-for-bit. The combined scalar is `33`, so `B = 33 · G2`.
+
+**G2 point coordinates:**
+
+As in previous G2 comparisons, the coordinates do **not** match directly because of different extension-field embeddings (`F_q²` in Rust vs `F_p¹²` in Sage). The scalar multiplier (`33`) is identical, which fully determines the point.
+
+### Commands to reproduce
+
+**Rust:**
+```bash
+cd groth16-prover
+cargo run --bin print_proof_b
 ```
 
 **Sage:**

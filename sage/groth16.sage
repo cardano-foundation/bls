@@ -454,8 +454,25 @@ print("  y =", A[1])
 print("\n✓ Proof element A computed.")
 print("✓ Step 1.12 printouts complete.")
 
-# Assemble remaining proof elements (B in G2, C in G1)
+# ---------------------------------------------------------------------------
+# Step 1.13 explicit printouts for cross-checking with Rust / arkworks
+# ---------------------------------------------------------------------------
+print("\n=== Step 1.13: Proof Element B ===\n")
+
+print("r(x) =", r)
+print("r(tau) =", r(tau), " (tau =", tau, ")")
+print("beta =", beta)
+
 B = r_tau_G2 + betaG2
+print("\nB = r(tau)*G2 + beta*G2")
+print("  combined scalar = r(tau) + beta =", r(tau) + beta)
+print("  x =", B[0])
+print("  y =", B[1])
+
+print("\n✓ Proof element B computed.")
+print("✓ Step 1.13 printouts complete.")
+
+# Assemble remaining proof element C in G1
 C = Psi_with_a + h_tau_G1
 
 print("Proof generated.")
