@@ -1,0 +1,107 @@
+diff --git a/zeroj-onchain-julc/src/test/java/com/bloxbean/cardano/zeroj/onchain/julc/groth16/validator/DeterministicCrossCheckTest.java b/zeroj-onchain-julc/src/test/java/com/bloxbean/cardano/zeroj/onchain/julc/groth16/validator/DeterministicCrossCheckTest.java
+index ab3cf05..74e4701 100644
+--- a/zeroj-onchain-julc/src/test/java/com/bloxbean/cardano/zeroj/onchain/julc/groth16/validator/DeterministicCrossCheckTest.java
++++ b/zeroj-onchain-julc/src/test/java/com/bloxbean/cardano/zeroj/onchain/julc/groth16/validator/DeterministicCrossCheckTest.java
+@@ -1,10 +1,12 @@
+ package com.bloxbean.cardano.zeroj.onchain.julc.groth16.validator;
+ 
+ import com.bloxbean.cardano.zeroj.api.R1CSConstraint;
+-import com.bloxbean.cardano.zeroj.bls12381.ec.JacobianG1BLS381;
+-import com.bloxbean.cardano.zeroj.bls12381.ec.JacobianG2BLS381;
++import com.bloxbean.cardano.zeroj.bls12381.ec.*;
++import com.bloxbean.cardano.zeroj.bls12381.field.*;
++import com.bloxbean.cardano.zeroj.bls12381.pairing.BLS12381Pairing;
+ import com.bloxbean.cardano.zeroj.crypto.groth16.Groth16ProverBLS381;
+ import com.bloxbean.cardano.zeroj.crypto.groth16.Groth16ProofBLS381;
++import com.bloxbean.cardano.zeroj.crypto.groth16.Groth16ProvingKeyBLS381;
+ import com.bloxbean.cardano.zeroj.crypto.setup.Groth16SetupBLS381;
+ import org.junit.jupiter.api.Test;
+ 
+@@ -27,14 +29,14 @@ import static org.junit.jupiter.api.Assertions.*;
+  *
+  * <p>Witness: [1, 48, 2, 2, 3, 4, 4, 12]</p>
+  *
+- * <p>Deterministic toxic waste (for reproducible cross-checking):</p>
+- * <pre>
+- *   tau   = 5
+- *   alpha = 7
+- *   beta  = 11
+- *   gamma = 13
+- *   delta = 17
+- * </pre>
++     * <p>Deterministic toxic waste (for reproducible cross-checking):</p>
++     * <pre>
++     *   tau   = 3
++     *   alpha = 5
++     *   beta  = 7
++     *   gamma = 11
++     *   delta = 13
++     * </pre>
+  *
+  * <p>The test prints every intermediate group-element coordinate in hex so that
+  * the same circuit + same toxic waste can be reproduced in Rust / Sage and the
+@@ -43,11 +45,11 @@ import static org.junit.jupiter.api.Assertions.*;
+ class DeterministicCrossCheckTest {
+ 
+     // Deterministic toxic waste — MUST match the values used in Rust / Sage cross-check
+-    static final BigInteger TAU   = BigInteger.valueOf(5);
+-    static final BigInteger ALPHA = BigInteger.valueOf(7);
+-    static final BigInteger BETA  = BigInteger.valueOf(11);
+-    static final BigInteger GAMMA = BigInteger.valueOf(13);
+-    static final BigInteger DELTA = BigInteger.valueOf(17);
++    static final BigInteger TAU   = BigInteger.valueOf(3);
++    static final BigInteger ALPHA = BigInteger.valueOf(5);
++    static final BigInteger BETA  = BigInteger.valueOf(7);
++    static final BigInteger GAMMA = BigInteger.valueOf(11);
++    static final BigInteger DELTA = BigInteger.valueOf(13);
+ 
+     // Witness vector: [1, a, x1, x2, x3, x4, x5, x6]
+     static final BigInteger[] WITNESS = {
+@@ -137,6 +139,47 @@ class DeterministicCrossCheckTest {
+         assertTrue(proof.a().isOnCurve(), "A must be on curve");
+         assertTrue(proof.b().isOnCurve(), "B must be on curve");
+         assertTrue(proof.c().isOnCurve(), "C must be on curve");
++
++        // Pairing verification (check 5)
++        boolean verified = verifyPairing(proof, pk, setup.ic(), setup.gammaG2());
++        assertTrue(verified, "Pairing check must pass for the deterministic proof");
++        System.out.println("Pairing verification: PASSED");
++    }
++
++    private static boolean verifyPairing(Groth16ProofBLS381 proof,
++                                         Groth16ProvingKeyBLS381 pk,
++                                         JacobianG1BLS381.AffineG1[] ic,
++                                         JacobianG2BLS381.AffineG2 gammaG2) {
++        var piA = toG1(proof.a());
++        var piB = toG2(proof.b());
++        var piC = toG1(proof.c());
++        var alpha1 = toG1(pk.alphaG1());
++        var beta2 = toG2(pk.betaG2());
++        var gamma2 = toG2(gammaG2);
++        var delta2 = toG2(pk.deltaG2());
++
++        var vkX = toG1(ic[0]);
++        BigInteger[] pubInputs = {WITNESS[1]}; // public output a = 48
++        for (int i = 0; i < pubInputs.length; i++) {
++            var icPoint = toG1(ic[i + 1]);
++            vkX = vkX.add(icPoint.scalarMul(pubInputs[i]));
++        }
++
++        return BLS12381Pairing.pairingCheck(
++                new G1Point[]{piA, alpha1.negate(), vkX.negate(), piC.negate()},
++                new G2Point[]{piB, beta2, gamma2, delta2});
++    }
++
++    private static G1Point toG1(JacobianG1BLS381.AffineG1 p) {
++        if (p.isInfinity()) return G1Point.INFINITY;
++        return new G1Point(Fp.of(p.xBigInt()), Fp.of(p.yBigInt()));
++    }
++
++    private static G2Point toG2(JacobianG2BLS381.AffineG2 p) {
++        if (p.isInfinity()) return G2Point.INFINITY;
++        return new G2Point(
++                Fp2.of(Fp.of(p.x().reBigInt()), Fp.of(p.x().imBigInt())),
++                Fp2.of(Fp.of(p.y().reBigInt()), Fp.of(p.y().imBigInt())));
+     }
+ 
+     // Build the exact 3-constraint multiplication chain circuit

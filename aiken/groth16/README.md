@@ -95,6 +95,8 @@ Key zeroj features relevant to this project:
 - **JULC on-chain verifier** (`Groth16BLS12381Verifier`) that runs inside a Plutus V3 validator.
 - **Circom-compatible circuit builder** (`CircuitBuilder`) for dynamic R1CS generation.
 
+> **Running the reference circuit in zeroj:** See [`ZeroJAudit.md`](../../ZeroJAudit.md) §6 for the exact Java code that builds the 3-constraint multiplication-chain circuit in zeroj, together with instructions for executing the deterministic cross-check test.
+
 ---
 
 ## Step 1: Concrete Example (Completed)
