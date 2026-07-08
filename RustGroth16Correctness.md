@@ -39,7 +39,7 @@ For every sub-step in [README.md](README.md):
 | 1.11 | Quotient polynomial `h(x)` | ✅ **VERIFIED** | `h(x) = 3` in both; zero remainder confirmed by `p(x) == T(x) * h(x)`. |
 | 1.12 | Proof element `A` | ✅ **VERIFIED** | `l(tau)` and `alpha` match; G1 point coordinates match bit-for-bit. |
 | 1.13 | Proof element `B` | ✅ **VERIFIED** | `r(tau)` and `beta` match; combined scalar `33` matches; G2 coordinates differ only by field embedding. |
-| 1.14 | Proof element `C` | ⏳ pending | Will compare point coordinates. |
+| 1.14 | Proof element `C` | ✅ **VERIFIED** | All intermediate Psi scalars, h_tau scalar, and total scalar match exactly; G1 point coordinates match bit-for-bit. |
 | 1.15 | Public-input commitment `V` | ⏳ pending | Will compare point coordinates. |
 | 1.16 | Pairing check | ⏳ pending | Will assert `lhs == rhs` in both. |
 
@@ -761,6 +761,73 @@ As in previous G2 comparisons, the coordinates do **not** match directly because
 ```bash
 cd groth16-prover
 cargo run --bin print_proof_b
+```
+
+**Sage:**
+```bash
+cd sage
+docker run --rm --entrypoint bash \
+  -v "$(pwd):/mnt/sage" \
+  sagemath/sagemath:latest \
+  -c "cp -r /mnt/sage /tmp/sage && cd /tmp/sage && sage groth16.sage"
+```
+
+---
+
+## Step 1.14 — Detailed Verification
+
+### Proof element C
+
+The Groth16 proof element **C** is computed as:
+
+```
+C = Σ_{i=2}^{7} a_i · Ψ_P_G1[i-2] + h(τ) · SRS3[0]
+```
+
+where `Ψ_P_G1[i] = (v_i(τ)·α + u_i(τ)·β + w_i(τ)) / δ · G1` and `SRS3[0] = T(τ)/δ · G1`.
+
+**Psi_P_G1 accumulation (per-variable contributions):**
+
+| Variable | `a_i` | `psi_scalar` | Contribution `a_i · psi_scalar` |
+|----------|-------|--------------|--------------------------------|
+| 2 | `2` | `7/δ` | `14/δ` |
+| 3 | `2` | `5/δ` | `10/δ` |
+| 4 | `3` | `-21/δ` | `-63/δ` |
+| 5 | `4` | `-15/δ` | `-60/δ` |
+| 6 | `4` | `22/δ` | `88/δ` |
+| 7 | `12` | `12/δ` | `144/δ` |
+
+Sum of contributions = `133/δ`.
+
+**h_tau_G1:**
+
+| Value | Rust | Sage |
+|-------|------|------|
+| `T(τ)` | `6` | `6` |
+| `h(x)` | `3` | `3` |
+| `h_tau_scalar = 3·T(τ)/δ` | `12100586578875274726026401655735222885620896730890993343677767392293518734889` | `12100586578875274726026401655735222885620896730890993343677767392293518734889` |
+
+**Total combined scalar:**
+
+`C_scalar = 133/δ + 18/δ = 151/δ = 40335288596250915753421338852450742952069655769636644478925891307645062449637`
+
+Both implementations compute the exact same total scalar.
+
+**G1 point coordinates:**
+
+```
+x = 3477346963486146336080690417246290554369535001274151168403521084199798218082100186633847934754472195202639916926478
+y = 2877418015272335331399124044300343129441068058670528616316313371402761790909030539812890756390775761919318388690071
+```
+
+Rust and Sage produce identical G1 coordinates.
+
+### Commands to reproduce
+
+**Rust:**
+```bash
+cd groth16-prover
+cargo run --bin print_proof_c
 ```
 
 **Sage:**
