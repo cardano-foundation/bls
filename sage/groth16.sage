@@ -436,8 +436,25 @@ Psi_with_a = 0 * Psi_P_G1[0]
 for i in range(len(a_vec) - 2):
     Psi_with_a = Psi_with_a + ZZ(a_vec[i + 2]) * Psi_P_G1[i]
 
-# Assemble proof (A in G1, B in G2, C in G1)
+# ---------------------------------------------------------------------------
+# Step 1.12 explicit printouts for cross-checking with Rust / arkworks
+# ---------------------------------------------------------------------------
+print("\n=== Step 1.12: Proof Element A ===\n")
+
+print("l(x) =", l)
+print("l(tau) =", l(tau), " (tau =", tau, ")")
+print("alpha =", alpha)
+
 A = l_tau_G1 + alphaG1
+print("\nA = l(tau)*G1 + alpha*G1")
+print("  combined scalar = l(tau) + alpha =", l(tau) + alpha)
+print("  x =", A[0])
+print("  y =", A[1])
+
+print("\n✓ Proof element A computed.")
+print("✓ Step 1.12 printouts complete.")
+
+# Assemble remaining proof elements (B in G2, C in G1)
 B = r_tau_G2 + betaG2
 C = Psi_with_a + h_tau_G1
 
