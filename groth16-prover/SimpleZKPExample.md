@@ -6,6 +6,8 @@ This document walks through a **complete, concrete Groth16 proof** that can be f
 > `((x1 · x2) · (x3 · x4)) = 48`  
 > without revealing `x1, x2, x3, x4`.
 
+> **Two paths, one example.** The walkthrough follows the **dense-monomial path** (Steps 1.1–1.16) because you can read every coefficient with pen and paper. §6.5 adds the **FFT / roots-of-unity path** (Steps 2.1–2.17) for the exact same 3-gate circuit, showing what changes and what stays the same. The Rust code supports both via the [`QapEngine`](README.md) trait.
+
 ---
 
 ## 1. The Problem
