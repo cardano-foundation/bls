@@ -36,7 +36,7 @@ For every sub-step in [README.md](README.md):
 | 1.8 | CRS fixed points `alpha·G1`, `beta·G2`, `gamma·G2`, `delta·G2` | ✅ **VERIFIED** | Scalars match exactly; alpha·G1 coordinates match bit-for-bit; G2 coordinates differ only by field embedding. |
 | 1.9 | Per-variable CRS `Psi_V_G1`, `Psi_P_G1` | ✅ **VERIFIED** | Intermediate scalars (`u_i(tau)`, `v_i(tau)`, `w_i(tau)`, combined, `psi_scalar`) match exactly; G1 point coordinates match bit-for-bit for all variables. |
 | 1.10 | Witness polynomials `l(x)`, `r(x)`, `o(x)` | ✅ **VERIFIED** | Coefficients match exactly; degree and evaluation at constraint points match. |
-| 1.11 | Quotient polynomial `h(x)` | ⏳ pending | Will compare coefficients + zero remainder. |
+| 1.11 | Quotient polynomial `h(x)` | ✅ **VERIFIED** | `h(x) = 3` in both; zero remainder confirmed by `p(x) == T(x) * h(x)`. |
 | 1.12 | Proof element `A` | ⏳ pending | Will compare point coordinates. |
 | 1.13 | Proof element `B` | ⏳ pending | Will compare point coordinates. |
 | 1.14 | Proof element `C` | ⏳ pending | Will compare point coordinates. |
@@ -609,6 +609,61 @@ These values reproduce the original R1CS constraint evaluations from Step 1.1.
 ```bash
 cd groth16-prover
 cargo run --bin print_witness_polys
+```
+
+**Sage:**
+```bash
+cd sage
+docker run --rm --entrypoint bash \
+  -v "$(pwd):/mnt/sage" \
+  sagemath/sagemath:latest \
+  -c "cp -r /mnt/sage /tmp/sage && cd /tmp/sage && sage groth16.sage"
+```
+
+---
+
+## Step 1.11 — Detailed Verification
+
+### Quotient polynomial computation
+
+The quotient polynomial is defined by the QAP identity:
+
+```
+h(x) = (l(x) · r(x) - o(x)) / T(x)
+```
+
+For the division to be exact (zero remainder), `l(x)·r(x) - o(x)` must be divisible by the target polynomial `T(x)`. This is guaranteed by the R1CS-to-QAP transformation.
+
+**Rust** and **Sage** intermediate values:
+
+| Polynomial | Degree | Coefficients (constant term first) |
+|------------|--------|----------------------------------|
+| `l(x)` | 1 | `[2, 1]` |
+| `r(x)` | 2 | `[2, q-1, 3]` |
+| `o(x)` | 2 | `[4, q-6, 14]` |
+| `T(x)` | 3 | `[0, 2, q-3, 1]` |
+| `p(x) = l·r - o` | 3 | `[0, 6, q-9, 3]` |
+| `h(x) = p(x)/T(x)` | 0 | `[3]` |
+
+### Zero-remainder verification
+
+Both implementations assert that the division has zero remainder:
+
+- **Sage:** `assert (l*r - o) % T == 0`
+- **Rust:** `assert_eq!(p, t * h)` where `p = l*r - o` and `h = leading_coeff(p) / leading_coeff(T)`
+
+The reconstructed product `T(x) · h(x)` has coefficients `[0, 6, q-9, 3]`, which matches `p(x)` exactly. Therefore:
+
+```
+h(x) = 3
+```
+
+### Commands to reproduce
+
+**Rust:**
+```bash
+cd groth16-prover
+cargo run --bin print_quotient
 ```
 
 **Sage:**

@@ -394,9 +394,25 @@ print("✓ Step 1.10 printouts complete.")
 # ---------------------------------------------------------------------------
 # Step 1.11: Quotient polynomial h(x)
 # ---------------------------------------------------------------------------
-assert (l * r - o) % T == 0, "Polynomial division has non-zero remainder!"
-h = (l * r - o) // T
-print("\nh(x) =", h)
+print("\n=== Step 1.11: Quotient Polynomial h(x) ===\n")
+
+print("l(x) =", l)
+print("r(x) =", r)
+print("o(x) =", o)
+print("T(x) =", T)
+
+p = l * r - o
+print("\np(x) = l(x)*r(x) - o(x) =", p)
+
+assert p % T == 0, "Polynomial division has non-zero remainder!"
+h = p // T
+print("h(x) = leading_coeff(p) / leading_coeff(T) =", p.leading_coefficient(), "/", T.leading_coefficient(), "=", h)
+print("h(x) =", h)
+
+# Verify: p(x) == T(x) * h(x)
+assert p == T * h, "p(x) must equal T(x) * h(x)"
+print("\n✓ p(x) == T(x) * h(x) — zero remainder confirmed.")
+print("✓ Step 1.11 printouts complete.")
 
 def eval_in_exponent(poly_coeffs, srs):
     """
