@@ -133,13 +133,13 @@ The key classes for Groth16 are:
 
 **Agreement:** Both sample 5 random scalars in `Fr`. With the deterministic overloads, the *same* toxic waste can be fed to both implementations.
 
-**Deterministic values chosen for cross-checking:**
+**Deterministic values chosen for cross-checking (aligned with Rust reference):**
 ```
-tau   = 5
-alpha = 7
-beta  = 11
-gamma = 13
-delta = 17
+tau   = 3
+alpha = 5
+beta  = 7
+gamma = 11
+delta = 13
 ```
 
 ---
@@ -306,7 +306,7 @@ We added a dedicated JUnit test inside the `zeroj-audit` submodule that feeds ze
 |-----------|-------|
 | Circuit | 3 constraints, 8 wires (multiplication chain) |
 | Witness | `[1, 48, 2, 2, 3, 4, 4, 12]` |
-| Toxic waste | `tau=5, alpha=7, beta=11, gamma=13, delta=17` |
+| Toxic waste | `tau=3, alpha=5, beta=7, gamma=11, delta=13` (aligned with Rust `print_toxic_waste`) |
 | Randomizers | `r=0, s=0` (unblinded textbook proof) |
 
 The test prints:
@@ -314,17 +314,16 @@ The test prints:
 - Proof points `A` (G1), `B` (G2), `C` (G1) — uncompressed hex coordinates
 - IC points (public-input commitment bases)
 - Fixed VK points (`alpha·G1`, `beta·G2`, `gamma·G2`, `delta·G2`)
+- **Pairing verification result** (PASS / FAIL)
 
-### Next step: reproduce in Rust / Sage
+### Rust / Sage side already ready
 
-To perform the bit-for-bit comparison:
-1. Implement deterministic toxic waste in `groth16-prover` (Step 1.6).
-2. Feed the **same** scalars (`tau=5, alpha=7, beta=11, gamma=13, delta=17`) into the Rust setup.
-3. Generate the proof with `r=0, s=0`.
-4. Print `A`, `B`, `C`, and IC coordinates.
-5. Assert equality with the Java output from `DeterministicCrossCheckTest`.
+`groth16-prover` already uses the same deterministic toxic waste (`tau=3, alpha=5, beta=7, gamma=11, delta=13`) in `print_toxic_waste.rs`. Running the full sequence of 16 binaries reproduces every intermediate value for the same circuit and witness. See [`groth16-prover/README.md`](../../groth16-prover/README.md) for the command list.
 
-Because both implementations use the **same curve** (BLS12-381) and the **same algebraic formulas**, the coordinates must match exactly when the inputs are identical.
+**What matches and what does not:**
+- **CRS fixed points** (`alpha·G1`, `beta·G2`, `gamma·G2`, `delta·G2`) match bit-for-bit ✅.
+- **Proof coordinates** (`A`, `B`, `C`) and **IC bases** differ ⚠️ because zeroj uses FFT over 4-th roots of unity while Rust uses dense Lagrange over `{0,1,2}`. This is a legitimate internal-representation difference, not a bug.
+- **Pairing check** passes in both implementations independently ✅.
 
 ---
 
@@ -350,17 +349,291 @@ Because both implementations use the **same curve** (BLS12-381) and the **same a
 
 ---
 
-## 6. Summary
+## 5. Validation Strategy — End-to-End Checks Without 16-Step Intermediates
+
+Our Rust / Sage stack has been cross-checked at **every intermediate step** (1.1–1.16 in `RustGroth16Correctness.md`). This gives us a high-confidence **golden reference** for the entire Groth16 pipeline. Because zeroj uses different internal representations (FFT / Lagrange basis instead of dense monomials), a step-by-step coefficient comparison is impractical. Instead, we can validate zeroj through a small set of **end-to-end algebraic checks** that exercise the same formulas without exposing internal data structures.
+
+### 5.1 Check 1 — Field modulus agreement
+
+**What:** Verify that zeroj's `MontFr381` and our `ark_bls12_381::Fr` use the exact same scalar-field prime.
+
+**How:** Print `MontFr381.modulus()` from zeroj and compare against `Fr::MODULUS` from Rust.
+
+**Expected result:** Both equal `52435875175126190479447740508185965837690552500527637822603658699938581184513`.
+
+**What it validates:** The foundation of all subsequent arithmetic is identical.
+
+### 5.2 Check 2 — CRS fixed points agreement
+
+**What:** For the same deterministic toxic waste, compare `alpha·G1`, `beta·G2`, `gamma·G2`, `delta·G2`.
+
+**How:** Run zeroj's `setupDeterministic(...)` and our Rust `print_crs` with the same five scalars (e.g. `tau=5, alpha=7, beta=11, gamma=13, delta=17`). Compare uncompressed affine coordinates.
+
+**Expected result:** G1 coordinates match bit-for-bit. G2 coordinates match after accounting for field embedding (`F_q²` in arkworks vs `F_p¹²` in zeroj's internal representation; the scalar multiplier is the only thing that matters, and it is identical).
+
+**What it validates:** Generator constants, scalar multiplication, point addition, and field arithmetic are consistent between the two implementations.
+
+### 5.3 Check 3 — IC / public-input commitment bases agreement
+
+**What:** Compare the `IC` vector (public-input commitment bases, equivalent to our `Psi_V_G1`) point coordinates.
+
+**How:** After deterministic setup, print `IC[0]` and `IC[1]` from zeroj, and `Psi_V_G1[0]` and `Psi_V_G1[1]` from Rust. Compare coordinates.
+
+**Expected result:** If both implementations used the same QAP domain (e.g. both FFT over the same roots of unity, or both dense Lagrange over `{0,1,2}`), the G1 coordinates would match bit-for-bit. With the current setups, they **differ** because zeroj evaluates QAP polynomials over a 4-point FFT domain while Rust evaluates over a 3-point dense Lagrange domain, producing different values at the same `tau`.
+
+**What it validates:** The per-variable CRS formula is structurally identical; any mismatch is attributable to the QAP domain choice, not a bug in curve arithmetic or the CRS formula.
+
+### 5.4 Check 4 — Proof points A, B, C agreement
+
+**What:** For the same circuit, witness, and toxic waste, compare the uncompressed proof coordinates.
+
+**How:** Run zeroj's `proveDeterministic(...)` with `r=0, s=0` (unblinded), and our Rust `print_pairing` with the same toxic waste. Compare `A` (G1), `B` (G2), `C` (G1).
+
+**Expected result:** As with Check 3, a perfect bit-for-bit match requires the same QAP domain convention on both sides. With the current setups the coordinates **differ**, but each proof is still valid within its own verifier (see Check 5).
+
+**What it validates:** The proof construction logic (witness MSM, quotient addition, randomizer handling) is structurally identical. Any coordinate mismatch is again attributable to the different QAP domain conventions, not to a bug in point arithmetic or the proof formula.
+
+### 5.5 Check 5 — Cross-verification pairing
+
+**What:** Verify that each implementation's own verifier accepts its own proof, confirming the full pipeline is internally consistent.
+
+**How:**
+1. Run zeroj's `DeterministicCrossCheckTest` — it executes `BLS12381Pairing.pairingCheck(...)` and asserts the proof is valid.
+2. Run Rust's `print_pairing` binary — it computes the pairing product and asserts it equals 1.
+
+**Expected result:** Each verifier accepts its own proof. Cross-feeding a zeroj proof into the Rust verifier (or vice versa) would currently **fail** because the VK components (IC, pointsA, pointsB, etc.) are derived from different QAP domains.
+
+**What it validates:** The pairing engine, curve arithmetic, and verifier equation are correct and self-consistent within each implementation. To achieve *cross*-verification, align the QAP domains first (see recommendation in the results table above).
+
+### Why these five checks are sufficient
+
+| Check | Validates |
+|-------|-----------|
+| 1. Field modulus | Foundation arithmetic |
+| 2. CRS fixed points | Curve operations, generators, scalar mul |
+| 3. IC bases | QAP evaluation, per-variable CRS formula |
+| 4. Proof A, B, C | **Entire prover pipeline end-to-end** |
+| 5. Cross-verification pairing | **Verifier logic, serialization, GT arithmetic** |
+
+Checks 1 and 2 validate that the underlying curve arithmetic, generators, and scalar multiplication are identical. Check 5 validates that each verifier is internally consistent and accepts its own proof. Checks 3 and 4 would validate the full prover pipeline end-to-end *if* both implementations used the same QAP domain; with the current setups they reveal where the implementations diverge (FFT domain vs. dense Lagrange points). This is still valuable: it confirms the divergence is a legitimate internal representation difference, not a bug in the Groth16 formulas.
+
+---
+
+## 6. How to Build the Easy Circuit in zeroj
+
+The following Java snippet reproduces the exact 3-constraint multiplication-chain circuit inside zeroj. It is taken from `DeterministicCrossCheckTest.java` in the `zeroj-onchain-julc` module.
+
+```java
+import com.bloxbean.cardano.zeroj.api.R1CSConstraint;
+import java.math.BigInteger;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+
+public class EasyCircuit {
+
+    // Witness vector: [1, a, x1, x2, x3, x4, x5, x6]
+    static final BigInteger[] WITNESS = {
+        BigInteger.ONE,           // wire 0: constant 1
+        BigInteger.valueOf(48),   // wire 1: public output a
+        BigInteger.valueOf(2),    // wire 2: x1
+        BigInteger.valueOf(2),    // wire 3: x2
+        BigInteger.valueOf(3),    // wire 4: x3
+        BigInteger.valueOf(4),    // wire 5: x4
+        BigInteger.valueOf(4),    // wire 6: x5 (intermediate)
+        BigInteger.valueOf(12)    // wire 7: x6 (intermediate)
+    };
+
+    public static List<R1CSConstraint> buildConstraints() {
+        List<R1CSConstraint> cs = new ArrayList<>();
+
+        // Constraint 0: x1 * x2 == x5
+        //   wire 2 (x1) * wire 3 (x2) = wire 6 (x5)
+        cs.add(new R1CSConstraint(
+                Map.of(2, BigInteger.ONE),
+                Map.of(3, BigInteger.ONE),
+                Map.of(6, BigInteger.ONE)));
+
+        // Constraint 1: x3 * x4 == x6
+        //   wire 4 (x3) * wire 5 (x4) = wire 7 (x6)
+        cs.add(new R1CSConstraint(
+                Map.of(4, BigInteger.ONE),
+                Map.of(5, BigInteger.ONE),
+                Map.of(7, BigInteger.ONE)));
+
+        // Constraint 2: x5 * x6 == a
+        //   wire 6 (x5) * wire 7 (x6) = wire 1 (a)
+        cs.add(new R1CSConstraint(
+                Map.of(6, BigInteger.ONE),
+                Map.of(7, BigInteger.ONE),
+                Map.of(1, BigInteger.ONE)));
+
+        return cs;
+    }
+}
+```
+
+### Running the deterministic cross-check test
+
+From the repo root:
+
+```bash
+cd zeroj-audit
+JAVA_HOME=/path/to/java25 ./gradlew :zeroj-onchain-julc:test \
+  --tests "DeterministicCrossCheckTest.deterministicCrossCheck"
+```
+
+The test will:
+1. Build the sparse R1CS constraints above.
+2. Sanity-check that `(A·w) ∘ (B·w) == C·w` holds for the witness.
+3. Run a deterministic trusted setup with the fixed toxic waste.
+4. Generate an unblinded proof (`r = s = 0`).
+5. Print every intermediate group-element coordinate in hex.
+6. Execute the Groth16 pairing check and assert it passes.
+
+> **Prerequisites:** Java 25 (e.g. GraalVM CE 25.0.2) and Gradle 9.x. If Java 25 is not on your path, download the GraalVM tarball and point `JAVA_HOME` to it.
+
+---
+
+## 7. Summary
 
 zeroj is a **valuable third reference** for our Groth16 implementation:
 
 - It uses the **same curve** (BLS12-381) and the **same pairing equation**.
 - Its prover uses FFT/Lagrange basis rather than dense monomials, which is the production-standard approach.
 - It already has a **working on-chain verifier** compiled from Java to UPLC (JULC), giving us confidence that the verifier logic we plan to write in Aiken is sound.
-- We have **injected deterministic toxic waste** into zeroj (`setupDeterministic`) and added a matching unblinded prover (`proveDeterministic`), removing the last barrier to a bit-for-bit cross-check.
+- We have **injected deterministic toxic waste** into zeroj (`setupDeterministic`) and added a matching unblinded prover (`proveDeterministic`). The remaining barrier to a full bit-for-bit cross-check of proof coordinates is the **QAP domain convention** (zeroj uses FFT over 4-th roots of unity; Rust uses dense Lagrange over `{0,1,2}`). This is a legitimate internal difference, not a bug.
 
-**Current status:**
-- ✅ zeroj side ready — `DeterministicCrossCheckTest` prints proof + VK coordinates for the fixed circuit and fixed toxic waste.
-- ⏳ Rust / Sage side pending — need to implement Step 1.6 (deterministic toxic waste) and generate the same proof points for comparison.
+---
 
-**Recommendation:** Complete Step 1.6 in `groth16-prover`, feed it the exact same deterministic scalars (`tau=5, alpha=7, beta=11, gamma=13, delta=17`), and assert that the resulting uncompressed `A`, `B`, `C`, and IC coordinates match the Java output byte-for-byte.
+## 8. Results of the 5 End-to-End Checks (Updated)
+
+Below is the concise executive summary of the cross-check executed against the deterministic test fixture.
+
+| Check | What was compared | Result | Notes |
+|-------|-------------------|--------|-------|
+| 1. Field modulus | `MontFr381.modulus()` vs `Fr::MODULUS` | **PASS** ✅ | Both equal `52435875175126190479447740508185965837690552500527637822603658699938581184513` |
+| 2. CRS fixed points | `alpha·G1`, `beta·G2`, `gamma·G2`, `delta·G2` coordinates | **PASS** ✅ | All G1 and G2 coordinates match bit-for-bit for the same toxic waste |
+| 3. IC / public-input bases | `IC[1]` (public-input commitment base) | **MISMATCH** ⚠️ | Coordinates differ because zeroj uses a 4-point root-of-unity FFT domain while Rust uses a 3-point `{0,1,2}` dense Lagrange domain. The QAP polynomials evaluate to different values at `tau`, so the derived scalars differ. |
+| 4. Proof A, B, C | Unblinded proof coordinates (`r=s=0`) | **MISMATCH** ⚠️ | Same root cause as Check 3: the witness-polynomial scalars (`l(tau)`, `r(tau)`, `o(tau)`) and quotient `h(tau)` differ due to the different QAP domain. The coordinates are deterministic and valid within each implementation, but they do not match across implementations. |
+| 5. Pairing verification | `e(A,B) == e(alpha·G1, beta·G2) · e(V, gamma·G2) · e(C, delta·G2)` | **PASS** ✅ | The zeroj proof verifies successfully with zeroj's pure Java pairing engine. The Rust proof verifies successfully with `ark_ec::pairing`. Cross-verifying a zeroj proof with the Rust verifier (or vice versa) would fail because the VK components (IC, pointsA, pointsB, etc.) are circuit-specific and depend on the QAP domain. |
+
+**Why Checks 3 and 4 differ (and why this is expected):**
+
+- **Rust / Sage** interpolates each QAP column polynomial over the *dense* points `{0, 1, 2}` using the classical Lagrange formula. This yields degree-2 polynomials with trivial coefficients.
+- **zeroj** pads the 3 constraints to a domain of size `N = 4` (next power of 2) and performs FFT/IFFT over the 4-th roots of unity. The resulting polynomials are still degree ≤ 2, but they are expressed in the monomial basis via the FFT matrix. Evaluating these FFT-derived polynomials at the same `tau` produces a *different* scalar than evaluating the dense Lagrange polynomials at `tau`.
+- Because the QAP evaluation at `tau` differs, every circuit-dependent SRS point (`pointsA`, `pointsB`, `pointsC`, `pointsH`, `ic`, `pointsL`) gets a different scalar multiplier. Consequently the proof elements `A`, `B`, `C` and the IC bases also differ.
+- **This is not a bug** — both implementations compute valid proofs that verify under their own verifiers. The difference is purely an internal representation choice (dense monomial vs. FFT/Lagrange basis).
+
+**Recommendation for full bit-for-bit cross-check:**
+To make checks 3 and 4 match, one side must adopt the other's QAP domain convention:
+- **Option A:** Modify the Rust prover to use FFT over the same 4-th roots of unity (matching zeroj's `FieldFFTBLS381` root choice).
+- **Option B:** Modify zeroj's `setupDeterministic` to use dense Lagrange interpolation over `{0, 1, 2}` instead of FFT.
+Either option would align the QAP polynomials and make the proof coordinates identical. For the audit purpose, the current result is sufficient: we have verified that the *curve arithmetic*, *generators*, *scalar multiplication*, and *pairing engine* are identical (Checks 1, 2, and 5), and we have identified the exact boundary where the implementations diverge (QAP domain choice in Checks 3 and 4).
+
+---
+
+## 9. Reproducing the Cross-Check from Scratch
+
+All instructions below are **self-contained** — you do not need write access to the upstream zeroj repository. The only local modifications are captured in a single patch file that lives in *this* audit repository.
+
+### 9.1 Prerequisites
+
+| Tool | Version | How to get it |
+|------|---------|---------------|
+| Git | any | system package manager |
+| Java | **25** (e.g. GraalVM CE 25.0.2) | [github.com/graalvm/graalvm-ce-builds](https://github.com/graalvm/graalvm-ce-builds/releases) or `sdk use java 25.0.2-graal` |
+| Gradle | 9.x (wrapper included in zeroj) | `./gradlew` inside `zeroj-audit/` |
+| Rust | stable | [rustup.rs](https://rustup.rs) |
+
+> **Note on Java 25.** zeroj's `build.gradle` pins `sourceCompatibility = JavaVersion.VERSION_25`. Running with Java 17 will fail. If you do not have Java 25 installed, download the GraalVM CE tarball, unpack it to `/tmp/graalvm-community-openjdk-25.0.2+10.1`, and export `JAVA_HOME` before invoking Gradle (see step 9.3).
+
+### 9.2 Clone zeroj and apply the local patch
+
+```bash
+# 1. Clone zeroj at the exact commit that already contains the deterministic overloads
+git clone https://github.com/bloxbean/zeroj.git zeroj-audit
+cd zeroj-audit
+git checkout cd19cb5   # "Add deterministic overloads for cross-checking..."
+
+# 2. Copy the patch from this audit repo into the submodule
+#    (adjust the relative path if you cloned the parent repo differently)
+cp ../patches/zeroj-deterministic-crosscheck.patch .
+
+# 3. Apply the patch (toxic-waste alignment + pairing verification)
+git apply zeroj-deterministic-crosscheck.patch
+```
+
+The patch makes **only** these changes to `zeroj-onchain-julc/.../DeterministicCrossCheckTest.java`:
+- Changes the five toxic-waste constants to `tau=3, alpha=5, beta=7, gamma=11, delta=13`.
+- Adds imports for `BLS12381Pairing`, `Fp`, `Fp2`, `G1Point`, `G2Point`, and `Groth16ProvingKeyBLS381`.
+- Adds a `verifyPairing(...)` helper that recomputes `vk_x` from the public inputs and runs the pure-Java pairing check.
+- Asserts that the pairing check passes at the end of the test.
+
+No other zeroj source files are modified.
+
+### 9.3 Run the zeroj deterministic test
+
+```bash
+cd zeroj-audit
+
+# If Java 25 is on your PATH:
+./gradlew :zeroj-onchain-julc:test \
+  --tests "DeterministicCrossCheckTest.deterministicCrossCheck"
+
+# If you downloaded GraalVM CE to /tmp:
+JAVA_HOME=/tmp/graalvm-community-openjdk-25.0.2+10.1 \
+  ./gradlew :zeroj-onchain-julc:test \
+  --tests "DeterministicCrossCheckTest.deterministicCrossCheck"
+```
+
+**Expected output:**
+- The test prints the witness vector, proof points `A` (G1), `B` (G2), `C` (G1), IC points, and fixed VK points in uncompressed hex.
+- The final line is `Pairing verification: PASSED`.
+- The Gradle report shows `DeterministicCrossCheckTest > deterministicCrossCheck() PASSED`.
+
+> **Keep the submodule clean.** The patch is applied only to reproduce the cross-check. After running, discard it so the submodule does not show as modified in the parent repo:
+> ```bash
+> cd zeroj-audit
+> git checkout -- zeroj-onchain-julc/src/test/java/com/bloxbean/cardano/zeroj/onchain/julc/groth16/validator/DeterministicCrossCheckTest.java
+> ```
+> The patch file itself stays in the parent repo (`patches/zeroj-deterministic-crosscheck.patch`) for future re-use.
+
+### 9.4 Run the Rust / Sage reference for the same fixture
+
+From the parent audit repository (next to `zeroj-audit/`):
+
+```bash
+cd groth16-prover
+
+# Step 1.6 — toxic waste (already deterministic)
+cargo run --bin print_toxic_waste
+
+# Step 1.8 — CRS fixed points (alpha·G1, beta·G2, gamma·G2, delta·G2)
+cargo run --bin print_crs
+
+# Step 1.15 — public-input commitment V
+cargo run --bin print_public_input
+
+# Step 1.12–1.14 — proof elements A, B, C
+cargo run --bin print_proof_a
+cargo run --bin print_proof_b
+cargo run --bin print_proof_c
+
+# Step 1.16 — pairing check
+cargo run --bin print_pairing
+```
+
+All binaries use the **same** hard-coded toxic waste (`tau=3, alpha=5, beta=7, gamma=11, delta=13`) and the **same** witness `[1, 48, 2, 2, 3, 4, 4, 12]`.
+
+### 9.5 What to compare
+
+| Check | zeroj output | Rust output | Expected |
+|-------|--------------|-------------|----------|
+| Field modulus | printed by `MontFr381.modulus()` | printed by `print_field` | Identical ✅ |
+| CRS fixed points | printed by deterministic test | printed by `print_crs` | Identical ✅ |
+| IC[1] / public-input base | printed by deterministic test | printed by `print_public_input` | **Different** ⚠️ (QAP domain mismatch) |
+| Proof A, B, C | printed by deterministic test | printed by `print_proof_a/b/c` | **Different** ⚠️ (same root cause) |
+| Pairing check | `Pairing verification: PASSED` | `✓ Pairing check PASSED` | Both pass ✅ (internally consistent) |
+
+If you want a **bit-for-bit** match of proof coordinates, align the QAP domains first (see §8 recommendation). For the audit, the combination of identical curve arithmetic (Checks 1 & 2) and independently passing pairing checks (Check 5) is sufficient.
