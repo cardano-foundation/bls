@@ -507,13 +507,39 @@ print("✓ Step 1.14 printouts complete.")
 print("Proof generated.")
 
 # ---------------------------------------------------------------------------
-# 5. Verifier
+# Step 1.15 explicit printouts for cross-checking with Rust / arkworks
 # ---------------------------------------------------------------------------
+print("\n=== Step 1.15: Public-Input Commitment V ===\n")
 
 # Public-input commitment V = sum_{i=0}^{1} a_i * Psi_V_G1[i]
+print("--- Psi_V_G1 accumulation ---")
+for i in range(2):
+    psi_scalar = (vs[i](tau) * alpha + us[i](tau) * beta + ws[i](tau)) / gamma
+    contrib = a_vec[i] * psi_scalar
+    print("Variable {}: a_i = {}, psi_scalar = {}, contribution scalar = {}".format(
+        i, a_vec[i], psi_scalar, contrib))
+
 V = 0 * Psi_V_G1[0]
 for i in range(2):
     V = V + ZZ(a_vec[i]) * Psi_V_G1[i]
+
+print("\nV = sum(a_i * Psi_V_G1)")
+print("  x =", V[0])
+print("  y =", V[1])
+
+# Sanity: compute total scalar directly
+total_scalar = sum(
+    a_vec[i] * (vs[i](tau) * alpha + us[i](tau) * beta + ws[i](tau)) / gamma
+    for i in range(2)
+)
+print("\nTotal combined scalar =", total_scalar)
+
+print("\n✓ Public-input commitment V computed.")
+print("✓ Step 1.15 printouts complete.")
+
+# ---------------------------------------------------------------------------
+# 5. Verifier
+# ---------------------------------------------------------------------------
 
 # Groth16 pairing check:
 #   e(A, B) == e(alpha*G1, beta*G2) * e(C, delta*G2) * e(V, gamma*G2)

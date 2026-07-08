@@ -40,7 +40,7 @@ For every sub-step in [README.md](README.md):
 | 1.12 | Proof element `A` | ✅ **VERIFIED** | `l(tau)` and `alpha` match; G1 point coordinates match bit-for-bit. |
 | 1.13 | Proof element `B` | ✅ **VERIFIED** | `r(tau)` and `beta` match; combined scalar `33` matches; G2 coordinates differ only by field embedding. |
 | 1.14 | Proof element `C` | ✅ **VERIFIED** | All intermediate Psi scalars, h_tau scalar, and total scalar match exactly; G1 point coordinates match bit-for-bit. |
-| 1.15 | Public-input commitment `V` | ⏳ pending | Will compare point coordinates. |
+| 1.15 | Public-input commitment `V` | ✅ **VERIFIED** | Psi scalars and total scalar match exactly; G1 point coordinates match bit-for-bit. |
 | 1.16 | Pairing check | ⏳ pending | Will assert `lhs == rhs` in both. |
 
 ---
@@ -828,6 +828,59 @@ Rust and Sage produce identical G1 coordinates.
 ```bash
 cd groth16-prover
 cargo run --bin print_proof_c
+```
+
+**Sage:**
+```bash
+cd sage
+docker run --rm --entrypoint bash \
+  -v "$(pwd):/mnt/sage" \
+  sagemath/sagemath:latest \
+  -c "cp -r /mnt/sage /tmp/sage && cd /tmp/sage && sage groth16.sage"
+```
+
+---
+
+## Step 1.15 — Detailed Verification
+
+### Public-input commitment V
+
+The Groth16 verifier computes the public-input commitment **V** as:
+
+```
+V = Σ_{i=0}^{l} a_i · Ψ_V_G1[i]
+```
+
+where `Ψ_V_G1[i] = (v_i(τ)·α + u_i(τ)·β + w_i(τ)) / γ · G1`. For our circuit, public inputs are variables 0 and 1.
+
+**Psi_V_G1 accumulation:**
+
+| Variable | `a_i` | `psi_scalar` | Contribution `a_i · psi_scalar` |
+|----------|-------|--------------|--------------------------------|
+| 0 | `1` | `0` | `0` (point at infinity) |
+| 1 | `48` | `3/γ = 38135181945546320348689265824135247881956765454929191143711751781773513588737` | `144/γ = 47668977431932900435861582280169059852445956818661488929639689727216891985934` |
+
+**Total combined scalar:**
+
+`V_scalar = 144/γ = 47668977431932900435861582280169059852445956818661488929639689727216891985934`
+
+Both implementations compute the exact same total scalar.
+
+**G1 point coordinates:**
+
+```
+x = 3337099566340177974295613883078663641546306683813670543470652739952350773953062828466379278565571213269819581380768
+y = 3746897423881059582536580884164712874154732350924394171506646096982032816103621142597925838888773523128573392211368
+```
+
+Rust and Sage produce identical G1 coordinates.
+
+### Commands to reproduce
+
+**Rust:**
+```bash
+cd groth16-prover
+cargo run --bin print_public_input
 ```
 
 **Sage:**
