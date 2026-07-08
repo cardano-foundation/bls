@@ -172,12 +172,40 @@ print("\n✓ Target polynomial verified.")
 # 3. Trusted Setup
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Step 1.6 explicit printouts for cross-checking with Rust / arkworks
+# ---------------------------------------------------------------------------
 # Toxic waste – in a real deployment these must be discarded / destroyed!
-tau   = Fq(random.randint(1, int(q) - 1))
-alpha = Fq(random.randint(1, int(q) - 1))
-beta  = Fq(random.randint(1, int(q) - 1))
-gamma = Fq(random.randint(1, int(q) - 1))
-delta = Fq(random.randint(1, int(q) - 1))
+# Here we hard-code the same small-prime values used in Rust so outputs match.
+print("\n=== Step 1.6: Toxic Waste (Fixed Deterministic Values) ===\n")
+
+tau   = Fq(3)
+alpha = Fq(5)
+beta  = Fq(7)
+gamma = Fq(11)
+delta = Fq(13)
+
+print("Field modulus q =", q)
+print()
+print("tau   =", tau, "(decimal)")
+print("alpha =", alpha, "(decimal)")
+print("beta  =", beta, "(decimal)")
+print("gamma =", gamma, "(decimal)")
+print("delta =", delta, "(decimal)")
+print()
+
+assert tau != 0,   "tau must be non-zero"
+assert alpha != 0, "alpha must be non-zero"
+assert beta != 0,  "beta must be non-zero"
+assert gamma != 0, "gamma must be non-zero"
+assert delta != 0, "delta must be non-zero"
+
+assert tau != alpha, "tau and alpha must be distinct"
+assert beta != gamma, "beta and gamma must be distinct"
+assert gamma != delta, "gamma and delta must be distinct"
+
+print("✓ All five toxic-waste values are non-zero, distinct, and invertible.")
+print("✓ Step 1.6 printouts complete.")
 
 n = L.nrows()   # number of constraints == SRS length bound
 

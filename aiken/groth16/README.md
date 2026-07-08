@@ -110,9 +110,19 @@ Before building the production Rust tooling, we maintain a **pure-Sage prototype
 
 ### Running it
 
+With a local Sage installation:
 ```bash
 cd ../sage
 sage groth16.sage
+```
+
+Or via Docker (no local Sage required):
+```bash
+cd ../sage
+docker run --rm --entrypoint bash \
+  -v "$(pwd):/mnt/sage" \
+  sagemath/sagemath:latest \
+  -c "cp -r /mnt/sage /tmp/sage && cd /tmp/sage && sage groth16.sage"
 ```
 
 Expected output:
