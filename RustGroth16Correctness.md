@@ -33,7 +33,7 @@ For every sub-step in [README.md](README.md):
 | 1.5 | QAP verification at constraint points | ✅ **VERIFIED** | All 24 evaluations match; assertions pass in Rust and Sage. |
 | 1.6 | Toxic waste `tau, alpha, beta, gamma, delta` | ✅ **VERIFIED** | Same five hard-coded primes in both; all non-zero, distinct, and invertible. |
 | 1.7 | SRS: `G1·tau^i`, `G2·tau^i`, `G1·T(tau)·tau^i/delta` | ✅ **VERIFIED** | Scalar values match exactly; G1 point coordinates match bit-for-bit; G2 coordinates differ only by field embedding (F₁₂ in Sage vs F_q² in Rust). |
-| 1.8 | CRS fixed points `alpha·G1`, `beta·G2`, `gamma·G2`, `delta·G2` | ⏳ pending | Will compare point coordinates. |
+| 1.8 | CRS fixed points `alpha·G1`, `beta·G2`, `gamma·G2`, `delta·G2` | ✅ **VERIFIED** | Scalars match exactly; alpha·G1 coordinates match bit-for-bit; G2 coordinates differ only by field embedding. |
 | 1.9 | Per-variable CRS `Psi_V_G1`, `Psi_P_G1` | ⏳ pending | Will compare point coordinates. |
 | 1.10 | Witness polynomials `l(x)`, `r(x)`, `o(x)` | ⏳ pending | Will compare coefficients. |
 | 1.11 | Quotient polynomial `h(x)` | ⏳ pending | Will compare coefficients + zero remainder. |
@@ -430,6 +430,57 @@ Both implementations assert:
 ```bash
 cd groth16-prover
 cargo run --bin print_srs
+```
+
+**Sage:**
+```bash
+cd sage
+docker run --rm --entrypoint bash \
+  -v "$(pwd):/mnt/sage" \
+  sagemath/sagemath:latest \
+  -c "cp -r /mnt/sage /tmp/sage && cd /tmp/sage && sage groth16.sage"
+```
+
+---
+
+## Step 1.8 — Detailed Verification
+
+### CRS scalar values
+
+Both implementations compute the four CRS fixed points using the same fixed toxic waste from Step 1.6:
+
+| Point | Scalar | Rust | Sage |
+|-------|--------|------|------|
+| `alpha·G1` | `alpha` | `5` | `5` |
+| `beta·G2`  | `beta`  | `7` | `7` |
+| `gamma·G2` | `gamma` | `11` | `11` |
+| `delta·G2` | `delta` | `13` | `13` |
+
+All scalar values match bit-for-bit.
+
+### G1 point coordinates (alpha·G1)
+
+**Rust** and **Sage** produce identical G1 coordinates because both embed the base field `F_p` in the same way:
+
+```
+x = 2601793266141653880357945339922727723793268013331457916525213050197274797722760296318099993752923714935161798464476
+y = 3498096627312022583321348410616510759186251088555060790999813363211667535344132702692445545590448314959259020805858
+```
+
+### G2 point coordinates (beta·G2, gamma·G2, delta·G2)
+
+As in Step 1.7, the G2 coordinates do **not** match directly because of different extension-field embeddings (`F_q²` in Rust vs `F_p¹²` in Sage). The scalar multipliers are identical, which fully determines the points.
+
+### Sanity checks
+
+Both implementations assert that the resulting points are non-zero (scalar multiplication by a non-zero scalar on a prime-order subgroup always yields a non-zero point).
+
+### Commands to reproduce
+
+**Rust:**
+```bash
+cd groth16-prover
+cargo run --bin print_crs
 ```
 
 **Sage:**
