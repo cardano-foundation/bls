@@ -296,21 +296,63 @@ assert deltaG2 != 0 * g2, "delta*G2 must be non-zero"
 print("\n✓ CRS fixed-point sanity checks passed.")
 print("✓ Step 1.8 printouts complete.")
 
+# ---------------------------------------------------------------------------
+# Step 1.9 explicit printouts for cross-checking with Rust / arkworks
+# ---------------------------------------------------------------------------
+print("\n=== Step 1.9: Per-Variable CRS ===\n")
+print("tau =", tau, ", alpha =", alpha, ", beta =", beta, ", gamma =", gamma, ", delta =", delta)
+
 # Psi for public inputs (variables 0 and 1, divided by gamma)
 Psi_V_G1 = []
+print("\n--- Psi_V_G1 (public inputs, divided by gamma) ---")
 for i in range(2):
-    term = (ZZ(vs[i](tau) * alpha) * g1
-            + ZZ(us[i](tau) * beta) * g1
-            + ZZ(ws[i](tau)) * g1)
-    Psi_V_G1.append(ZZ(gamma^(-1)) * term)
+    u_tau = us[i](tau)
+    v_tau = vs[i](tau)
+    w_tau = ws[i](tau)
+    scalar = v_tau * alpha + u_tau * beta + w_tau
+    psi_scalar = scalar / gamma
+    term = (ZZ(v_tau * alpha) * g1
+            + ZZ(u_tau * beta) * g1
+            + ZZ(w_tau) * g1)
+    pt = ZZ(gamma^(-1)) * term
+    Psi_V_G1.append(pt)
+    print("Variable {}: u_i(tau) = {}, v_i(tau) = {}, w_i(tau) = {}".format(i, u_tau, v_tau, w_tau))
+    print("  combined scalar = v*alpha + u*beta + w =", scalar)
+    print("  psi_scalar = combined / gamma =", psi_scalar)
+    if pt == 0 * g1:
+        print("  point = (point at infinity)")
+    else:
+        print("  x =", pt[0])
+        print("  y =", pt[1])
 
 # Psi for private inputs (variables 2..7, divided by delta)
 Psi_P_G1 = []
+print("\n--- Psi_P_G1 (private inputs, divided by delta) ---")
 for i in range(2, len(a_vec)):
-    term = (ZZ(vs[i](tau) * alpha) * g1
-            + ZZ(us[i](tau) * beta) * g1
-            + ZZ(ws[i](tau)) * g1)
-    Psi_P_G1.append(ZZ(delta^(-1)) * term)
+    u_tau = us[i](tau)
+    v_tau = vs[i](tau)
+    w_tau = ws[i](tau)
+    scalar = v_tau * alpha + u_tau * beta + w_tau
+    psi_scalar = scalar / delta
+    term = (ZZ(v_tau * alpha) * g1
+            + ZZ(u_tau * beta) * g1
+            + ZZ(w_tau) * g1)
+    pt = ZZ(delta^(-1)) * term
+    Psi_P_G1.append(pt)
+    print("Variable {}: u_i(tau) = {}, v_i(tau) = {}, w_i(tau) = {}".format(i, u_tau, v_tau, w_tau))
+    print("  combined scalar = v*alpha + u*beta + w =", scalar)
+    print("  psi_scalar = combined / delta =", psi_scalar)
+    if pt == 0 * g1:
+        print("  point = (point at infinity)")
+    else:
+        print("  x =", pt[0])
+        print("  y =", pt[1])
+
+assert us[0](tau) == 0, "u_0(tau) must be zero"
+assert vs[0](tau) == 0, "v_0(tau) must be zero"
+assert ws[0](tau) == 0, "w_0(tau) must be zero"
+print("\n✓ Step 1.9 sanity checks passed.")
+print("✓ Step 1.9 printouts complete.")
 
 print("Trusted setup complete.")
 
