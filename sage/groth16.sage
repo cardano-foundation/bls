@@ -263,6 +263,39 @@ betaG2  = ZZ(beta)  * g2
 gammaG2 = ZZ(gamma) * g2
 deltaG2 = ZZ(delta) * g2
 
+# ---------------------------------------------------------------------------
+# Step 1.8 explicit printouts for cross-checking with Rust / arkworks
+# ---------------------------------------------------------------------------
+print("\n=== Step 1.8: CRS Fixed Points ===\n")
+
+print("--- alpha * G1 ---")
+print("scalar = alpha =", alpha)
+print("x =", alphaG1[0])
+print("y =", alphaG1[1])
+
+print("\n--- beta * G2 ---")
+print("scalar = beta =", beta)
+print("x =", betaG2[0])
+print("y =", betaG2[1])
+
+print("\n--- gamma * G2 ---")
+print("scalar = gamma =", gamma)
+print("x =", gammaG2[0])
+print("y =", gammaG2[1])
+
+print("\n--- delta * G2 ---")
+print("scalar = delta =", delta)
+print("x =", deltaG2[0])
+print("y =", deltaG2[1])
+
+# Sanity: scalar multiplication by a non-zero scalar always yields a valid point
+assert alphaG1 != 0 * g1, "alpha*G1 must be non-zero"
+assert betaG2  != 0 * g2, "beta*G2 must be non-zero"
+assert gammaG2 != 0 * g2, "gamma*G2 must be non-zero"
+assert deltaG2 != 0 * g2, "delta*G2 must be non-zero"
+print("\n✓ CRS fixed-point sanity checks passed.")
+print("✓ Step 1.8 printouts complete.")
+
 # Psi for public inputs (variables 0 and 1, divided by gamma)
 Psi_V_G1 = []
 for i in range(2):
