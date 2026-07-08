@@ -31,7 +31,7 @@ For every sub-step in [README.md](README.md):
 | 1.3 | Polynomial interpolation `u_i`, `v_i`, `w_i` | ✅ **VERIFIED** | Coefficient vectors match; QAP evaluation assertions pass at x = 0, 1, 2. |
 | 1.4 | Target polynomial `T(x)` | ✅ **VERIFIED** | Coefficients match; vanishes at x = 0, 1, 2. |
 | 1.5 | QAP verification at constraint points | ✅ **VERIFIED** | All 24 evaluations match; assertions pass in Rust and Sage. |
-| 1.6 | Toxic waste `tau, alpha, beta, gamma, delta` | ⏳ pending | Will use fixed deterministic values. |
+| 1.6 | Toxic waste `tau, alpha, beta, gamma, delta` | ✅ **VERIFIED** | Same five hard-coded primes in both; all non-zero, distinct, and invertible. |
 | 1.7 | SRS: `G1·tau^i`, `G2·tau^i`, `G1·T(tau)·tau^i/delta` | ⏳ pending | Will compare point coordinates. |
 | 1.8 | CRS fixed points `alpha·G1`, `beta·G2`, `gamma·G2`, `delta·G2` | ⏳ pending | Will compare point coordinates. |
 | 1.9 | Per-variable CRS `Psi_V_G1`, `Psi_P_G1` | ⏳ pending | Will compare point coordinates. |
@@ -94,7 +94,10 @@ cargo test
 **Sage:**
 ```bash
 cd sage
-sage groth16.sage
+docker run --rm --entrypoint bash \
+  -v "$(pwd):/mnt/sage" \
+  sagemath/sagemath:latest \
+  -c "cp -r /mnt/sage /tmp/sage && cd /tmp/sage && sage groth16.sage"
 ```
 
 Both print the matrices and the element-wise products shown above. The assertion `(L·a) ∘ (R·a) == O·a` passes in both.
@@ -140,7 +143,10 @@ cargo run --bin print_field
 **Sage:**
 ```bash
 cd sage
-sage groth16.sage
+docker run --rm --entrypoint bash \
+  -v "$(pwd):/mnt/sage" \
+  sagemath/sagemath:latest \
+  -c "cp -r /mnt/sage /tmp/sage && cd /tmp/sage && sage groth16.sage"
 ```
 
 *(If Sage is unavailable, the same modulus and operations were verified with Python’s built-in `pow(a, -1, q)`.)*
@@ -195,7 +201,10 @@ cargo test
 **Sage:**
 ```bash
 cd sage
-sage groth16.sage
+docker run --rm --entrypoint bash \
+  -v "$(pwd):/mnt/sage" \
+  sagemath/sagemath:latest \
+  -c "cp -r /mnt/sage /tmp/sage && cd /tmp/sage && sage groth16.sage"
 ```
 
 ---
@@ -241,7 +250,10 @@ cargo test
 **Sage:**
 ```bash
 cd sage
-sage groth16.sage
+docker run --rm --entrypoint bash \
+  -v "$(pwd):/mnt/sage" \
+  sagemath/sagemath:latest \
+  -c "cp -r /mnt/sage /tmp/sage && cd /tmp/sage && sage groth16.sage"
 ```
 
 *(If Sage is unavailable, the same coefficients and vanishing check were verified with Python.)*
@@ -292,10 +304,59 @@ cargo test
 **Sage:**
 ```bash
 cd sage
-sage groth16.sage
+docker run --rm --entrypoint bash \
+  -v "$(pwd):/mnt/sage" \
+  sagemath/sagemath:latest \
+  -c "cp -r /mnt/sage /tmp/sage && cd /tmp/sage && sage groth16.sage"
 ```
 
-*(If Sage is unavailable, the same interpolation and evaluation logic was verified independently in Python.)*
+---
+
+## Step 1.6 — Detailed Verification
+
+### Deterministic toxic-waste values
+
+Both implementations now use the **same five hard-coded prime values** for the trusted-setup toxic waste (in a real deployment these would be generated securely and destroyed):
+
+| Parameter | Rust (`Fr::from`) | Sage (`Fq(...)`) |
+|-----------|-------------------|------------------|
+| `tau`   | `3`  | `3`  |
+| `alpha` | `5`  | `5`  |
+| `beta`  | `7`  | `7`  |
+| `gamma` | `11` | `11` |
+| `delta` | `13` | `13` |
+
+### Field modulus
+
+Both print the same BLS12-381 scalar-field prime:
+
+```
+q = 52435875175126190479447740508185965837690552500527637822603658699938581184513
+```
+
+### Sanity checks
+
+Both implementations assert:
+1. Each value is **non-zero**.
+2. The five values are **pairwise distinct** (`tau ≠ alpha`, `beta ≠ gamma`, `gamma ≠ delta`).
+3. Each value is **invertible** modulo `q` (verified via `inverse()` in Rust and via Fermat's little theorem in Sage).
+
+### Commands to reproduce
+
+**Rust:**
+```bash
+cd groth16-prover
+cargo run --bin print_toxic_waste
+```
+
+**Sage:**
+```bash
+cd sage
+docker run --rm --entrypoint bash \
+  -v "$(pwd):/mnt/sage" \
+  sagemath/sagemath:latest \
+  -c "cp -r /mnt/sage /tmp/sage && cd /tmp/sage && sage groth16.sage"
+```
 
 ---
 
