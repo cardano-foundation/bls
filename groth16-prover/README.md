@@ -29,7 +29,8 @@ All 7 library tests pass (R1CS relation, QAP interpolation, target polynomial, f
 | **Dense monomial basis** | `u_i(x)`, `v_i(x)`, `w_i(x)` are stored as dense coefficient vectors. This makes printing and comparison trivial. It is `O(n²)` and therefore unsuitable for production circuits with millions of constraints, but it is ideal for learning. |
 | **No randomizers (`r = s = 0`)** | Proof elements `A`, `B`, `C` use the textbook formulas without blinding. This removes entropy and makes the outputs deterministic and reproducible. A production prover would add random `r` and `s` for zero-knowledge. |
 | **Deterministic toxic waste** | `tau=3`, `alpha=5`, `beta=7`, `gamma=11`, `delta=13` are hard-coded small primes. In a real deployment these would be generated securely and destroyed; here they are fixed so that two independent codebases can produce the exact same curve points. |
-| **Two switchable paths** | The dense path (classical Lagrange over `{0,1,2}`) is the default for pedagogical clarity. The FFT path (roots of unity, IFFT, `T(x)=x^N−1`) is implemented via the `QapEngine` trait and cross-checked against Sage bit-for-bit. Both paths share the same downstream proof-assembly code. |
+| **Two switchable QAP engines** | The dense path (classical Lagrange over `{0,1,2}`) is the default for pedagogical clarity. The FFT path (roots of unity, IFFT, `T(x)=x^N−1`) is implemented via the `QapEngine` trait and cross-checked against Sage bit-for-bit. Both paths share the same downstream proof-assembly code. |
+| **Two switchable MSM provers** | Proof assembly uses either `NaiveProver` (scalar-by-scalar accumulation, pedagogical) or `PippengerProver` (batched multi-scalar multiplication via `VariableBaseMSM::msm`, production). Both are generic over any `QapEngine` and produce identical proof points. |
 
 ---
 
@@ -59,6 +60,7 @@ The 16 sub-steps are grouped into six phases:
 | `src/r1cs.rs` | 1.1 | Hard-coded `L`, `R`, `O` matrices and witness `a = [1, 48, 2, 2, 3, 4, 4, 12]` |
 | `src/qap.rs` | 1.3–1.4 | Lagrange interpolation of QAP polynomials and target polynomial `T(x)` (dense path) |
 | `src/engine.rs` | 2.3–2.12 | `QapEngine` trait + `DenseQapEngine` + `FftQapEngine` (switchable paths) |
+| `src/prover.rs` | 3.1 | `Prover` trait + `NaiveProver` + `PippengerProver` (switchable MSM) |
 | `src/bin/print_r1cs.rs` | 1.1 | Prints matrices and verifies `(L·a) ∘ (R·a) == O·a` |
 | `src/bin/print_field.rs` | 1.2 | Prints the BLS12-381 scalar field `Fr` and sample arithmetic |
 | `src/bin/print_qap.rs` | 1.3–1.5 | Prints `u_i(x)`, `v_i(x)`, `w_i(x)` coefficients and evaluates them at constraint points |
@@ -73,6 +75,7 @@ The 16 sub-steps are grouped into six phases:
 | `src/bin/print_proof_c.rs` | 1.14 | Computes proof element `C = Σ a_i·Psi_P_G1 + h_tau_G1` |
 | `src/bin/print_public_input.rs` | 1.15 | Computes public-input commitment `V = Σ a_i·Psi_V_G1` |
 | `src/bin/print_pairing.rs` | 1.16 | Executes the final Groth16 pairing check `e(A,B) == e(alpha·G1,beta·G2)·e(C,delta·G2)·e(V,gamma·G2)` |
+| `src/bin/print_proof_pippenger.rs` | 3.1 | Runs `PippengerProver` with `FftQapEngine` and asserts bit-for-bit match against naive prover |
 
 </details>
 
@@ -126,6 +129,9 @@ cargo run --bin print_public_input
 
 # Step 1.16 — Pairing check
 cargo run --bin print_pairing
+
+# Step 3.1 — Pippenger MSM proof assembly (matches naive bit-for-bit)
+cargo run --bin print_proof_pippenger
 ```
 
 </details>
@@ -243,6 +249,59 @@ To achieve a true bit-for-bit parity (identical coefficients and proof points), 
 
 ---
 
+## Implementation 3 (Pippenger MSM)
+
+<details>
+<summary><b>Step 3.1 — click to expand</b></summary>
+
+Implementation 3 is a **pure optimization** of proof assembly. It reuses the same `FftQapEngine` from Implementation 2 for QAP construction and quotient computation, but replaces the naive scalar-by-scalar point accumulation with **Pippenger's multi-scalar multiplication** algorithm.
+
+### What changes
+
+| Concern | Implementation 2 (naive MSM) | Implementation 3 (Pippenger) | Why it matters |
+|---------|------------------------------|------------------------------|----------------|
+| **Proof element C** | `for i in 2..n { c += generator * psi_i * a_i }` | `G1Projective::msm(bases, scalars)` | Pippenger reduces group ops from `O(n)` scalar muls to `O(n / log n)` bucket additions |
+| **Public input V** | `for i in 0..l { v += generator * psi_i * a_i }` | `G1Projective::msm(bases, scalars)` | Same speedup for the verifier-side commitment |
+| **A and B** | Single scalar mul each | Single scalar mul each | Only 2 points; MSM does not help here |
+
+### Architecture
+
+```rust
+pub trait Prover {
+    fn prove<E: QapEngine>(
+        &self, engine: &E, witness: &[Fr], tau, alpha, beta, gamma, delta
+    ) -> (Proof, PublicInput);
+}
+```
+
+with two implementations:
+
+- `NaiveProver` — current scalar-by-scalar loop (used in Implementations 1 and 2).
+- `PippengerProver` — collects all `(base, scalar)` pairs into vectors and calls `VariableBaseMSM::msm`, which uses Pippenger internally.
+
+Both are generic over any `QapEngine`, so you can combine them freely:
+- `NaiveProver` + `DenseQapEngine` = original dense path
+- `NaiveProver` + `FftQapEngine` = original FFT path
+- `PippengerProver` + `FftQapEngine` = optimized FFT path (Implementation 3)
+
+### Parity assertion
+
+`cargo test` includes `test_pippenger_matches_naive_with_fft_engine`, which asserts that `PippengerProver` and `NaiveProver` produce **identical** `A`, `B`, `C`, and `V` points when both use `FftQapEngine`.
+
+### Commands to reproduce
+
+```bash
+cd groth16-prover
+cargo run --bin print_proof_pippenger
+cargo test test_pippenger_matches_naive_with_fft_engine
+```
+
+> **Note:** No Sage implementation is needed for this step because Pippenger is purely an optimization of group arithmetic. The mathematical inputs (scalars) and outputs (curve points) are identical to the naive path.
+
+</details>
+
+---
+
 ## TO DO — Production innovations (from zeroj)
 
 <details>
@@ -258,9 +317,8 @@ The current crate is a **reference implementation** for correctness verification
 
 ### (b) Pippenger multi-scalar multiplication (MSM)
 
-- **Current:** Point accumulations (`Σ a_i · Psi_P_G1`, SRS evaluations, proof assembly) use naive scalar-by-scalar multiplication and addition.
-- **Target:** Implement [Pippenger's algorithm](https://zcash.github.io/halo2/background/pippenger.html) for multi-scalar multiplication. This reduces the number of group operations from `O(n)` scalar muls to roughly `O(n / log n)` bucket additions.
-- **Reference:** zeroj's `Groth16ProverBLS381` uses a bucket-MSM for computing `piA`, `piB`, and `piC`.
+- **Status:** ✅ **Implemented.** The `Prover` trait, `NaiveProver`, and `PippengerProver` are all in `src/prover.rs`. `PippengerProver` uses `ark_ec::VariableBaseMSM::msm` for batched multi-scalar multiplication of proof element `C` and public-input commitment `V`. A parity test asserts identical points against the naive path.
+- **Reference:** zeroj's `Groth16ProverBLS381` uses a bucket-MSM for computing `piA`, `piB`, and `piC`. Our implementation uses arkworks' built-in Pippenger via `G1Projective::msm`.
 - **Benefit:** 5–10× speedup on proof generation, especially for circuits with large witness vectors.
 
 ### (c) Support usage of circom
