@@ -62,6 +62,12 @@ For every sub-step in [README.md](README.md):
 | 2.12 | Quotient `h(x)` via vanishing-poly division | ✅ **VERIFIED** | `h(τ)` and `T(τ)` match bit-for-bit; zero remainder confirmed. |
 | 2.13–2.17 | Proof assembly, public input, pairing | ✅ **REUSED** | Same formulas as 1.12–1.16, but with FFT-derived scalars. Both paths self-consistent. |
 
+### Implementation 3 — Pippenger MSM (Step 3.1)
+
+| Sub-step | Description | Status | Notes |
+|----------|-------------|--------|-------|
+| 3.1 | Pippenger MSM proof assembly | ✅ **VERIFIED** | `PippengerProver` uses `VariableBaseMSM::msm` for C and V. Parity test asserts bit-for-bit match against `NaiveProver` with same `FftQapEngine`. No Sage implementation needed (pure optimization). |
+
 ---
 
 ## Implementation 1 (dense monomial)
@@ -1241,6 +1247,59 @@ docker run --rm --entrypoint bash \
   sagemath/sagemath:latest \
   -c "cp -r /mnt/sage /tmp/sage && cd /tmp/sage && sage groth16.sage"
 ```
+
+</details>
+
+---
+
+## Implementation 3 (Pippenger MSM)
+
+<details>
+<summary><b>Step 3.1 — click to expand</b></summary>
+
+Implementation 3 is a **pure optimization** of proof assembly. It reuses the same `FftQapEngine` from Implementation 2 for QAP construction (Steps 2.3–2.12) and replaces the naive scalar-by-scalar point accumulation with Pippenger's multi-scalar multiplication.
+
+### What is optimized
+
+In the naive prover, proof element `C` and public-input commitment `V` are built with a loop:
+
+```rust
+let mut c_proj = G1Projective::zero();
+for i in 2..witness.len() {
+    let psi_scalar = (v_tau[i] * alpha + u_tau[i] * beta + w_tau[i]) * delta_inv;
+    c_proj += g1_generator * (psi_scalar * witness[i]);
+}
+```
+
+This is `O(n)` scalar multiplications + `O(n)` point additions.
+
+The Pippenger prover batches all `(base, scalar)` pairs into two vectors and calls:
+
+```rust
+let c_proj = G1Projective::msm(&bases, &scalars).unwrap();
+```
+
+where `msm` uses Pippenger's bucket algorithm internally. This reduces group operations from `O(n)` scalar muls to roughly `O(n / log n)` bucket additions.
+
+### Parity verification
+
+`cargo test` includes two parity tests:
+
+1. `test_pippenger_matches_naive_with_fft_engine` — asserts that `PippengerProver` + `FftQapEngine` produces the exact same `A`, `B`, `C`, and `V` as `NaiveProver` + `FftQapEngine`.
+2. `test_pippenger_matches_naive_with_dense_engine` — same assertion using `DenseQapEngine`.
+
+Both tests pass, confirming the Pippenger path is mathematically identical to the naive path.
+
+### Commands to reproduce
+
+**Rust (Pippenger vs naive comparison):**
+```bash
+cd groth16-prover
+cargo run --bin print_proof_pippenger
+cargo test test_pippenger_matches_naive_with_fft_engine
+```
+
+> **No Sage verification needed.** Pippenger is an optimization of group arithmetic, not a change to the QAP construction or the Groth16 formulas. The scalars fed into the MSM are identical to the naive path, so the resulting curve points must be identical by the definition of scalar multiplication.
 
 </details>
 

@@ -14,6 +14,7 @@ This directory contains a **pure Sage** reference implementation of the same 3-c
 - [Implementation 2 (FFT)](#implementation-2-fft)
 - [Bit-for-bit Rust ↔ Sage verification](#bit-for-bit-rust--sage-verification)
 - [What the comparison proves](#what-the-comparison-proves)
+- [Implementation 3 (Pippenger MSM — Rust only)](#implementation-3-pippenger-msm--rust-only)
 
 ---
 
@@ -246,6 +247,16 @@ The witness polynomials `l(x) = Σ a_i·u_i(x)`, `r(x)`, `o(x)` and the quotient
 2. **The Sage FFT implementation is correct.** It serves as a second, readable ground-truth for the FFT path, just as the dense path served as ground-truth for the original prover.
 3. **Both paths are internally self-consistent.** Dense proof verifies with dense `T(x)`. FFT proof verifies with FFT `T(x) = x⁴ − 1`. Cross-path mismatches are documented and expected.
 4. **zeroj's FFT path is aligned with our FFT path.** zeroj also uses the roots-of-unity domain for QAP construction. The only remaining discrepancy between zeroj and Rust (IC bases, proof points A/B/C) is explained by the fact that zeroj uses a **different circuit** (larger constraint system, different variable ordering) even for the same multiplication chain.
+
+---
+
+## Implementation 3 (Pippenger MSM — Rust only)
+
+Implementation 3 is a **pure optimization** of proof assembly in the Rust crate. It reuses the same `FftQapEngine` from Implementation 2 for QAP construction and quotient computation, but replaces the naive scalar-by-scalar point accumulation with **Pippenger's multi-scalar multiplication** via `ark_ec::VariableBaseMSM::msm`.
+
+> **No Sage equivalent is needed.** Pippenger is an optimization of group arithmetic, not a change to the QAP mathematics. The scalars fed into the MSM are identical to the naive path, so the resulting curve points are identical by definition. The Rust crate verifies this with a parity test (`test_pippenger_matches_naive_with_fft_engine`) that asserts bit-for-bit equality of proof points `A`, `B`, `C`, and public-input commitment `V`.
+
+See [`groth16-prover/README.md`](../groth16-prover/README.md) §"Implementation 3 (Pippenger MSM)" for the full architecture description.
 
 ---
 

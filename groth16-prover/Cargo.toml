@@ -15,3 +15,7 @@ ark-std = { version = "0.4", default-features = false }
 
 [dev-dependencies]
 ark-std = { version = "0.4", features = ["std"] }
+
+[[bin]]
+name = "print_proof_pippenger"
+path = "src/bin/print_proof_pippenger.rs"

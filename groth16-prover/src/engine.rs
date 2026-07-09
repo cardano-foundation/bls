@@ -3,7 +3,7 @@ use ark_ff::{Field, One, Zero};
 use ark_poly::{univariate::DensePolynomial, DenseUVPolynomial, EvaluationDomain, GeneralEvaluationDomain, Polynomial};
 use ark_std::vec::Vec;
 
-use crate::r1cs::{L, R, O, WITNESS};
+use crate::r1cs::{L, R, O};
 
 /// Trait abstracting over the two QAP construction strategies:
 /// - `DenseQapEngine` — classical dense Lagrange (pedagogical, O(n²))
@@ -367,7 +367,7 @@ pub fn evaluate_witness_and_quotient<E: QapEngine>(
 #[cfg(test)]
 mod tests {
     use super::*;
-use crate::r1cs::{L, R, O};
+    use crate::r1cs::{L, R, O, WITNESS};
     use ark_std::Zero;
 
     #[test]
