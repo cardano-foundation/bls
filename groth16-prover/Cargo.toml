@@ -19,3 +19,7 @@ ark-std = { version = "0.4", features = ["std"] }
 [[bin]]
 name = "print_proof_pippenger"
 path = "src/bin/print_proof_pippenger.rs"
+
+[[bin]]
+name = "benchmark_provers"
+path = "src/bin/benchmark_provers.rs"
