@@ -8,7 +8,51 @@ A **didactic, end-to-end Groth16 prover** in Rust over the BLS12-381 curve.
 
 ---
 
-## What is inside
+## How to use
+
+### 1. Run unit tests
+
+```bash
+cd groth16-prover
+cargo test
+```
+
+All 7 library tests pass (R1CS relation, QAP interpolation, target polynomial, field arithmetic).
+
+---
+
+## Design choices (and why)
+
+| Choice | Rationale |
+|--------|-----------|
+| **Hard-coded circuit** | A 3-constraint multiplication chain (`x1·x2=x5`, `x3·x4=x6`, `x5·x6=a`) is large enough to exercise every Groth16 step, yet small enough to verify by hand. |
+| **Dense monomial basis** | `u_i(x)`, `v_i(x)`, `w_i(x)` are stored as dense coefficient vectors. This makes printing and comparison trivial. It is `O(n²)` and therefore unsuitable for production circuits with millions of constraints, but it is ideal for learning. |
+| **No randomizers (`r = s = 0`)** | Proof elements `A`, `B`, `C` use the textbook formulas without blinding. This removes entropy and makes the outputs deterministic and reproducible. A production prover would add random `r` and `s` for zero-knowledge. |
+| **Deterministic toxic waste** | `tau=3`, `alpha=5`, `beta=7`, `gamma=11`, `delta=13` are hard-coded small primes. In a real deployment these would be generated securely and destroyed; here they are fixed so that two independent codebases can produce the exact same curve points. |
+| **Two switchable paths** | The dense path (classical Lagrange over `{0,1,2}`) is the default for pedagogical clarity. The FFT path (roots of unity, IFFT, `T(x)=x^N−1`) is implemented via the `QapEngine` trait and cross-checked against Sage bit-for-bit. Both paths share the same downstream proof-assembly code. |
+
+---
+
+## Implementation 1 (dense monomial)
+
+<details>
+<summary><b>Steps 1.1–1.16 — click to expand</b></summary>
+
+Implementation 1 covers the classical **dense-monomial** path. Every QAP polynomial is stored as a coefficient vector and every division uses dense polynomial arithmetic. This is ideal for learning but too slow for large circuits.
+
+The 16 sub-steps are grouped into six phases:
+
+| Phase | Steps | What happens |
+|-------|-------|-------------|
+| **A. R1CS & Field** | 1.1–1.2 | Hard-coded matrices `L`, `R`, `O`, witness `a`, and BLS12-381 scalar field `Fr` |
+| **B. QAP construction** | 1.3–1.5 | Lagrange interpolation of `u_i(x)`, `v_i(x)`, `w_i(x)` and target polynomial `T(x)`; sanity check at gate points |
+| **C. Trusted setup** | 1.6–1.9 | Deterministic toxic waste `τ, α, β, γ, δ`; SRS points; CRS fixed points; per-variable CRS `Ψ_V_G1`, `Ψ_P_G1` |
+| **D. Witness & quotient** | 1.10–1.11 | Build witness polynomials `l(x)`, `r(x)`, `o(x)` and compute exact quotient `h(x) = (l·r − o) / T` |
+| **E. Proof assembly** | 1.12–1.15 | Compute proof elements `A`, `B`, `C` and public-input commitment `V` |
+| **F. Verification** | 1.16 | Execute the final Groth16 pairing check |
+
+<details>
+<summary><b>What is inside — click to expand</b></summary>
 
 | File | Step | What it does |
 |------|------|-------------|
@@ -30,20 +74,10 @@ A **didactic, end-to-end Groth16 prover** in Rust over the BLS12-381 curve.
 | `src/bin/print_public_input.rs` | 1.15 | Computes public-input commitment `V = Σ a_i·Psi_V_G1` |
 | `src/bin/print_pairing.rs` | 1.16 | Executes the final Groth16 pairing check `e(A,B) == e(alpha·G1,beta·G2)·e(C,delta·G2)·e(V,gamma·G2)` |
 
----
+</details>
 
-## How to use
-
-### 1. Run unit tests
-
-```bash
-cd groth16-prover
-cargo test
-```
-
-All 7 library tests pass (R1CS relation, QAP interpolation, target polynomial, field arithmetic).
-
-### 2. Print and inspect every step
+<details>
+<summary><b>Print and inspect every step — click to expand</b></summary>
 
 Each binary corresponds to a numbered sub-step in [`RustGroth16Correctness.md`](RustGroth16Correctness.md).
 
@@ -94,7 +128,10 @@ cargo run --bin print_public_input
 cargo run --bin print_pairing
 ```
 
-### 3. Cross-check against Sage
+</details>
+
+<details>
+<summary><b>Cross-check against Sage — click to expand</b></summary>
 
 The Sage reference lives in [`../sage/groth16.sage`](../sage/groth16.sage). Run it via Docker (no local Sage required):
 
@@ -108,30 +145,23 @@ docker run --rm --entrypoint bash \
 
 Compare the printed intermediate values with the Rust output. They match bit-for-bit for all G1 points and scalars. G2 coordinates differ only by field embedding (`F_q²` in Rust vs `F_p¹²` in Sage), which is expected.
 
----
+</details>
 
-## Design choices (and why)
-
-| Choice | Rationale |
-|--------|-----------|
-| **Hard-coded circuit** | A 3-constraint multiplication chain (`x1·x2=x5`, `x3·x4=x6`, `x5·x6=a`) is large enough to exercise every Groth16 step, yet small enough to verify by hand. |
-| **Dense monomial basis** | `u_i(x)`, `v_i(x)`, `w_i(x)` are stored as dense coefficient vectors. This makes printing and comparison trivial. It is `O(n²)` and therefore unsuitable for production circuits with millions of constraints, but it is ideal for learning. |
-| **No randomizers (`r = s = 0`)** | Proof elements `A`, `B`, `C` use the textbook formulas without blinding. This removes entropy and makes the outputs deterministic and reproducible. A production prover would add random `r` and `s` for zero-knowledge. |
-| **Deterministic toxic waste** | `tau=3`, `alpha=5`, `beta=7`, `gamma=11`, `delta=13` are hard-coded small primes. In a real deployment these would be generated securely and destroyed; here they are fixed so that two independent codebases can produce the exact same curve points. |
-| **Two switchable paths** | The dense path (classical Lagrange over `{0,1,2}`) is the default for pedagogical clarity. The FFT path (roots of unity, IFFT, `T(x)=x^N−1`) is implemented via the `QapEngine` trait and cross-checked against Sage bit-for-bit. Both paths share the same downstream proof-assembly code. |
+</details>
 
 ---
 
-## Step 2 — FFT / Lagrange basis path (implemented)
+## Implementation 2 (FFT)
 
-The 16 sub-steps above (1.1–1.16) form the **dense-monomial** path: every QAP polynomial is stored as a coefficient vector and every division is done with dense polynomial arithmetic. This is ideal for learning but too slow for large circuits.
+<details>
+<summary><b>Steps 2.1–2.17 — click to expand</b></summary>
 
-Step 2 adds a **second, switchable path** that replaces the slow polynomial operations with FFT/IFFT over roots of unity. The high-level Groth16 formulas (proof elements `A`, `B`, `C`, pairing check, CRS fixed points) are **completely unchanged**.
+Implementation 2 adds a **second, switchable path** that replaces the slow polynomial operations with FFT/IFFT over roots of unity. The high-level Groth16 formulas (proof elements `A`, `B`, `C`, pairing check, CRS fixed points) are **completely unchanged**.
 
-### What Step 2 adds — at a glance
+### What the FFT path adds — at a glance
 
-| Concern | Step 1 (dense) | Step 2 (FFT) | Why it matters |
-|---------|---------------|--------------|----------------|
+| Concern | Implementation 1 (dense) | Implementation 2 (FFT) | Why it matters |
+|---------|--------------------------|------------------------|----------------|
 | **Gate points** | `{0, 1, 2}` — the natural numbers | `N`-th roots of unity `ω^i` where `N = next_power_of_2(num_constraints)` | FFT requires a multiplicative cyclic group of size `N` for the butterfly network |
 | **QAP construction** | Hand-solve Lagrange formula for each column (O(n²)) | IFFT of padded column evaluations (O(N log N)) | For 3 gates the dense path is faster; for 10⁴ gates FFT is ~1000× faster |
 | **Target polynomial** | `T(x) = (x−0)(x−1)(x−2)` | `T(x) = x^N − 1` | Vanishes at all `N`-th roots of unity simultaneously |
@@ -141,6 +171,8 @@ Step 2 adds a **second, switchable path** that replaces the slow polynomial oper
 | **Proof points `A, B, C`** | Deterministic values from dense QAP | **Different** deterministic values from FFT QAP | Each path produces a self-consistent proof that verifies under its own target polynomial |
 
 > **Key takeaway:** Steps 2.1–2.2 (R1CS, field) and 2.7, 2.9, 2.13–2.17 (toxic waste, CRS fixed points, proof assembly, pairing) are **identical** between the two paths. Only the polynomial representation and the SRS basis change.
+
+### Step-by-step mapping
 
 The table below maps out every sub-step and labels each one as **REUSED** (same code), **SWITCHABLE** (two implementations selectable at run time), or **NEW** (FFT-only infrastructure).
 
@@ -207,9 +239,14 @@ Because the two paths use **different QAP domains** (dense points `{0,1,2}` vs. 
 
 To achieve a true bit-for-bit parity (identical coefficients and proof points), both engines would need to use the **same QAP domain** (either both dense over `{0,1,2}` or both FFT over the same roots of unity). The current implementation intentionally keeps the domains different so that the dense path stays pedagogical and the FFT path stays production-standard.
 
+</details>
+
 ---
 
 ## TO DO — Production innovations (from zeroj)
+
+<details>
+<summary><b>Pending improvements — click to expand</b></summary>
 
 The current crate is a **reference implementation** for correctness verification. The following items, already present in the [zeroj](https://github.com/bloxbean/zeroj) Java toolkit (see [`ZerojAudit.md`](../ZerojAudit.md)), would need to be adopted for production use:
 
@@ -269,6 +306,8 @@ The current crate is a **reference implementation** for correctness verification
   2. Keep dense/naive computation paths as **parity assertions** alongside optimized paths (FFT, coset quotient). In debug/test mode, run both and assert identical results.
 - **Reference:** Groth.jl keeps dense quotient computation (`compute_h_polynomial`) as an explicit parity check while the production prover uses the coset-only path. Their test suite covers multiple circuits with randomized seeds.
 - **Benefit:** Catches bugs in the optimized path early by comparing against a slow-but-correct reference on every test run.
+
+</details>
 
 ---
 
