@@ -343,3 +343,209 @@ fn prove_invalid_witness_file() {
         .failure()
         .stderr(predicate::str::contains("failed to load witness"));
 }
+
+// ------------------------------------------------------------------
+// Verify command tests
+// ------------------------------------------------------------------
+
+#[test]
+fn verify_valid_proof() {
+    let (r1cs, wtns) = create_test_artifacts();
+    let out_file = NamedTempFile::new().unwrap();
+
+    // First, generate a proof
+    let mut cmd_prove = Command::cargo_bin("groth16-prover").unwrap();
+    cmd_prove
+        .arg("prove")
+        .arg("--circuit")
+        .arg(r1cs.path())
+        .arg("--witness")
+        .arg(wtns.path())
+        .arg("--out")
+        .arg(out_file.path());
+    cmd_prove.assert().success();
+
+    // Now verify it
+    let pub_path = out_file.path().with_extension("pub");
+    let mut cmd_verify = Command::cargo_bin("groth16-prover").unwrap();
+    cmd_verify
+        .arg("verify")
+        .arg("--proof")
+        .arg(out_file.path())
+        .arg("--public")
+        .arg(&pub_path);
+    cmd_verify
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Verification result: VALID"));
+}
+
+#[test]
+fn verify_all_combinations() {
+    let (r1cs, wtns) = create_test_artifacts();
+
+    for engine in &["dense", "fft"] {
+        for prover in &["naive", "pippenger"] {
+            let out_file = NamedTempFile::new().unwrap();
+
+            // Generate proof with this combination
+            let mut cmd_prove = Command::cargo_bin("groth16-prover").unwrap();
+            cmd_prove
+                .arg("prove")
+                .arg("--circuit")
+                .arg(r1cs.path())
+                .arg("--witness")
+                .arg(wtns.path())
+                .arg("--engine")
+                .arg(*engine)
+                .arg("--prover")
+                .arg(*prover)
+                .arg("--out")
+                .arg(out_file.path());
+            let prove_output = cmd_prove.output().unwrap();
+            assert!(
+                prove_output.status.success(),
+                "prove failed for engine={} prover={}",
+                engine,
+                prover
+            );
+
+            // Verify it
+            let pub_path = out_file.path().with_extension("pub");
+            let mut cmd_verify = Command::cargo_bin("groth16-prover").unwrap();
+            cmd_verify
+                .arg("verify")
+                .arg("--proof")
+                .arg(out_file.path())
+                .arg("--public")
+                .arg(&pub_path);
+            let verify_output = cmd_verify.output().unwrap();
+            assert!(
+                verify_output.status.success(),
+                "verify failed for engine={} prover={}: {}",
+                engine,
+                prover,
+                String::from_utf8_lossy(&verify_output.stderr)
+            );
+
+            let stdout = String::from_utf8_lossy(&verify_output.stdout);
+            assert!(
+                stdout.contains("VALID"),
+                "verify did not report VALID for engine={} prover={}",
+                engine,
+                prover
+            );
+        }
+    }
+}
+
+#[test]
+fn verify_missing_proof() {
+    let mut cmd = Command::cargo_bin("groth16-prover").unwrap();
+    cmd.arg("verify").arg("--public").arg("/tmp/dummy.pub");
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("required arguments were not provided"));
+}
+
+#[test]
+fn verify_missing_public() {
+    let mut cmd = Command::cargo_bin("groth16-prover").unwrap();
+    cmd.arg("verify").arg("--proof").arg("/tmp/dummy.bin");
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("required arguments were not provided"));
+}
+
+#[test]
+fn verify_invalid_proof_length() {
+    let proof_file = NamedTempFile::new().unwrap();
+    fs::write(proof_file.path(), vec![0u8; 100]).unwrap();
+
+    let pub_file = NamedTempFile::new().unwrap();
+    fs::write(pub_file.path(), vec![0u8; 48]).unwrap();
+
+    let mut cmd = Command::cargo_bin("groth16-prover").unwrap();
+    cmd.arg("verify")
+        .arg("--proof")
+        .arg(proof_file.path())
+        .arg("--public")
+        .arg(pub_file.path());
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("proof file must be exactly 192 bytes"));
+}
+
+#[test]
+fn verify_invalid_public_length() {
+    let (r1cs, wtns) = create_test_artifacts();
+    let out_file = NamedTempFile::new().unwrap();
+
+    // Generate a valid proof so we have a valid proof file
+    let mut cmd_prove = Command::cargo_bin("groth16-prover").unwrap();
+    cmd_prove
+        .arg("prove")
+        .arg("--circuit")
+        .arg(r1cs.path())
+        .arg("--witness")
+        .arg(wtns.path())
+        .arg("--out")
+        .arg(out_file.path());
+    cmd_prove.assert().success();
+
+    // Provide a public input file that is too short
+    let bad_pub = NamedTempFile::new().unwrap();
+    fs::write(bad_pub.path(), vec![0u8; 10]).unwrap();
+
+    let mut cmd = Command::cargo_bin("groth16-prover").unwrap();
+    cmd.arg("verify")
+        .arg("--proof")
+        .arg(out_file.path())
+        .arg("--public")
+        .arg(bad_pub.path());
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("public-input file must be exactly 48 bytes"));
+}
+
+#[test]
+fn verify_tampered_public_input_fails() {
+    let (r1cs, wtns) = create_test_artifacts();
+    let out_file = NamedTempFile::new().unwrap();
+
+    // Generate a valid proof
+    let mut cmd_prove = Command::cargo_bin("groth16-prover").unwrap();
+    cmd_prove
+        .arg("prove")
+        .arg("--circuit")
+        .arg(r1cs.path())
+        .arg("--witness")
+        .arg(wtns.path())
+        .arg("--out")
+        .arg(out_file.path());
+    cmd_prove.assert().success();
+
+    // Tamper with the public input file: replace it with the G1 generator
+    // (a different valid point that will cause the pairing check to fail)
+    let g1_generator: [u8; 48] = [
+        0x97, 0xf1, 0xd3, 0xa7, 0x31, 0x97, 0xd7, 0x94, 0x26, 0x95, 0x63, 0x8c,
+        0x4f, 0xa9, 0xac, 0x0f, 0xc3, 0x68, 0x8c, 0x4f, 0x97, 0x74, 0xb9, 0x05,
+        0xa1, 0x4e, 0x3a, 0x3f, 0x17, 0x1b, 0xac, 0x58, 0x6c, 0x55, 0xe8, 0x3f,
+        0xf9, 0x7a, 0x1a, 0xef, 0xfb, 0x3a, 0xf0, 0x0a, 0xdb, 0x22, 0xc6, 0xbb,
+    ];
+    let pub_path = out_file.path().with_extension("pub");
+    fs::write(&pub_path, &g1_generator).unwrap();
+
+    // Verification should fail because the public input commitment does not match
+    let mut cmd_verify = Command::cargo_bin("groth16-prover").unwrap();
+    cmd_verify
+        .arg("verify")
+        .arg("--proof")
+        .arg(out_file.path())
+        .arg("--public")
+        .arg(&pub_path);
+    cmd_verify
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("INVALID"));
+}
