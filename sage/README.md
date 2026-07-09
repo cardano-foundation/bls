@@ -6,6 +6,17 @@ This directory contains a **pure Sage** reference implementation of the same 3-c
 
 ---
 
+## Table of Contents
+
+- [Files](#files)
+- [Running Scripts](#running-scripts)
+- [Implementation 1 (dense monomial)](#implementation-1-dense-monomial)
+- [Implementation 2 (FFT)](#implementation-2-fft)
+- [Bit-for-bit Rust ↔ Sage verification](#bit-for-bit-rust--sage-verification)
+- [What the comparison proves](#what-the-comparison-proves)
+
+---
+
 ## Files
 
 | File | What it does |
@@ -15,7 +26,7 @@ This directory contains a **pure Sage** reference implementation of the same 3-c
 
 ---
 
-## Running the script
+## Running Scripts
 
 With a local Sage installation:
 
@@ -36,7 +47,10 @@ docker run --rm --entrypoint bash \
 
 ---
 
-## What is inside `groth16.sage`
+## Implementation 1 (dense monomial)
+
+<details>
+<summary><b>Steps 1.1–1.16 — click to expand</b></summary>
 
 The script mirrors the numbered sub-steps in [`../groth16-prover/RustGroth16Correctness.md`](../groth16-prover/RustGroth16Correctness.md):
 
@@ -61,11 +75,16 @@ The script mirrors the numbered sub-steps in [`../groth16-prover/RustGroth16Corr
 
 Every step asserts its own correctness and prints the exact values that the Rust binaries (`print_r1cs`, `print_qap`, `print_crs`, …) print. G1 scalars and coordinates match bit-for-bit. G2 coordinates differ by field embedding (`F_q²` in Rust/arkworks vs `F_p¹²` in Sage), which is expected.
 
+</details>
+
 ---
 
-## Step 2 — FFT / Lagrange basis path (implemented)
+## Implementation 2 (FFT)
 
 `groth16.sage` now contains **both** the dense-monomial path and the FFT/roots-of-unity path. After running Step 1.16, the script continues with Steps 2.3–2.12 to build the same QAP via FFT, compute the quotient, and compare the two paths side-by-side.
+
+<details>
+<summary><b>Steps 2.1–2.17 — click to expand</b></summary>
 
 ### What Step 2 adds — at a glance
 
@@ -134,7 +153,11 @@ cd ../groth16-prover
 cargo run --bin print_qap_engines
 ```
 
-### Bit-for-bit Rust ↔ Sage verification
+</details>
+
+---
+
+## Bit-for-bit Rust ↔ Sage verification
 
 Both the Rust crate and the Sage script implement **the same two paths** independently (different languages, different libraries, no shared code). We verified that:
 
@@ -215,7 +238,9 @@ The witness polynomials `l(x) = Σ a_i·u_i(x)`, `r(x)`, `o(x)` and the quotient
 
 </details>
 
-### What the comparison proves
+---
+
+## What the comparison proves
 
 1. **The Rust FFT implementation is correct.** It uses `ark_poly::GeneralEvaluationDomain` (Cooley-Tukey IFFT) and `DensePolynomial` division. The output matches an independent Sage implementation that uses a hand-written radix-2 butterfly and the same BLS12-381 field arithmetic.
 2. **The Sage FFT implementation is correct.** It serves as a second, readable ground-truth for the FFT path, just as the dense path served as ground-truth for the original prover.
