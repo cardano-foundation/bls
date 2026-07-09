@@ -10,15 +10,22 @@ groth16-prover prove --circuit circuit.r1cs --witness witness.wtns
 
 # Generate a proof and write raw binary to file
 groth16-prover prove --circuit circuit.r1cs --witness witness.wtns --out proof.bin
+```
 
-# Use classical dense QAP + naive scalar-by-scalar prover (pedagogical)
-groth16-prover prove --circuit circuit.r1cs --witness witness.wtns --engine dense --prover naive
+### All engine + prover combinations
 
-# Use FFT QAP + naive prover
-groth16-prover prove --circuit circuit.r1cs --witness witness.wtns --engine fft --prover naive
+```bash
+# 1. fft + pippenger   (default — fastest, recommended for production)
+groth16-prover prove --circuit c.r1cs --witness w.wtns --engine fft --prover pippenger
 
-# Use dense QAP + Pippenger MSM
-groth16-prover prove --circuit circuit.r1cs --witness witness.wtns --engine dense --prover pippenger
+# 2. fft + naive       (good for debugging FFT path; same proof points as pippenger)
+groth16-prover prove --circuit c.r1cs --witness w.wtns --engine fft --prover naive
+
+# 3. dense + pippenger (fast MSM but slow QAP; useful for parity testing)
+groth16-prover prove --circuit c.r1cs --witness w.wtns --engine dense --prover pippenger
+
+# 4. dense + naive     (pedagogical — every step is scalar-by-scalar, easiest to trace)
+groth16-prover prove --circuit c.r1cs --witness w.wtns --engine dense --prover naive
 ```
 
 ### Flags
