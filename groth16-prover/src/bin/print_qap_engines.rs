@@ -64,9 +64,9 @@ fn main() {
     println!("\n--- Quotient parity check ---");
     let witness: Vec<Fr> = groth16_prover::r1cs::WITNESS.iter().map(|&v| Fr::from(v)).collect();
     let (dense_l, dense_r, dense_o, dense_h, dense_t_tau) =
-        groth16_prover::engine::evaluate_witness_and_quotient(&dense, &witness, tau);
+        groth16_prover::engine::evaluate_witness_and_quotient(&dense, &L, &R, &O, &witness, tau);
     let (fft_l, fft_r, fft_o, fft_h, fft_t_tau) =
-        groth16_prover::engine::evaluate_witness_and_quotient(&fft, &witness, tau);
+        groth16_prover::engine::evaluate_witness_and_quotient(&fft, &L, &R, &O, &witness, tau);
 
     println!("Dense: l(τ)={}, r(τ)={}, o(τ)={}, h(τ)={}, T(τ)={}",
         dense_l, dense_r, dense_o, dense_h, dense_t_tau);

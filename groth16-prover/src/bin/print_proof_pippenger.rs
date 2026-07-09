@@ -2,7 +2,7 @@ use ark_bls12_381::{G1Affine, G1Projective, G2Affine, G2Projective, Fr};
 use ark_ec::Group;
 use groth16_prover::engine::FftQapEngine;
 use groth16_prover::prover::{NaiveProver, PippengerProver, Prover};
-use groth16_prover::r1cs::WITNESS;
+use groth16_prover::r1cs::{L, O, R, WITNESS};
 
 fn main() {
     println!("=== Step 3.1: Pippenger MSM Proof Assembly ===\n");
@@ -23,7 +23,7 @@ fn main() {
     // ------------------------------------------------------------------
     println!("--- Naive prover (scalar-by-scalar) ---");
     let (proof_naive, public_naive) =
-        naive.prove(&engine, &witness, tau, alpha, beta, gamma, delta);
+        naive.prove(&engine, &L, &R, &O, &witness, tau, alpha, beta, gamma, delta);
 
     println!("A (G1) x = {}", proof_naive.a.x);
     println!("A (G1) y = {}", proof_naive.a.y);
@@ -39,7 +39,7 @@ fn main() {
     // ------------------------------------------------------------------
     println!("\n--- Pippenger prover (batched MSM) ---");
     let (proof_pip, public_pip) =
-        pippenger.prove(&engine, &witness, tau, alpha, beta, gamma, delta);
+        pippenger.prove(&engine, &L, &R, &O, &witness, tau, alpha, beta, gamma, delta);
 
     println!("A (G1) x = {}", proof_pip.a.x);
     println!("A (G1) y = {}", proof_pip.a.y);

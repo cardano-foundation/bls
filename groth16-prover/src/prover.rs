@@ -5,7 +5,6 @@ use ark_poly::{univariate::DensePolynomial, Polynomial};
 use ark_std::vec::Vec;
 
 use crate::engine::{poly_add, poly_scalar_mul, QapEngine};
-use crate::r1cs::{L, R, O};
 
 /// A Groth16 proof consists of three curve points.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -33,9 +32,12 @@ pub trait Prover {
     ///
     /// The toxic waste parameters are the same fixed test values used
     /// throughout the crate: `tau=3, alpha=5, beta=7, gamma=11, delta=13`.
-    fn prove<E: QapEngine>(
+    fn prove<E: QapEngine, L: AsRef<[u64]>, R: AsRef<[u64]>, O: AsRef<[u64]>>(
         &self,
         engine: &E,
+        l: &[L],
+        r: &[R],
+        o: &[O],
         witness: &[Fr],
         tau: Fr,
         alpha: Fr,
@@ -59,9 +61,12 @@ impl NaiveProver {
 }
 
 impl Prover for NaiveProver {
-    fn prove<E: QapEngine>(
+    fn prove<E: QapEngine, Lm: AsRef<[u64]>, Rm: AsRef<[u64]>, Om: AsRef<[u64]>>(
         &self,
         engine: &E,
+        l: &[Lm],
+        r: &[Rm],
+        o: &[Om],
         witness: &[Fr],
         tau: Fr,
         alpha: Fr,
@@ -72,7 +77,7 @@ impl Prover for NaiveProver {
         let g1_proj = G1Projective::generator();
         let g2_proj = G2Projective::generator();
 
-        let (us_tau, vs_tau, ws_tau) = engine.evaluate_qap_at_tau(&L, &R, &O, tau);
+        let (us_tau, vs_tau, ws_tau) = engine.evaluate_qap_at_tau(l, r, o, tau);
 
         // ------------------------------------------------------------------
         // A = l(tau)·G1 + alpha·G1
@@ -101,7 +106,7 @@ impl Prover for NaiveProver {
         let delta_inv = delta.inverse().unwrap();
 
         // Compute h(tau) from the quotient polynomial
-        let (us, vs, ws) = engine.build_qap(&L, &R, &O);
+        let (us, vs, ws) = engine.build_qap(l, r, o);
         let mut l_poly = DensePolynomial::zero();
         let mut r_poly = DensePolynomial::zero();
         let mut o_poly = DensePolynomial::zero();
@@ -110,7 +115,7 @@ impl Prover for NaiveProver {
             r_poly = poly_add(&r_poly, &poly_scalar_mul(&vs[i], witness[i]));
             o_poly = poly_add(&o_poly, &poly_scalar_mul(&ws[i], witness[i]));
         }
-        let t = engine.target_poly(3);
+        let t = engine.target_poly(l.len());
         let h = engine.compute_quotient(&l_poly, &r_poly, &o_poly, &t);
         let h_tau = h.evaluate(&tau);
         let t_tau = t.evaluate(&tau);
@@ -159,9 +164,12 @@ impl PippengerProver {
 }
 
 impl Prover for PippengerProver {
-    fn prove<E: QapEngine>(
+    fn prove<E: QapEngine, Lm: AsRef<[u64]>, Rm: AsRef<[u64]>, Om: AsRef<[u64]>>(
         &self,
         engine: &E,
+        l: &[Lm],
+        r: &[Rm],
+        o: &[Om],
         witness: &[Fr],
         tau: Fr,
         alpha: Fr,
@@ -173,7 +181,7 @@ impl Prover for PippengerProver {
         let g2_proj = G2Projective::generator();
         let g1_gen = G1Affine::generator();
 
-        let (us_tau, vs_tau, ws_tau) = engine.evaluate_qap_at_tau(&L, &R, &O, tau);
+        let (us_tau, vs_tau, ws_tau) = engine.evaluate_qap_at_tau(l, r, o, tau);
 
         // ------------------------------------------------------------------
         // A = l(tau)·G1 + alpha·G1
@@ -202,7 +210,7 @@ impl Prover for PippengerProver {
         let delta_inv = delta.inverse().unwrap();
 
         // Compute h(tau) from the quotient polynomial
-        let (us, vs, ws) = engine.build_qap(&L, &R, &O);
+        let (us, vs, ws) = engine.build_qap(l, r, o);
         let mut l_poly = DensePolynomial::zero();
         let mut r_poly = DensePolynomial::zero();
         let mut o_poly = DensePolynomial::zero();
@@ -211,7 +219,7 @@ impl Prover for PippengerProver {
             r_poly = poly_add(&r_poly, &poly_scalar_mul(&vs[i], witness[i]));
             o_poly = poly_add(&o_poly, &poly_scalar_mul(&ws[i], witness[i]));
         }
-        let t = engine.target_poly(3);
+        let t = engine.target_poly(l.len());
         let h = engine.compute_quotient(&l_poly, &r_poly, &o_poly, &t);
         let h_tau = h.evaluate(&tau);
         let t_tau = t.evaluate(&tau);
@@ -278,7 +286,7 @@ pub fn verify_proof(
 mod tests {
     use super::*;
     use crate::engine::{DenseQapEngine, FftQapEngine};
-    use crate::r1cs::WITNESS;
+    use crate::r1cs::{L, O, R, WITNESS};
 
     fn toxic_waste() -> (Fr, Fr, Fr, Fr, Fr) {
         (
@@ -301,7 +309,7 @@ mod tests {
         let witness = witness();
         let (tau, alpha, beta, gamma, delta) = toxic_waste();
 
-        let (proof, public_input) = prover.prove(&engine, &witness, tau, alpha, beta, gamma, delta);
+        let (proof, public_input) = prover.prove(&engine, &L, &R, &O, &witness, tau, alpha, beta, gamma, delta);
 
         let alpha_g1 = G1Affine::from(G1Projective::generator() * alpha);
         let beta_g2 = G2Affine::from(G2Projective::generator() * beta);
@@ -321,7 +329,7 @@ mod tests {
         let witness = witness();
         let (tau, alpha, beta, gamma, delta) = toxic_waste();
 
-        let (proof, public_input) = prover.prove(&engine, &witness, tau, alpha, beta, gamma, delta);
+        let (proof, public_input) = prover.prove(&engine, &L, &R, &O, &witness, tau, alpha, beta, gamma, delta);
 
         let alpha_g1 = G1Affine::from(G1Projective::generator() * alpha);
         let beta_g2 = G2Affine::from(G2Projective::generator() * beta);
@@ -341,7 +349,7 @@ mod tests {
         let witness = witness();
         let (tau, alpha, beta, gamma, delta) = toxic_waste();
 
-        let (proof, public_input) = prover.prove(&engine, &witness, tau, alpha, beta, gamma, delta);
+        let (proof, public_input) = prover.prove(&engine, &L, &R, &O, &witness, tau, alpha, beta, gamma, delta);
 
         let alpha_g1 = G1Affine::from(G1Projective::generator() * alpha);
         let beta_g2 = G2Affine::from(G2Projective::generator() * beta);
@@ -363,9 +371,9 @@ mod tests {
         let (tau, alpha, beta, gamma, delta) = toxic_waste();
 
         let (proof_naive, public_naive) =
-            naive.prove(&engine, &witness, tau, alpha, beta, gamma, delta);
+            naive.prove(&engine, &L, &R, &O, &witness, tau, alpha, beta, gamma, delta);
         let (proof_pip, public_pip) =
-            pippenger.prove(&engine, &witness, tau, alpha, beta, gamma, delta);
+            pippenger.prove(&engine, &L, &R, &O, &witness, tau, alpha, beta, gamma, delta);
 
         assert_eq!(proof_naive.a, proof_pip.a, "A must match between naive and Pippenger");
         assert_eq!(proof_naive.b, proof_pip.b, "B must match between naive and Pippenger");
@@ -382,9 +390,9 @@ mod tests {
         let (tau, alpha, beta, gamma, delta) = toxic_waste();
 
         let (proof_naive, public_naive) =
-            naive.prove(&engine, &witness, tau, alpha, beta, gamma, delta);
+            naive.prove(&engine, &L, &R, &O, &witness, tau, alpha, beta, gamma, delta);
         let (proof_pip, public_pip) =
-            pippenger.prove(&engine, &witness, tau, alpha, beta, gamma, delta);
+            pippenger.prove(&engine, &L, &R, &O, &witness, tau, alpha, beta, gamma, delta);
 
         assert_eq!(proof_naive.a, proof_pip.a, "A must match between naive and Pippenger");
         assert_eq!(proof_naive.b, proof_pip.b, "B must match between naive and Pippenger");
