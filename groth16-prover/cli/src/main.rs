@@ -22,6 +22,20 @@ pub enum Command {
     ///
     ///   $ groth16-prover prove --circuit circuit.r1cs --witness witness.wtns  # hex to stdout
     Prove(cmd::prove::Args),
+
+    /// Verify a Groth16 proof against its public input
+    ///
+    /// Loads a proof file (192 bytes) and a public-input file (48 bytes),
+    /// then checks the Groth16 pairing equation.
+    ///
+    /// The verification key is derived from hard-coded toxic-waste
+    /// parameters (same as the prover). In production you would load a
+    /// verification key generated during the trusted-setup ceremony.
+    ///
+    /// Examples:
+    ///
+    ///   $ groth16-prover verify --proof proof.bin --public proof.pub
+    Verify(cmd::verify::Args),
 }
 
 #[derive(Debug, Parser)]
@@ -40,5 +54,6 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     match args.command {
         Command::Prove(args) => cmd::prove::run(args),
+        Command::Verify(args) => cmd::verify::run(args),
     }
 }
