@@ -1,7 +1,7 @@
 use ark_bls12_381::Fr;
 use groth16_prover::engine::{DenseQapEngine, FftQapEngine};
 use groth16_prover::prover::{NaiveProver, PippengerProver, Prover};
-use groth16_prover::r1cs::WITNESS;
+use groth16_prover::r1cs::{L, O, R, WITNESS};
 use std::time::Instant;
 
 fn main() {
@@ -23,29 +23,29 @@ fn main() {
     let fft = FftQapEngine::new();
 
     for _ in 0..100 {
-        let _ = naive.prove(&dense, &witness, tau, alpha, beta, gamma, delta);
-        let _ = naive.prove(&fft, &witness, tau, alpha, beta, gamma, delta);
-        let _ = pippenger.prove(&fft, &witness, tau, alpha, beta, gamma, delta);
+        let _ = naive.prove(&dense, &L, &R, &O, &witness, tau, alpha, beta, gamma, delta);
+        let _ = naive.prove(&fft, &L, &R, &O, &witness, tau, alpha, beta, gamma, delta);
+        let _ = pippenger.prove(&fft, &L, &R, &O, &witness, tau, alpha, beta, gamma, delta);
     }
 
     // --- Implementation 1: Dense + Naive ---
     let start = Instant::now();
     for _ in 0..iterations {
-        let _ = naive.prove(&dense, &witness, tau, alpha, beta, gamma, delta);
+        let _ = naive.prove(&dense, &L, &R, &O, &witness, tau, alpha, beta, gamma, delta);
     }
     let t1 = start.elapsed();
 
     // --- Implementation 2: FFT + Naive ---
     let start = Instant::now();
     for _ in 0..iterations {
-        let _ = naive.prove(&fft, &witness, tau, alpha, beta, gamma, delta);
+        let _ = naive.prove(&fft, &L, &R, &O, &witness, tau, alpha, beta, gamma, delta);
     }
     let t2 = start.elapsed();
 
     // --- Implementation 3: FFT + Pippenger ---
     let start = Instant::now();
     for _ in 0..iterations {
-        let _ = pippenger.prove(&fft, &witness, tau, alpha, beta, gamma, delta);
+        let _ = pippenger.prove(&fft, &L, &R, &O, &witness, tau, alpha, beta, gamma, delta);
     }
     let t3 = start.elapsed();
 

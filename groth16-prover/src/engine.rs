@@ -3,18 +3,21 @@ use ark_ff::{Field, One, Zero};
 use ark_poly::{univariate::DensePolynomial, DenseUVPolynomial, EvaluationDomain, GeneralEvaluationDomain, Polynomial};
 use ark_std::vec::Vec;
 
-use crate::r1cs::{L, R, O};
-
 /// Trait abstracting over the two QAP construction strategies:
 /// - `DenseQapEngine` — classical dense Lagrange (pedagogical, O(n²))
 /// - `FftQapEngine` — FFT over roots of unity (production, O(N log N))
+///
+/// The trait is generic over any row type that can be viewed as `&[u64]`,
+/// so it accepts both fixed-size arrays (`&[[u64; 8]]`) and dynamic vectors
+/// (`&[Vec<u64>]`). This lets the same engine work with hard-coded circuits
+/// and Circom-generated R1CS files.
 pub trait QapEngine {
     /// Build the QAP polynomials u_s(x), v_s(x), w_s(x) from R1CS matrices.
-    fn build_qap(
+    fn build_qap<L: AsRef<[u64]>, R: AsRef<[u64]>, O: AsRef<[u64]>>(
         &self,
-        l: &[[u64; 8]],
-        r: &[[u64; 8]],
-        o: &[[u64; 8]],
+        l: &[L],
+        r: &[R],
+        o: &[O],
     ) -> (Vec<DensePolynomial<Fr>>, Vec<DensePolynomial<Fr>>, Vec<DensePolynomial<Fr>>);
 
     /// Build the target polynomial T(x) that vanishes at all constraint points.
@@ -35,11 +38,11 @@ pub trait QapEngine {
     ///
     /// In the dense path this evaluates each stored polynomial.
     /// In the FFT path this is a dot-product against Lagrange basis values.
-    fn evaluate_qap_at_tau(
+    fn evaluate_qap_at_tau<L: AsRef<[u64]>, R: AsRef<[u64]>, O: AsRef<[u64]>>(
         &self,
-        l: &[[u64; 8]],
-        r: &[[u64; 8]],
-        o: &[[u64; 8]],
+        l: &[L],
+        r: &[R],
+        o: &[O],
         tau: Fr,
     ) -> (Vec<Fr>, Vec<Fr>, Vec<Fr>);
 }
@@ -54,13 +57,13 @@ impl DenseQapEngine {
 }
 
 impl QapEngine for DenseQapEngine {
-    fn build_qap(
+    fn build_qap<L: AsRef<[u64]>, R: AsRef<[u64]>, O: AsRef<[u64]>>(
         &self,
-        l: &[[u64; 8]],
-        r: &[[u64; 8]],
-        o: &[[u64; 8]],
+        l: &[L],
+        r: &[R],
+        o: &[O],
     ) -> (Vec<DensePolynomial<Fr>>, Vec<DensePolynomial<Fr>>, Vec<DensePolynomial<Fr>>) {
-        let n_vars = l[0].len();
+        let n_vars = l[0].as_ref().len();
         let n_constraints = l.len();
         assert_eq!(n_constraints, 3, "DenseQapEngine only supports 3 constraints");
 
@@ -72,21 +75,21 @@ impl QapEngine for DenseQapEngine {
 
         for i in 0..n_vars {
             // u_i(x) from L column
-            let y0_l = Fr::from(l[0][i]);
-            let y1_l = Fr::from(l[1][i]);
-            let y2_l = Fr::from(l[2][i]);
+            let y0_l = Fr::from(l[0].as_ref()[i]);
+            let y1_l = Fr::from(l[1].as_ref()[i]);
+            let y2_l = Fr::from(l[2].as_ref()[i]);
             us.push(interpolate_3_points(y0_l, y1_l, y2_l, two_inv));
 
             // v_i(x) from R column
-            let y0_r = Fr::from(r[0][i]);
-            let y1_r = Fr::from(r[1][i]);
-            let y2_r = Fr::from(r[2][i]);
+            let y0_r = Fr::from(r[0].as_ref()[i]);
+            let y1_r = Fr::from(r[1].as_ref()[i]);
+            let y2_r = Fr::from(r[2].as_ref()[i]);
             vs.push(interpolate_3_points(y0_r, y1_r, y2_r, two_inv));
 
             // w_i(x) from O column
-            let y0_o = Fr::from(o[0][i]);
-            let y1_o = Fr::from(o[1][i]);
-            let y2_o = Fr::from(o[2][i]);
+            let y0_o = Fr::from(o[0].as_ref()[i]);
+            let y1_o = Fr::from(o[1].as_ref()[i]);
+            let y2_o = Fr::from(o[2].as_ref()[i]);
             ws.push(interpolate_3_points(y0_o, y1_o, y2_o, two_inv));
         }
 
@@ -121,11 +124,11 @@ impl QapEngine for DenseQapEngine {
         q
     }
 
-    fn evaluate_qap_at_tau(
+    fn evaluate_qap_at_tau<L: AsRef<[u64]>, R: AsRef<[u64]>, O: AsRef<[u64]>>(
         &self,
-        l: &[[u64; 8]],
-        r: &[[u64; 8]],
-        o: &[[u64; 8]],
+        l: &[L],
+        r: &[R],
+        o: &[O],
         tau: Fr,
     ) -> (Vec<Fr>, Vec<Fr>, Vec<Fr>) {
         let (us, vs, ws) = self.build_qap(l, r, o);
@@ -144,7 +147,7 @@ impl FftQapEngine {
         Self
     }
 
-    fn domain_size(num_constraints: usize) -> usize {
+    pub fn domain_size(num_constraints: usize) -> usize {
         let mut n = 1;
         while n < num_constraints {
             n <<= 1;
@@ -154,13 +157,13 @@ impl FftQapEngine {
 }
 
 impl QapEngine for FftQapEngine {
-    fn build_qap(
+    fn build_qap<L: AsRef<[u64]>, R: AsRef<[u64]>, O: AsRef<[u64]>>(
         &self,
-        l: &[[u64; 8]],
-        r: &[[u64; 8]],
-        o: &[[u64; 8]],
+        l: &[L],
+        r: &[R],
+        o: &[O],
     ) -> (Vec<DensePolynomial<Fr>>, Vec<DensePolynomial<Fr>>, Vec<DensePolynomial<Fr>>) {
-        let n_vars = l[0].len();
+        let n_vars = l[0].as_ref().len();
         let n_constraints = l.len();
         let domain_size = Self::domain_size(n_constraints);
         let domain = GeneralEvaluationDomain::<Fr>::new(domain_size)
@@ -175,7 +178,7 @@ impl QapEngine for FftQapEngine {
             let mut evals: Vec<Fr> = (0..domain_size)
                 .map(|j| {
                     if j < n_constraints {
-                        Fr::from(l[j][i])
+                        Fr::from(l[j].as_ref()[i])
                     } else {
                         Fr::zero()
                     }
@@ -188,7 +191,7 @@ impl QapEngine for FftQapEngine {
             let mut evals: Vec<Fr> = (0..domain_size)
                 .map(|j| {
                     if j < n_constraints {
-                        Fr::from(r[j][i])
+                        Fr::from(r[j].as_ref()[i])
                     } else {
                         Fr::zero()
                     }
@@ -201,7 +204,7 @@ impl QapEngine for FftQapEngine {
             let mut evals: Vec<Fr> = (0..domain_size)
                 .map(|j| {
                     if j < n_constraints {
-                        Fr::from(o[j][i])
+                        Fr::from(o[j].as_ref()[i])
                     } else {
                         Fr::zero()
                     }
@@ -245,11 +248,11 @@ impl QapEngine for FftQapEngine {
         quotient
     }
 
-    fn evaluate_qap_at_tau(
+    fn evaluate_qap_at_tau<L: AsRef<[u64]>, R: AsRef<[u64]>, O: AsRef<[u64]>>(
         &self,
-        l: &[[u64; 8]],
-        r: &[[u64; 8]],
-        o: &[[u64; 8]],
+        l: &[L],
+        r: &[R],
+        o: &[O],
         tau: Fr,
     ) -> (Vec<Fr>, Vec<Fr>, Vec<Fr>) {
         let n_constraints = l.len();
@@ -260,7 +263,7 @@ impl QapEngine for FftQapEngine {
         // Compute all Lagrange basis evaluations at tau: L_0(tau), L_1(tau), ..., L_{N-1}(tau)
         let lagrange_at_tau = domain.evaluate_all_lagrange_coefficients(tau);
 
-        let n_vars = l[0].len();
+        let n_vars = l[0].as_ref().len();
         let mut us_tau = Vec::with_capacity(n_vars);
         let mut vs_tau = Vec::with_capacity(n_vars);
         let mut ws_tau = Vec::with_capacity(n_vars);
@@ -272,9 +275,9 @@ impl QapEngine for FftQapEngine {
             let mut w = Fr::zero();
             for c in 0..n_constraints {
                 let lc = lagrange_at_tau[c];
-                u += Fr::from(l[c][s]) * lc;
-                v += Fr::from(r[c][s]) * lc;
-                w += Fr::from(o[c][s]) * lc;
+                u += Fr::from(l[c].as_ref()[s]) * lc;
+                v += Fr::from(r[c].as_ref()[s]) * lc;
+                w += Fr::from(o[c].as_ref()[s]) * lc;
             }
             us_tau.push(u);
             vs_tau.push(v);
@@ -332,12 +335,15 @@ pub fn poly_scalar_mul(poly: &DensePolynomial<Fr>, scalar: Fr) -> DensePolynomia
 
 /// Evaluate witness polynomials at τ using a QapEngine.
 /// Returns (l(τ), r(τ), o(τ), h(τ), T(τ)) where h is the quotient.
-pub fn evaluate_witness_and_quotient<E: QapEngine>(
+pub fn evaluate_witness_and_quotient<E: QapEngine, L: AsRef<[u64]>, R: AsRef<[u64]>, O: AsRef<[u64]>>(
     engine: &E,
+    l: &[L],
+    r: &[R],
+    o: &[O],
     witness: &[Fr],
     tau: Fr,
 ) -> (Fr, Fr, Fr, Fr, Fr) {
-    let (us, vs, ws) = engine.build_qap(&L, &R, &O);
+    let (us, vs, ws) = engine.build_qap(l, r, o);
 
     // Build l(x), r(x), o(x) as linear combinations
     let mut l_poly = DensePolynomial::zero();
@@ -350,7 +356,7 @@ pub fn evaluate_witness_and_quotient<E: QapEngine>(
         o_poly = poly_add(&o_poly, &poly_scalar_mul(&ws[i], witness[i]));
     }
 
-    let t = engine.target_poly(3);
+    let t = engine.target_poly(l.len());
     let h = engine.compute_quotient(&l_poly, &r_poly, &o_poly, &t);
 
     let l_tau = l_poly.evaluate(&tau);
@@ -416,7 +422,7 @@ mod tests {
         let engine = FftQapEngine::new();
         let witness: Vec<Fr> = WITNESS.iter().map(|&v| Fr::from(v)).collect();
 
-        let (_, _, _, _, _) = evaluate_witness_and_quotient(&engine, &witness, Fr::from(3u64));
+        let (_, _, _, _, _) = evaluate_witness_and_quotient(&engine, &L, &R, &O, &witness, Fr::from(3u64));
         // evaluate_witness_and_quotient already asserts that the quotient
         // has zero remainder inside compute_quotient
     }
@@ -426,7 +432,7 @@ mod tests {
         let engine = DenseQapEngine::new();
         let witness: Vec<Fr> = WITNESS.iter().map(|&v| Fr::from(v)).collect();
 
-        let (_, _, _, _, _) = evaluate_witness_and_quotient(&engine, &witness, Fr::from(3u64));
+        let (_, _, _, _, _) = evaluate_witness_and_quotient(&engine, &L, &R, &O, &witness, Fr::from(3u64));
     }
 
     #[test]
