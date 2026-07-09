@@ -21,6 +21,27 @@ All 7 library tests pass (R1CS relation, QAP interpolation, target polynomial, f
 
 ---
 
+## Benchmarks
+
+Proof-production time for the hard-coded 3-constraint circuit (`x1·x2 = x5`, `x3·x4 = x6`, `x5·x6 = a`) on a single core, compiled with `--release`:
+
+| Implementation | Engine | Prover | Per-proof time | vs. Impl 1 | vs. Impl 2 |
+|----------------|--------|--------|---------------|------------|------------|
+| 1 (dense) | `DenseQapEngine` | `NaiveProver` | **3.87 ms** | — | — |
+| 2 (FFT) | `FftQapEngine` | `NaiveProver` | **4.04 ms** | 0.96× | — |
+| 3 (Pippenger) | `FftQapEngine` | `PippengerProver` | **3.30 ms** | 1.17× | 1.22× |
+
+> **What the numbers mean.** For a 3-gate circuit the FFT overhead (padding to 4 points, extra IFFT steps) outweighs its `O(N log N)` advantage, so Implementation 2 is slightly slower than Implementation 1. Pippenger's batched MSM still yields a modest ~20 % speedup even at this tiny scale. On realistic circuits with hundreds or thousands of gates, the FFT advantage grows to ~1000× and Pippenger's MSM speedup grows to 5–10×.
+
+Run the benchmark yourself:
+
+```bash
+cd groth16-prover
+cargo run --bin benchmark_provers --release
+```
+
+---
+
 ## Design choices (and why)
 
 | Choice | Rationale |
