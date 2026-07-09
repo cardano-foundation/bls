@@ -19,6 +19,20 @@ cargo test
 
 All 20 library tests pass (R1CS relation, QAP interpolation, target polynomial, field arithmetic, Circom parser, prover parity).
 
+### 2. Use the CLI
+
+A command-line interface lives in `groth16-prover/cli/`:
+
+```bash
+cd groth16-prover/cli
+cargo run --release -- prove \
+  --circuit ../circom/multiplier.r1cs \
+  --witness ../circom/witness.wtns \
+  --out /tmp/proof.bin
+```
+
+See [`cli/README.md`](cli/README.md) for full CLI documentation.
+
 ---
 
 ## Benchmarks
@@ -508,6 +522,20 @@ cargo run --bin print_circom_proof
 cargo test circom_adapter
 cargo run --bin benchmark_circom --release
 ```
+
+### CLI (Implementation 4 in practice)
+
+The `groth16-prover-cli` crate wraps the Circom adapter into a command-line tool:
+
+```bash
+cd groth16-prover/cli
+cargo run --release -- prove \
+  --circuit ../circom/multiplier.r1cs \
+  --witness ../circom/witness.wtns \
+  --out /tmp/proof.bin
+```
+
+This uses `FftQapEngine` + `PippengerProver` under the hood and outputs a standard arkworks-serialized proof. See [`cli/README.md`](cli/README.md) for details.
 
 </details>
 
