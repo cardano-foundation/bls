@@ -151,6 +151,28 @@ docker run --rm --entrypoint bash \
 
 Compare the printed intermediate values with the Rust output. They match bit-for-bit for all G1 points and scalars. G2 coordinates differ only by field embedding (`F_q²` in Rust vs `F_p¹²` in Sage), which is expected.
 
+### Produce a proof in one line (Implementation 1)
+
+```rust
+use groth16_prover::engine::DenseQapEngine;
+use groth16_prover::prover::{NaiveProver, Prover};
+use groth16_prover::r1cs::WITNESS;
+use ark_bls12_381::Fr;
+
+let engine = DenseQapEngine::new();
+let prover = NaiveProver::new();
+let witness: Vec<Fr> = WITNESS.iter().map(|&v| Fr::from(v)).collect();
+
+let (proof, public_input) = prover.prove(
+    &engine, &witness,
+    Fr::from(3u64),  // τ
+    Fr::from(5u64),  // α
+    Fr::from(7u64),  // β
+    Fr::from(11u64), // γ
+    Fr::from(13u64), // δ
+);
+```
+
 </details>
 
 </details>
@@ -245,6 +267,32 @@ Because the two paths use **different QAP domains** (dense points `{0,1,2}` vs. 
 
 To achieve a true bit-for-bit parity (identical coefficients and proof points), both engines would need to use the **same QAP domain** (either both dense over `{0,1,2}` or both FFT over the same roots of unity). The current implementation intentionally keeps the domains different so that the dense path stays pedagogical and the FFT path stays production-standard.
 
+### Produce a proof in one line (Implementation 2)
+
+Only the engine changes — everything else is identical to Implementation 1:
+
+```rust
+use groth16_prover::engine::FftQapEngine;
+use groth16_prover::prover::{NaiveProver, Prover};
+use groth16_prover::r1cs::WITNESS;
+use ark_bls12_381::Fr;
+
+let engine = FftQapEngine::new();   // <-- switch to FFT
+let prover = NaiveProver::new();
+let witness: Vec<Fr> = WITNESS.iter().map(|&v| Fr::from(v)).collect();
+
+let (proof, public_input) = prover.prove(
+    &engine, &witness,
+    Fr::from(3u64),  // τ
+    Fr::from(5u64),  // α
+    Fr::from(7u64),  // β
+    Fr::from(11u64), // γ
+    Fr::from(13u64), // δ
+);
+```
+
+> **Note:** The resulting proof points are *different* from Implementation 1 because the FFT QAP uses a different domain (4-th roots of unity vs. `{0,1,2}`), but the proof is equally valid and passes its own verifier.
+
 </details>
 
 ---
@@ -297,6 +345,32 @@ cargo test test_pippenger_matches_naive_with_fft_engine
 ```
 
 > **Note:** No Sage implementation is needed for this step because Pippenger is purely an optimization of group arithmetic. The mathematical inputs (scalars) and outputs (curve points) are identical to the naive path.
+
+### Produce a proof in one line (Implementation 3)
+
+Only the prover changes — the engine stays `FftQapEngine`:
+
+```rust
+use groth16_prover::engine::FftQapEngine;
+use groth16_prover::prover::{PippengerProver, Prover};
+use groth16_prover::r1cs::WITNESS;
+use ark_bls12_381::Fr;
+
+let engine = FftQapEngine::new();
+let prover = PippengerProver::new(); // <-- switch to Pippenger MSM
+let witness: Vec<Fr> = WITNESS.iter().map(|&v| Fr::from(v)).collect();
+
+let (proof, public_input) = prover.prove(
+    &engine, &witness,
+    Fr::from(3u64),  // τ
+    Fr::from(5u64),  // α
+    Fr::from(7u64),  // β
+    Fr::from(11u64), // γ
+    Fr::from(13u64), // δ
+);
+```
+
+> **Note:** The resulting proof points are **bit-for-bit identical** to `NaiveProver` + `FftQapEngine`. Pippenger is purely a performance optimization.
 
 </details>
 
