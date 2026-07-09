@@ -162,6 +162,36 @@ T(x) = (x - 0)(x - 1)(x - 2) = x³ - 3x² + 2x
 
 `T(x)` is zero exactly at the gate points, and nowhere else. It will act as a "divisibility test" later.
 
+### Concrete QAP polynomials for this circuit
+
+Most of the 24 polynomials are identically zero because the matrices are sparse. Only the columns that actually select a variable are non-trivial:
+
+**From `L` (left inputs)**
+
+| Polynomial | Values at `0, 1, 2` | Interpolated form |
+|------------|---------------------|-------------------|
+| `u₂(x)` | `[1, 0, 0]` | `1 - ³⁄₂x + ¹⁄₂x²` |
+| `u₄(x)` | `[0, 1, 0]` | `2x - x²` |
+| `u₆(x)` | `[0, 0, 1]` | `¹⁄₂x² - ¹⁄₂x` |
+
+**From `R` (right inputs)**
+
+| Polynomial | Values at `0, 1, 2` | Interpolated form |
+|------------|---------------------|-------------------|
+| `v₃(x)` | `[1, 0, 0]` | `1 - ³⁄₂x + ¹⁄₂x²` |
+| `v₅(x)` | `[0, 1, 0]` | `2x - x²` |
+| `v₇(x)` | `[0, 0, 1]` | `¹⁄₂x² - ¹⁄₂x` |
+
+**From `O` (outputs)**
+
+| Polynomial | Values at `0, 1, 2` | Interpolated form |
+|------------|---------------------|-------------------|
+| `w₁(x)` | `[0, 0, 1]` | `¹⁄₂x² - ¹⁄₂x` |
+| `w₆(x)` | `[1, 0, 0]` | `1 - ³⁄₂x + ¹⁄₂x²` |
+| `w₇(x)` | `[0, 1, 0]` | `2x - x²` |
+
+> **On fractional coefficients.** The fractions (`¹⁄₂`, `³⁄₂`) are perfectly valid in the finite field `Fr` because division by 2 means multiplication by the modular inverse of 2. In the actual Rust/Sage code the coefficients are stored as large integers modulo the BLS12-381 prime.
+
 ---
 
 ## 6.5 The FFT shortcut (production path)
@@ -253,6 +283,46 @@ h(x) = (l(x)·r(x) - o(x)) / T(x)
 
 Because the division is exact, there is **no remainder**. The existence of `h(x)` is the mathematical proof that all gates are satisfied.
 
+### Concrete witness polynomials for this circuit
+
+Folding the witness `a = [1, 48, 2, 2, 3, 4, 4, 12]` into the QAP polynomials gives:
+
+```
+l(x) = 2·u₂(x) + 3·u₄(x) + 4·u₆(x)
+     = 2 + x
+
+r(x) = 2·v₃(x) + 4·v₅(x) + 12·v₇(x)
+     = 2 - x + 3x²
+
+o(x) = 48·w₁(x) + 4·w₆(x) + 12·w₇(x)
+     = 4 - 6x + 14x²
+```
+
+**Sanity check at the gate points:**
+
+| x | l(x) | r(x) | o(x) | l(x)·r(x) == o(x)? |
+|---|------|------|------|-------------------|
+| 0 | 2 | 2 | 4 | 2·2 = 4 ✅ |
+| 1 | 3 | 4 | 12 | 3·4 = 12 ✅ |
+| 2 | 4 | 12 | 48 | 4·12 = 48 ✅ |
+
+**The quotient:**
+
+```
+p(x) = l(x)·r(x) - o(x)
+     = (2+x)(2-x+3x²) - (4-6x+14x²)
+     = 3x³ - 9x² + 6x
+     = 3·T(x)
+```
+
+Therefore:
+
+```
+h(x) = 3
+```
+
+The quotient is just the constant `3`. For larger circuits `h(x)` would have higher degree, but for our 3-gate example the arithmetic collapses beautifully to a single number.
+
 ---
 
 ## 8. Trusted Setup & Toxic Waste
@@ -263,7 +333,11 @@ To hide the proof, a setup phase generates random secret scalars (called **toxic
 τ, α, β, γ, δ   ←   random elements of Fr
 ```
 
-In a real deployment these numbers must be generated jointly and then destroyed (a multi-party computation ceremony). For this example we treat them as fixed test values.
+In a real deployment these numbers must be generated jointly and then destroyed (a multi-party computation ceremony). For this example we treat them as fixed test values:
+
+```
+τ = 3,   α = 5,   β = 7,   γ = 11,   δ = 13
+```
 
 From these secrets, the setup produces:
 - **SRS** (structured reference string): powers of `τ` hidden in curve points, e.g. `G1, τ·G1, τ²·G1, …`
@@ -284,10 +358,22 @@ Alice evaluates her polynomials at the secret point `τ`, but she does so **"in 
 A = l(τ)·G1 + α·G1
 ```
 
+With `τ = 3` and `l(x) = 2 + x`, we get `l(τ) = 5`. Adding `α = 5`:
+
+```
+A = 10 · G1
+```
+
 ### Proof element B (in G2)
 
 ```
 B = r(τ)·G2 + β·G2
+```
+
+With `r(x) = 2 - x + 3x²`, we get `r(τ) = 26`. Adding `β = 7`:
+
+```
+B = 33 · G2
 ```
 
 ### Proof element C (in G1)
@@ -297,6 +383,18 @@ C = Σ(private_inputs) aᵢ·Psi_P_G1[i]  +  h(τ)·(T(τ)/δ)·G1
 ```
 
 The first term is a weighted sum of the per-variable CRS points for Alice's private secrets. The second term incorporates the quotient polynomial `h(x)`.
+
+With `h(x) = 3`, `τ = 3`, `T(τ) = 6`, and `δ = 13`:
+
+```
+h(τ)·T(τ)/δ = 3 · 6 / 13 = 18/13
+```
+
+In the finite field this becomes a large integer, and when combined with the weighted sum of per-variable points the total scalar for `C` is:
+
+```
+C = 40335288596250915753421338852450742952069655769636644478925891307645062449637 · G1
+```
 
 The final proof is just **three curve points**: `(A, B, C)`.
 
@@ -317,6 +415,13 @@ Bob aggregates the CRS points for the public variables using the public witness 
 V = 1·Psi_V_G1[0] + 48·Psi_V_G1[1]
 ```
 
+`Psi_V_G1[0]` corresponds to the constant `1` wire and evaluates to the point at infinity (its combined scalar is zero), so in practice:
+
+```
+V = 48 · Psi_V_G1[1]
+    = 47668977431932900435861582280169059852445956818661488929639689727216891985934 · G1
+```
+
 ### Step 2 — Pairing check
 
 Bob checks the Groth16 equation:
@@ -326,6 +431,8 @@ e(A, B)  ==  e(alpha·G1, beta·G2) · e(V, gamma·G2) · e(C, delta·G2)
 ```
 
 Because of bilinearity, the left-hand side expands to terms involving `l(τ)·r(τ)`, `α·r(τ)`, `β·l(τ)`, and `α·β`. The right-hand side cancels everything except the witness-correctness term, which is valid **if and only if** `h(x)` was computed honestly from a satisfying witness.
+
+For our concrete example both sides evaluate to the same target-group element and the proof **passes**.
 
 If Alice cheated (wrong witness, or no witness at all), the equation fails with overwhelming probability.
 
