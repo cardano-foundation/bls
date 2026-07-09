@@ -541,26 +541,26 @@ This uses `FftQapEngine` + `PippengerProver` under the hood and outputs a standa
 
 ---
 
-## TO DO — Production innovations (from zeroj)
+## TO DO — Production innovations 
 
 <details>
 <summary><b>Pending improvements — click to expand</b></summary>
 
 The current crate is a **reference implementation** for correctness verification. The following items, already present in the [zeroj](https://github.com/bloxbean/zeroj) Java toolkit (see [`ZerojAudit.md`](../ZerojAudit.md)), would need to be adopted for production use:
 
-### (a) FFT / Lagrange basis as an alternative to dense monomials
+### (a) FFT / Lagrange basis as an alternative to dense monomials (zeroj supports that)
 
 - **Status:** ✅ **Implemented.** The `QapEngine` trait, `DenseQapEngine`, and `FftQapEngine` are all in `src/engine.rs` with passing parity tests. Steps 2.3–2.12 are complete: FFT domain setup, QAP construction via IFFT, target polynomial `T(x)=x^N−1`, per-variable QAP evaluation via Lagrange basis scalars, witness polynomials, and quotient computation via `divide_by_vanishing_poly` are all working. The only remaining gap is building the group-element SRS in the Lagrange basis (`L_i(τ)·G1` instead of `τ^i·G1`); the FFT path currently reuses the monomial SRS for proof assembly, which is mathematically valid but not the most efficient production pattern.
 - **Reference:** zeroj uses `FieldFFTBLS381` for coset FFT: constraint evaluations → IFFT → coefficient form; quotient `h(x)` is computed point-wise on the coset and inverse-FFT'd back. The Lagrange basis SRS (`u_s(tau)·G1`) is also more efficient than monomial SRS for FFT-based provers.
 - **Benefit:** Enables proving for realistic circuits (e.g., Poseidon hash, Merkle membership) in seconds rather than minutes.
 
-### (b) Pippenger multi-scalar multiplication (MSM)
+### (b) Pippenger multi-scalar multiplication (MSM) (zeroj supports that)
 
 - **Status:** ✅ **Implemented.** The `Prover` trait, `NaiveProver`, and `PippengerProver` are all in `src/prover.rs`. `PippengerProver` uses `ark_ec::VariableBaseMSM::msm` for batched multi-scalar multiplication of proof element `C` and public-input commitment `V`. A parity test asserts identical points against the naive path.
 - **Reference:** zeroj's `Groth16ProverBLS381` uses a bucket-MSM for computing `piA`, `piB`, and `piC`. Our implementation uses arkworks' built-in Pippenger via `G1Projective::msm`.
 - **Benefit:** 5–10× speedup on proof generation, especially for circuits with large witness vectors.
 
-### (c) Support usage of circom
+### (c) Support usage of circom (zeroj supports that)
 
 - **Status:** ✅ **Implemented.** The `circom_adapter` module in `src/circom_adapter.rs` parses `.r1cs` constraints and `.wtns` witnesses using `nom`. It converts sparse Circom matrices into dense `Vec<Vec<u64>>` representations and feeds them into the same `QapEngine` / `Prover` stack. Parity tests assert that the parsed matrices and witness match the hard-coded circuit bit-for-bit.
 - **Reference:** zeroj's `CircuitBuilder` generates R1CS dynamically; our adapter loads the constraints and witness from standard circom artifacts.
@@ -571,21 +571,21 @@ The current crate is a **reference implementation** for correctness verification
   3. ✅ Map circom wire indices to the QAP variable ordering — verified by parity test against hard-coded circuit.
   4. ✅ Verify that the FFT domain size matches `next_power_of_2(num_constraints)` — handled automatically by `FftQapEngine::target_poly`.
 
-### (d) Prepared verifier and batched pairing verification
+### (d) Prepared verifier and batched pairing verification (beyond what zeroj supports)
 
 - **Current:** The verifier recomputes every pairing from scratch each time a proof is checked.
 - **Target:** Add a `PreparedVerifyingKey` that precomputes and caches fixed verification-key data (e.g., G2 line coefficients for the Miller loop). Also expose a batched verifier that checks multiple proofs with a single multi-pairing product.
 - **Reference:** [Groth.jl](https://github.com/0xpantera/Groth.jl) implements `prepare_verifying_key`, `prepare_inputs`, and `verify_with_prepared`; batched pairing verification reduced their `N=16` batch from `18.212 ms` to `13.854 ms` on the same fixture. Arkworks also provides `PreparedVerifyingKey`.
 - **Benefit:** On-chain verification becomes cheaper because the heavy G2 preparation is done once per VK, not per proof. Batching further amortizes the Miller-loop cost across many proofs.
 
-### (e) Proof aggregation
+### (e) Proof aggregation (beyond what zeroj supports)
 
 - **Current:** Each proof is verified individually.
 - **Target:** Support Groth16 proof aggregation (rolling multiple proofs into a single succinct proof that can be verified with one pairing check).
 - **Reference:** Arkworks has an optional `groth16::aggregate_proofs` module. Groth.jl tracks this on their roadmap.
 - **Benefit:** Essential for rollup and batching use cases where many proofs need to be verified on-chain in a single transaction.
 
-### (f) Batch normalization and fixed-base MSM tables
+### (f) Batch normalization and fixed-base MSM tables (beyond what zeroj supports)
 
 - **Current:** Individual `G1Affine::from(projective)` calls and naive scalar-by-scalar point accumulation.
 - **Target:**
@@ -594,7 +594,7 @@ The current crate is a **reference implementation** for correctness verification
 - **Reference:** Groth.jl uses `batch_to_affine!` and `FixedBaseTable` with measured speedups on setup query generation.
 - **Benefit:** Batch normalization saves ~30–50% on point serialization and pairing input preparation. Fixed-base tables speed up setup and any verifier-side IC recomputation.
 
-### (g) Randomized R1CS test fixtures and parity assertions
+### (g) Randomized R1CS test fixtures and parity assertions 
 
 - **Current:** Only one hard-coded 3-constraint circuit is tested.
 - **Target:**
