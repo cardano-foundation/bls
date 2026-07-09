@@ -1,0 +1,19 @@
+[package]
+name = "groth16-prover-cli"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "CLI for Groth16 proof generation over BLS12-381"
+
+[dependencies]
+clap = { version = "4.5", features = ["derive"] }
+hex = "0.4"
+groth16-prover = { path = ".." }
+ark-bls12-381 = "0.4"
+ark-ff = "0.4"
+ark-serialize = "0.4"
+ark-ec = "0.4"
+
+[[bin]]
+name = "groth16-prover"
+path = "src/main.rs"
