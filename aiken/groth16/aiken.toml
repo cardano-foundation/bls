@@ -1,0 +1,23 @@
+name = "cardano-foundation/groth16"
+version = "0.0.0"
+compiler = "v1.1.21"
+plutus = "v3"
+license = "Apache-2.0"
+description = "Aiken implementation of Groth16 verifier for BLS12-381"
+
+[repository]
+user = "cardano-foundation"
+project = "groth16"
+platform = "github"
+
+[[dependencies]]
+name = "aiken-lang/stdlib"
+version = "v3.1.0"
+source = "github"
+
+[[dependencies]]
+name = "ilap/bls"
+version = "0.4.0"
+source = "github"
+
+[config]
