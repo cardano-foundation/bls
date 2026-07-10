@@ -9,7 +9,7 @@
 6. [VRF using Aiken BLS12-381 primitives](#vrf-using-bls12-381-curve-primitives)
 7. [KDF using Aiken primitives, also BLS12-381](#kdf-using-aiken-primitives)
 8. [Linear and non-linear equations](#solving-easy-linear-and-non-linear-equations-using-BLS12-381-curve-primitives)
-9. [Groth16 using Aiken BLS12-381 CLI](#groth16-using-bls12-381-curve-primitives)
+9. [Groth16 with Aiken BLS12-381](#groth16-with-bls12-381-curve-primitives)
 
 ## High level introduction
 
@@ -343,6 +343,8 @@ The implementation of KDF using [aiken primitves](https://aiken-lang.github.io) 
 
 ## Solving easy linear and non-linear equations using BLS12-381 curve primitives
 
+<details>
+
 Let's start with an easy linear equation `x+y=23`. The setup of interaction is the following: the formula of equation is known for both parties: prover and verifier.
 Prover wants to prove it has the solution for the equation and without disclosing them wants the verifier to check his claim.
 In order to do it the prover can use either G1 or G2 curve. Let's start with the G1. The prover comes up with the solution x=10 and y=13. Then in order to hide the solution he finds the corresponding elliptic curves in G1:
@@ -410,8 +412,10 @@ without revealing them — by sending **only points** and relying on bilinearity
 
 Both pairing outputs are identical, confirming that `xy = 26` holds — without the verifier ever learning `x = 13` or `y = 2`. This technique, known as a **quadratic arithmetic program**, is the foundation of zk-SNARKs built on BLS12-381.
 
-## Groth16 using BLS12-381 curve primitives
+</details>
 
-We are going to implement now, in not performnt, though correct way, Groth16 based on Aiken BLS12-381 CLI. The approach was introduced in [seminal paper](https://eprint.iacr.org/2016/260.pdf).
+## Groth16 with BLS12-381 curve primitives
 
-TO-DO
+The system was introduced in [seminal paper](https://eprint.iacr.org/2016/260.pdf).
+Groth16 prover with circom adapter written in Rust is [here](./groth16-prover/). It contains CLI too.
+Groth16 verifier written in Aiken is [here](./aiken/groth16/).
