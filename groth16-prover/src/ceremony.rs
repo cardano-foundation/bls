@@ -257,10 +257,22 @@ pub fn single_party_ceremony_full<E: QapEngine, L: AsRef<[u64]>, R: AsRef<[u64]>
     n_public: usize,
     rng: &mut impl RngCore,
 ) -> (FullProvingKey, VerifyingKey) {
-    // 1. Generate random toxic waste (destroyed before we return)
     let tw = ToxicWaste::random(rng);
+    single_party_ceremony_full_from_tw(engine, l, r, o, n_public, tw)
+}
 
-    // 2. Evaluate QAP at tau
+/// Same as `single_party_ceremony_full` but accepts explicit `ToxicWaste`.
+///
+/// Useful for deterministic testing and parity checks.
+pub fn single_party_ceremony_full_from_tw<E: QapEngine, L: AsRef<[u64]>, R: AsRef<[u64]>, O: AsRef<[u64]>>(
+    engine: &E,
+    l: &[L],
+    r: &[R],
+    o: &[O],
+    n_public: usize,
+    tw: ToxicWaste,
+) -> (FullProvingKey, VerifyingKey) {
+    // 1. Evaluate QAP at tau
     let (us_tau, vs_tau, ws_tau) = engine.evaluate_qap_at_tau(l, r, o, tw.tau);
     let n_vars = us_tau.len();
     assert!(

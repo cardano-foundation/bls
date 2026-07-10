@@ -45,6 +45,26 @@ pub trait Prover {
         gamma: Fr,
         delta: Fr,
     ) -> (Proof, PublicInput);
+
+    /// Assemble the proof using a `FullProvingKey` (group elements only).
+    ///
+    /// This is the production path: no toxic-waste scalars are needed.
+    /// The prover uses multi-scalar multiplication over pre-computed
+    /// curve points from the proving key.
+    ///
+    /// Default implementation panics — concrete provers must override.
+    fn prove_with_full_pk<E: QapEngine, L: AsRef<[u64]>, R: AsRef<[u64]>, O: AsRef<[u64]>>(
+        &self,
+        engine: &E,
+        full_pk: &crate::ceremony::FullProvingKey,
+        l: &[L],
+        r: &[R],
+        o: &[O],
+        witness: &[Fr],
+    ) -> (Proof, PublicInput) {
+        let _ = (engine, full_pk, l, r, o, witness);
+        unimplemented!("prove_with_full_pk must be implemented for this prover")
+    }
 }
 
 /// Naive prover — scalar-by-scalar accumulation.
@@ -138,6 +158,66 @@ impl Prover for NaiveProver {
             let psi_scalar = (vs_tau[i] * alpha + us_tau[i] * beta + ws_tau[i]) * gamma_inv;
             let weighted = g1_proj * (psi_scalar * witness[i]);
             v_proj += weighted;
+        }
+        let v = G1Affine::from(v_proj);
+
+        (Proof { a, b, c }, PublicInput { v })
+    }
+
+    fn prove_with_full_pk<E: QapEngine, Lm: AsRef<[u64]>, Rm: AsRef<[u64]>, Om: AsRef<[u64]>>(
+        &self,
+        engine: &E,
+        full_pk: &crate::ceremony::FullProvingKey,
+        l: &[Lm],
+        r: &[Rm],
+        o: &[Om],
+        witness: &[Fr],
+    ) -> (Proof, PublicInput) {
+        let n_public = full_pk.vk.n_public;
+        let n_vars = witness.len();
+
+        // 1. Build witness polynomials and quotient h(x)
+        let (us, vs, ws) = engine.build_qap(l, r, o);
+        let mut l_poly = DensePolynomial::zero();
+        let mut r_poly = DensePolynomial::zero();
+        let mut o_poly = DensePolynomial::zero();
+        for i in 0..n_vars {
+            l_poly = poly_add(&l_poly, &poly_scalar_mul(&us[i], witness[i]));
+            r_poly = poly_add(&r_poly, &poly_scalar_mul(&vs[i], witness[i]));
+            o_poly = poly_add(&o_poly, &poly_scalar_mul(&ws[i], witness[i]));
+        }
+        let t = engine.target_poly(l.len());
+        let h = engine.compute_quotient(&l_poly, &r_poly, &o_poly, &t);
+
+        // 2. A = sum witness[i] * a_query[i] + alpha_g1
+        let mut a_proj = G1Projective::from(full_pk.vk.alpha_g1);
+        for i in 0..n_vars {
+            a_proj += G1Projective::from(full_pk.a_query[i]) * witness[i];
+        }
+        let a = G1Affine::from(a_proj);
+
+        // 3. B = sum witness[i] * b_g2_query[i] + beta_g2
+        let mut b_proj = G2Projective::from(full_pk.vk.beta_g2);
+        for i in 0..n_vars {
+            b_proj += G2Projective::from(full_pk.b_g2_query[i]) * witness[i];
+        }
+        let b = G2Affine::from(b_proj);
+
+        // 4. C = sum_{private} witness[i] * c_query[i] + sum_j h_j * h_query[j]
+        let mut c_proj = G1Projective::zero();
+        for i in n_public..n_vars {
+            c_proj += G1Projective::from(full_pk.c_query[i]) * witness[i];
+        }
+        let h_len = h.coeffs.len().min(full_pk.h_query.len());
+        for j in 0..h_len {
+            c_proj += G1Projective::from(full_pk.h_query[j]) * h.coeffs[j];
+        }
+        let c = G1Affine::from(c_proj);
+
+        // 5. V = sum_{public} witness[i] * l_query[i]
+        let mut v_proj = G1Projective::zero();
+        for i in 0..n_public {
+            v_proj += G1Projective::from(full_pk.l_query[i]) * witness[i];
         }
         let v = G1Affine::from(v_proj);
 
@@ -254,6 +334,67 @@ impl Prover for PippengerProver {
 
         let v_proj = G1Projective::msm(&v_bases, &v_scalars).expect("MSM length mismatch");
         let v = G1Affine::from(v_proj);
+
+        (Proof { a, b, c }, PublicInput { v })
+    }
+
+    fn prove_with_full_pk<E: QapEngine, Lm: AsRef<[u64]>, Rm: AsRef<[u64]>, Om: AsRef<[u64]>>(
+        &self,
+        engine: &E,
+        full_pk: &crate::ceremony::FullProvingKey,
+        l: &[Lm],
+        r: &[Rm],
+        o: &[Om],
+        witness: &[Fr],
+    ) -> (Proof, PublicInput) {
+        let n_public = full_pk.vk.n_public;
+        let n_vars = witness.len();
+
+        // 1. Build witness polynomials and quotient h(x)
+        let (us, vs, ws) = engine.build_qap(l, r, o);
+        let mut l_poly = DensePolynomial::zero();
+        let mut r_poly = DensePolynomial::zero();
+        let mut o_poly = DensePolynomial::zero();
+        for i in 0..n_vars {
+            l_poly = poly_add(&l_poly, &poly_scalar_mul(&us[i], witness[i]));
+            r_poly = poly_add(&r_poly, &poly_scalar_mul(&vs[i], witness[i]));
+            o_poly = poly_add(&o_poly, &poly_scalar_mul(&ws[i], witness[i]));
+        }
+        let t = engine.target_poly(l.len());
+        let h = engine.compute_quotient(&l_poly, &r_poly, &o_poly, &t);
+
+        // 2. A = MSM(a_query, witness) + alpha_g1
+        let a_proj = G1Projective::msm(&full_pk.a_query, witness)
+            .expect("MSM length mismatch");
+        let a = G1Affine::from(a_proj + G1Projective::from(full_pk.vk.alpha_g1));
+
+        // 3. B = MSM(b_g2_query, witness) + beta_g2
+        let b_proj = G2Projective::msm(&full_pk.b_g2_query, witness)
+            .expect("MSM length mismatch");
+        let b = G2Affine::from(b_proj + G2Projective::from(full_pk.vk.beta_g2));
+
+        // 4. C = MSM(c_query[private], witness[private]) + MSM(h_query, h_coeffs)
+        let private_c = &full_pk.c_query[n_public..];
+        let private_w = &witness[n_public..];
+        let c_private = G1Projective::msm(private_c, private_w)
+            .expect("MSM length mismatch");
+
+        let h_len = h.coeffs.len().min(full_pk.h_query.len());
+        let h_c = if h_len > 0 {
+            G1Projective::msm(&full_pk.h_query[..h_len], &h.coeffs[..h_len])
+                .expect("MSM length mismatch")
+        } else {
+            G1Projective::zero()
+        };
+
+        let c = G1Affine::from(c_private + h_c);
+
+        // 5. V = MSM(l_query, witness[public])
+        let public_w = &witness[..n_public];
+        let v = G1Affine::from(
+            G1Projective::msm(&full_pk.l_query, public_w)
+                .expect("MSM length mismatch")
+        );
 
         (Proof { a, b, c }, PublicInput { v })
     }
@@ -398,5 +539,95 @@ mod tests {
         assert_eq!(proof_naive.b, proof_pip.b, "B must match between naive and Pippenger");
         assert_eq!(proof_naive.c, proof_pip.c, "C must match between naive and Pippenger");
         assert_eq!(public_naive.v, public_pip.v, "V must match between naive and Pippenger");
+    }
+
+    // ------------------------------------------------------------------
+    // FullProvingKey parity tests (Phase 0 prover migration)
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn test_naive_full_pk_matches_scalar_prover() {
+        let engine = DenseQapEngine::new();
+        let prover = NaiveProver::new();
+        let witness = witness();
+        let tw = crate::ceremony::ToxicWaste::deterministic();
+
+        let l_ref: Vec<&[u64]> = L.iter().map(|v| v.as_slice()).collect();
+        let r_ref: Vec<&[u64]> = R.iter().map(|v| v.as_slice()).collect();
+        let o_ref: Vec<&[u64]> = O.iter().map(|v| v.as_slice()).collect();
+
+        // Old scalar-based path
+        let (proof_old, public_old) = prover.prove(
+            &engine, &l_ref, &r_ref, &o_ref, &witness,
+            tw.tau, tw.alpha, tw.beta, tw.gamma, tw.delta,
+        );
+
+        // New group-element path
+        let (full_pk, _vk) = crate::ceremony::single_party_ceremony_full_from_tw(
+            &engine, &l_ref, &r_ref, &o_ref, 2, tw,
+        );
+        let (proof_new, public_new) = prover.prove_with_full_pk(
+            &engine, &full_pk, &l_ref, &r_ref, &o_ref, &witness,
+        );
+
+        assert_eq!(proof_old.a, proof_new.a, "A must match between scalar and FullPK path");
+        assert_eq!(proof_old.b, proof_new.b, "B must match between scalar and FullPK path");
+        assert_eq!(proof_old.c, proof_new.c, "C must match between scalar and FullPK path");
+        assert_eq!(public_old.v, public_new.v, "V must match between scalar and FullPK path");
+    }
+
+    #[test]
+    fn test_pippenger_full_pk_matches_scalar_prover() {
+        let engine = FftQapEngine::new();
+        let prover = PippengerProver::new();
+        let witness = witness();
+        let tw = crate::ceremony::ToxicWaste::deterministic();
+
+        let l_ref: Vec<&[u64]> = L.iter().map(|v| v.as_slice()).collect();
+        let r_ref: Vec<&[u64]> = R.iter().map(|v| v.as_slice()).collect();
+        let o_ref: Vec<&[u64]> = O.iter().map(|v| v.as_slice()).collect();
+
+        // Old scalar-based path
+        let (proof_old, public_old) = prover.prove(
+            &engine, &l_ref, &r_ref, &o_ref, &witness,
+            tw.tau, tw.alpha, tw.beta, tw.gamma, tw.delta,
+        );
+
+        // New group-element path
+        let (full_pk, _vk) = crate::ceremony::single_party_ceremony_full_from_tw(
+            &engine, &l_ref, &r_ref, &o_ref, 2, tw,
+        );
+        let (proof_new, public_new) = prover.prove_with_full_pk(
+            &engine, &full_pk, &l_ref, &r_ref, &o_ref, &witness,
+        );
+
+        assert_eq!(proof_old.a, proof_new.a, "A must match between scalar and FullPK path");
+        assert_eq!(proof_old.b, proof_new.b, "B must match between scalar and FullPK path");
+        assert_eq!(proof_old.c, proof_new.c, "C must match between scalar and FullPK path");
+        assert_eq!(public_old.v, public_new.v, "V must match between scalar and FullPK path");
+    }
+
+    #[test]
+    fn test_full_pk_prover_produces_valid_proof() {
+        let engine = FftQapEngine::new();
+        let prover = PippengerProver::new();
+        let witness = witness();
+        let tw = crate::ceremony::ToxicWaste::deterministic();
+
+        let l_ref: Vec<&[u64]> = L.iter().map(|v| v.as_slice()).collect();
+        let r_ref: Vec<&[u64]> = R.iter().map(|v| v.as_slice()).collect();
+        let o_ref: Vec<&[u64]> = O.iter().map(|v| v.as_slice()).collect();
+
+        let (full_pk, _vk) = crate::ceremony::single_party_ceremony_full_from_tw(
+            &engine, &l_ref, &r_ref, &o_ref, 2, tw,
+        );
+        let (proof, public_input) = prover.prove_with_full_pk(
+            &engine, &full_pk, &l_ref, &r_ref, &o_ref, &witness,
+        );
+
+        assert!(
+            verify_proof(&proof, &public_input, &full_pk.vk.alpha_g1, &full_pk.vk.beta_g2, &full_pk.vk.gamma_g2, &full_pk.vk.delta_g2),
+            "FullPK prover must produce a valid proof"
+        );
     }
 }
