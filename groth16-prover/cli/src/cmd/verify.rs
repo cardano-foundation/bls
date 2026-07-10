@@ -1,10 +1,10 @@
 //! Verify subcommand — load a proof + public input and run the Groth16 pairing check.
 
-use ark_bls12_381::{Fr, G1Affine, G1Projective, G2Affine, G2Projective};
-use ark_ec::Group;
+use ark_bls12_381::{G1Affine, G2Affine};
 use ark_serialize::CanonicalDeserialize;
 use clap::Parser;
-use groth16_prover::prover::{verify_proof, Proof, PublicInput};
+use groth16_prover::ceremony::VerifyingKey;
+use groth16_prover::prover::{Proof, PublicInput, verify_proof};
 use std::error::Error;
 use std::fs;
 use std::path::PathBuf;
@@ -19,6 +19,11 @@ pub struct Args {
     /// Path to the public-input file (raw binary, 48 bytes)
     #[arg(long, value_name = "FILE")]
     public: PathBuf,
+
+    /// Path to the verifying key file (from the ceremony step).
+    /// If omitted, the deterministic test values are used (dev only).
+    #[arg(long, value_name = "FILE")]
+    verifying_key: Option<PathBuf>,
 }
 
 /// Run the verify command
@@ -66,28 +71,38 @@ pub fn run(args: Args) -> Result<(), Box<dyn Error>> {
     let public_input = PublicInput { v };
 
     // ------------------------------------------------------------------
-    // 3. Build verification key from hard-coded toxic waste
-    //
-    // NOTE: In a production deployment the verification key would be
-    // loaded from a file (generated during the trusted-setup ceremony).
-    // Here we use the same deterministic test values as the prover so
-    // that CLI-generated proofs can be verified end-to-end without
-    // requiring a separate VK file.
+    // 3. Load verifying key (or fall back to deterministic test values)
     // ------------------------------------------------------------------
-    let alpha = Fr::from(5u64);
-    let beta = Fr::from(7u64);
-    let gamma = Fr::from(11u64);
-    let delta = Fr::from(13u64);
-
-    let alpha_g1 = G1Affine::from(G1Projective::generator() * alpha);
-    let beta_g2 = G2Affine::from(G2Projective::generator() * beta);
-    let gamma_g2 = G2Affine::from(G2Projective::generator() * gamma);
-    let delta_g2 = G2Affine::from(G2Projective::generator() * delta);
+    let vk = if let Some(vk_path) = &args.verifying_key {
+        let vk_bytes = fs::read(vk_path)
+            .map_err(|e| format!("failed to read verifying key: {e}"))?;
+        let vk = VerifyingKey::deserialize_compressed(&vk_bytes[..])
+            .map_err(|e| format!("failed to deserialize verifying key: {e:?}"))?;
+        eprintln!("Loaded verifying key from {}", vk_path.display());
+        vk
+    } else {
+        eprintln!("Warning: no verifying key provided; using deterministic test toxic waste (dev only)");
+        // Reconstruct the hard-coded VK from deterministic scalars
+        use ark_bls12_381::{G1Affine, G1Projective, G2Affine, G2Projective, Fr};
+        use ark_ec::Group;
+        let alpha = Fr::from(5u64);
+        let beta = Fr::from(7u64);
+        let gamma = Fr::from(11u64);
+        let delta = Fr::from(13u64);
+        VerifyingKey {
+            alpha_g1: G1Affine::from(G1Projective::generator() * alpha),
+            beta_g2: G2Affine::from(G2Projective::generator() * beta),
+            gamma_g2: G2Affine::from(G2Projective::generator() * gamma),
+            delta_g2: G2Affine::from(G2Projective::generator() * delta),
+            ic: Vec::new(), // empty — verify_proof only uses the four fixed points when no VK is loaded
+            n_public: 2,
+        }
+    };
 
     // ------------------------------------------------------------------
     // 4. Pairing check
     // ------------------------------------------------------------------
-    let valid = verify_proof(&proof, &public_input, &alpha_g1, &beta_g2, &gamma_g2, &delta_g2);
+    let valid = verify_proof(&proof, &public_input, &vk.alpha_g1, &vk.beta_g2, &vk.gamma_g2, &vk.delta_g2);
 
     if valid {
         println!("Verification result: VALID");
