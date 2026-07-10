@@ -4,20 +4,40 @@ Command-line interface for generating and verifying Groth16 zero-knowledge proof
 
 ## Usage
 
+### Ceremony (trusted setup)
+
+```bash
+# Generate random toxic waste and produce proving + verifying keys
+groth16-prover ceremony \
+  --circuit circuit.r1cs \
+  --proving-key circuit.pk \
+  --verifying-key circuit.vk
+```
+
 ### Prove
 
 ```bash
-# Generate a proof and print hex to stdout (defaults: --engine fft --prover pippenger)
-groth16-prover prove --circuit circuit.r1cs --witness witness.wtns
+# Generate a proof using a proving key from the ceremony step
+groth16-prover prove \
+  --circuit circuit.r1cs \
+  --witness witness.wtns \
+  --proving-key circuit.pk \
+  --out proof.bin
 
-# Generate a proof and write raw binary to file
+# Without a proving key (dev only — uses deterministic test values)
 groth16-prover prove --circuit circuit.r1cs --witness witness.wtns --out proof.bin
 ```
 
 ### Verify
 
 ```bash
-# Verify a proof against its public input
+# Verify a proof using a verifying key from the ceremony step
+groth16-prover verify \
+  --proof proof.bin \
+  --public proof.pub \
+  --verifying-key circuit.vk
+
+# Without a verifying key (dev only — uses deterministic test values)
 groth16-prover verify --proof proof.bin --public proof.pub
 ```
 
@@ -41,13 +61,21 @@ groth16-prover prove --circuit c.r1cs --witness w.wtns --engine dense --prover n
 
 | Flag | Values | Default | Description |
 |------|--------|---------|-------------|
+| **Ceremony** |
+| `--circuit FILE` | — | *required* | Path to `.r1cs` circuit file |
+| `--proving-key FILE` | — | *required* | Output path for the proving key |
+| `--verifying-key FILE` | — | *required* | Output path for the verification key |
+| **Prove** |
 | `--circuit FILE` | — | *required* | Path to `.r1cs` circuit file |
 | `--witness FILE` | — | *required* | Path to `.wtns` witness file |
+| `--proving-key FILE` | — | — | Proving key from ceremony (optional, dev fallback) |
 | `--engine ENGINE` | `dense`, `fft` | `fft` | QAP construction engine |
 | `--prover PROVER` | `naive`, `pippenger` | `pippenger` | MSM strategy for proof assembly |
 | `--out FILE` | — | — | Output file (raw binary); public input written to `FILE.pub` |
-| `--proof FILE` | — | *required for verify* | Path to proof file (192 bytes) |
-| `--public FILE` | — | *required for verify* | Path to public-input file (48 bytes) |
+| **Verify** |
+| `--proof FILE` | — | *required* | Path to proof file (192 bytes) |
+| `--public FILE` | — | *required* | Path to public-input file (48 bytes) |
+| `--verifying-key FILE` | — | — | Verifying key from ceremony (optional, dev fallback) |
 
 When `--out` is provided during proving, two files are written:
 - `proof.bin` — the Groth16 proof (192 bytes: compressed G1 + G2 + G1)
@@ -64,13 +92,14 @@ The binary will be at `target/release/groth16-prover`.
 
 ## How it works
 
-1. **Load circuit** — parses the `.r1cs` binary format into dense L/R/O matrices
-2. **Load witness** — parses the `.wtns` binary format into wire values
-3. **Prove** — by default uses `FftQapEngine` + `PippengerProver` (FFT-accelerated QAP + batched MSM); can be switched to `DenseQapEngine` or `NaiveProver` via flags
-4. **Serialize** — outputs the proof using `ark-serialize` compressed format
-5. **Verify** — loads the proof and public input, then checks the Groth16 pairing equation using the hard-coded verification key
+1. **Ceremony** (once per circuit) — generates random toxic-waste scalars (`tau, alpha, beta, gamma, delta`) using a CSPRNG, evaluates the QAP at `tau`, and writes a proving key (`*.pk`) and verifying key (`*.vk`)
+2. **Load circuit** — parses the `.r1cs` binary format into dense L/R/O matrices
+3. **Load witness** — parses the `.wtns` binary format into wire values
+4. **Prove** — by default uses `FftQapEngine` + `PippengerProver` with the toxic waste from the proving key; can be switched to `DenseQapEngine` or `NaiveProver` via flags
+5. **Serialize** — outputs the proof using `ark-serialize` compressed format
+6. **Verify** — loads the proof, public input, and verifying key, then checks the Groth16 pairing equation
 
-## Complete example
+## Complete example (with ceremony)
 
 ```bash
 # 1. Compile the Circom circuit
@@ -80,14 +109,39 @@ circom multiplier.circom --r1cs --wasm --prime bls12381
 # 2. Generate witness
 snarkjs wtns calculate multiplier.wasm input.json witness.wtns
 
-# 3. Prove
+# 3. Ceremony (run once per circuit)
 cd ../cli
+cargo run --release -- ceremony \
+  --circuit ../circom/multiplier.r1cs \
+  --proving-key /tmp/multiplier.pk \
+  --verifying-key /tmp/multiplier.vk
+
+# 4. Prove (uses the random toxic waste from the proving key)
+cargo run --release -- prove \
+  --circuit ../circom/multiplier.r1cs \
+  --witness ../circom/witness.wtns \
+  --proving-key /tmp/multiplier.pk \
+  --out /tmp/proof.bin
+
+# 5. Verify (uses the verification key from the ceremony)
+cargo run --release -- verify \
+  --proof /tmp/proof.bin \
+  --public /tmp/proof.pub \
+  --verifying-key /tmp/multiplier.vk
+```
+
+## Dev-only example (no ceremony — deterministic test values)
+
+For quick testing you can skip the ceremony; the prover and verifier fall back to the deterministic test toxic waste (`tau=3, alpha=5, beta=7, gamma=11, delta=13`):
+
+```bash
+# Prove (no --proving-key)
 cargo run --release -- prove \
   --circuit ../circom/multiplier.r1cs \
   --witness ../circom/witness.wtns \
   --out /tmp/proof.bin
 
-# 4. Verify
+# Verify (no --verifying-key)
 cargo run --release -- verify \
   --proof /tmp/proof.bin \
   --public /tmp/proof.pub
@@ -184,16 +238,19 @@ For human inspection, use `hexdump -C proof.bin` or `xxd proof.bin`.
 
 ---
 
-## Verification key note
+## Warning: proving key contains toxic waste
 
-The `verify` subcommand currently uses a **hard-coded verification key** derived from deterministic toxic-waste parameters (`alpha=5, beta=7, gamma=11, delta=13`). This is sufficient for testing and end-to-end demos, but **not for production**.
+The `ProvingKey` produced by the `ceremony` step **contains the raw toxic-waste scalars** (`tau, alpha, beta, gamma, delta`) because our current prover computes proof elements on-the-fly from them.  In a production deployment:
 
-In a real deployment:
-1. Run a trusted-setup ceremony (or use a universal setup like PLONK)
-2. Serialize the resulting verification key to a file
-3. Load that VK file in the verifier instead of using hard-coded values
+1. The ceremony would be a multi-party computation (MPC) where each participant contributes randomness and discards their contribution
+2. After the ceremony, the scalars are destroyed and only the pre-computed group elements are retained
+3. The prover would use the full structured reference string (SRS) — `tau^i·G1`, `tau^i·G2`, etc. — rather than the scalars themselves
 
-The pairing equation checked is the standard Groth16 equation:
+For this didactic crate, the scalars are kept in the proving key file for simplicity. **Do not use this for production circuits.**
+
+## Pairing equation
+
+The verifier checks the standard Groth16 equation:
 ```
 e(A, B) == e(alpha·G1, beta·G2) · e(C, delta·G2) · e(V, gamma·G2)
 ```

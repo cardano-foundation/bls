@@ -1,6 +1,7 @@
 use ark_bls12_381::Fr;
-use ark_serialize::CanonicalSerialize;
+use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use clap::{Parser, ValueEnum};
+use groth16_prover::ceremony::ProvingKey;
 use groth16_prover::circom_adapter::CircomCircuit;
 use groth16_prover::engine::{DenseQapEngine, FftQapEngine};
 use groth16_prover::prover::{NaiveProver, PippengerProver, Prover};
@@ -36,6 +37,11 @@ pub struct Args {
     /// Path to the `.wtns` witness file
     #[arg(long, value_name = "FILE")]
     witness: PathBuf,
+
+    /// Path to the proving key file (from the ceremony step).
+    /// If omitted, the deterministic test values are used (dev only).
+    #[arg(long, value_name = "FILE")]
+    proving_key: Option<PathBuf>,
 
     /// QAP engine: dense (classical) or fft (roots of unity)
     #[arg(long, value_enum, default_value = "fft")]
@@ -85,15 +91,35 @@ pub fn run(args: Args) -> Result<(), Box<dyn Error>> {
 
     let witness_fr: Vec<Fr> = circuit.witness.iter().map(|&v| Fr::from(v)).collect();
 
-    // Fixed toxic-waste parameters (same as the test suite)
-    let tau = Fr::from(3u64);
-    let alpha = Fr::from(5u64);
-    let beta = Fr::from(7u64);
-    let gamma = Fr::from(11u64);
-    let delta = Fr::from(13u64);
+    // ------------------------------------------------------------------
+    // 3. Load proving key (or fall back to deterministic test values)
+    // ------------------------------------------------------------------
+    let (tau, alpha, beta, gamma, delta) = if let Some(pk_path) = &args.proving_key {
+        let pk_bytes = fs::read(pk_path)
+            .map_err(|e| format!("failed to read proving key: {e}"))?;
+        let pk = ProvingKey::deserialize_compressed(&pk_bytes[..])
+            .map_err(|e| format!("failed to deserialize proving key: {e:?}"))?;
+        eprintln!("Loaded proving key from {}", pk_path.display());
+        (
+            pk.toxic_waste.tau,
+            pk.toxic_waste.alpha,
+            pk.toxic_waste.beta,
+            pk.toxic_waste.gamma,
+            pk.toxic_waste.delta,
+        )
+    } else {
+        eprintln!("Warning: no proving key provided; using deterministic test toxic waste (dev only)");
+        (
+            Fr::from(3u64),
+            Fr::from(5u64),
+            Fr::from(7u64),
+            Fr::from(11u64),
+            Fr::from(13u64),
+        )
+    };
 
     // ------------------------------------------------------------------
-    // 3. Select engine and prover based on CLI flags
+    // 4. Select engine and prover based on CLI flags
     // ------------------------------------------------------------------
     let (proof, public_input) = match (args.engine, args.prover) {
         (EngineArg::Dense, ProverArg::Naive) => {

@@ -3,6 +3,62 @@ use predicates::prelude::*;
 use std::fs;
 use tempfile::NamedTempFile;
 
+/// Run a full ceremony → prove → verify round-trip using random keys.
+#[test]
+fn full_ceremony_prove_verify_roundtrip() {
+    let (r1cs, wtns) = create_test_artifacts();
+    let pk_file = NamedTempFile::new().unwrap();
+    let vk_file = NamedTempFile::new().unwrap();
+    let out_file = NamedTempFile::new().unwrap();
+
+    // 1. Ceremony
+    let mut cmd_ceremony = Command::cargo_bin("groth16-prover").unwrap();
+    cmd_ceremony
+        .arg("ceremony")
+        .arg("--circuit")
+        .arg(r1cs.path())
+        .arg("--proving-key")
+        .arg(pk_file.path())
+        .arg("--verifying-key")
+        .arg(vk_file.path());
+    cmd_ceremony
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Ceremony complete"))
+        .stderr(predicate::str::contains("Proving key written to"))
+        .stderr(predicate::str::contains("Verifying key written to"));
+
+    // 2. Prove with the generated proving key
+    let mut cmd_prove = Command::cargo_bin("groth16-prover").unwrap();
+    cmd_prove
+        .arg("prove")
+        .arg("--circuit")
+        .arg(r1cs.path())
+        .arg("--witness")
+        .arg(wtns.path())
+        .arg("--proving-key")
+        .arg(pk_file.path())
+        .arg("--out")
+        .arg(out_file.path());
+    cmd_prove.assert().success();
+
+    // 3. Verify with the generated verifying key
+    let pub_path = out_file.path().with_extension("pub");
+    let mut cmd_verify = Command::cargo_bin("groth16-prover").unwrap();
+    cmd_verify
+        .arg("verify")
+        .arg("--proof")
+        .arg(out_file.path())
+        .arg("--public")
+        .arg(&pub_path)
+        .arg("--verifying-key")
+        .arg(vk_file.path());
+    cmd_verify
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Verification result: VALID"));
+}
+
 /// Generate a synthetic `.r1cs` file for the 3-gate multiplier circuit.
 fn build_synthetic_r1cs() -> Vec<u8> {
     let mut out = Vec::new();
