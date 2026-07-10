@@ -21,6 +21,17 @@ pub enum Command {
     ///   $ groth16-prover ceremony --circuit circuit.r1cs --proving-key circuit.pk --verifying-key circuit.vk
     Ceremony(cmd::ceremony::Args),
 
+    /// Run a single-party dev ceremony that outputs a FullProvingKey (group elements only)
+    ///
+    /// This is the **insecure, dev-only** path.  It produces the same `.pk`
+    /// format as a production MPC ceremony, but with locally-generated
+    /// randomness.  Use this for testing, CI, and benchmarking.
+    ///
+    /// Example:
+    ///
+    ///   $ groth16-prover ceremony-dev --circuit circuit.r1cs --proving-key circuit.pk --verifying-key circuit.vk
+    CeremonyDev(cmd::ceremony_dev::Args),
+
     /// Generate a Groth16 proof from Circom artifacts
     ///
     /// Loads a circuit from `.r1cs` and a witness from `.wtns`,
@@ -68,6 +79,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     match args.command {
         Command::Ceremony(args) => cmd::ceremony::run(args),
+        Command::CeremonyDev(args) => cmd::ceremony_dev::run(args),
         Command::Prove(args) => cmd::prove::run(args),
         Command::Verify(args) => cmd::verify::run(args),
     }
