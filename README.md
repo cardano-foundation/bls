@@ -419,3 +419,116 @@ Both pairing outputs are identical, confirming that `xy = 26` holds — without 
 The system was introduced in [seminal paper](https://eprint.iacr.org/2016/260.pdf).
 Groth16 prover with circom adapter written in Rust is [here](./groth16-prover/). It contains CLI too.
 Groth16 verifier written in Aiken is [here](./aiken/groth16/).
+
+<details>
+<summary><b>Simplest end-to-end workflow (click to expand)</b></summary>
+
+Below is the minimal path from a Circom circuit to an on-chain Aiken verifier, with explicit inputs and outputs at each step.
+
+---
+
+### 1. Compile the circuit (Circom)
+
+**Inputs:**
+- `multiplier.circom` — the circuit description
+
+**Command:**
+
+```bash
+cd groth16-prover/circom
+circom multiplier.circom --r1cs --wasm --prime bls12381
+```
+
+**Outputs:**
+- `multiplier.r1cs` — R1CS constraint system (structural description of the circuit)
+- `multiplier.wasm` — WebAssembly witness calculator (knows how to solve every wire value)
+
+**→ Next step uses:** `multiplier.wasm` + `input.json`
+
+---
+
+### 2. Generate the witness (snarkjs)
+
+**Inputs:**
+- `multiplier.wasm` — witness calculator from step 1
+- `input.json` — concrete private/public inputs for this proof
+
+```json
+{ "x1": "2", "x2": "3" }
+```
+
+**Command:**
+
+```bash
+snarkjs wtns calculate multiplier.wasm input.json witness.wtns
+```
+
+**Output:**
+- `witness.wtns` — full witness vector containing all wire assignments.  
+  For the example above this is conceptually `[1, 6, 2, 3]`:
+  - `1` — the constant wire (always first)
+  - `6` — the public output `a = x1·x2`
+  - `2, 3` — the private inputs `x1, x2`
+
+**→ Next step uses:** `multiplier.r1cs` (from step 1) + `witness.wtns`
+
+---
+
+### 3. Generate the proof (groth16-prover CLI)
+
+**Inputs:**
+- `multiplier.r1cs` — constraint system from step 1
+- `witness.wtns` — witness vector from step 2
+
+**Command:**
+
+```bash
+cd groth16-prover/cli
+cargo run --release -- prove \
+  --circuit ../circom/multiplier.r1cs \
+  --witness ../circom/witness.wtns \
+  --out /tmp/proof.bin
+```
+
+**Output:**
+- `/tmp/proof.bin` — serialized Groth16 proof containing three compressed curve points:
+  - `A` (G1, 48 bytes)
+  - `B` (G2, 96 bytes)
+  - `C` (G1, 48 bytes)
+
+The CLI uses `FftQapEngine` + `PippengerProver` under the hood (fast FFT-based QAP + batched MSM).
+
+**→ Next step uses:** proof points `(A, B, C)` + public inputs from `input.json`
+
+---
+
+### 4. Verify on-chain (Aiken)
+
+**Inputs:**
+- `proof = (A, B, C)` — compressed points from step 3
+- `public_inputs` — only the **public** portion of the witness vector:  
+  For the example above: **`[1, 6]`**
+  - `1` — the constant wire (always present)
+  - `6` — the public output `a = x1·x2 = 2·3 = 6`
+  - The private inputs (`x1 = 2`, `x2 = 3`) are **not** included here; they are hidden by the proof
+
+The Aiken verifier in [`aiken/groth16`](./aiken/groth16/) currently implements a **minimal hard-coded verifier** for a concrete 3-constraint circuit. The on-chain logic:
+
+1. Decompress `A`, `B`, `C` and the verification-key points.
+2. Compute the public-input commitment `V = Σ public_input[i] · Ψ_V_G1[i]` via scalar multiplication and point addition.
+3. Run the pairing equation:
+
+```aiken
+let lhs = bls12_381_miller_loop(a, b)
+let rhs = bls12_381_miller_loop(alpha_g1, beta_g2)
+  |> bls12_381_mul_miller_loop_result(bls12_381_miller_loop(c, delta_g2))
+  |> bls12_381_mul_miller_loop_result(bls12_381_miller_loop(v, gamma_g2))
+
+bls12_381_final_verify(lhs, rhs)   // True = proof is valid
+```
+
+**Output:** `True` (accept) or `False` (reject)
+
+See the Aiken verifier's [`README.md`](./aiken/groth16/README.md) for the full hard-coded example, exact hex values, test results, and next steps toward generalization (parameterized VK, dynamic public inputs, Circom adapter).
+
+</details>
