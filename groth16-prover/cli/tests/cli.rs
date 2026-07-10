@@ -605,3 +605,62 @@ fn verify_tampered_public_input_fails() {
         .failure()
         .stderr(predicate::str::contains("INVALID"));
 }
+
+/// Run a full ceremony-dev → prove → verify round-trip using a FullProvingKey.
+#[test]
+fn full_ceremony_dev_prove_verify_roundtrip() {
+    let (r1cs, wtns) = create_test_artifacts();
+    let pk_file = NamedTempFile::new().unwrap();
+    let vk_file = NamedTempFile::new().unwrap();
+    let out_file = NamedTempFile::new().unwrap();
+
+    // 1. Dev ceremony (outputs FullProvingKey)
+    let mut cmd_ceremony = Command::cargo_bin("groth16-prover").unwrap();
+    cmd_ceremony
+        .arg("ceremony-dev")
+        .arg("--circuit")
+        .arg(r1cs.path())
+        .arg("--proving-key")
+        .arg(pk_file.path())
+        .arg("--verifying-key")
+        .arg(vk_file.path());
+    cmd_ceremony
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Dev ceremony complete"))
+        .stderr(predicate::str::contains("Full proving key written to"))
+        .stderr(predicate::str::contains("Verifying key written to"));
+
+    // 2. Prove with the FullProvingKey
+    let mut cmd_prove = Command::cargo_bin("groth16-prover").unwrap();
+    cmd_prove
+        .arg("prove")
+        .arg("--circuit")
+        .arg(r1cs.path())
+        .arg("--witness")
+        .arg(wtns.path())
+        .arg("--proving-key")
+        .arg(pk_file.path())
+        .arg("--out")
+        .arg(out_file.path());
+    cmd_prove
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Loaded FullProvingKey"));
+
+    // 3. Verify with the generated verifying key
+    let pub_path = out_file.path().with_extension("pub");
+    let mut cmd_verify = Command::cargo_bin("groth16-prover").unwrap();
+    cmd_verify
+        .arg("verify")
+        .arg("--proof")
+        .arg(out_file.path())
+        .arg("--public")
+        .arg(&pub_path)
+        .arg("--verifying-key")
+        .arg(vk_file.path());
+    cmd_verify
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Verification result: VALID"));
+}
