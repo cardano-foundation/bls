@@ -115,6 +115,42 @@ pub struct ProvingKey {
     pub toxic_waste: ToxicWaste,
 }
 
+/// Full proving key — group elements only, no toxic-waste scalars.
+///
+/// This is the production-grade proving-key format.  It contains
+/// pre-computed curve points that the prover uses directly via
+/// multi-scalar multiplication.  It is compatible with the
+/// `ark_groth16::ProvingKey` layout.
+///
+/// # Lifecycle
+///
+/// 1. **Single-party dev path** — `single_party_ceremony_full()` generates
+///    this from random scalars that are immediately dropped.
+/// 2. **MPC production path** — Phase 2 contributions produce the same
+///    structure; no participant ever reconstructs the scalars.
+///
+/// In both cases the artifact that ends up on disk contains **no secrets**.
+#[derive(Clone, Debug, PartialEq, Eq, CanonicalSerialize, CanonicalDeserialize)]
+pub struct FullProvingKey {
+    pub vk: VerifyingKey,
+    /// `beta·G1` — used in the C-term MSM
+    pub beta_g1: G1Affine,
+    /// `delta·G1` — optional, kept for arkworks compatibility
+    pub delta_g1: G1Affine,
+    /// `u_i(tau)·G1` per variable — basis for `A = MSM(a_query, witness) + alpha_g1`
+    pub a_query: Vec<G1Affine>,
+    /// `v_i(tau)·G1` per variable — basis for cross-terms in C
+    pub b_g1_query: Vec<G1Affine>,
+    /// `v_i(tau)·G2` per variable — basis for `B = MSM(b_g2_query, witness) + beta_g2`
+    pub b_g2_query: Vec<G2Affine>,
+    /// `delta_inv·(beta·u_i + alpha·v_i + w_i)(tau)·G1` for private variables
+    pub c_query: Vec<G1Affine>,
+    /// `delta_inv·tau^j·T(tau)·G1` for j = 0..deg(h) — basis for the quotient commitment
+    pub h_query: Vec<G1Affine>,
+    /// Public-input subset of `c_query` (same content as `vk.ic` but stored here for arkworks parity)
+    pub l_query: Vec<G1Affine>,
+}
+
 /// Run the trusted-setup ceremony for a given circuit.
 ///
 /// * `engine`   — QAP engine (dense or FFT).
