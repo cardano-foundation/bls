@@ -26,8 +26,8 @@ A command-line interface lives in `groth16-prover/cli/`:
 ```bash
 cd groth16-prover/cli
 cargo run --release -- prove \
-  --circuit ../circom/multiplier.r1cs \
-  --witness ../circom/witness.wtns \
+  --circuit ../circom/SimpleExample/multiplier.r1cs \
+  --witness ../circom/SimpleExample/witness.wtns \
   --out /tmp/proof.bin
 ```
 
@@ -530,8 +530,8 @@ The `groth16-prover-cli` crate wraps the Circom adapter into a command-line tool
 ```bash
 cd groth16-prover/cli
 cargo run --release -- prove \
-  --circuit ../circom/multiplier.r1cs \
-  --witness ../circom/witness.wtns \
+  --circuit ../circom/SimpleExample/multiplier.r1cs \
+  --witness ../circom/SimpleExample/witness.wtns \
   --out /tmp/proof.bin
 ```
 
@@ -612,6 +612,17 @@ The current crate is a **reference implementation** for correctness verification
   3. The prover uses the **full SRS** instead of the raw scalars, so the scalars can be destroyed immediately.
 - **Reference:** [Perpetual Powers of Tau](https://github.com/privacy-scaling-explorations/perpetualpowersoftau), snarkjs `powersoftau` workflow, and arkworks' `groth16::generator::generate_random_parameters`.
 - **Benefit:** Eliminates the single point of failure. Even if N−1 participants collude, the ceremony remains secure as long as at least one participant honestly discards their contribution.
+
+### (i) Additional Circom use-case circuits
+
+- **Current:** Only one circuit (`multiplier.circom`) lives in `circom/SimpleExample/`. It is a trivial 3-gate multiplication chain used to validate the Circom adapter end-to-end.
+- **Target:** Add several realistic Circom circuits that exercise different zk-SNARK patterns:
+  1. **Poseidon hash** — demonstrate hash pre-image knowledge inside a Groth16 proof.
+  2. **Merkle membership** — prove that a leaf exists in a Merkle tree without revealing the leaf or the path.
+  3. **Range proof / comparison** — prove that a committed value lies in a range `[0, 2^n)`.
+  4. **EdDSA / BabyJubJub signature** — verify a signature inside the circuit (requires JubJub curve gadgets).
+- **Reference:** [circomlib](https://github.com/iden3/circomlib) provides production-grade Poseidon, MiMC, Merkle, and EdDSA circuits for BN254. Porting to BLS12-381 requires updating the field constants.
+- **Benefit:** Shows that the Rust prover + Aiken verifier pipeline works for real-world zk-SNARK applications, not just toy arithmetic circuits.
 
 </details>
 

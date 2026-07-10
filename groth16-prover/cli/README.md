@@ -103,23 +103,23 @@ The binary will be at `target/release/groth16-prover`.
 
 ```bash
 # 1. Compile the Circom circuit
-cd ../circom
+cd ../circom/SimpleExample
 circom multiplier.circom --r1cs --wasm --prime bls12381
 
 # 2. Generate witness
 snarkjs wtns calculate multiplier.wasm input.json witness.wtns
 
 # 3. Ceremony (run once per circuit)
-cd ../cli
+cd ../../cli
 cargo run --release -- ceremony \
-  --circuit ../circom/multiplier.r1cs \
+  --circuit ../circom/SimpleExample/multiplier.r1cs \
   --proving-key /tmp/multiplier.pk \
   --verifying-key /tmp/multiplier.vk
 
 # 4. Prove (uses the random toxic waste from the proving key)
 cargo run --release -- prove \
-  --circuit ../circom/multiplier.r1cs \
-  --witness ../circom/witness.wtns \
+  --circuit ../circom/SimpleExample/multiplier.r1cs \
+  --witness ../circom/SimpleExample/witness.wtns \
   --proving-key /tmp/multiplier.pk \
   --out /tmp/proof.bin
 
@@ -137,8 +137,8 @@ For quick testing you can skip the ceremony; the prover and verifier fall back t
 ```bash
 # Prove (no --proving-key)
 cargo run --release -- prove \
-  --circuit ../circom/multiplier.r1cs \
-  --witness ../circom/witness.wtns \
+  --circuit ../circom/SimpleExample/multiplier.r1cs \
+  --witness ../circom/SimpleExample/witness.wtns \
   --out /tmp/proof.bin
 
 # Verify (no --verifying-key)
