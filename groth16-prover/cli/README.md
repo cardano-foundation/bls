@@ -4,12 +4,46 @@ Command-line interface for generating and verifying Groth16 zero-knowledge proof
 
 ## Usage
 
-### Ceremony (trusted setup)
+> **Ceremony modes.** The CLI supports two ceremony paths that produce the **same** `.pk` / `.vk` binary format. The prover and verifier are agnostic to which path was used.
+
+### Dev ceremony (`ceremony-dev` — without MPC, for testing)
+
+A single-party ceremony that generates randomness locally and outputs a `ProvingKey` containing only group elements (no raw scalars). This is the **fast, insecure path** for development, CI, and benchmarking.
 
 ```bash
-# Generate random toxic waste and produce proving + verifying keys
-groth16-prover ceremony \
+# Generate proving + verifying keys instantly (dev only — never for production)
+groth16-prover ceremony-dev \
   --circuit circuit.r1cs \
+  --proving-key circuit.pk \
+  --verifying-key circuit.vk
+```
+
+### Production ceremony (`phase2` — with MPC, for mainnet)
+
+A multi-party Phase 2 ceremony that reuses a publicly verified Phase 1 SRS (e.g., Perpetual Powers of Tau). Each participant contributes randomness locally; the coordinator is just a passive file host.
+
+```bash
+# 1. Initialize from universal SRS
+groth16-ceremony phase2 new \
+  --circuit circuit.r1cs \
+  --srs universal.ptau \
+  --zkey circuit_0000.zkey
+
+# 2. Participant 1 contributes locally, uploads result
+groth16-ceremony phase2 contribute \
+  --zkey-in circuit_0000.zkey \
+  --zkey-out circuit_0001.zkey \
+  --entropy /dev/urandom
+
+# 3. Participant N contributes
+groth16-ceremony phase2 contribute \
+  --zkey-in circuit_0001.zkey \
+  --zkey-out circuit_final.zkey \
+  --entropy /dev/urandom
+
+# 4. Finalize to the same .pk/.vk format as dev mode
+groth16-ceremony phase2 finalize \
+  --zkey-in circuit_final.zkey \
   --proving-key circuit.pk \
   --verifying-key circuit.vk
 ```
@@ -61,10 +95,15 @@ groth16-prover prove --circuit c.r1cs --witness w.wtns --engine dense --prover n
 
 | Flag | Values | Default | Description |
 |------|--------|---------|-------------|
-| **Ceremony** |
+| **Dev ceremony (`ceremony-dev`)** |
 | `--circuit FILE` | — | *required* | Path to `.r1cs` circuit file |
 | `--proving-key FILE` | — | *required* | Output path for the proving key |
 | `--verifying-key FILE` | — | *required* | Output path for the verification key |
+| **Production ceremony (`phase2`)** |
+| `--circuit FILE` | — | *required* | Path to `.r1cs` circuit file |
+| `--srs FILE` | — | *required* | Path to universal Phase 1 SRS (`.ptau`) |
+| `--zkey FILE` | — | *required* | Output path for the intermediate `.zkey` |
+| **Prove** |
 | **Prove** |
 | `--circuit FILE` | — | *required* | Path to `.r1cs` circuit file |
 | `--witness FILE` | — | *required* | Path to `.wtns` witness file |
@@ -92,14 +131,18 @@ The binary will be at `target/release/groth16-prover`.
 
 ## How it works
 
-1. **Ceremony** (once per circuit) — generates random toxic-waste scalars (`tau, alpha, beta, gamma, delta`) using a CSPRNG, evaluates the QAP at `tau`, and writes a proving key (`*.pk`) and verifying key (`*.vk`)
+1. **Ceremony** (once per circuit) — two switchable paths produce the same `*.pk` / `*.vk` format:
+   - **Dev mode** (`ceremony-dev`) — single-party, instant, insecure. Generates randomness locally, evaluates QAP, and writes pre-computed group elements (`a_query`, `b_g2_query`, `h_query`, etc.).
+   - **Production mode** (`phase2`) — multi-party MPC. Reuses a publicly verified Phase 1 SRS (e.g., Perpetual Powers of Tau). Participants sequentially contribute randomness; the final output is the same group-element-based `*.pk` / `*.vk`.
 2. **Load circuit** — parses the `.r1cs` binary format into dense L/R/O matrices
 3. **Load witness** — parses the `.wtns` binary format into wire values
-4. **Prove** — by default uses `FftQapEngine` + `PippengerProver` with the toxic waste from the proving key; can be switched to `DenseQapEngine` or `NaiveProver` via flags
+4. **Prove** — loads the proving key (group elements only, no scalars) and uses `FftQapEngine` + `PippengerProver` to compute the proof via multi-scalar multiplication; can be switched to `DenseQapEngine` or `NaiveProver` via flags
 5. **Serialize** — outputs the proof using `ark-serialize` compressed format
 6. **Verify** — loads the proof, public input, and verifying key, then checks the Groth16 pairing equation
 
-## Complete example (with ceremony)
+## Complete example (with dev ceremony)
+
+This example uses the **dev ceremony** (`ceremony-dev`) for speed. The resulting `.pk` / `.vk` files are in the exact same format as a production MPC ceremony, so the proving and verifying steps are identical.
 
 ```bash
 # 1. Compile the Circom circuit
@@ -109,14 +152,14 @@ circom multiplier.circom --r1cs --wasm --prime bls12381
 # 2. Generate witness
 snarkjs wtns calculate multiplier.wasm input.json witness.wtns
 
-# 3. Ceremony (run once per circuit)
+# 3. Dev ceremony (run once per circuit — instant, single-party)
 cd ../../cli
-cargo run --release -- ceremony \
+cargo run --release -- ceremony-dev \
   --circuit ../circom/SimpleExample/multiplier.r1cs \
   --proving-key /tmp/multiplier.pk \
   --verifying-key /tmp/multiplier.vk
 
-# 4. Prove (uses the random toxic waste from the proving key)
+# 4. Prove (uses the proving key — group elements, no scalars)
 cargo run --release -- prove \
   --circuit ../circom/SimpleExample/multiplier.r1cs \
   --witness ../circom/SimpleExample/witness.wtns \
@@ -130,9 +173,9 @@ cargo run --release -- verify \
   --verifying-key /tmp/multiplier.vk
 ```
 
-## Dev-only example (no ceremony — deterministic test values)
+## Dev-only shortcut (no proving key — deterministic test values)
 
-For quick testing you can skip the ceremony; the prover and verifier fall back to the deterministic test toxic waste (`tau=3, alpha=5, beta=7, gamma=11, delta=13`):
+For the quickest possible testing you can skip even the `ceremony-dev` step. The prover and verifier fall back to hard-coded deterministic toxic waste (`tau=3, alpha=5, beta=7, gamma=11, delta=13`). No `.pk` or `.vk` files are needed:
 
 ```bash
 # Prove (no --proving-key)
@@ -146,6 +189,8 @@ cargo run --release -- verify \
   --proof /tmp/proof.bin \
   --public /tmp/proof.pub
 ```
+
+> **Note:** This uses the old scalar-based prover path internally. Once Phase 0 (prover migration to group elements) is complete, this shortcut may be removed or redirected to load an auto-generated dev proving key.
 
 ---
 
@@ -238,15 +283,23 @@ For human inspection, use `hexdump -C proof.bin` or `xxd proof.bin`.
 
 ---
 
-## Warning: proving key contains toxic waste
+## Warning: proving key format (current vs target)
 
-The `ProvingKey` produced by the `ceremony` step **contains the raw toxic-waste scalars** (`tau, alpha, beta, gamma, delta`) because our current prover computes proof elements on-the-fly from them.  In a production deployment:
+**Current state (before Phase 0 migration):**
+The `ProvingKey` produced by the `ceremony` step **contains the raw toxic-waste scalars** (`tau, alpha, beta, gamma, delta`). The prover re-evaluates QAP polynomials from these scalars on every proof. **Do not use this for production circuits** — anyone who reads the `.pk` file can forge proofs.
 
-1. The ceremony would be a multi-party computation (MPC) where each participant contributes randomness and discards their contribution
-2. After the ceremony, the scalars are destroyed and only the pre-computed group elements are retained
-3. The prover would use the full structured reference string (SRS) — `tau^i·G1`, `tau^i·G2`, etc. — rather than the scalars themselves
+**Target state (after Phase 0 migration):**
+The `ProvingKey` will contain **only pre-computed group elements** (`a_query`, `b_g2_query`, `h_query`, `l_query`, etc.) and **no scalars**. The prover will use multi-scalar multiplication over these points, making it faster and safe to share the `.pk` with the prover. This is the format produced by both `ceremony-dev` (single-party) and `phase2 finalize` (multi-party MPC).
 
-For this didactic crate, the scalars are kept in the proving key file for simplicity. **Do not use this for production circuits.**
+| Property | Current (scalars) | Target (group elements) |
+|----------|------------------|-------------------------|
+| `.pk` size | ~200 bytes | ~MBs (circuit-dependent) |
+| Toxic waste in `.pk` | ❌ Yes — raw scalars | ✅ No — only curve points |
+| Prover work per proof | Re-evaluates QAP at `tau` | Pure MSM over pre-computed points |
+| Dev path | `ceremony` (today) | `ceremony-dev` (future) |
+| Production path | Not available | `phase2` MPC |
+
+See [`MPC_Ceremony_Research.md`](../MPC_Ceremony_Research.md) for the full migration plan.
 
 ## Pairing equation
 

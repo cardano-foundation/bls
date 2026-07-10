@@ -612,7 +612,10 @@ The current crate is a **reference implementation** for correctness verification
   3. The prover uses the **full SRS** instead of the raw scalars, so the scalars can be destroyed immediately.
 - **Status:** 🚧 **Planned.** A detailed plan document exists at [`MPC_Ceremony_Research.md`](MPC_Ceremony_Research.md). The plan covers three ceremony alternatives (full two-phase MPC, reuse existing Phase 1, circuit-specific MPC) with trade-offs, the required prover migration from scalars to group elements, and a phased implementation roadmap.
 - **Key insight:** The prover must be rewritten to use **pre-computed group elements** (`u_i(tau)·G1`, `v_i(tau)·G2`, `delta_inv·psi_i·G1`, etc.) via multi-scalar multiplication instead of re-evaluating QAP polynomials from raw scalars on every proof. This makes the prover faster *and* removes toxic waste from the `.pk` file.
-- **Pipeline change:** The CLI will gain `phase2 new`, `phase2 contribute`, `phase2 finalize`, and `import-srs` subcommands. The `prove` and `verify` commands remain unchanged from the user's perspective — only the internal `.pk` format changes.
+- **Switchable design:** The prover will consume a unified `ProvingKey` format (group elements only, arkworks-compatible). Two ceremony implementations will produce the same artifact:
+  - `ceremony-dev` — single-party, instant, for testing/CI/benchmarks (retains today's behavior but outputs the new group-element format)
+  - `phase2` — multi-party MPC for production (reuses PPoT Phase 1 + circuit-specific contributions)
+- **Pipeline change:** The CLI gains `ceremony-dev` (dev) and `phase2 new / contribute / finalize` (production) subcommands. The `prove` and `verify` commands remain unchanged from the user's perspective — they load the same `.pk` / `.vk` format regardless of provenance.
 - **Reference:** [Perpetual Powers of Tau](https://github.com/privacy-scaling-explorations/perpetualpowersoftau), snarkjs `powersoftau` workflow, [Ethereum KZG Ceremony](https://github.com/ethereum/kzg-ceremony), and arkworks' `groth16::generator::generate_random_parameters`.
 - **Benefit:** Eliminates the single point of failure. Even if N−1 participants collude, the ceremony remains secure as long as at least one participant honestly discards their contribution.
 

@@ -1,6 +1,6 @@
-# MPC Ceremony Plan for Groth16 Trusted Setup
+# MPC Ceremony Research for Groth16 Trusted Setup
 
-> **Context.** This document analyzes how to replace our current **single-party** trusted-setup ceremony with a **multi-party computation (MPC)** ceremony, and what that means for the Circom → Rust CLI → Aiken verifier pipeline.
+> **Context.** This document analyzes how to replace our current **single-party** trusted-setup ceremony with a **multi-party computation (MPC)** ceremony, and what that means for the Circom → Rust CLI → Aiken verifier pipeline. It includes original analysis plus research into existing Rust crates, tools, and ceremony formats.
 
 ---
 
@@ -269,17 +269,129 @@ groth16-prover verify --proof proof.bin --public proof.pub --verifying-key c.vk
 
 ---
 
-## 5. Implementation Roadmap
+## 5. Existing Rust Implementations & SRS Sources (Research Findings)
+
+After surveying the ecosystem, here is what actually exists and what we can reuse.
+
+### 5.1 Rust crates for Groth16 Phase 2 MPC
+
+| Crate | Source | Status | Notes |
+|-------|--------|--------|-------|
+| `phase2` (ebfull) | https://github.com/ebfull/phase2 | ⚠️ Unmaintained | Original Zcash/Bellman Phase 2. Tied to old `pairing` 0.14 / `bellman` 0.1 stack. Academic quality; warns about side-channel leaks. Useful for understanding the protocol, but not directly reusable with modern arkworks. |
+| `manta-trusted-setup` | https://github.com/Manta-Network/manta-rs | ✅ Production-grade | **Best reference available.** Built on arkworks. Ran a 4,382-participant ceremony in 2022 using PPoT Round 72 as Phase 1. Contains `groth16/mpc.rs` with `initialize()`, `contribute()`, `verify_transform()`, and `check_invariants()`. Uses `arkworks::serialize` natively. GPL-3.0 license. |
+| `ark-groth16` | https://github.com/arkworks-rs/groth16 | ✅ Active | Provides the **target data structures** (`ProvingKey`, `VerifyingKey`) but **zero ceremony code**. `generate_random_parameters` is single-party only. Our Phase 2 output should produce these exact structs. |
+| `phase2-bn254` | https://github.com/kobigurk/phase2-bn254 | ⚠️ Curve mismatch | Fork of ebfull/phase2 for BN254. Good for understanding PPoT verification in Rust, but hardcoded for the wrong curve. |
+
+### 5.2 Universal SRS / Phase 1 sources for BLS12-381
+
+| Source | Format | Groth16-ready? | Trust level |
+|--------|--------|---------------|-------------|
+| **Perpetual Powers of Tau (PPoT)** | `.ptau` (snarkjs binary) | ✅ Yes — contains `tau^i·G1/G2`, `alpha·tau^i·G1`, `beta·tau^i·G1`, `beta·G2` | 80+ verified contributions; actively maintained by PSE |
+| **Ethereum KZG Ceremony** | Custom JSON / KZG format | ⚠️ Partial — only `tau^i·G1/G2`; missing `alpha` and `beta` terms | 100,000+ participants; extremely high trust, but needs extra engineering to inject `alpha`/`beta` for Groth16 |
+
+**Practical recommendation:** Use **PPoT** as the Phase 1 source. Download the prepared `.ptau` file for the appropriate power (e.g., power 14 for up to 2^14 constraints). The file is a binary blob of group elements; we need a custom Rust parser to load it into `ark_bls12_381::G1Affine/G2Affine` structs. No existing Rust crate reads `.ptau` natively.
+
+### 5.3 What snarkjs does (for reference)
+
+snarkjs implements Approach A (full two-phase) in JavaScript/WASM:
+
+```bash
+# Phase 1 — Powers of Tau
+snarkjs powersoftau new bls12-381 14 pot14_0000.ptau
+snarkjs powersoftau contribute pot14_0000.ptau pot14_0001.ptau
+snarkjs powersoftau prepare phase2 pot14_0002.ptau pot14_final.ptau
+
+# Phase 2 — Circuit-specific
+snarkjs groth16 setup circuit.r1cs pot14_final.ptau circuit_0000.zkey
+snarkjs zkey contribute circuit_0000.zkey circuit_0001.zkey
+snarkjs zkey export verificationkey circuit_0001.zkey vk.json
+```
+
+The `.zkey` file contains the full `ProvingKey` as group elements, plus an MPC contribution transcript. It contains **no scalars**. The format is custom (magic `zkey` header) and not readable by arkworks.
+
+### 5.4 Architecture: separate CLI tool, not a server
+
+**Is the MPC a separate thing to instantiate?**  
+**Yes.** The MPC ceremony should be a **separate Rust binary** (or at minimum a distinct set of subcommands) from the prover. Reasons:
+
+1. **Security auditability** — Ceremony code is security-critical and should be minimal. Mixing it with proving logic increases attack surface.
+2. **Usage pattern** — A ceremony runs **once per circuit** (or once per major upgrade). A prover runs **once per proof**. They have completely different operational contexts.
+3. **Reusability** — A standalone ceremony tool can be reused by other projects without pulling in the full prover.
+
+**In the form of a server?**  
+**No — the cryptographic work stays client-side.** The ceremony does not need a "server" that performs crypto. It needs:
+
+- **A CLI tool** that each participant runs **locally** on their own machine. The tool:
+  - Downloads the latest contribution file
+  - Generates random entropy locally
+  - Updates the group elements locally
+  - Produces a contribution proof (e.g., a Schnorr-like ratio proof)
+  - Uploads the new contribution file
+- **A coordinator** that is just a **file host** — an HTTP server, IPFS node, or even a Git repository. The coordinator never sees secrets; it only stores and serves the latest public contribution file.
+
+This is exactly how PPoT, Zcash, and Manta ceremonies work. The "server" is passive storage; the crypto is client-side.
+
+### 5.5 Target proving-key format
+
+Our Phase 2 ceremony should output a proving key that is **compatible with `ark_groth16::ProvingKey<Bls12_381>`**. That struct contains:
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `vk` | `VerifyingKey` | The verification key (public) |
+| `beta_g1` | `G1Affine` | `beta·G1` |
+| `delta_g1` | `G1Affine` | `delta·G1` |
+| `a_query` | `Vec<G1Affine>` | `u_i(tau)·G1` per variable |
+| `b_g1_query` | `Vec<G1Affine>` | `v_i(tau)·G1` per variable |
+| `b_g2_query` | `Vec<G2Affine>` | `v_i(tau)·G2` per variable |
+| `h_query` | `Vec<G1Affine>` | `delta_inv·tau^j·T(tau)·G1` for j=0..deg(h) |
+| `l_query` | `Vec<G1Affine>` | public-input subset of `c_query` |
+
+This is the de-facto standard. Once our prover reads this format, it is compatible with any arkworks-based verifier, including our Aiken on-chain verifier (which expects the same `VerifyingKey` points).
+
+### 5.6 Switchable design: dev mode vs MPC mode
+
+The proving-key format is intentionally **the same** for both paths. The prover is agnostic to how the `ProvingKey` was produced:
+
+| Path | Command | Use case | Security |
+|------|---------|----------|----------|
+| **Dev (without MPC)** | `groth16-prover ceremony-dev --circuit c.r1cs --proving-key c.pk --verifying-key c.vk` | Testing, benchmarking, CI, developer onboarding, debugging | Single-party — fine for dev, never for production |
+| **Production (with MPC)** | `groth16-ceremony phase2 new → contribute → finalize` | Production deployments, mainnet circuits | Multi-party — 1-of-N honesty guarantees |
+
+Both paths output the **exact same binary format** (`ark_groth16::ProvingKey` serialized with `CanonicalSerialize`). The `prove` and `verify` commands are completely agnostic:
+
+```bash
+# Proving: identical for both paths
+groth16-prover prove --circuit c.r1cs --witness w.wtns --proving-key c.pk --out proof.bin
+
+# Verifying: identical for both paths
+groth16-prover verify --proof proof.bin --public proof.pub --verifying-key c.vk
+```
+
+**Why retain dev mode?**
+
+| Concern | Why dev mode is essential |
+|---------|--------------------------|
+| **Unit & integration tests** | CI cannot run an MPC. Tests need deterministic, instant ceremony output. |
+| **Benchmarking** | Compare FFT vs dense, Pippenger vs naive, Circom vs hard-coded — all with the same `.pk` format but without MPC overhead. |
+| **Developer onboarding** | A new contributor can run the full pipeline end-to-end in under a minute. |
+| **Debugging** | When a proof fails in the MPC path, a dev-mode baseline rules out circuit/witness bugs. |
+| **Aiken verifier testing** | The on-chain verifier can be tested against dev-mode proofs without ceremony infrastructure. |
+
+**Design principle:** The prover consumes a `ProvingKey` trait (or struct). Two implementations of the ceremony trait produce the same artifact: `SinglePartyCeremony` (fast, insecure) and `Phase2MpcCeremony` (slow, secure). The prover does not know which one was used.
+
+---
+
+## 6. Implementation Roadmap
 
 ### Phase 0: Prover migration (scalars → group elements)
 
 **Priority: Critical — blocks everything else**
 
-1. **Define `FullProvingKey` struct** containing:
+1. **Define `FullProvingKey` struct** compatible with `ark_groth16::ProvingKey`:
    - `vk: VerifyingKey` (existing)
    - `alpha_g1: G1Affine`, `beta_g1: G1Affine`, `beta_g2: G2Affine`, `delta_g2: G2Affine`
    - `a_query: Vec<G1Affine>` — `u_i(tau)·G1`
-   - `b_g1_query: Vec<G1Affine>` — `v_i(tau)·G1` (for A-term, if needed)
+   - `b_g1_query: Vec<G1Affine>` — `v_i(tau)·G1`
    - `b_g2_query: Vec<G2Affine>` — `v_i(tau)·G2`
    - `c_query: Vec<G1Affine>` — `delta_inv·(beta·u_i + alpha·v_i + w_i)(tau)·G1`
    - `h_query: Vec<G1Affine>` — `delta_inv·tau^j·T(tau)·G1`
@@ -303,14 +415,18 @@ groth16-prover verify --proof proof.bin --public proof.pub --verifying-key c.vk
 
 **Priority: High — enables multi-party security**
 
-1. **Design contribution protocol**:
-   - Participant generates random `alpha`, `beta`, `gamma`, `delta`, `tau`
-   - Participant updates all group elements in the proving key
-   - Participant produces a **contribution proof** (a hash chain + zero-knowledge proof of knowledge of their randomness)
+1. **Port `manta-trusted-setup/groth16/mpc.rs` logic** (GPL-3.0 — check license compatibility or rewrite from the math):
+   - `initialize()` — consumes a Phase 1 SRS accumulator + `.r1cs` → produces initial `zkey_0000.zkey`
+   - `contribute()` — participant generates random `delta`, updates `delta`-dependent group elements, appends ratio proof
+   - `verify_transform()` — checks invariants (A, B, alpha, beta, gamma, public cross-terms unchanged) and verifies ratio proof
 
-2. **Implement `phase2 new`** — takes `.r1cs` + universal SRS → produces initial `zkey_0000.zkey`
+2. **Implement `.ptau` parser** — reads PPoT prepared files (sections 12–15) into arkworks `G1Affine/G2Affine` vectors
 
-3. **Implement `phase2 contribute`** — takes `zkey_in.zkey` + participant entropy → produces `zkey_out.zkey` with updated group elements and a contribution hash
+3. **Implement CLI subcommands:**
+   - `groth16-ceremony phase2 new --circuit c.r1cs --srs universal.ptau --zkey c_0000.zkey`
+   - `groth16-ceremony phase2 contribute --zkey-in c_0000.zkey --zkey-out c_0001.zkey --entropy /dev/urandom`
+   - `groth16-ceremony phase2 verify --zkey c_0001.zkey --circuit c.r1cs --srs universal.ptau`
+   - `groth16-ceremony phase2 finalize --zkey c_final.zkey --proving-key c.pk --verifying-key c.vk`
 
 4. **Implement `phase2 verify`** — validates that all contributions are well-formed (no participant learned the combined randomness)
 
@@ -336,7 +452,7 @@ groth16-prover verify --proof proof.bin --public proof.pub --verifying-key c.vk
 
 ---
 
-## 6. Recommended Path Forward
+## 7. Recommended Path Forward
 
 Given our project context (didactic but moving toward production, Cardano ecosystem, BLS12-381), the **recommended approach is B + C hybrid**:
 
@@ -354,13 +470,16 @@ This gives us:
 
 ---
 
-## 7. References
+## 8. References
 
 1. [Groth16 paper](https://eprint.iacr.org/2016/260.pdf) — original zk-SNARK construction
-2. [Arkworks groth16 crate](https://docs.rs/ark-groth16/latest/ark_groth16/) — production reference implementation
-3. [Perpetual Powers of Tau](https://github.com/privacy-scaling-explorations/perpetualpowersoftau) — universal SRS ceremony
-4. [snarkjs powersoftau](https://github.com/iden3/snarkjs/blob/master/src/powersoftau.js) — JavaScript reference
-5. [Zcash Sapling ceremony](https://z.cash/technology/sapling/) — original Groth16 MPC
-6. [Filecoin trusted setup](https://github.com/filecoin-project/filecoin-phase1) — large-scale Phase 1
-7. [Ethereum KZG Ceremony](https://github.com/ethereum/kzg-ceremony) — modern BLS12-381 SRS ceremony
-8. [Arkworks Phase 2](https://github.com/arkworks-rs/cryptocontexts) — circuit-specific contribution math
+2. [Arkworks groth16 crate](https://docs.rs/ark-groth16/latest/ark_groth16/) — production reference implementation; target `ProvingKey` format
+3. [Perpetual Powers of Tau](https://github.com/privacy-scaling-explorations/perpetualpowersoftau) — universal SRS ceremony for BLS12-381
+4. [snarkjs](https://github.com/iden3/snarkjs) — JavaScript reference for Phase 1 + Phase 2; defines `.ptau` and `.zkey` formats
+5. [ebfull/phase2](https://github.com/ebfull/phase2) — original Rust Phase 2 implementation (Zcash/Bellman)
+6. [Manta Network trusted setup](https://github.com/Manta-Network/manta-rs/tree/main/manta-trusted-setup) — production arkworks-based Phase 2 MPC; best Rust reference
+7. [Zcash Sapling ceremony](https://z.cash/technology/sapling/) — original Groth16 MPC
+8. [Filecoin trusted setup](https://github.com/filecoin-project/filecoin-phase1) — large-scale Phase 1
+9. [Ethereum KZG Ceremony](https://github.com/ethereum/kzg-ceremony) — modern BLS12-381 SRS ceremony (KZG-only, not Groth16-ready)
+10. [phase2-bn254](https://github.com/kobigurk/phase2-bn254) — BN254 Phase 2 fork with PPoT verification tools
+11. [Arkworks serialization](https://docs.rs/ark-serialize/latest/ark_serialize/) — canonical serialization traits used throughout
