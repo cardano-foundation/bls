@@ -604,6 +604,6 @@ bls12_381_final_verify(lhs, rhs)   // True = proof is valid
 
 > **On-chain cost:** Groth16 verification is extremely efficient on Cardano. The 3-gate multiplier circuit consumes only **~20% of the per-script CPU budget** (~2.0B units out of 10B limit) and **~0.1% of memory** (~15K words). Crucially, verification cost is **essentially flat** regardless of circuit complexity — a circuit with thousands of constraints costs almost exactly the same as this toy example. Only the number of public inputs adds a small linear cost (~50M CPU per extra input). See the full cost analysis, scaling tables, and headroom calculations in [`groth16-prover/README.md`](./groth16-prover/README.md) §**Aiken On-Chain Verification Cost Analysis**.
 
-See the Aiken verifier's [`README.md`](./aiken/groth16/README.md) for the full hard-coded example, exact hex values, test results, and next steps toward generalization (parameterized VK, dynamic public inputs, Circom adapter).
+See the Aiken verifier's [`README.md`](./aiken/groth16/README.md) for the full hard-coded example, exact hex values, test results.
 
 </details>
