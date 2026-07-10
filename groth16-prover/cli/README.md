@@ -24,26 +24,30 @@ A multi-party Phase 2 ceremony that reuses a publicly verified Phase 1 SRS (e.g.
 
 ```bash
 # 1. Initialize from universal SRS
-groth16-ceremony phase2 new \
+groth16-prover phase2 new \
   --circuit circuit.r1cs \
   --srs universal.ptau \
   --zkey circuit_0000.zkey
 
 # 2. Participant 1 contributes locally, uploads result
-groth16-ceremony phase2 contribute \
+groth16-prover phase2 contribute \
   --zkey-in circuit_0000.zkey \
   --zkey-out circuit_0001.zkey \
-  --entropy /dev/urandom
+  --name "Alice"
 
 # 3. Participant N contributes
-groth16-ceremony phase2 contribute \
+groth16-prover phase2 contribute \
   --zkey-in circuit_0001.zkey \
   --zkey-out circuit_final.zkey \
-  --entropy /dev/urandom
+  --name "Bob"
 
-# 4. Finalize to the same .pk/.vk format as dev mode
-groth16-ceremony phase2 finalize \
-  --zkey-in circuit_final.zkey \
+# 4. Verify the accumulator before finalizing
+groth16-prover phase2 verify \
+  --zkey circuit_final.zkey
+
+# 5. Finalize to the same .pk/.vk format as dev mode
+groth16-prover phase2 finalize \
+  --zkey circuit_final.zkey \
   --proving-key circuit.pk \
   --verifying-key circuit.vk
 ```

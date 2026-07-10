@@ -620,7 +620,7 @@ The current crate is a **reference implementation** for correctness verification
 - **Switchable design:** The prover consumes a unified `ProvingKey` format (group elements only, arkworks-compatible). Two ceremony implementations produce the same artifact:
   - `ceremony-dev` — single-party, instant, for testing/CI/benchmarks
   - `phase2` — multi-party MPC for production (reuses PPoT Phase 1 + circuit-specific contributions)
-- **Pipeline change:** The CLI already has `ceremony-dev`. Future subcommands `phase2 new / contribute / finalize` will produce the same `.pk` / `.vk` format. The `prove` and `verify` commands are agnostic to provenance.
+- **Pipeline change:** The CLI now has both `ceremony-dev` (single-party, instant) and `phase2 new / contribute / verify / finalize` (multi-party MPC). Both produce the same `.pk` / `.vk` binary format. The `prove` and `verify` commands are agnostic to provenance.
 - **Reference:** [Perpetual Powers of Tau](https://github.com/privacy-scaling-explorations/perpetualpowersoftau), snarkjs `powersoftau` workflow, [Ethereum KZG Ceremony](https://github.com/ethereum/kzg-ceremony), and arkworks' `groth16::generator::generate_random_parameters`.
 - **Benefit:** Eliminates the single point of failure. Even if N−1 participants collude, the ceremony remains secure as long as at least one participant honestly discards their contribution.
 

@@ -61,6 +61,19 @@ pub enum Command {
     ///
     ///   $ groth16-prover verify --proof proof.bin --public proof.pub --verifying-key circuit.vk
     Verify(cmd::verify::Args),
+
+    /// Run a Phase-2 multi-party ceremony for a circuit
+    ///
+    /// Consumes a Phase-1 SRS (`.ptau`) and a circuit (`.r1cs`) to produce
+    /// a circuit-specific proving key via a sequential MPC protocol.
+    ///
+    /// Subcommands:
+    ///   new        — create initial accumulator
+    ///   contribute — add your randomness
+    ///   verify     — check all contributions
+    ///   finalize   — convert to `.pk` / `.vk`
+    #[command(subcommand)]
+    Phase2(cmd::phase2::Phase2Command),
 }
 
 #[derive(Debug, Parser)]
@@ -82,5 +95,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         Command::CeremonyDev(args) => cmd::ceremony_dev::run(args),
         Command::Prove(args) => cmd::prove::run(args),
         Command::Verify(args) => cmd::verify::run(args),
+        Command::Phase2(cmd) => cmd::phase2::run(cmd),
     }
 }
