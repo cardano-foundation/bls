@@ -456,17 +456,17 @@ circom multiplier.circom --r1cs --wasm --prime bls12381
 
 ```bash
 cd groth16-prover/cli
-cargo run --release -- ceremony \
+cargo run --release -- ceremony-dev \
   --circuit ../circom/SimpleExample/multiplier.r1cs \
   --proving-key /tmp/multiplier.pk \
   --verifying-key /tmp/multiplier.vk
 ```
 
 **Output:**
-- `/tmp/multiplier.pk` — proving key (toxic-waste scalars + CRS points; **keep secret**, dev use only)
+- `/tmp/multiplier.pk` — proving key (pre-computed group elements only; **no raw scalars**)
 - `/tmp/multiplier.vk` — verification key (CRS fixed points + per-variable public-input points; **share freely**)
 
-> **Note:** This is a **single-party ceremony** using `rand::thread_rng()` (ChaCha12 CSPRNG). It is fine for development and testing, but production deployments should use a multi-party computation (MPC) ceremony so no single participant learns the toxic waste. See [`groth16-prover/README.md`](./groth16-prover/README.md) §**TO DO — Production innovations** (h) for the MPC plan.
+> **Note:** This is a **single-party dev ceremony** (`ceremony-dev`). It outputs a `FullProvingKey` that contains only curve points — safe to share with the prover. For production, use a multi-party `phase2` ceremony (reusing PPoT Phase 1). See [`groth16-prover/README.md`](./groth16-prover/README.md) §**TO DO — Production innovations** (h) for the MPC plan.
 
 **→ Next step uses:** `multiplier.wasm` (from step 1) + `input.json`
 
@@ -504,7 +504,7 @@ snarkjs wtns calculate multiplier.wasm input.json witness.wtns
 **Inputs:**
 - `multiplier.r1cs` — constraint system from step 1
 - `witness.wtns` — witness vector from step 3
-- `/tmp/multiplier.pk` — proving key from step 2 (contains the random toxic waste)
+- `/tmp/multiplier.pk` — proving key from step 2 (group elements only, no toxic waste)
 
 **Command:**
 
@@ -523,7 +523,7 @@ cargo run --release -- prove \
   - `B` (G2, 96 bytes)
   - `C` (G1, 48 bytes)
 
-The CLI uses `FftQapEngine` + `PippengerProver` under the hood (fast FFT-based QAP + batched MSM), and the toxic waste from the proving key to make the proof random and non-deterministic.
+The CLI uses `FftQapEngine` + `PippengerProver` under the hood (fast FFT-based QAP + batched MSM) over the pre-computed group elements in the proving key.
 
 **→ Next step uses:** proof points `(A, B, C)` + public inputs from `input.json` + `/tmp/multiplier.vk` (from step 2)
 

@@ -190,7 +190,7 @@ cargo run --release -- verify \
   --public /tmp/proof.pub
 ```
 
-> **Note:** This uses the old scalar-based prover path internally. Once Phase 0 (prover migration to group elements) is complete, this shortcut may be removed or redirected to load an auto-generated dev proving key.
+> **Note:** This uses deterministic test values (`tau=3`, `alpha=5`, etc.) and skips the ceremony step. Once `FullProvingKey` serialization lands, this shortcut may be redirected to auto-generate a dev proving key.
 
 ---
 
@@ -283,23 +283,21 @@ For human inspection, use `hexdump -C proof.bin` or `xxd proof.bin`.
 
 ---
 
-## Warning: proving key format (current vs target)
+## Proving key format
 
-**Current state (before Phase 0 migration):**
-The `ProvingKey` produced by the `ceremony` step **contains the raw toxic-waste scalars** (`tau, alpha, beta, gamma, delta`). The prover re-evaluates QAP polynomials from these scalars on every proof. **Do not use this for production circuits** — anyone who reads the `.pk` file can forge proofs.
+The CLI produces two formats.  The **preferred** one (group elements only) is what `ceremony-dev` outputs today and what a future MPC `phase2 finalize` will also output.
 
-**Target state (after Phase 0 migration):**
-The `ProvingKey` will contain **only pre-computed group elements** (`a_query`, `b_g2_query`, `h_query`, `l_query`, etc.) and **no scalars**. The prover will use multi-scalar multiplication over these points, making it faster and safe to share the `.pk` with the prover. This is the format produced by both `ceremony-dev` (single-party) and `phase2 finalize` (multi-party MPC).
-
-| Property | Current (scalars) | Target (group elements) |
-|----------|------------------|-------------------------|
+| Property | Legacy `ProvingKey` (scalars) | `FullProvingKey` (group elements) |
+|----------|------------------------------|-----------------------------------|
 | `.pk` size | ~200 bytes | ~MBs (circuit-dependent) |
 | Toxic waste in `.pk` | ❌ Yes — raw scalars | ✅ No — only curve points |
 | Prover work per proof | Re-evaluates QAP at `tau` | Pure MSM over pre-computed points |
-| Dev path | `ceremony` (today) | `ceremony-dev` (future) |
-| Production path | Not available | `phase2` MPC |
+| Dev path | `ceremony-dev` (legacy path, kept for backward compat) | `ceremony-dev` (default since Phase 0) |
+| Production path | — | `phase2` MPC |
 
-See [`MPC_Ceremony_Research.md`](../MPC_Ceremony_Research.md) for the full migration plan.
+**Backward compatibility.**  The `prove` command auto-detects the format on load: if the file starts with the legacy `ProvingKey` magic it falls back to the scalar-based prover; otherwise it loads a `FullProvingKey` and uses the fast MSM path.  New `.pk` files are always written as `FullProvingKey`.
+
+See [`MPC_Ceremony_Research.md`](../MPC_Ceremony_Research.md) for the full ceremony roadmap.
 
 ## Pairing equation
 
