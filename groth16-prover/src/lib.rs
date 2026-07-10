@@ -5,3 +5,4 @@ pub mod prover;
 pub mod circom_adapter;
 pub mod ceremony;
 pub mod ptau;
+pub mod phase2;

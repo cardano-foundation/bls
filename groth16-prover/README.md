@@ -17,7 +17,7 @@ cd groth16-prover
 cargo test
 ```
 
-All 27 library tests pass (R1CS relation, QAP interpolation, target polynomial, field arithmetic, Circom parser, prover parity, ptau parser).
+All 38 library tests pass (R1CS relation, QAP interpolation, target polynomial, field arithmetic, Circom parser, prover parity, ptau parser, Phase 2 MPC).
 
 ### 2. Use the CLI
 
@@ -615,7 +615,7 @@ The current crate is a **reference implementation** for correctness verification
 - **Status:**
   - ✅ **Phase 0 — Prover migration (scalars → group elements):** Complete. `FullProvingKey` struct, `single_party_ceremony_full()`, `NaiveProver`/`PippengerProver` `prove_with_full_pk()`, and CLI `ceremony-dev` subcommand are all implemented and tested. Parity tests confirm bit-for-bit identical proofs between old and new paths.
   - ✅ **Phase 1 — `.ptau` parser:** Complete. `src/ptau.rs` reads snarkjs `.ptau` files (PPoT format) and converts LEM points into arkworks `G1Affine`/`G2Affine`. Tested against a snarkjs-generated power-4 BLS12-381 file with on-curve and subgroup validation.
-  - ⏳ **Phase 2 — Phase 2 MPC logic:** Pending. Port Manta Network's `initialize()` / `contribute()` / `verify_transform()` math to Rust/arkworks (rewritten from scratch due to GPL-3.0 license incompatibility).
+  - ✅ **Phase 2 — Phase 2 MPC logic:** Complete. `src/phase2.rs` implements `initialize()` (consumes `.ptau` + `.r1cs` → `Phase2Accumulator`), `contribute()` (updates delta-dependent elements with Schnorr-like ratio proof), `verify()` (checks all contribution proofs and delta chaining), and `finalize()` (produces `FullProvingKey` + `VerifyingKey`). Rewritten from scratch (Manta reference is GPL-3.0, incompatible with our Apache-2.0). Five integration tests pass including end-to-end prove/verify with a real `.ptau` file.
 - **Key insight:** The prover now uses **pre-computed group elements** (`u_i(tau)·G1`, `v_i(tau)·G2`, `delta_inv·psi_i·G1`, etc.) via multi-scalar multiplication instead of re-evaluating QAP polynomials from raw scalars on every proof. This makes the prover faster *and* removes toxic waste from the `.pk` file.
 - **Switchable design:** The prover consumes a unified `ProvingKey` format (group elements only, arkworks-compatible). Two ceremony implementations produce the same artifact:
   - `ceremony-dev` — single-party, instant, for testing/CI/benchmarks

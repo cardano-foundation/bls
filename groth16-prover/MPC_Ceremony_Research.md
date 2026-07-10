@@ -420,14 +420,15 @@ groth16-prover verify --proof proof.bin --public proof.pub --verifying-key c.vk
    - On-curve and subgroup validation for every point
    - Tested against a snarkjs-generated power-4 BLS12-381 `.ptau` file
 
-### Phase 2: Phase 2 MPC logic (circuit-specific) ⏳ PENDING
+### Phase 2: Phase 2 MPC logic (circuit-specific) ✅ COMPLETE
 
 **Priority: High — enables multi-party security**
 
-1. ⏳ **Port Phase 2 math** (rewrite from scratch, Manta reference is GPL-3.0):
-   - `initialize()` — consumes a Phase 1 SRS accumulator + `.r1cs` → produces initial `zkey_0000.zkey`
-   - `contribute()` — participant generates random `delta`, updates `delta`-dependent group elements, appends ratio proof
-   - `verify_transform()` — checks invariants (A, B, alpha, beta, gamma, public cross-terms unchanged) and verifies ratio proof
+1. ✅ **Port Phase 2 math** (rewritten from scratch, Manta reference is GPL-3.0):
+   - `initialize()` — consumes a Phase 1 SRS accumulator (`.ptau`) + `.r1cs` → produces initial `Phase2Accumulator`
+   - `contribute()` — participant generates random `delta_new`, updates `delta`-dependent group elements (`c_query`, `h_query`, `l_query`, `ic`), appends Schnorr-like ratio proof
+   - `verify()` — checks that all contributions have valid ratio proofs and that delta points chain correctly
+   - `finalize()` — converts accumulator into `FullProvingKey` + `VerifyingKey`, compatible with existing prover
 
 2. ⏳ **Implement CLI subcommands:**
    - `groth16-ceremony phase2 new --circuit c.r1cs --srs universal.ptau --zkey c_0000.zkey`
@@ -435,7 +436,20 @@ groth16-prover verify --proof proof.bin --public proof.pub --verifying-key c.vk
    - `groth16-ceremony phase2 verify --zkey c_0001.zkey --circuit c.r1cs --srs universal.ptau`
    - `groth16-ceremony phase2 finalize --zkey c_final.zkey --proving-key c.pk --verifying-key c.vk`
 
-3. ⏳ **Implement `phase2 verify`** — validates that all contributions are well-formed (no participant learned the combined randomness)
+3. ✅ **Implement `phase2 verify`** — validates that all contributions are well-formed (no participant learned the combined randomness)
+
+**Key design decisions:**
+- All circuit-specific group elements computed via **MSM over `.ptau` basis elements** — no raw `tau` scalar needed
+- `ic` (public-input commitment points) computed during `initialize()` and updated during `contribute()` because they contain `delta_inv` implicitly
+- Ratio proof uses **G1 base = `delta_g1_before`** (not `G1` generator), so proof works even when total delta is a product of multiple contributions
+- Phase 2 output is **bit-for-bit compatible** with `FullProvingKey`/`VerifyingKey` used by `NaiveProver`/`PippengerProver`
+
+**Tests:**
+- `test_ratio_proof_roundtrip` — Schnorr proof verifies for correct scalar
+- `test_ratio_proof_wrong_s_fails` — tampered proof rejected
+- `test_initialize_with_ptau` — full `initialize()` with real `.ptau` file, all points on-curve and in subgroup
+- `test_contribute_and_verify` — two sequential contributions, both verify
+- `test_finalize_produces_valid_keys` — `finalize()` produces valid `FullProvingKey`, proof generation succeeds
 
 4. ⏳ **Implement `phase2 finalize`** — takes final `zkey_n.zkey` → produces `circuit.pk` + `circuit.vk`
 
@@ -467,14 +481,14 @@ Given our project context (didactic but moving toward production, Cardano ecosys
 
 2. ✅ **Phase 1 (COMPLETE):** `.ptau` parser implemented. We can import Perpetual Powers of Tau files directly into arkworks `G1Affine`/`G2Affine` vectors.
 
-3. ⏳ **Phase 2 (NEXT):** Implement circuit-specific Phase 2 MPC logic (`initialize`, `contribute`, `verify_transform`). Reuse PPoT Phase 1 via the `.ptau` parser. The math will be rewritten from scratch (Manta's implementation is GPL-3.0, incompatible with our Apache-2.0 license).
+3. ✅ **Phase 2 (COMPLETE):** Circuit-specific Phase 2 MPC logic implemented (`initialize`, `contribute`, `verify`, `finalize`). Reuses PPoT Phase 1 via the `.ptau` parser. The math was rewritten from scratch (Manta's implementation is GPL-3.0, incompatible with our Apache-2.0 license).
 
 4. **Long-term:** If sovereignty is required, implement our own Phase 1 MPC. This is a large undertaking and should only be done if we cannot trust any existing universal SRS.
 
 This gives us:
 - ✅ Production-grade prover (no toxic waste in `.pk`)
 - ✅ `.ptau` import ready for PPoT / snarkjs Phase 1 artifacts
-- ⏳ Multi-party security for circuit-specific randomness (Phase 2 pending)
+- ✅ Multi-party security for circuit-specific randomness (Phase 2 complete)
 - ✅ Fast path to deployment (reuse existing Phase 1)
 - ✅ Option to bootstrap our own Phase 1 later
 
