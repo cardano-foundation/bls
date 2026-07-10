@@ -364,6 +364,7 @@ mod tests {
     use crate::prover::{NaiveProver, PippengerProver, Prover};
     use crate::r1cs::{L, O, R, WITNESS};
     use ark_bls12_381::Fr;
+    use ark_ec::AffineRepr;
 
     #[test]
     fn test_ceremony_deterministic_matches_hardcoded() {
@@ -384,7 +385,7 @@ mod tests {
         let delta_g2 = G2Affine::from(g2_proj * tw.delta);
 
         let gamma_inv = tw.gamma.inverse().unwrap();
-        let delta_inv = tw.delta.inverse().unwrap();
+        let _delta_inv = tw.delta.inverse().unwrap();
 
         let mut ic = Vec::with_capacity(n_vars);
         for i in 0..n_vars {
@@ -491,5 +492,57 @@ mod tests {
         for i in 0..pk.vk.ic.len() {
             assert_eq!(pk.vk.ic[i], pk2.vk.ic[i]);
         }
+    }
+
+    #[test]
+    fn test_single_party_full_proving_key_basic() {
+        let mut rng = rand::thread_rng();
+        let engine = FftQapEngine::new();
+
+        let l_ref: Vec<&[u64]> = L.iter().map(|v| v.as_slice()).collect();
+        let r_ref: Vec<&[u64]> = R.iter().map(|v| v.as_slice()).collect();
+        let o_ref: Vec<&[u64]> = O.iter().map(|v| v.as_slice()).collect();
+
+        let n_public = 2;
+        let n_vars = L[0].len(); // 8 for the hard-coded 3-constraint circuit
+
+        let (full_pk, vk) = single_party_ceremony_full(&engine, &l_ref, &r_ref, &o_ref, n_public, &mut rng);
+
+        // 1. Basic sanity checks on vector lengths
+        assert_eq!(full_pk.a_query.len(), n_vars, "a_query should have one entry per variable");
+        assert_eq!(full_pk.b_g1_query.len(), n_vars, "b_g1_query should have one entry per variable");
+        assert_eq!(full_pk.b_g2_query.len(), n_vars, "b_g2_query should have one entry per variable");
+        assert_eq!(full_pk.c_query.len(), n_vars, "c_query should have one entry per variable");
+        assert_eq!(full_pk.l_query.len(), n_public, "l_query should have one entry per public variable");
+        assert!(!full_pk.h_query.is_empty(), "h_query should not be empty");
+
+        // 2. VK consistency: vk.ic must match l_query exactly
+        assert_eq!(vk.ic.len(), n_vars, "vk.ic should have one entry per variable");
+        for i in 0..n_public {
+            assert_eq!(full_pk.l_query[i], vk.ic[i],
+                "l_query[{i}] must match vk.ic[{i}]");
+        }
+
+        // 3. Serialization round-trip
+        let mut bytes = Vec::new();
+        full_pk.serialize_compressed(&mut bytes).unwrap();
+        let full_pk2 = FullProvingKey::deserialize_compressed(&bytes[..]).unwrap();
+
+        assert_eq!(full_pk.a_query.len(), full_pk2.a_query.len());
+        assert_eq!(full_pk.b_g2_query.len(), full_pk2.b_g2_query.len());
+        assert_eq!(full_pk.h_query.len(), full_pk2.h_query.len());
+        assert_eq!(full_pk.vk.alpha_g1, full_pk2.vk.alpha_g1);
+        assert_eq!(full_pk.vk.beta_g2, full_pk2.vk.beta_g2);
+        assert_eq!(full_pk.vk.gamma_g2, full_pk2.vk.gamma_g2);
+        assert_eq!(full_pk.vk.delta_g2, full_pk2.vk.delta_g2);
+
+        // 4. Spot-check: at least some a_query entries are non-identity
+        // (not all variables have zero QAP coefficients at a random tau)
+        let non_zero_a = full_pk.a_query.iter().filter(|pt| !pt.is_zero()).count();
+        assert!(non_zero_a > 0, "at least some a_query entries should be non-identity");
+
+        // 5. Spot-check: at least some b_g2_query entries are non-identity
+        let non_zero_b2 = full_pk.b_g2_query.iter().filter(|pt| !pt.is_zero()).count();
+        assert!(non_zero_b2 > 0, "at least some b_g2_query entries should be non-identity");
     }
 }
