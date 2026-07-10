@@ -9,6 +9,8 @@ A Key Derivation Function takes some initial keying material — a password, a s
 or random bytes — and deterministically produces one or more cryptographically strong secret keys.
 KDFs are foundational for wallet key hierarchies, session-key agreement, and password-based encryption.
 
+> **Critical security warning.** Everything passed into an on-chain script—redeemers, datums, script arguments—is **permanently visible on the blockchain**. If you supply a password or a salt to `gen_keys_pbkdf2` or `gen_keys_hkdf` inside a validator, anyone can read the transaction, extract the password and salt, and re-run the same KDF off-chain. This means the on-chain KDF functions are **not suitable for password hashing in production**. They are intended for narrow use cases: testing, deriving keys from values that are *already* public or committed (e.g., a Diffie-Hellman shared secret computed off-chain by both parties), or educational examples. If you need to hash a human password, do it **off-chain** in the wallet or application layer, and only submit the resulting public key or hash on-chain.
+
 ## What this library offers
 
 | Layer | Module | Purpose |
