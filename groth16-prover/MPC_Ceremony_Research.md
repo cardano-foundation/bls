@@ -383,11 +383,11 @@ groth16-prover verify --proof proof.bin --public proof.pub --verifying-key c.vk
 
 ## 6. Implementation Roadmap
 
-### Phase 0: Prover migration (scalars → group elements)
+### Phase 0: Prover migration (scalars → group elements) ✅ COMPLETE
 
 **Priority: Critical — blocks everything else**
 
-1. **Define `FullProvingKey` struct** compatible with `ark_groth16::ProvingKey`:
+1. ✅ **Define `FullProvingKey` struct** compatible with `ark_groth16::ProvingKey`:
    - `vk: VerifyingKey` (existing)
    - `alpha_g1: G1Affine`, `beta_g1: G1Affine`, `beta_g2: G2Affine`, `delta_g2: G2Affine`
    - `a_query: Vec<G1Affine>` — `u_i(tau)·G1`
@@ -397,40 +397,47 @@ groth16-prover verify --proof proof.bin --public proof.pub --verifying-key c.vk
    - `h_query: Vec<G1Affine>` — `delta_inv·tau^j·T(tau)·G1`
    - `l_query: Vec<G1Affine>` — public-input subset of `c_query`
 
-2. **Update `Prover` trait** to accept `&FullProvingKey` instead of raw scalars
+2. ✅ **Update `Prover` trait** to accept `&FullProvingKey` instead of raw scalars
 
-3. **Rewrite `NaiveProver` and `PippengerProver`** to use MSM over pre-computed points
+3. ✅ **Rewrite `NaiveProver` and `PippengerProver`** to use MSM over pre-computed points
    - `A = MSM(a_query, witness) + alpha_g1`
    - `B = MSM(b_g2_query, witness) + beta_g2`
    - `C = MSM(c_query[private], witness[private]) + MSM(h_query, h_coeffs)`
    - `V = MSM(l_query, witness[public])`
 
-4. **Add a `single_party_ceremony_full` function** that produces the `FullProvingKey` + `VerifyingKey` from scalars (bridge between old and new)
+4. ✅ **Add a `single_party_ceremony_full` function** that produces the `FullProvingKey` + `VerifyingKey` from scalars (bridge between old and new)
 
-5. **Update CLI `prove` command** to load `FullProvingKey` and call the new prover
+5. ✅ **Update CLI `prove` command** to load `FullProvingKey` and call the new prover
 
-6. **Test parity** — old scalar-based prover and new group-element prover must produce identical proofs for the same toxic waste
+6. ✅ **Test parity** — old scalar-based prover and new group-element prover produce identical proofs for the same toxic waste.  Integration test `full_ceremony_dev_prove_verify_roundtrip` passes end-to-end.
 
-### Phase 1: Phase 2 MPC (circuit-specific)
+### Phase 1: `.ptau` parser and SRS import ✅ COMPLETE
 
 **Priority: High — enables multi-party security**
 
-1. **Port `manta-trusted-setup/groth16/mpc.rs` logic** (GPL-3.0 — check license compatibility or rewrite from the math):
+1. ✅ **Implement `.ptau` parser** — `src/ptau.rs` reads snarkjs `.ptau` files and converts LEM (Little-Endian Montgomery) uncompressed points directly into arkworks `G1Affine`/`G2Affine`.  The byte mapping is 1:1 because both snarkjs and arkworks use the same internal Montgomery representation.
+   - Sections parsed: `tauG1` (2), `tauG2` (3), `alphaTauG1` (4), `betaTauG1` (5), `betaG2` (6)
+   - On-curve and subgroup validation for every point
+   - Tested against a snarkjs-generated power-4 BLS12-381 `.ptau` file
+
+### Phase 2: Phase 2 MPC logic (circuit-specific) ⏳ PENDING
+
+**Priority: High — enables multi-party security**
+
+1. ⏳ **Port Phase 2 math** (rewrite from scratch, Manta reference is GPL-3.0):
    - `initialize()` — consumes a Phase 1 SRS accumulator + `.r1cs` → produces initial `zkey_0000.zkey`
    - `contribute()` — participant generates random `delta`, updates `delta`-dependent group elements, appends ratio proof
    - `verify_transform()` — checks invariants (A, B, alpha, beta, gamma, public cross-terms unchanged) and verifies ratio proof
 
-2. **Implement `.ptau` parser** — reads PPoT prepared files (sections 12–15) into arkworks `G1Affine/G2Affine` vectors
-
-3. **Implement CLI subcommands:**
+2. ⏳ **Implement CLI subcommands:**
    - `groth16-ceremony phase2 new --circuit c.r1cs --srs universal.ptau --zkey c_0000.zkey`
    - `groth16-ceremony phase2 contribute --zkey-in c_0000.zkey --zkey-out c_0001.zkey --entropy /dev/urandom`
    - `groth16-ceremony phase2 verify --zkey c_0001.zkey --circuit c.r1cs --srs universal.ptau`
    - `groth16-ceremony phase2 finalize --zkey c_final.zkey --proving-key c.pk --verifying-key c.vk`
 
-4. **Implement `phase2 verify`** — validates that all contributions are well-formed (no participant learned the combined randomness)
+3. ⏳ **Implement `phase2 verify`** — validates that all contributions are well-formed (no participant learned the combined randomness)
 
-5. **Implement `phase2 finalize`** — takes final `zkey_n.zkey` → produces `circuit.pk` + `circuit.vk`
+4. ⏳ **Implement `phase2 finalize`** — takes final `zkey_n.zkey` → produces `circuit.pk` + `circuit.vk`
 
 ### Phase 2: Phase 1 MPC (universal SRS)
 
@@ -456,15 +463,18 @@ groth16-prover verify --proof proof.bin --public proof.pub --verifying-key c.vk
 
 Given our project context (didactic but moving toward production, Cardano ecosystem, BLS12-381), the **recommended approach is B + C hybrid**:
 
-1. **Short-term (this month):** Implement Phase 0 (prover migration to group elements). This is purely internal refactoring — no MPC yet — but it makes the prover production-ready (no scalars in proving key).
+1. ✅ **Phase 0 (COMPLETE):** Prover migrated from scalars to group elements. `FullProvingKey` is the default format; CLI `ceremony-dev` outputs it; `prove` auto-detects and routes to the fast MSM path.
 
-2. **Medium-term:** Implement Phase 1 (circuit-specific Phase 2 MPC). Skip Phase 1 MPC initially by using a **single-party Phase 2** from an imported universal SRS. The Ethereum KZG ceremony or snarkjs's Perpetual Powers of Tau both provide BLS12-381-compatible universal SRS files.
+2. ✅ **Phase 1 (COMPLETE):** `.ptau` parser implemented. We can import Perpetual Powers of Tau files directly into arkworks `G1Affine`/`G2Affine` vectors.
 
-3. **Long-term:** If sovereignty is required, implement Phase 2 (our own Phase 1 MPC). This is a large undertaking and should only be done if we cannot trust any existing universal SRS.
+3. ⏳ **Phase 2 (NEXT):** Implement circuit-specific Phase 2 MPC logic (`initialize`, `contribute`, `verify_transform`). Reuse PPoT Phase 1 via the `.ptau` parser. The math will be rewritten from scratch (Manta's implementation is GPL-3.0, incompatible with our Apache-2.0 license).
+
+4. **Long-term:** If sovereignty is required, implement our own Phase 1 MPC. This is a large undertaking and should only be done if we cannot trust any existing universal SRS.
 
 This gives us:
 - ✅ Production-grade prover (no toxic waste in `.pk`)
-- ✅ Multi-party security for circuit-specific randomness
+- ✅ `.ptau` import ready for PPoT / snarkjs Phase 1 artifacts
+- ⏳ Multi-party security for circuit-specific randomness (Phase 2 pending)
 - ✅ Fast path to deployment (reuse existing Phase 1)
 - ✅ Option to bootstrap our own Phase 1 later
 
