@@ -19,8 +19,9 @@
 //! correctly without revealing the new scalar.
 
 use ark_bls12_381::{Fr, G1Affine, G1Projective, G2Affine, G2Projective};
-use ark_ec::{AffineRepr, Group, VariableBaseMSM};
+use ark_ec::{Group, VariableBaseMSM};
 use ark_ff::{Field, PrimeField, UniformRand, Zero};
+use ark_poly::Polynomial;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use ark_std::vec::Vec;
 use rand::RngCore;
@@ -160,7 +161,7 @@ impl Phase2Accumulator {
 
         // Check that .ptau has enough power
         let needed_power = next_power_of_two(n_constraints);
-        let needed_g1 = 2 * needed_power - 1;
+        let needed_g1 = 2 * needed_power;     // h_query needs tau^{2*domain_size-1}
         let needed_g2 = needed_power;
         if needed_g1 > ptau.max_g1_points() || needed_g2 > ptau.max_g2_points() {
             return Err(Error::InsufficientPtauPower {
@@ -174,9 +175,6 @@ impl Phase2Accumulator {
         // ------------------------------------------------------------------
         let tau_g1 = ptau.read_tau_g1(needed_g1)?;
         let tau_g2 = ptau.read_tau_g2(needed_g2)?;
-        let alpha_tau_g1 = ptau.read_alpha_tau_g1(needed_g2)?;
-        let beta_tau_g1 = ptau.read_beta_tau_g1(needed_g2)?;
-        let _beta_g2_ptau = ptau.read_beta_g2()?;
 
         // ------------------------------------------------------------------
         // 2. Generate circuit-specific random scalars
@@ -194,7 +192,6 @@ impl Phase2Accumulator {
         let (us, vs, ws) = engine.build_qap(l, r, o);
         let t = engine.target_poly(n_constraints);
         let t_coeffs = t.coeffs.clone();
-        let t_degree = t_coeffs.len().saturating_sub(1);
 
         // ------------------------------------------------------------------
         // 4. Compute a_query, b_g1_query, b_g2_query via MSM over tau powers
@@ -223,18 +220,19 @@ impl Phase2Accumulator {
         }
 
         // ------------------------------------------------------------------
-        // 5. Compute c_query from alpha/beta/w contributions
+        // 5. Compute c_query and ic from alpha/beta/w contributions
+        //
+        // Important: we use the CIRCUIT-SPECIFIC alpha and beta (generated
+        // above), NOT the alpha/beta from the .ptau Phase-1 SRS.
         // ------------------------------------------------------------------
         let mut c_query = Vec::with_capacity(n_vars);
+        let mut ic = Vec::with_capacity(n_vars);
         for i in 0..n_vars {
-            let u_coeffs = &us[i].coeffs;
-            let v_coeffs = &vs[i].coeffs;
+            // beta * u_i(tau) * G1 = a_query[i] * beta
+            let beta_u_pt = G1Projective::from(a_query[i]) * beta;
 
-            // beta * u_i(tau) * G1 = MSM(beta_tau_g1, u_coeffs)
-            let beta_u_pt = msm_g1(&beta_tau_g1, u_coeffs);
-
-            // alpha * v_i(tau) * G1 = MSM(alpha_tau_g1, v_coeffs)
-            let alpha_v_pt = msm_g1(&alpha_tau_g1, v_coeffs);
+            // alpha * v_i(tau) * G1 = b_g1_query[i] * alpha
+            let alpha_v_pt = G1Projective::from(b_g1_query[i]) * alpha;
 
             // w_i(tau) * G1 (already computed in w_query)
             let w_pt = G1Projective::from(w_query[i]);
@@ -242,8 +240,11 @@ impl Phase2Accumulator {
             // psi = beta*u + alpha*v + w
             let psi_pt = beta_u_pt + alpha_v_pt + w_pt;
 
-            // c_query[i] = delta_inv * psi
+            // c_query[i] = delta_inv * psi  (private variables)
             c_query.push(G1Affine::from(psi_pt * delta_inv));
+
+            // ic[i] = gamma_inv * psi  (public variables, never changes with delta)
+            ic.push(G1Affine::from(psi_pt * gamma_inv));
         }
 
         // ------------------------------------------------------------------
@@ -254,7 +255,7 @@ impl Phase2Accumulator {
         //   T(tau) * tau^j * G1 = sum_k t_k * tau^{j+k} * G1
         //                       = MSM(tau_g1[j..j+deg(T)+1], T.coeffs)
         // ------------------------------------------------------------------
-        let h_query_len = t_degree + 1;
+        let h_query_len = t.degree(); // safe upper bound on deg(h) + 1
         let mut h_query = Vec::with_capacity(h_query_len);
 
         for j in 0..h_query_len {
@@ -288,22 +289,12 @@ impl Phase2Accumulator {
         let delta_g1 = G1Affine::from(g1_proj * delta);
 
         // ------------------------------------------------------------------
-        // 8. l_query = public subset of c_query
+        // 8. l_query = public subset of ic (same as ic[..n_public], for arkworks parity)
         // ------------------------------------------------------------------
-        let l_query = c_query[..n_public].to_vec();
+        let l_query = ic[..n_public].to_vec();
 
         // ------------------------------------------------------------------
-        // 9. ic = gamma_inv * (beta*u + alpha*v + w)(tau) * G1
-        //       = gamma_inv * delta * c_query
-        // ------------------------------------------------------------------
-        let gamma_inv_delta = gamma_inv * delta;
-        let mut ic = Vec::with_capacity(n_vars);
-        for i in 0..n_vars {
-            ic.push(G1Affine::from(G1Projective::from(c_query[i]) * gamma_inv_delta));
-        }
-
-        // ------------------------------------------------------------------
-        // 10. Build accumulator
+        // 9. Build accumulator
         // ------------------------------------------------------------------
         let accumulator = Phase2Accumulator {
             alpha_g1,
@@ -362,16 +353,7 @@ impl Phase2Accumulator {
             *pt = G1Affine::from(G1Projective::from(*pt) * delta_new_inv);
         }
 
-        // l_query is a copy of the public subset of c_query, so update it too
-        for pt in &mut self.l_query {
-            *pt = G1Affine::from(G1Projective::from(*pt) * delta_new_inv);
-        }
-
-        // ic also contains delta_inv implicitly (ic = gamma_inv * delta * c_query)
-        // When c_query is divided by delta_new, ic must also be divided by delta_new
-        for pt in &mut self.ic {
-            *pt = G1Affine::from(G1Projective::from(*pt) * delta_new_inv);
-        }
+        // l_query and ic do NOT change with delta — they are gamma_inv * psi, independent of delta
 
         // Compute ratio proof: prove knowledge of delta_new such that
         // delta_g1_after = delta_g1_before * delta_new
@@ -580,6 +562,7 @@ fn hash_ratio_challenge(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ark_ec::AffineRepr;
     use crate::engine::FftQapEngine;
     #[allow(unused_imports)]
     use crate::r1cs::{L, O, R, WITNESS};
@@ -638,7 +621,7 @@ mod tests {
         assert_eq!(accumulator.b_g1_query.len(), 8);
         assert_eq!(accumulator.b_g2_query.len(), 8);
         assert_eq!(accumulator.c_query.len(), 8);
-        assert_eq!(accumulator.h_query.len(), 5); // degree(T) = 4, so 5 elements
+        assert_eq!(accumulator.h_query.len(), 4); // t.degree() = 4, safe upper bound on deg(h) + 1
         assert_eq!(accumulator.l_query.len(), n_public);
         assert_eq!(accumulator.ic.len(), 8);
         assert_eq!(accumulator.n_public, n_public);
@@ -754,7 +737,7 @@ mod tests {
         // Try to prove something with it
         let witness = crate::r1cs::witness_to_fr(&WITNESS);
         let prover = NaiveProver;
-        let (proof, _public_input) = prover.prove_with_full_pk(
+        let (proof, public_input) = prover.prove_with_full_pk(
             &engine, &full_pk, &L, &R, &O, &witness,
         );
 
@@ -762,5 +745,16 @@ mod tests {
         assert!(proof.a.is_on_curve());
         assert!(proof.b.is_on_curve());
         assert!(proof.c.is_on_curve());
+
+        // Verify the proof using the VK
+        let valid = crate::prover::verify_proof(
+            &proof,
+            &public_input,
+            &vk.alpha_g1,
+            &vk.beta_g2,
+            &vk.gamma_g2,
+            &vk.delta_g2,
+        );
+        assert!(valid, "proof produced from Phase2Accumulator must verify");
     }
 }

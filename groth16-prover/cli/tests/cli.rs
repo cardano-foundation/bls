@@ -664,3 +664,163 @@ fn full_ceremony_dev_prove_verify_roundtrip() {
         .success()
         .stdout(predicate::str::contains("Verification result: VALID"));
 }
+
+// ------------------------------------------------------------------
+// Phase-2 ceremony CLI tests
+// ------------------------------------------------------------------
+
+#[test]
+fn phase2_new_creates_accumulator() {
+    let (r1cs, _wtns) = create_test_artifacts();
+    let zkey = NamedTempFile::new().unwrap();
+
+    let mut cmd = Command::cargo_bin("groth16-prover").unwrap();
+    cmd.arg("phase2")
+        .arg("new")
+        .arg("--circuit")
+        .arg(r1cs.path())
+        .arg("--srs")
+        .arg("/tmp/pot4_final.ptau")
+        .arg("--zkey")
+        .arg(zkey.path());
+
+    cmd.assert()
+        .success()
+        .stderr(predicate::str::contains("Loaded circuit: 8 wires, 3 constraints"))
+        .stderr(predicate::str::contains("Accumulator initialized"))
+        .stderr(predicate::str::contains("Initial accumulator written to"));
+
+    let zkey_bytes = fs::read(zkey.path()).unwrap();
+    assert!(!zkey_bytes.is_empty(), "accumulator should be written");
+}
+
+#[test]
+fn phase2_contribute_and_verify() {
+    let (r1cs, _wtns) = create_test_artifacts();
+    let zkey0 = NamedTempFile::new().unwrap();
+    let zkey1 = NamedTempFile::new().unwrap();
+
+    // 1. New
+    let mut cmd_new = Command::cargo_bin("groth16-prover").unwrap();
+    cmd_new
+        .arg("phase2")
+        .arg("new")
+        .arg("--circuit")
+        .arg(r1cs.path())
+        .arg("--srs")
+        .arg("/tmp/pot4_final.ptau")
+        .arg("--zkey")
+        .arg(zkey0.path());
+    cmd_new.assert().success();
+
+    // 2. Contribute
+    let mut cmd_contrib = Command::cargo_bin("groth16-prover").unwrap();
+    cmd_contrib
+        .arg("phase2")
+        .arg("contribute")
+        .arg("--zkey-in")
+        .arg(zkey0.path())
+        .arg("--zkey-out")
+        .arg(zkey1.path())
+        .arg("--name")
+        .arg("Alice");
+    cmd_contrib
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Contribution applied by 'Alice'."))
+        .stderr(predicate::str::contains("Accumulator written to"));
+
+    // 3. Verify
+    let mut cmd_verify = Command::cargo_bin("groth16-prover").unwrap();
+    cmd_verify
+        .arg("phase2")
+        .arg("verify")
+        .arg("--zkey")
+        .arg(zkey1.path());
+    cmd_verify
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Accumulator is valid. All 1 contribution(s) passed verification."));
+}
+
+#[test]
+fn phase2_full_roundtrip_prove_verify() {
+    let (r1cs, wtns) = create_test_artifacts();
+    let zkey0 = NamedTempFile::new().unwrap();
+    let zkey1 = NamedTempFile::new().unwrap();
+    let pk_file = NamedTempFile::new().unwrap();
+    let vk_file = NamedTempFile::new().unwrap();
+    let out_file = NamedTempFile::new().unwrap();
+
+    // 1. New
+    let mut cmd_new = Command::cargo_bin("groth16-prover").unwrap();
+    cmd_new
+        .arg("phase2")
+        .arg("new")
+        .arg("--circuit")
+        .arg(r1cs.path())
+        .arg("--srs")
+        .arg("/tmp/pot4_final.ptau")
+        .arg("--zkey")
+        .arg(zkey0.path());
+    cmd_new.assert().success();
+
+    // 2. Contribute
+    let mut cmd_contrib = Command::cargo_bin("groth16-prover").unwrap();
+    cmd_contrib
+        .arg("phase2")
+        .arg("contribute")
+        .arg("--zkey-in")
+        .arg(zkey0.path())
+        .arg("--zkey-out")
+        .arg(zkey1.path());
+    cmd_contrib.assert().success();
+
+    // 3. Finalize
+    let mut cmd_final = Command::cargo_bin("groth16-prover").unwrap();
+    cmd_final
+        .arg("phase2")
+        .arg("finalize")
+        .arg("--zkey")
+        .arg(zkey1.path())
+        .arg("--proving-key")
+        .arg(pk_file.path())
+        .arg("--verifying-key")
+        .arg(vk_file.path());
+    cmd_final
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Accumulator finalized"))
+        .stderr(predicate::str::contains("Proving key written to"))
+        .stderr(predicate::str::contains("Verifying key written to"));
+
+    // 4. Prove
+    let mut cmd_prove = Command::cargo_bin("groth16-prover").unwrap();
+    cmd_prove
+        .arg("prove")
+        .arg("--circuit")
+        .arg(r1cs.path())
+        .arg("--witness")
+        .arg(wtns.path())
+        .arg("--proving-key")
+        .arg(pk_file.path())
+        .arg("--out")
+        .arg(out_file.path());
+    cmd_prove.assert().success();
+
+    // 5. Verify
+    let pub_path = out_file.path().with_extension("pub");
+    let mut cmd_verify = Command::cargo_bin("groth16-prover").unwrap();
+    cmd_verify
+        .arg("verify")
+        .arg("--proof")
+        .arg(out_file.path())
+        .arg("--public")
+        .arg(&pub_path)
+        .arg("--verifying-key")
+        .arg(vk_file.path());
+    cmd_verify
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Verification result: VALID"));
+}
