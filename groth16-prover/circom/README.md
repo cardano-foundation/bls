@@ -1,6 +1,18 @@
-# Circom circuit for the 3-gate multiplication chain
+# Circom circuits for Groth16 prover
 
-This directory contains the same 3-constraint circuit (`x1·x2 = x5`, `x3·x4 = x6`, `x5·x6 = a`) expressed in Circom language.
+This directory contains Circom circuits that can be loaded by the Rust prover via the `circom_adapter` module.
+
+## `SimpleExample/` — 3-gate multiplication chain
+
+The default example circuit. It implements:
+
+```
+x5 = x1 * x2
+x6 = x3 * x4
+a  = x5 * x6
+```
+
+See [`SimpleExample/README.md`](SimpleExample/README.md) for the full walkthrough.
 
 ## The Circom pipeline (what each tool does)
 
@@ -43,10 +55,10 @@ Also install `snarkjs` for witness generation:
 npm install -g snarkjs
 ```
 
-## Compiling the circuit
+## Compiling the default circuit
 
 ```bash
-cd groth16-prover/circom
+cd groth16-prover/circom/SimpleExample
 
 # Compile to BLS12-381 (must match the Rust prover curve)
 circom multiplier.circom --r1cs --wasm --sym --prime bls12381
@@ -59,7 +71,7 @@ circom multiplier.circom --r1cs --wasm --sym --prime bls12381
 
 ## Generating the witness
 
-Create `input.json` with the private inputs:
+Create `input.json` with the private inputs (already provided in `SimpleExample/`):
 
 ```json
 {
@@ -83,8 +95,8 @@ The Rust crate can load `multiplier.r1cs` and `witness.wtns` directly:
 ```rust
 use groth16_prover::circom_adapter::CircomCircuit;
 
-let circuit = CircomCircuit::from_r1cs("circom/multiplier.r1cs").unwrap();
-circuit.load_witness("circom/witness.wtns").unwrap();
+let circuit = CircomCircuit::from_r1cs("circom/SimpleExample/multiplier.r1cs").unwrap();
+circuit.load_witness("circom/SimpleExample/witness.wtns").unwrap();
 ```
 
 The parsed `L`, `R`, `O` matrices and witness vector are then fed into any `QapEngine` + `Prover` combination, producing a proof identical to the hard-coded circuit.

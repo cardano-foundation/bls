@@ -435,7 +435,7 @@ Below is the minimal path from a Circom circuit to an on-chain Aiken verifier, w
 **Command:**
 
 ```bash
-cd groth16-prover/circom
+cd groth16-prover/circom/SimpleExample
 circom multiplier.circom --r1cs --wasm --prime bls12381
 ```
 
@@ -457,7 +457,7 @@ circom multiplier.circom --r1cs --wasm --prime bls12381
 ```bash
 cd groth16-prover/cli
 cargo run --release -- ceremony \
-  --circuit ../circom/multiplier.r1cs \
+  --circuit ../circom/SimpleExample/multiplier.r1cs \
   --proving-key /tmp/multiplier.pk \
   --verifying-key /tmp/multiplier.vk
 ```
@@ -511,8 +511,8 @@ snarkjs wtns calculate multiplier.wasm input.json witness.wtns
 ```bash
 cd groth16-prover/cli
 cargo run --release -- prove \
-  --circuit ../circom/multiplier.r1cs \
-  --witness ../circom/witness.wtns \
+  --circuit ../circom/SimpleExample/multiplier.r1cs \
+  --witness ../circom/SimpleExample/witness.wtns \
   --proving-key /tmp/multiplier.pk \
   --out /tmp/proof.bin
 ```
