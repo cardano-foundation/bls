@@ -16,8 +16,9 @@
 use ark_bls12_381::{Fr, G1Affine, G1Projective, G2Affine, G2Projective};
 use ark_ec::Group;
 use ark_ff::Field;
+use ark_poly::Polynomial;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
-use ark_std::{vec::Vec, Zero};
+use ark_std::{vec::Vec, One, Zero};
 use rand::RngCore;
 
 use crate::engine::QapEngine;
@@ -238,6 +239,122 @@ pub fn verify_with_vk(
         &vk.gamma_g2,
         &vk.delta_g2,
     )
+}
+
+/// Run a single-party ceremony that produces a `FullProvingKey` (group elements only).
+///
+/// This is the **dev-mode** path: randomness is generated locally, all group
+/// elements are computed from it, and the scalars are dropped before the
+/// function returns.  The resulting `FullProvingKey` contains **no secrets**.
+///
+/// The output format is identical to what a Phase-2 MPC would produce, so
+/// the downstream `prove` / `verify` code is agnostic.
+pub fn single_party_ceremony_full<E: QapEngine, L: AsRef<[u64]>, R: AsRef<[u64]>, O: AsRef<[u64]>>(
+    engine: &E,
+    l: &[L],
+    r: &[R],
+    o: &[O],
+    n_public: usize,
+    rng: &mut impl RngCore,
+) -> (FullProvingKey, VerifyingKey) {
+    // 1. Generate random toxic waste (destroyed before we return)
+    let tw = ToxicWaste::random(rng);
+
+    // 2. Evaluate QAP at tau
+    let (us_tau, vs_tau, ws_tau) = engine.evaluate_qap_at_tau(l, r, o, tw.tau);
+    let n_vars = us_tau.len();
+    assert!(
+        n_public <= n_vars,
+        "n_public ({}) cannot exceed n_vars ({})",
+        n_public,
+        n_vars
+    );
+
+    // 3. CRS fixed points
+    let g1_proj = G1Projective::generator();
+    let g2_proj = G2Projective::generator();
+
+    let alpha_g1 = G1Affine::from(g1_proj * tw.alpha);
+    let beta_g1 = G1Affine::from(g1_proj * tw.beta);
+    let beta_g2 = G2Affine::from(g2_proj * tw.beta);
+    let gamma_g2 = G2Affine::from(g2_proj * tw.gamma);
+    let delta_g1 = G1Affine::from(g1_proj * tw.delta);
+    let delta_g2 = G2Affine::from(g2_proj * tw.delta);
+
+    // 4. Inverses (consumed immediately, never stored)
+    let gamma_inv = tw.gamma.inverse().unwrap();
+    let delta_inv = tw.delta.inverse().unwrap();
+
+    // 5. Per-variable queries
+    let mut a_query = Vec::with_capacity(n_vars);
+    let mut b_g1_query = Vec::with_capacity(n_vars);
+    let mut b_g2_query = Vec::with_capacity(n_vars);
+    let mut c_query = Vec::with_capacity(n_vars);
+    let mut ic = Vec::with_capacity(n_vars);
+
+    for i in 0..n_vars {
+        let u_i = us_tau[i];
+        let v_i = vs_tau[i];
+        let w_i = ws_tau[i];
+
+        // a_query[i] = u_i(tau) * G1
+        a_query.push(G1Affine::from(g1_proj * u_i));
+
+        // b_g1_query[i] = v_i(tau) * G1
+        b_g1_query.push(G1Affine::from(g1_proj * v_i));
+
+        // b_g2_query[i] = v_i(tau) * G2
+        b_g2_query.push(G2Affine::from(g2_proj * v_i));
+
+        // psi_scalar = beta*u_i(tau) + alpha*v_i(tau) + w_i(tau)
+        let psi_scalar = v_i * tw.alpha + u_i * tw.beta + w_i;
+
+        // c_query[i] = delta_inv * psi_scalar * G1  (for private variables)
+        c_query.push(G1Affine::from(g1_proj * (psi_scalar * delta_inv)));
+
+        // ic[i] = gamma_inv * psi_scalar * G1  (public-input commitment points)
+        ic.push(G1Affine::from(g1_proj * (psi_scalar * gamma_inv)));
+    }
+
+    // 6. l_query = public-input subset of c_query (same as ic, for arkworks parity)
+    let l_query = ic[..n_public].to_vec();
+
+    // 7. h_query[j] = delta_inv * tau^j * T(tau) * G1
+    let t = engine.target_poly(l.len());
+    let t_tau = t.evaluate(&tw.tau);
+    let h_scalar_base = t_tau * delta_inv;
+    let h_query_len = t.degree(); // safe upper bound on deg(h) + 1
+    let mut h_query = Vec::with_capacity(h_query_len);
+    let mut tau_pow = Fr::one();
+    for _ in 0..h_query_len {
+        h_query.push(G1Affine::from(g1_proj * (tau_pow * h_scalar_base)));
+        tau_pow *= tw.tau;
+    }
+
+    // 8. Build VK (same as old ceremony)
+    let vk = VerifyingKey {
+        alpha_g1,
+        beta_g2,
+        gamma_g2,
+        delta_g2,
+        ic,
+        n_public,
+    };
+
+    // 9. Build FullProvingKey (scalars are dropped here — tw goes out of scope)
+    let full_pk = FullProvingKey {
+        vk: vk.clone(),
+        beta_g1,
+        delta_g1,
+        a_query,
+        b_g1_query,
+        b_g2_query,
+        c_query,
+        h_query,
+        l_query,
+    };
+
+    (full_pk, vk)
 }
 
 #[cfg(test)]
