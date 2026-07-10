@@ -59,9 +59,34 @@ pub enum Error {
     InvalidPrime,
     /// Requested more points than the file contains.
     InsufficientPoints { requested: usize, available: usize },
-    /// A point failed the on-curve check.
+    /// A point could not be converted to a valid affine group element.
     InvalidPoint { section: u32, index: usize },
+    /// A section offset or size was missing from the header.
+    MissingSection(usize),
 }
+
+impl core::fmt::Display for Error {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Error::Io(msg) => write!(f, "I/O error: {}", msg),
+            Error::InvalidMagic => write!(f, "invalid .ptau magic header"),
+            Error::InvalidVersion(v) => write!(f, "unsupported .ptau version: {}", v),
+            Error::InvalidNumSections(n) => write!(f, "invalid number of .ptau sections: {}", n),
+            Error::InvalidPrime => write!(f, "prime modulus does not match BLS12-381"),
+            Error::InsufficientPoints { requested, available } => {
+                write!(f, "insufficient points in .ptau: requested {}, available {}", requested, available)
+            }
+            Error::InvalidPoint { section, index } => {
+                write!(f, "invalid point in section {} at index {}", section, index)
+            }
+            Error::MissingSection(idx) => {
+                write!(f, "missing .ptau section {}", idx)
+            }
+        }
+    }
+}
+
+impl std::error::Error for Error {}
 
 impl From<io::Error> for Error {
     fn from(e: io::Error) -> Self {
