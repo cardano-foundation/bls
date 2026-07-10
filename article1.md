@@ -1,5 +1,11 @@
 ## Aiken BLS12-381 primitives - wide possibilities available
 
+Cardano's Plutus core ships with a powerful but often overlooked feature: **built-in primitives for the BLS12-381 elliptic curve**. These are not abstract cryptographic concepts sitting in a library somewhere. They are first-class operations that every smart contract running on Cardano can execute natively—scalar multiplication, point addition, hash-to-curve, and pairing checks—without relying on external services or trusted oracles.
+
+Why does this matter? Because BLS12-381 is a **pairing-friendly** curve, and pairing-friendly curves unlock an entire family of protocols that are impossible on standard curves like Bitcoin's secp256k1. Within a single transaction, an Aiken script can aggregate signatures from thousands of parties, verify a zero-knowledge proof, generate a verifiable random number, or check an anonymous credential. All of this happens on-chain, deterministically, and with costs that are practical within Cardano's transaction budget.
+
+This article is a guided tour of what those primitives make possible. We start with the curve itself, walk through the Aiken API, and then explore four concrete protocols built on top of it: **BLS signatures** for aggregation and multi-sig, **key derivation** for turning passwords and seeds into curve-ready keys, **verifiable random functions** for privacy and leader selection, and **BBS+ signatures** for anonymous credentials and selective disclosure.
+
 **Table of Contents**
 
 - [BLS12-381 elliptic curve](#bls12-381-elliptic-curve)
