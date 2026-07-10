@@ -447,10 +447,13 @@ circom multiplier.circom --r1cs --wasm --prime bls12381
 
 ---
 
-### 2. Trusted-setup ceremony (groth16-prover CLI)
+### 2. Trusted-setup ceremony (choose your path)
 
-**Inputs:**
-- `multiplier.r1cs` — constraint system from step 1
+The CLI supports **two ceremony modes** that produce the **same** `.pk` / `.vk` binary format. The prover and verifier are agnostic to which path was used.
+
+#### Option A: Dev ceremony (`ceremony-dev`) — fastest, for testing/CI
+
+**When to use:** Local development, benchmarking, CI pipelines, or any scenario where you need a proving key **instantly** and security guarantees are not required.
 
 **Command:**
 
@@ -462,11 +465,54 @@ cargo run --release -- ceremony-dev \
   --verifying-key /tmp/multiplier.vk
 ```
 
+**What happens:** Generates random `alpha`, `beta`, `gamma`, `delta` locally, computes all group elements, and writes a `FullProvingKey` containing **only curve points** (no raw scalars). This is the **single-party, insecure** path — never use for production.
+
+---
+
+#### Option B: Phase-2 MPC ceremony (`phase2`) — multi-party, for production
+
+**When to use:** Mainnet deployments, any scenario where you need **1-of-N honesty guarantees** (if at least one participant honestly discards their randomness, the ceremony remains secure).
+
+**Prerequisites:** A Phase-1 universal SRS file (`.ptau`) from a publicly audited ceremony such as [Perpetual Powers of Tau](https://github.com/privacy-scaling-explorations/perpetualpowersoftau). The `.ptau` contains `tau^i·G1` and `tau^i·G2` powers — no one knows the scalar `tau`.
+
+**Workflow:**
+
+```bash
+# 1. Initialize the circuit-specific accumulator (coordinator or first participant)
+cd groth16-prover/cli
+cargo run --release -- phase2 new \
+  --circuit ../circom/SimpleExample/multiplier.r1cs \
+  --srs /path/to/pot14_final.ptau \
+  --zkey /tmp/multiplier_0000.zkey
+
+# 2. Participant 1 contributes randomness locally
+cargo run --release -- phase2 contribute \
+  --zkey-in /tmp/multiplier_0000.zkey \
+  --zkey-out /tmp/multiplier_0001.zkey \
+  --name "Alice"
+
+# 3. Participant N contributes (repeat for each participant)
+cargo run --release -- phase2 contribute \
+  --zkey-in /tmp/multiplier_0001.zkey \
+  --zkey-out /tmp/multiplier_final.zkey \
+  --name "Bob"
+
+# 4. Verify the final accumulator before finalizing
+cargo run --release -- phase2 verify \
+  --zkey /tmp/multiplier_final.zkey
+
+# 5. Convert to .pk / .vk (same format as ceremony-dev)
+cargo run --release -- phase2 finalize \
+  --zkey /tmp/multiplier_final.zkey \
+  --proving-key /tmp/multiplier.pk \
+  --verifying-key /tmp/multiplier.vk
+```
+
 **Output:**
 - `/tmp/multiplier.pk` — proving key (pre-computed group elements only; **no raw scalars**)
 - `/tmp/multiplier.vk` — verification key (CRS fixed points + per-variable public-input points; **share freely**)
 
-> **Note:** This is a **single-party dev ceremony** (`ceremony-dev`). It outputs a `FullProvingKey` that contains only curve points — safe to share with the prover. For production, use a multi-party `phase2` ceremony (reusing PPoT Phase 1). See [`groth16-prover/README.md`](./groth16-prover/README.md) §**TO DO — Production innovations** (h) for the MPC plan.
+> **Design principle:** Both paths produce a `FullProvingKey` with the exact same binary layout. The `prove` and `verify` commands work identically regardless of provenance. Switching from dev to production is a one-line CLI change.
 
 **→ Next step uses:** `multiplier.wasm` (from step 1) + `input.json`
 
@@ -555,6 +601,8 @@ bls12_381_final_verify(lhs, rhs)   // True = proof is valid
 ```
 
 **Output:** `True` (accept) or `False` (reject)
+
+> **On-chain cost:** Groth16 verification is extremely efficient on Cardano. The 3-gate multiplier circuit consumes only **~20% of the per-script CPU budget** (~2.0B units out of 10B limit) and **~0.1% of memory** (~15K words). Crucially, verification cost is **essentially flat** regardless of circuit complexity — a circuit with thousands of constraints costs almost exactly the same as this toy example. Only the number of public inputs adds a small linear cost (~50M CPU per extra input). See the full cost analysis, scaling tables, and headroom calculations in [`groth16-prover/README.md`](./groth16-prover/README.md) §**Aiken On-Chain Verification Cost Analysis**.
 
 See the Aiken verifier's [`README.md`](./aiken/groth16/README.md) for the full hard-coded example, exact hex values, test results, and next steps toward generalization (parameterized VK, dynamic public inputs, Circom adapter).
 
