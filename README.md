@@ -443,11 +443,36 @@ circom multiplier.circom --r1cs --wasm --prime bls12381
 - `multiplier.r1cs` — R1CS constraint system (structural description of the circuit)
 - `multiplier.wasm` — WebAssembly witness calculator (knows how to solve every wire value)
 
-**→ Next step uses:** `multiplier.wasm` + `input.json`
+**→ Next step uses:** `multiplier.r1cs`
 
 ---
 
-### 2. Generate the witness (snarkjs)
+### 2. Trusted-setup ceremony (groth16-prover CLI)
+
+**Inputs:**
+- `multiplier.r1cs` — constraint system from step 1
+
+**Command:**
+
+```bash
+cd groth16-prover/cli
+cargo run --release -- ceremony \
+  --circuit ../circom/multiplier.r1cs \
+  --proving-key /tmp/multiplier.pk \
+  --verifying-key /tmp/multiplier.vk
+```
+
+**Output:**
+- `/tmp/multiplier.pk` — proving key (toxic-waste scalars + CRS points; **keep secret**, dev use only)
+- `/tmp/multiplier.vk` — verification key (CRS fixed points + per-variable public-input points; **share freely**)
+
+> **Note:** This is a **single-party ceremony** using `rand::thread_rng()` (ChaCha12 CSPRNG). It is fine for development and testing, but production deployments should use a multi-party computation (MPC) ceremony so no single participant learns the toxic waste. See [`groth16-prover/README.md`](./groth16-prover/README.md) §**TO DO — Production innovations** (h) for the MPC plan.
+
+**→ Next step uses:** `multiplier.wasm` (from step 1) + `input.json`
+
+---
+
+### 3. Generate the witness (snarkjs)
 
 **Inputs:**
 - `multiplier.wasm` — witness calculator from step 1
@@ -470,15 +495,16 @@ snarkjs wtns calculate multiplier.wasm input.json witness.wtns
   - `6` — the public output `a = x1·x2`
   - `2, 3` — the private inputs `x1, x2`
 
-**→ Next step uses:** `multiplier.r1cs` (from step 1) + `witness.wtns`
+**→ Next step uses:** `multiplier.r1cs` (from step 1) + `witness.wtns` + `/tmp/multiplier.pk` (from step 2)
 
 ---
 
-### 3. Generate the proof (groth16-prover CLI)
+### 4. Generate the proof (groth16-prover CLI)
 
 **Inputs:**
 - `multiplier.r1cs` — constraint system from step 1
-- `witness.wtns` — witness vector from step 2
+- `witness.wtns` — witness vector from step 3
+- `/tmp/multiplier.pk` — proving key from step 2 (contains the random toxic waste)
 
 **Command:**
 
@@ -487,6 +513,7 @@ cd groth16-prover/cli
 cargo run --release -- prove \
   --circuit ../circom/multiplier.r1cs \
   --witness ../circom/witness.wtns \
+  --proving-key /tmp/multiplier.pk \
   --out /tmp/proof.bin
 ```
 
@@ -496,23 +523,23 @@ cargo run --release -- prove \
   - `B` (G2, 96 bytes)
   - `C` (G1, 48 bytes)
 
-The CLI uses `FftQapEngine` + `PippengerProver` under the hood (fast FFT-based QAP + batched MSM).
+The CLI uses `FftQapEngine` + `PippengerProver` under the hood (fast FFT-based QAP + batched MSM), and the toxic waste from the proving key to make the proof random and non-deterministic.
 
-**→ Next step uses:** proof points `(A, B, C)` + public inputs from `input.json`
+**→ Next step uses:** proof points `(A, B, C)` + public inputs from `input.json` + `/tmp/multiplier.vk` (from step 2)
 
 ---
 
-### 4. Verify on-chain (Aiken)
+### 5. Verify on-chain (Aiken)
 
 **Inputs:**
-- `proof = (A, B, C)` — compressed points from step 3
+- `proof = (A, B, C)` — compressed points from step 4
 - `public_inputs` — only the **public** portion of the witness vector:  
   For the example above: **`[1, 6]`**
   - `1` — the constant wire (always present)
   - `6` — the public output `a = x1·x2 = 2·3 = 6`
   - The private inputs (`x1 = 2`, `x2 = 3`) are **not** included here; they are hidden by the proof
 
-The Aiken verifier in [`aiken/groth16`](./aiken/groth16/) currently implements a **minimal hard-coded verifier** for a concrete 3-constraint circuit. The on-chain logic:
+The Aiken verifier in [`aiken/groth16`](./aiken/groth16/) currently implements a **minimal hard-coded verifier** for a concrete 3-constraint circuit. For a generic circuit you would load the `verifying_key` points from step 2 into the validator. The on-chain logic:
 
 1. Decompress `A`, `B`, `C` and the verification-key points.
 2. Compute the public-input commitment `V = Σ public_input[i] · Ψ_V_G1[i]` via scalar multiplication and point addition.

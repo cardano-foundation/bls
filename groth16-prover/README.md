@@ -603,6 +603,16 @@ The current crate is a **reference implementation** for correctness verification
 - **Reference:** Groth.jl keeps dense quotient computation (`compute_h_polynomial`) as an explicit parity check while the production prover uses the coset-only path. Their test suite covers multiple circuits with randomized seeds.
 - **Benefit:** Catches bugs in the optimized path early by comparing against a slow-but-correct reference on every test run.
 
+### (h) Multi-party computation (MPC) ceremony
+
+- **Current:** A **single-party** ceremony is implemented in `src/ceremony.rs` and exposed via `groth16-prover ceremony`. The prover generates random toxic waste with `rand::thread_rng()` (a CSPRNG using ChaCha12), computes the proving/verification keys, and writes them to disk. The raw scalars are kept inside the proving key file for simplicity.
+- **Target:** A proper **MPC trusted-setup ceremony** where multiple participants contribute randomness in a sequential protocol (e.g., Perpetual Powers of Tau). After the final contribution:
+  1. The toxic-waste scalars are **never reconstructed in one place**.
+  2. The structured reference string (SRS) — `tau^i·G1`, `tau^i·G2`, etc. — is the only artifact retained.
+  3. The prover uses the **full SRS** instead of the raw scalars, so the scalars can be destroyed immediately.
+- **Reference:** [Perpetual Powers of Tau](https://github.com/privacy-scaling-explorations/perpetualpowersoftau), snarkjs `powersoftau` workflow, and arkworks' `groth16::generator::generate_random_parameters`.
+- **Benefit:** Eliminates the single point of failure. Even if N−1 participants collude, the ceremony remains secure as long as at least one participant honestly discards their contribution.
+
 </details>
 
 ---
