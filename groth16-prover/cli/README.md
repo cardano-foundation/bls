@@ -66,6 +66,18 @@ groth16-prover prove \
 groth16-prover prove --circuit circuit.r1cs --witness witness.wtns --out proof.bin
 ```
 
+### Export verifying key to Aiken source
+
+After the ceremony step, convert the binary `.vk` into Aiken source code that declares a `VerificationKey` record with hex-encoded compressed points.
+
+```bash
+groth16-prover export-vk \
+  --verifying-key circuit.vk \
+  --out circuit_vk.ak
+```
+
+The output file is a self-contained Aiken snippet you can paste into a validator or library. It contains the `alpha_g1`, `beta_g2`, `gamma_g2`, `delta_g2`, `ic` list, and `n_public` fields.
+
 ### Verify
 
 ```bash

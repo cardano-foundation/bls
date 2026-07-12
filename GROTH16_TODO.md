@@ -27,6 +27,11 @@ Validated the entire toolchain end-to-end with the existing `SimpleExample/multi
 
 **Result:** All 16 Aiken tests pass, including the 2 new end-to-end Circom pipeline tests.
 
+### Documentation
+- Updated [`aiken/groth16/README.md`](../../aiken/groth16/README.md) with the parameterized API and a **Circom pipeline** section showing the full 6-step flow
+- Updated [`groth16-prover/cli/README.md`](../../groth16-prover/cli/README.md) with the new `export-vk` subcommand
+- Updated [`groth16-prover/circom/SimpleExample/README.md`](../../groth16-prover/circom/SimpleExample/README.md) with concrete Steps 4–5 (export VK + verify in Aiken) with code examples
+
 ---
 
 ## 1. Merkle Membership (Privacy Coin Spend)
