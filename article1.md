@@ -145,6 +145,8 @@ These primitives are the building blocks. The sections below show complete, work
 - **KDF** – how to derive BLS12-381 keys from passwords or seeds using PBKDF2 and HKDF, while keeping the scalar inside the valid prime field.
 - **Proof systems** – how to use pairings to verify that a secret satisfies a polynomial equation, which is the core idea behind zk-SNARKs.
 
+The example projects [`signature-aggregation-case`](https://github.com/cardano-foundation/bls/tree/main/signature-aggregation-case), [`publickey-aggregation-case`](https://github.com/cardano-foundation/bls/tree/main/publickey-aggregation-case), [`kdf`](https://github.com/cardano-foundation/bls/tree/main/kdf), and [`vrf`](https://github.com/cardano-foundation/bls/tree/main/vrf) referenced in the sections below are available in the [cardano-foundation/bls](https://github.com/cardano-foundation/bls) repository, which is dedicated to exploring the possibilities of BLS12-381 elliptic curve cryptography on Cardano.
+
 ## BLS
 
 BLS stands for **Boneh-Lynn-Shacham**, the three cryptographers who invented the scheme in the seminal paper *"Short Signatures from the Weil Pairing"*. At its heart, BLS is a signature scheme built on top of pairing-friendly elliptic curves like BLS12-381. It does everything a normal signature scheme does—sign messages, verify them, create key pairs—but it adds a superpower that no other mainstream scheme can match: **aggregation**.
@@ -186,7 +188,7 @@ All three share the same core operations: `sk_to_pk`, `sign`, `verify`, `aggrega
 
 ### Signature aggregation: many messages, many signers
 
-The first pattern is signature aggregation, where each party signs a different message. Their signatures are added together into one 96-byte value. The verifier computes one Miller-loop product per message and runs a single final verification. This pattern is demonstrated in the workspace project `aiken/signature-aggregation-case`.
+The first pattern is signature aggregation, where each party signs a different message. Their signatures are added together into one 96-byte value. The verifier computes one Miller-loop product per message and runs a single final verification. This pattern is demonstrated in the [`signature-aggregation-case`](https://github.com/cardano-foundation/bls/tree/main/signature-aggregation-case) example project.
 
 ```aiken
 use bls/g1/basic as basic_bls
@@ -220,7 +222,7 @@ The verifier iterates over the `(pk, message)` pairs, hashes each message to a G
 
 Because the messages are distinct, Basic mode is safe. But what if the messages are the same? In that case, a rogue-key attacker could construct a fake public key that cancels out honest keys, then forge an aggregate signature using only one honest signature. This is exactly why Basic mode bans duplicate messages in `aggregate_verify`.
 
-If you need to sign the same message, switch to **Augmented mode**. The `aiken/signature-aggregation-case` project shows this in action:
+If you need to sign the same message, switch to **Augmented mode**. The [`signature-aggregation-case`](https://github.com/cardano-foundation/bls/tree/main/signature-aggregation-case) example shows this in action:
 
 ```aiken
 use bls/g1/aug as aug_bls
@@ -241,7 +243,7 @@ fn three_party_same_message_aggregation() {
 }
 ```
 
-Finally, **PoP mode** adds a registration step. Before any aggregation happens, each signer proves they control their private key by producing a PoP signature over their own public key. The `aiken/signature-aggregation-case` project tests this flow as well:
+Finally, **PoP mode** adds a registration step. Before any aggregation happens, each signer proves they control their private key by producing a PoP signature over their own public key. The [`signature-aggregation-case`](https://github.com/cardano-foundation/bls/tree/main/signature-aggregation-case) example tests this flow as well:
 
 ```aiken
 use bls/g1/pop as pop_bls
@@ -268,9 +270,9 @@ fn pop_registration() {
 
 ### Public-key aggregation: same message, constant cost
 
-The second pattern is even more powerful for on-chain use. When every party signs the same message, we can aggregate the **public keys** themselves—not just the signatures. The verifier only needs **two** pairing evaluations total, no matter how many signers exist. This is demonstrated in the workspace project `aiken/publickey-aggregation-case`.
+The second pattern is even more powerful for on-chain use. When every party signs the same message, we can aggregate the **public keys** themselves—not just the signatures. The verifier only needs **two** pairing evaluations total, no matter how many signers exist. This is demonstrated in the [`publickey-aggregation-case`](https://github.com/cardano-foundation/bls/tree/main/publickey-aggregation-case) example project.
 
-The project provides a small helper module (`bls-extra/core`) that exposes `aggregate_publickeys` and `aggregate_publickey_verify`:
+The [`publickey-aggregation-case`](https://github.com/cardano-foundation/bls/tree/main/publickey-aggregation-case) example provides a small helper module (`bls-extra/core`) that exposes `aggregate_publickeys` and `aggregate_publickey_verify`:
 
 ```aiken
 use bls_extra/core as bls_extra_core
@@ -303,13 +305,13 @@ fn aggregate_publickeys(publickeys: List<PublicKey>) -> PublicKeyAggregated {
 
 At verification time, the aggregated public key is paired with the hashed message, and the aggregated signature is paired with the G1 generator. A single `final_verify` confirms every signature. For a committee of ten, a hundred, or even a thousand members, the on-chain cost stays constant.
 
-**Important limitation:** public-key aggregation only works cleanly with **Basic mode** and identical messages. In Augmented mode, each signature is computed over `pk_i || message`, so the hash inputs differ per signer. Aggregating the public keys and hashing `pk_agg || message` produces a different hash than the individual signatures, so the pairing equation no longer balances. The `aiken/publickey-aggregation-case` project explicitly demonstrates that this fails. PoP mode suffers from the same problem because each signature is bound to the individual public key. For public-key aggregation, stick to Basic mode with the same message for every signer.
+**Important limitation:** public-key aggregation only works cleanly with **Basic mode** and identical messages. In Augmented mode, each signature is computed over `pk_i || message`, so the hash inputs differ per signer. Aggregating the public keys and hashing `pk_agg || message` produces a different hash than the individual signatures, so the pairing equation no longer balances. The [`publickey-aggregation-case`](https://github.com/cardano-foundation/bls/tree/main/publickey-aggregation-case) example explicitly demonstrates that this fails. PoP mode suffers from the same problem because each signature is bound to the individual public key. For public-key aggregation, stick to Basic mode with the same message for every signer.
 
 ### Rogue-key attacks and why the modes matter
 
 Aggregation is powerful, but it introduces a subtle risk. Suppose an attacker claims a public key `pk_rogue = pk_1 + pk_2 - pk_3`, where `pk_1` and `pk_2` are honest keys. The attacker never knew the secret for `pk_3`, but by choosing `pk_rogue` this way, they can cancel out the honest keys. If all three sign the same message, the aggregate signature can be verified with just `sig_3` alone, even though the attacker never produced `sig_1` or `sig_2`.
 
-The `aiken/signature-aggregation-case` project demonstrates this exact attack:
+The [`signature-aggregation-case`](https://github.com/cardano-foundation/bls/tree/main/signature-aggregation-case) example demonstrates this exact attack:
 
 ```aiken
 let rogue_pk3 = construct_rogue_key(pk1, pk2, pk3)
@@ -321,7 +323,7 @@ let sigs_aggr_predicate = core_bls.core_aggregate_verify([pk1, pk2, rogue_pk3], 
 
 The three modes defend against this differently:
 
-- **Basic** bans duplicate messages in `aggregate_verify`, so the attack is blocked at the API level. The `aiken/publickey-aggregation-case` project shows that `aggregate_publickey_verify` also rejects duplicate messages in Basic mode.
+- **Basic** bans duplicate messages in `aggregate_verify`, so the attack is blocked at the API level. The [`publickey-aggregation-case`](https://github.com/cardano-foundation/bls/tree/main/publickey-aggregation-case) example shows that `aggregate_publickey_verify` also rejects duplicate messages in Basic mode.
 - **Aug** prepends the public key to the message, so the hash is unique per signer even when the underlying message is identical. The rogue-key attack fails because `sig_3` was computed over `pk_3 || message`, not `pk_rogue || message`.
 - **PoP** forces a registration step where the signer proves they control the private key, making rogue-key construction impossible in the first place.
 
@@ -329,11 +331,11 @@ For a fixed stake pool or committee, PoP is usually the cleanest. For a dynamic 
 
 ### Summary
 
-BLS signatures turn the expensive problem of multi-party verification into a constant-cost operation. The `ilap/bls` library packages the entire IETF draft into three Aiken modules that handle key generation, signing, aggregation, and all the pairing arithmetic behind the scenes. The workspace projects `aiken/signature-aggregation-case` and `aiken/publickey-aggregation-case` show the two complementary patterns in practice: signature aggregation for many messages, and public-key aggregation for the same message. Whether you need a simple two-of-three wallet, a thousand-validator consensus layer, or a governance vote with thousands of participants, the pattern is the same: aggregate, compress, and verify once.
+BLS signatures turn the expensive problem of multi-party verification into a constant-cost operation. The `ilap/bls` library packages the entire IETF draft into three Aiken modules that handle key generation, signing, aggregation, and all the pairing arithmetic behind the scenes. The [`signature-aggregation-case`](https://github.com/cardano-foundation/bls/tree/main/signature-aggregation-case) and [`publickey-aggregation-case`](https://github.com/cardano-foundation/bls/tree/main/publickey-aggregation-case) examples show the two complementary patterns in practice: signature aggregation for many messages, and public-key aggregation for the same message. Whether you need a simple two-of-three wallet, a thousand-validator consensus layer, or a governance vote with thousands of participants, the pattern is the same: aggregate, compress, and verify once.
 
 ## KDF
 
-In everyday cryptography, you rarely start with a perfectly random 32-byte secret. More often, you have a password, a seed phrase, a shared secret from a handshake, or some other piece of keying material that is not yet curve-ready. A **Key Derivation Function (KDF)** bridges this gap: it takes arbitrary input and deterministically produces a cryptographically strong key that fits inside the prime field of your chosen curve. The workspace project `aiken/kdf` provides two RFC-compliant KDFs—HKDF and PBKDF2—together with a thin layer that maps the derived bytes directly onto BLS12-381 key pairs.
+In everyday cryptography, you rarely start with a perfectly random 32-byte secret. More often, you have a password, a seed phrase, a shared secret from a handshake, or some other piece of keying material that is not yet curve-ready. A **Key Derivation Function (KDF)** bridges this gap: it takes arbitrary input and deterministically produces a cryptographically strong key that fits inside the prime field of your chosen curve. The [`kdf`](https://github.com/cardano-foundation/bls/tree/main/kdf) example project provides two RFC-compliant KDFs—HKDF and PBKDF2—together with a thin layer that maps the derived bytes directly onto BLS12-381 key pairs.
 
 ### Why KDFs matter on-chain
 
@@ -341,7 +343,7 @@ On-chain scripts often need to derive keys from information that lives inside th
 
 > **Critical security warning.** If you pass a password or a salt into an on-chain script via a redeemer or a datum, **every value becomes publicly visible on the blockchain forever**. Anyone can read the transaction, extract the password and salt, and run the same KDF off-chain. This means the on-chain KDF functions are **not suitable for password hashing in production**. Their intended use cases are narrow: testing, deriving keys from values that are *already* public or committed (e.g., a Diffie-Hellman shared secret that both parties have computed off-chain), or educational examples. If you need to hash a human password, do it **off-chain** in the wallet or application layer, and only submit the resulting public key or hash on-chain.
 
-The `aiken/kdf` project offers two complementary tools for this job:
+The [`kdf`](https://github.com/cardano-foundation/bls/tree/main/kdf) example offers two complementary tools for this job:
 
 - **HKDF** ([RFC 5869](https://datatracker.ietf.org/doc/html/rfc5869)) – fast, HMAC-based Extract-then-Expand. Ideal when your input is already high-entropy (a random seed, a shared secret, another key).
 - **PBKDF2** ([RFC 8018 §5.2](https://datatracker.ietf.org/doc/html/rfc8018#page-11)) – intentionally slow, iteration-based. Ideal when your input is a password or human-memorable secret and you need to raise the cost of brute-force attacks.
@@ -447,7 +449,7 @@ fn custom_derivation() {
 
 ### What you cannot do on-chain: memory-hard KDFs
 
-The `aiken/kdf` project investigated Argon2 and Balloon hashing, two modern memory-hard KDFs designed to resist GPU and ASIC attacks. The conclusion was clear: **they are fundamentally incompatible with on-chain execution**.
+The [`kdf`](https://github.com/cardano-foundation/bls/tree/main/kdf) example project investigated Argon2 and Balloon hashing, two modern memory-hard KDFs designed to resist GPU and ASIC attacks. The conclusion was clear: **they are fundamentally incompatible with on-chain execution**.
 
 - **Memory requirements:** Argon2's minimum recommended settings use 64 MiB to 4 GiB of RAM. Cardano's entire on-chain memory budget per transaction is roughly 14–17 MB.
 - **Missing primitives:** Argon2 requires BLAKE2b-512 (64-byte outputs), but Plutus only exposes 224-bit and 256-bit variants. It also requires 64-bit arithmetic with bitwise rotations, which must be emulated using bytearray operations at enormous cost.
@@ -457,7 +459,7 @@ The practical rule is simple: if you need memory-hard password hashing, do it **
 
 ### Summary
 
-The `aiken/kdf` project gives you two reliable, RFC-compliant paths from raw secrets to BLS12-381 keys:
+The [`kdf`](https://github.com/cardano-foundation/bls/tree/main/kdf) example project gives you two reliable, RFC-compliant paths from raw secrets to BLS12-381 keys:
 
 - **HKDF** for high-entropy inputs: fast, cheap, and domain-separable via the `info` string.
 - **PBKDF2** for passwords: slow by design, but keep iteration counts modest (≤10) to stay within the on-chain budget.
@@ -466,7 +468,7 @@ Both are pure Aiken, built entirely from Plutus builtins, and produce determinis
 
 ## VRF
 
-A **Verifiable Random Function (VRF)** is the public-key cousin of a keyed hash. Only the holder of a secret key can compute the hash, but anyone with the public key can verify that the hash was computed correctly. The output is deterministic—same key and input always produce the same result—but to anyone without the secret, it looks perfectly random. The workspace project `aiken/vrf` implements the standard ECVRF scheme over BLS12-381 G2 entirely in Aiken, using nothing but Plutus builtins.
+A **Verifiable Random Function (VRF)** is the public-key cousin of a keyed hash. Only the holder of a secret key can compute the hash, but anyone with the public key can verify that the hash was computed correctly. The output is deterministic—same key and input always produce the same result—but to anyone without the secret, it looks perfectly random. The [`vrf`](https://github.com/cardano-foundation/bls/tree/main/vrf) example project implements the standard ECVRF scheme over BLS12-381 G2 entirely in Aiken, using nothing but Plutus builtins.
 
 The API is small and regular: you derive a key pair from secret material, generate a proof for an input, and anyone can verify that proof to recover the same pseudorandom output. The proof is 144 bytes (96 bytes for a compressed G2 point, 16 bytes for a challenge, 32 bytes for a Schnorr-style response). The final hash output is a standard 32-byte value.
 
@@ -487,6 +489,7 @@ When you store data in a public hash-based structure—say a Merkle tree or a ha
 A VRF replaces the regular hash with a pseudorandom output that only the data owner can compute. The owner derives a "private address" for each record from the record name and their secret key. Outsiders see only random-looking values and cannot link them to anything.
 
 ```aiken
+// vrf/core is the module exposed by the `vrf` example project
 use vrf/core as vrf
 
 fn store_private_records() {
@@ -539,6 +542,7 @@ Many protocols need a source of randomness that is simultaneously unpredictable,
 The pattern is simple: a trusted operator publishes their public key in advance. For each round, they use a public input—say a block hash or a round number—as the VRF input. They compute the proof privately, then publish `(input, proof, hash)`. Anyone can verify the proof and recover the same hash.
 
 ```aiken
+// vrf/core is the module exposed by the `vrf` example project
 use vrf/core as vrf
 
 fn run_randomness_beacon() {
@@ -577,7 +581,7 @@ Because the input is public and fixed, the operator cannot grind on it to produc
 
 ### Other use cases
 
-Beyond the two cases above, the `aiken/vrf` project tests several other patterns that are worth mentioning:
+Beyond the two cases above, the [`vrf`](https://github.com/cardano-foundation/bls/tree/main/vrf) example tests several other patterns that are worth mentioning:
 
 - **Leader selection** – In proof-of-stake consensus, each stakeholder privately computes their VRF output for the current epoch. If the output falls below a threshold proportional to their stake, they are selected as the slot leader. Only the winner reveals their proof, preventing pre-slot DDoS attacks.
 - **Proof of prior possession** – A party can prove they knew a secret at a specific time by using the secret itself as the VRF input. The resulting proof is self-bound: it only verifies against that exact secret, and it does not leak the secret itself.
@@ -585,7 +589,7 @@ Beyond the two cases above, the `aiken/vrf` project tests several other patterns
 
 ### Summary
 
-The `aiken/vrf` project provides a complete, RFC-compliant ECVRF implementation over BLS12-381 G2 using only Aiken and Plutus builtins. The API is minimal: `keys_from_secret`, `prove`, `verify`, and `proof_to_hash`. With these four functions, you can build privacy-preserving data structures, verifiable randomness beacons, leader-selection protocols, and non-interactive proofs of knowledge. The key insight is always the same: the prover computes a private, deterministic, pseudorandom output; the verifier checks it publicly; and neither the secret nor the output is forgeable.
+The [`vrf`](https://github.com/cardano-foundation/bls/tree/main/vrf) example project provides a complete, RFC-compliant ECVRF implementation over BLS12-381 G2 using only Aiken and Plutus builtins. The API is minimal: `keys_from_secret`, `prove`, `verify`, and `proof_to_hash`. With these four functions, you can build privacy-preserving data structures, verifiable randomness beacons, leader-selection protocols, and non-interactive proofs of knowledge. The key insight is always the same: the prover computes a private, deterministic, pseudorandom output; the verifier checks it publicly; and neither the secret nor the output is forgeable.
 
 ## BBS
 
