@@ -62,6 +62,17 @@ pub enum Command {
     ///   $ groth16-prover verify --proof proof.bin --public proof.pub --verifying-key circuit.vk
     Verify(cmd::verify::Args),
 
+    /// Export a binary verifying key to Aiken source code
+    ///
+    /// Reads a `.vk` file produced by the ceremony step and emits a
+    /// Groth16 `VerificationKey` record ready to paste into an Aiken
+    /// validator.
+    ///
+    /// Example:
+    ///
+    ///   $ groth16-prover export-vk --verifying-key circuit.vk --out circuit_vk.ak
+    ExportVk(cmd::export_vk::Args),
+
     /// Run a Phase-2 multi-party ceremony for a circuit
     ///
     /// Consumes a Phase-1 SRS (`.ptau`) and a circuit (`.r1cs`) to produce
@@ -93,6 +104,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     match args.command {
         Command::Ceremony(args) => cmd::ceremony::run(args),
         Command::CeremonyDev(args) => cmd::ceremony_dev::run(args),
+        Command::ExportVk(args) => cmd::export_vk::run(args),
         Command::Prove(args) => cmd::prove::run(args),
         Command::Verify(args) => cmd::verify::run(args),
         Command::Phase2(cmd) => cmd::phase2::run(cmd),
