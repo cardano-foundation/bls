@@ -83,16 +83,64 @@ The CLI uses `FftQapEngine` + `PippengerProver` internally for fast proof genera
 
 ---
 
-### Step 4: Verify the proof (Aiken on-chain verifier)
+### Step 4: Export the verification key for Aiken
+
+**Input:** `multiplier.vk` from the dev ceremony  
+**Output:** Aiken source file containing the `VerificationKey` record
+
+```bash
+cd ../../cli
+cargo run --release -- export-vk \
+  --verifying-key /tmp/multiplier.vk \
+  --out /tmp/multiplier_vk.ak
+```
+
+The file `/tmp/multiplier_vk.ak` is a self-contained Aiken snippet. It declares a `verification_key()` function that returns a `groth16/verifier.VerificationKey` with all CRS points encoded as hex literals. You can paste it directly into an Aiken project.
+
+### Step 5: Verify the proof in Aiken
 
 **Inputs:**
-- `proof.bin` — proof from Step 3
-- Verifying key (produced by the ceremony in Step 3, or reused)
-- Public inputs (`a = 48` in this case)
+- `proof.bin` — proof from Step 3 (192 bytes)
+- `multiplier_vk.ak` — verification key from Step 4
+- Public inputs (`[1, 48]` in this case: constant wire + output `a`)
 
-**Output:** On-chain accept / reject
+**Output:** `True` iff the Groth16 pairing equation holds
 
-Use the Aiken smart-contract verifier (see the top-level `aiken/` directory) to submit the proof and public inputs for on-chain verification.
+Read the proof bytes and split them into the three compressed curve points:
+
+```bash
+# Convert binary proof to hex
+xxd -p /tmp/proof.bin | tr -d '\n'
+```
+
+The hex string is 384 characters (192 bytes). Split it:
+- First 96 chars → proof `A` (48 bytes compressed G1)
+- Next 192 chars → proof `B` (96 bytes compressed G2)
+- Last 96 chars → proof `C` (48 bytes compressed G1)
+
+Then write an Aiken test or validator:
+
+```aiken
+use groth16/verifier as groth16
+
+fn real_circom_vk() -> groth16.VerificationKey {
+  // Paste the contents of /tmp/multiplier_vk.ak here,
+  // or import it as a module.
+  verification_key()
+}
+
+test verify_real_circom_proof() {
+  let proof = groth16.Proof {
+    a: #"<first 96 hex chars from proof.bin>",
+    b: #"<next 192 hex chars from proof.bin>",
+    c: #"<last 96 hex chars from proof.bin>",
+  }
+  // Public inputs: constant wire = 1, output a = 48
+  groth16.verify(proof, [1, 48], real_circom_vk())
+}
+```
+
+See the [`aiken/groth16` README](../../../../aiken/groth16/README.md) §**Circom pipeline** for a complete walkthrough including the parameterized API and validator-level integration.
 
 ---
 

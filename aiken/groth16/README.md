@@ -154,6 +154,85 @@ validator my_zk_app(vk: groth16.VerificationKey) {
 
 ---
 
+## Circom pipeline (end-to-end)
+
+The verifier is designed to consume proofs produced by the Rust `groth16-prover` CLI from Circom circuits. The full pipeline is:
+
+```
+multiplier.circom  ──►  circom  ──►  multiplier.r1cs + multiplier.wasm
+                                               │
+                                               ▼
+input.json + multiplier.wasm  ──►  snarkjs  ──►  witness.wtns
+                                               │
+                                               ▼
+multiplier.r1cs + witness.wtns  ──►  groth16-prover  ──►  proof.bin + .vk
+                                               │
+                                               ▼
+.vk  ──►  export-vk  ──►  circuit_vk.ak  ──►  paste into Aiken project
+                                               │
+                                               ▼
+proof.bin  ──►  Aiken test/validator  ──►  on-chain verification
+```
+
+### Quick start with the included `SimpleExample`
+
+1. **Compile the circuit** (in `groth16-prover/circom/SimpleExample/`):
+   ```bash
+   circom multiplier.circom --r1cs --wasm --sym --prime bls12381
+   ```
+
+2. **Generate the witness**:
+   ```bash
+   snarkjs wtns calculate multiplier_js/multiplier.wasm input.json witness.wtns
+   ```
+
+3. **Run the dev ceremony** (in `groth16-prover/cli/`):
+   ```bash
+   cargo run --release -- ceremony-dev \
+     --circuit ../circom/SimpleExample/multiplier.r1cs \
+     --proving-key /tmp/multiplier.pk \
+     --verifying-key /tmp/multiplier.vk
+   ```
+
+4. **Generate the proof**:
+   ```bash
+   cargo run --release -- prove \
+     --circuit ../circom/SimpleExample/multiplier.r1cs \
+     --witness ../circom/SimpleExample/witness.wtns \
+     --proving-key /tmp/multiplier.pk \
+     --out /tmp/multiplier.proof
+   ```
+
+5. **Export the verification key to Aiken**:
+   ```bash
+   cargo run --release -- export-vk \
+     --verifying-key /tmp/multiplier.vk \
+     --out /tmp/multiplier_vk.ak
+   ```
+
+6. **Use the exported VK in Aiken**:
+   Copy the contents of `/tmp/multiplier_vk.ak` into your Aiken project (e.g. `lib/circuit_vk.ak`). The file is a self-contained Aiken function that returns a `VerificationKey`.
+
+   ```aiken
+   use groth16/verifier as groth16
+   use circuit_vk
+
+   test verify_real_circom_proof() {
+     let proof = groth16.Proof {
+       a: #"<hex from proof.bin, first 96 chars>",
+       b: #"<hex from proof.bin, next 192 chars>",
+       c: #"<hex from proof.bin, last 96 chars>",
+     }
+     groth16.verify(proof, [1, 48], circuit_vk.verification_key())
+   }
+   ```
+
+   > The `export-vk` command emits the VK in a format that is ready to paste. The proof bytes can be read from `/tmp/multiplier.proof` with `xxd -p` and split into the three 48/96/48 byte chunks.
+
+See the [`SimpleExample` README](../../groth16-prover/circom/SimpleExample/README.md) for a deeper walkthrough of steps 1–4.
+
+---
+
 ## File layout
 
 ```
