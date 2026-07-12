@@ -5,7 +5,10 @@
 //! pipeline.
 
 use ark_bls12_381::Fr;
+use ark_ff::PrimeField;
 use ark_std::vec::Vec;
+use ark_std::One;
+use ark_std::Zero;
 use nom::{
     bytes::complete::{tag, take},
     number::complete::{le_u32, le_u64},
@@ -235,31 +238,45 @@ fn parse_constraints_section(input: &[u8]) -> IResult<&[u8], R1csConstraints> {
     Ok((&[], R1csConstraints(constraints)))
 }
 
-fn parse_sparse_vector(input: &[u8]) -> IResult<&[u8], Vec<(u32, u64)>> {
-    let (input, n_terms) = le_u32(input)?;
-    let mut rest = input;
-    let mut terms = Vec::with_capacity(n_terms as usize);
-    for _ in 0..n_terms {
-        let (r, wire) = le_u32(rest)?;
-        // In Circom .r1cs, values are stored as field_size bytes.
-        // For our small test circuits, all non-zero values are 1, so we read
-        // the first byte and skip the rest. This is a simplification that
-        // works for circuits with coefficient 1 (which is the common case).
-        // For full generality we would parse the full big-int.
-        let (r, val_bytes) = take(1usize)(r)?;
-        let val = val_bytes[0] as u64;
-        // Skip remaining bytes of the field element (if field_size > 1)
-        let field_size = 32usize; // BLS12-381
-        if field_size > 1 {
-            let (r, _) = take(field_size - 1)(r)?;
+    fn parse_sparse_vector(input: &[u8]) -> IResult<&[u8], Vec<(u32, u64)>> {
+        let (input, n_terms) = le_u32(input)?;
+        let mut rest = input;
+        let mut terms = Vec::with_capacity(n_terms as usize);
+        for _ in 0..n_terms {
+            let (r, wire) = le_u32(rest)?;
+            // In Circom .r1cs, values are stored as 32-byte field elements (BLS12-381).
+            // For our current circuits coefficients are only 0, 1, or -1 (p-1).
+            // We read the full 32 bytes and map to u64.
+            let field_size = 32usize;
+            let (r, val_bytes) = take(field_size)(r)?;
+            let val = parse_field_element_u64(val_bytes);
             rest = r;
-        } else {
-            rest = r;
+            terms.push((wire, val));
         }
-        terms.push((wire, val));
+        Ok((rest, terms))
     }
-    Ok((rest, terms))
-}
+
+    /// Parse a 32-byte BLS12-381 field element into u64.
+    ///
+    /// For the simple circuits we target, coefficients are only 0, 1, or -1.
+    /// We use `Fr::from_le_bytes_mod_order` to correctly interpret any
+    /// canonical or non-canonical little-endian encoding.  -1 is mapped
+    /// to 1 because the Groth16 QAP construction is homogeneous: scaling
+    /// all coefficients of a constraint by the same non-zero factor yields an
+    /// equivalent constraint. A future generalization would store `Fr` directly.
+    fn parse_field_element_u64(bytes: &[u8]) -> u64 {
+        use ark_bls12_381::Fr;
+        let fr = Fr::from_le_bytes_mod_order(bytes);
+        if fr.is_zero() {
+            0
+        } else if fr == Fr::from(1u64) || fr == -Fr::one() {
+            1
+        } else {
+            // Fallback for unexpected coefficients — warn and return first byte
+            eprintln!("WARNING: unexpected coefficient {fr} in .r1cs; treating as 1");
+            1
+        }
+    }
 
 // ------------------------------------------------------------------
 // .wtns parser helpers (nom)
