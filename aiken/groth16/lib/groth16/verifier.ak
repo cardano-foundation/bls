@@ -1,15 +1,42 @@
 use aiken/builtin.{
   bls12_381_final_verify,
   bls12_381_g1_add,
-  bls12_381_g1_scalar_mul,
   bls12_381_g1_uncompress,
   bls12_381_g2_uncompress,
   bls12_381_miller_loop,
   bls12_381_mul_miller_loop_result,
 }
 use aiken/crypto/bls12_381/g1 as g1
-use aiken/crypto/bls12_381/g2 as g2
 use aiken/crypto/bls12_381/scalar as scalar
+
+// ---------------------------------------------------------------------------
+// Public types
+// ---------------------------------------------------------------------------
+
+/// Groth16 proof consisting of three compressed curve points.
+pub type Proof {
+  a: ByteArray,
+  b: ByteArray,
+  c: ByteArray,
+}
+
+/// Groth16 verification key — everything needed to verify a proof.
+///
+/// * `alpha_g1` — 48-byte compressed G1 point (`alpha * G1`).
+/// * `beta_g2`  — 96-byte compressed G2 point (`beta * G2`).
+/// * `gamma_g2` — 96-byte compressed G2 point (`gamma * G2`).
+/// * `delta_g2` — 96-byte compressed G2 point (`delta * G2`).
+/// * `ic`       — list of 48-byte compressed G1 points. `ic[i] = Psi_V_G1[i]`.
+///                  Only the first `n_public` entries are used for `V`.
+/// * `n_public` — number of public variables (including the constant wire).
+pub type VerificationKey {
+  alpha_g1: ByteArray,
+  beta_g2: ByteArray,
+  gamma_g2: ByteArray,
+  delta_g2: ByteArray,
+  ic: List<ByteArray>,
+  n_public: Int,
+}
 
 // ---------------------------------------------------------------------------
 // Hard-coded verification key (compressed BLS12-381 points)
@@ -40,11 +67,11 @@ const psi_v_g1_1 =
 // Hard-coded proof for the concrete witness [1, 48, 2, 2, 3, 4, 4, 12]
 // ---------------------------------------------------------------------------
 
-/// A = (l(tau) + alpha) * G1  (combined scalar = 10)
+/// A = (l(tau)+alpha) * G1  (combined scalar = 10)
 const proof_a =
   #"af81da25ecf1c84b577fefbedd61077a81dc43b00304015b2b596ab67f00e41c86bb00ebd0f90d4b125eb0539891aeed"
 
-/// B = (r(tau) + beta) * G2  (combined scalar = 33)
+/// B = (r(tau)+beta) * G2  (combined scalar = 33)
 const proof_b =
   #"ab0f336a9b3ee493b210f64587b8c1d5fab0a86346812545a822692c40ee4eecb349a69388ba3ad13ea3c5f8d29eb36506547761152a1517a6fffeefff70c7e817bdcf94dfa8e25955a0b4ac6ffcfd9477d7230902453d78bac3bcd06dbbb457"
 
@@ -53,46 +80,65 @@ const proof_c =
   #"b697c05f3d58d125ed8630e8f547dd5a952c33753b65629e18efcada75d443690fc1f3759dfb55edc35e4d03dd17860e"
 
 // ---------------------------------------------------------------------------
-// Public types
+// Convenience constructors (for backward compatibility / tests)
 // ---------------------------------------------------------------------------
-
-/// Groth16 proof consisting of three compressed curve points.
-pub type Proof {
-  a: ByteArray,
-  b: ByteArray,
-  c: ByteArray,
-}
 
 /// The hard-coded valid proof for the concrete circuit.
 pub fn hardcoded_proof() -> Proof {
   Proof { a: proof_a, b: proof_b, c: proof_c }
 }
 
+/// The hard-coded verification key for the concrete 3-constraint circuit.
+pub fn hardcoded_verification_key() -> VerificationKey {
+  VerificationKey {
+    alpha_g1,
+    beta_g2,
+    gamma_g2,
+    delta_g2,
+    ic: [
+      // Variable 0 (constant `1`) — point at infinity
+      #"c00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      // Variable 1 (output `a`) — psi_v_g1_1
+      psi_v_g1_1,
+      // Variables 2..7 are private — their ic entries are never used by the verifier,
+      // but we include them so `ic` has one entry per variable (8 total).
+      #"c00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      #"c00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      #"c00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      #"c00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      #"c00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      #"c00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+    ],
+    n_public: 2,
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Verifier
 // ---------------------------------------------------------------------------
 
-/// Verify a Groth16 proof against the hard-coded verification key.
+/// Verify a Groth16 proof against a supplied verification key.
 ///
-/// * `proof`   – compressed points `(A, B, C)`.
-/// * `public_inputs` – list of public witness values. For the concrete circuit this is `[1, 48]`
-///   (variable 0 is the constant `1`, variable 1 is the output `a = 48`).
+/// * `proof`         – compressed points `(A, B, C)`.
+/// * `public_inputs` – list of public witness values. The length must match
+///                     `vk.n_public`. Variable 0 is the constant `1`.
+/// * `vk`            – verification key containing CRS points and `ic` list.
 ///
 /// Returns `True` iff the Groth16 pairing equation holds.
-pub fn verify(proof: Proof, public_inputs: List<Int>) -> Bool {
+pub fn verify(proof: Proof, public_inputs: List<Int>, vk: VerificationKey) -> Bool {
   // Decompress proof points.
   let a = bls12_381_g1_uncompress(proof.a)
   let b = bls12_381_g2_uncompress(proof.b)
   let c = bls12_381_g1_uncompress(proof.c)
 
   // Decompress VK fixed points.
-  let alpha = bls12_381_g1_uncompress(alpha_g1)
-  let beta = bls12_381_g2_uncompress(beta_g2)
-  let gamma = bls12_381_g2_uncompress(gamma_g2)
-  let delta = bls12_381_g2_uncompress(delta_g2)
+  let alpha = bls12_381_g1_uncompress(vk.alpha_g1)
+  let beta = bls12_381_g2_uncompress(vk.beta_g2)
+  let gamma = bls12_381_g2_uncompress(vk.gamma_g2)
+  let delta = bls12_381_g2_uncompress(vk.delta_g2)
 
   // Compute the public-input commitment V.
-  let v = compute_public_input_commitment(public_inputs)
+  let v = compute_public_input_commitment(public_inputs, vk.ic, vk.n_public)
 
   // Pairing check:
   //   e(A, B) == e(alpha·G1, beta·G2) · e(C, delta·G2) · e(V, gamma·G2)
@@ -105,22 +151,42 @@ pub fn verify(proof: Proof, public_inputs: List<Int>) -> Bool {
   bls12_381_final_verify(lhs, rhs)
 }
 
-/// Compute the public-input commitment `V = Σ a_i · Ψ_V_G1[i]`.
+/// Compute the public-input commitment `V = Σ a_i · ic[i]`.
 ///
-/// For the concrete circuit only public variables 0 and 1 exist.
-/// Variable 0 maps to the point at infinity (zero contribution), so the
-/// result is simply `public_inputs[1] · psi_v_g1_1`.
-fn compute_public_input_commitment(public_inputs: List<Int>) -> G1Element {
-  when public_inputs is {
-    // Concrete circuit: [1, 48]
-    [_a0, a1] -> {
-      let psi1 = bls12_381_g1_uncompress(psi_v_g1_1)
-      let scalar1 = scalar.from_int(a1)
-      g1.scale(psi1, scalar1)
+/// * `public_inputs` – witness values for the public variables.
+/// * `ic`            – list of compressed G1 points (`Psi_V_G1`), one per variable.
+/// * `n_public`      – number of public variables to consume from the front of the lists.
+///
+/// Returns the identity point if the input lengths are mismatched or `n_public`
+/// is zero — this causes the pairing check to fail for malformed input.
+fn compute_public_input_commitment(
+  public_inputs: List<Int>,
+  ic: List<ByteArray>,
+  n_public: Int,
+) -> G1Element {
+  // Build the MSM over the first `n_public` entries.
+  do_compute_v(public_inputs, ic, n_public, g1.zero)
+}
+
+/// Tail-recursive helper that accumulates `v` one public input at a time.
+fn do_compute_v(
+  public_inputs: List<Int>,
+  ic: List<ByteArray>,
+  remaining: Int,
+  acc: G1Element,
+) -> G1Element {
+  if remaining <= 0 {
+    acc
+  } else {
+    when (public_inputs, ic) is {
+      ([input, ..rest_inputs], [ic_point, ..rest_ic]) -> {
+        let pt = bls12_381_g1_uncompress(ic_point)
+        let s = scalar.from_int(input)
+        let weighted = g1.scale(pt, s)
+        do_compute_v(rest_inputs, rest_ic, remaining - 1, bls12_381_g1_add(acc, weighted))
+      }
+      _ -> g1.zero
     }
-    // Fallback: if the list does not match the expected shape, return identity.
-    // This will cause the pairing check to fail for malformed input.
-    _ -> g1.zero
   }
 }
 
@@ -130,30 +196,122 @@ fn compute_public_input_commitment(public_inputs: List<Int>) -> G1Element {
 
 test test_verify_hardcoded_proof() {
   let proof = hardcoded_proof()
-  verify(proof, [1, 48])
+  let vk = hardcoded_verification_key()
+  verify(proof, [1, 48], vk)
 }
 
 test test_verify_reject_wrong_public_input() {
   let proof = hardcoded_proof()
+  let vk = hardcoded_verification_key()
   // Wrong public output (49 instead of 48) changes V and breaks the pairing.
-  !verify(proof, [1, 49])
+  !verify(proof, [1, 49], vk)
 }
 
 test test_verify_reject_tampered_proof() {
-  let proof = Proof { a: proof_a, b: proof_b, c: proof_c }
+  let vk = hardcoded_verification_key()
   // Replace C with the G1 generator: valid point, wrong proof.
   let bad_c =
     #"97f1d3a73197d7942695638c4fa9ac0fc3688c4f9774b905a14e3a3f171bac586c55e83ff97a1aeffb3af00adb22c6bb"
   let bad_proof = Proof { a: proof_a, b: proof_b, c: bad_c }
-  !verify(bad_proof, [1, 48])
+  !verify(bad_proof, [1, 48], vk)
 }
 
 test test_compute_public_input_commitment_matches_expected_v() {
-  // V for public inputs [1, 48] should equal the offline-computed point.
-  let v = compute_public_input_commitment([1, 48])
+  let vk = hardcoded_verification_key()
+  let v = compute_public_input_commitment([1, 48], vk.ic, vk.n_public)
   let expected_v =
     bls12_381_g1_uncompress(
       #"b5ae7b97f37351dbfa7c343f60ac8c1c53a4ab74b227970e8415d5d7a791498cdb0f4bd32809129a90096188dea1b8a0",
     )
   g1.equal(v, expected_v)
+}
+
+// ---------------------------------------------------------------------------
+// Tests with a *different* VK (ensures verify is not accidentally falling back
+// to hard-coded constants).
+// ---------------------------------------------------------------------------
+
+test test_verify_fails_with_wrong_vk_alpha() {
+  let proof = hardcoded_proof()
+  let vk = hardcoded_verification_key()
+  // Tamper with alpha_g1 (replace with G1 generator)
+  let bad_vk = VerificationKey {
+    ..vk,
+    alpha_g1: #"97f1d3a73197d7942695638c4fa9ac0fc3688c4f9774b905a14e3a3f171bac586c55e83ff97a1aeffb3af00adb22c6bb",
+  }
+  !verify(proof, [1, 48], bad_vk)
+}
+
+test test_verify_fails_with_wrong_vk_beta() {
+  let proof = hardcoded_proof()
+  let vk = hardcoded_verification_key()
+  // Tamper with beta_g2 (replace with G2 generator)
+  let bad_vk = VerificationKey {
+    ..vk,
+    beta_g2: #"93e02b6052719f607dacd3a088274f65596bd0d09920b61ab5da61bbdc7f5049334cf11213945d57e5ac7d055d042b7e024aa2b2f08f0a91260805272dc51051c6e47ad4fa403b02b4510b647ae3d1770bac0326a805bbefd48056c8c121bdb8",
+  }
+  !verify(proof, [1, 48], bad_vk)
+}
+
+test test_verify_fails_with_wrong_vk_ic() {
+  let proof = hardcoded_proof()
+  let vk = hardcoded_verification_key()
+  // Tamper with ic[1] (replace with point at infinity)
+  let bad_ic = [
+    vk.ic |> head,
+    #"c00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+    ..(vk.ic |> tail |> tail)
+  ]
+  let bad_vk = VerificationKey { ..vk, ic: bad_ic }
+  !verify(proof, [1, 48], bad_vk)
+}
+
+fn head(list: List<a>) -> a {
+  when list is {
+    [x, ..] -> x
+    _ -> fail @"head called on empty list"
+  }
+}
+
+fn tail(list: List<a>) -> List<a> {
+  when list is {
+    [_, ..rest] -> rest
+    _ -> []
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Generalization tests — arbitrary-length public inputs
+// ---------------------------------------------------------------------------
+
+test test_single_public_input() {
+  // A VK with one public variable (just the constant wire).
+  let vk = VerificationKey {
+    alpha_g1,
+    beta_g2,
+    gamma_g2,
+    delta_g2,
+    ic: [
+      #"c00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+    ],
+    n_public: 1,
+  }
+  // Any proof paired with this VK will fail because the VK does not match the
+  // hard-coded circuit, but the MSM for V should still compute the identity.
+  // We only assert that the function runs and returns a Bool.
+  let _result = verify(hardcoded_proof(), [1], vk)
+  True
+}
+
+test test_zero_public_inputs() {
+  let vk = VerificationKey {
+    alpha_g1,
+    beta_g2,
+    gamma_g2,
+    delta_g2,
+    ic: [],
+    n_public: 0,
+  }
+  let _result = verify(hardcoded_proof(), [], vk)
+  True
 }

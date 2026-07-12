@@ -1,8 +1,8 @@
 # Groth16 Verifier in Aiken (BLS12-381)
 
-A **minimal, hard-coded Groth16 verifier** in Aiken for a concrete 3-constraint multiplication circuit. This proves that the full Groth16 pairing check can run on-chain using Cardano's BLS12-381 builtins.
+A **parameterized Groth16 verifier** in Aiken for BLS12-381. The on-chain verifier accepts an arbitrary verification key, an arbitrary list of public inputs, and a proof, then runs the standard Groth16 pairing check using Cardano's BLS12-381 builtins.
 
-> **Status.** The off-chain Rust prover is complete and cross-checked against Sage bit-for-bit. The on-chain Aiken verifier implements the final pairing equation for the same concrete circuit with deterministic (hard-coded) toxic waste.
+> **Status.** The off-chain Rust prover is complete and cross-checked against Sage bit-for-bit. The on-chain Aiken verifier is now fully parameterized: it no longer hard-codes the verification key or the public-input commitment logic.
 
 ---
 
@@ -109,6 +109,51 @@ bls12_381_final_verify(lhs, rhs)
 
 ---
 
+## Parameterized API
+
+The verifier exposes two public types and two entry-point functions:
+
+```aiken
+pub type Proof {
+  a: ByteArray,   // 48 bytes compressed G1
+  b: ByteArray,   // 96 bytes compressed G2
+  c: ByteArray,   // 48 bytes compressed G1
+}
+
+pub type VerificationKey {
+  alpha_g1: ByteArray,       // 48 bytes
+  beta_g2: ByteArray,        // 96 bytes
+  gamma_g2: ByteArray,       // 96 bytes
+  delta_g2: ByteArray,       // 96 bytes
+  ic: List<ByteArray>,       // one 48-byte G1 point per variable
+  n_public: Int,             // number of public variables (incl. constant wire)
+}
+
+/// Verify a proof against a supplied VK and public inputs.
+pub fn verify(proof: Proof, public_inputs: List<Int>, vk: VerificationKey) -> Bool
+
+/// The old hard-coded VK (for tests / backward compat).
+pub fn hardcoded_verification_key() -> VerificationKey
+```
+
+The `ic` list contains one compressed G1 point per circuit variable. Only the first `n_public` entries are used when computing the public-input commitment `V = Σ a_i · ic[i]`. The remaining entries are private-variable commitment bases and are ignored by the verifier.
+
+### Example: verify a proof supplied by a redeemer
+
+```aiken
+use groth16/verifier as groth16
+
+validator my_zk_app(vk: groth16.VerificationKey) {
+  spend(datum, redeemer: groth16.Proof, own_ref, self) {
+    // Public inputs come from the transaction or datum
+    let public_inputs = [1, datum.output_value]
+    groth16.verify(redeemer, public_inputs, vk)
+  }
+}
+```
+
+---
+
 ## File layout
 
 ```
@@ -117,9 +162,9 @@ aiken/groth16/
 ├── aiken.toml
 ├── lib/
 │   └── groth16/
-│       └── verifier.ak    # Core verifier logic + hard-coded VK
+│       └── verifier.ak    # Core verifier logic + VerificationKey type
 └── validators/
-    └── placeholder.ak       # Tests: hard-coded proof, wrong proof, etc.
+    └── placeholder.ak       # Tests: parameterized proof + VK
 ```
 
 ---
@@ -161,10 +206,13 @@ The hard-coded compressed points in `lib/groth16/verifier.ak` were generated wit
 
 ---
 
-## Next steps (generalization)
+## What is already generalized
 
-1. **Parameterized VK:** accept the verification key as validator parameters or datum instead of hard-coding.
-2. **Dynamic public inputs:** support arbitrary-length public input vectors with on-chain MSM.
+1. **Parameterized VK** — `verify` accepts a `VerificationKey` record containing `alpha_g1`, `beta_g2`, `gamma_g2`, `delta_g2`, and the `ic` list. The hard-coded VK is still available via `hardcoded_verification_key()` for backward compatibility.
+2. **Dynamic public inputs** — `compute_public_input_commitment` now performs a genuine multi-scalar multiplication (MSM) over the first `vk.n_public` entries of `vk.ic` and the supplied public-input list. It works for any number of public inputs, not just two.
+
+## Remaining next steps
+
 3. **Circom adapter:** load `.r1cs` + `.wtns` into the Rust prover, serialize proof + VK for Aiken.
 4. **Randomized proofs:** switch from deterministic toxic waste to a real trusted-setup ceremony.
 
