@@ -91,7 +91,18 @@ node helpers_js/compute_spend_inputs.js 2 transcript.txt 2 input.json
 # arguments: <depth> <transcript-file> <target-nullifier> [output-file]
 ```
 
-#### Option B — Rust (from the `groth16-prover` crate)
+#### Option B — Rust CLI (installed `groth16-prover` binary)
+
+```bash
+cd ../../cli
+cargo run --release -- compute-inputs \
+  --depth 2 \
+  --transcript ../circom/Privacy/transcript.txt \
+  --nullifier 2 \
+  --out ../circom/Privacy/input.json
+```
+
+#### Option C — Rust library (from the `groth16-prover` crate)
 
 ```rust
 use groth16_prover::privacy_inputs::{

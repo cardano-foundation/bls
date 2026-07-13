@@ -73,6 +73,27 @@ pub enum Command {
     ///   $ groth16-prover export-vk --verifying-key circuit.vk --out circuit_vk.ak
     ExportVk(cmd::export_vk::Args),
 
+    /// Compute witness inputs for the Spend(depth) circuit
+    ///
+    /// Reads a transcript file and produces a JSON file with the private
+    /// Merkle-path data needed by the Circom witness generator.
+    ///
+    /// Example:
+    ///
+    ///   $ groth16-prover compute-inputs --depth 2 --transcript transcript.txt --nullifier 2 --out input.json
+    ComputeInputs(cmd::compute_inputs::Args),
+
+    /// Sparse Merkle Tree operations for BLS12-381
+    ///
+    /// Provides insert-only SMT commands backed by MiMC(x^7) hashing.
+    ///
+    /// Subcommands:
+    ///   insert — insert items and persist tree state
+    ///   digest — print the current tree digest
+    ///   path   — print the Merkle path for a leaf
+    #[command(subcommand)]
+    Smt(cmd::smt::SmtCommand),
+
     /// Run a Phase-2 multi-party ceremony for a circuit
     ///
     /// Consumes a Phase-1 SRS (`.ptau`) and a circuit (`.r1cs`) to produce
@@ -104,8 +125,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     match args.command {
         Command::Ceremony(args) => cmd::ceremony::run(args),
         Command::CeremonyDev(args) => cmd::ceremony_dev::run(args),
+        Command::ComputeInputs(args) => cmd::compute_inputs::run(args),
         Command::ExportVk(args) => cmd::export_vk::run(args),
         Command::Prove(args) => cmd::prove::run(args),
+        Command::Smt(cmd) => cmd::smt::run(cmd),
         Command::Verify(args) => cmd::verify::run(args),
         Command::Phase2(cmd) => cmd::phase2::run(cmd),
     }
