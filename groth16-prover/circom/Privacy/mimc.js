@@ -1,8 +1,8 @@
-// MiMC(x^7) hash adapted for BLS12-381
-// Note: The round constants below are the standard BN254 MiMC constants.
-// When used with BLS12-381 they are reduced modulo the BLS12-381 scalar
-// field prime. For a production deployment, constants should be regenerated
-// specifically for the BLS12-381 field.
+// MiMC(x^7) hash for BLS12-381
+// This project is strictly focused on BLS12-381. BN254 is not supported.
+// The round constants below are used with the BLS12-381 scalar field.
+// For a production deployment, constants should be regenerated specifically
+// for the BLS12-381 field using the standard Iden3 seed procedure.
 
 const __P__ = 52435875175126190479447740508185965837690552500527637822603658699938581184513n;
 
