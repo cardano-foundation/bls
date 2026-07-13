@@ -85,11 +85,7 @@ pub fn run(args: Args) -> Result<(), Box<dyn Error>> {
     // ------------------------------------------------------------------
     // 2. Build engine inputs
     // ------------------------------------------------------------------
-    let l_ref: Vec<&[u64]> = circuit.l.iter().map(|v| v.as_slice()).collect();
-    let r_ref: Vec<&[u64]> = circuit.r.iter().map(|v| v.as_slice()).collect();
-    let o_ref: Vec<&[u64]> = circuit.o.iter().map(|v| v.as_slice()).collect();
-
-    let witness_fr: Vec<Fr> = circuit.witness.iter().map(|&v| Fr::from(v)).collect();
+    let witness_fr = &circuit.witness;
 
     // ------------------------------------------------------------------
     // 3. Load proving key (or fall back to deterministic test values)
@@ -141,44 +137,44 @@ pub fn run(args: Args) -> Result<(), Box<dyn Error>> {
         (EngineArg::Dense, ProverArg::Naive, Some(full_pk)) => {
             let engine = DenseQapEngine::new();
             let prover = NaiveProver::new();
-            prover.prove_with_full_pk(&engine, &full_pk, &l_ref, &r_ref, &o_ref, &witness_fr)
+            prover.prove_with_full_pk(&engine, &full_pk, &circuit.l, &circuit.r, &circuit.o, witness_fr)
         }
         (EngineArg::Dense, ProverArg::Pippenger, Some(full_pk)) => {
             let engine = DenseQapEngine::new();
             let prover = PippengerProver::new();
-            prover.prove_with_full_pk(&engine, &full_pk, &l_ref, &r_ref, &o_ref, &witness_fr)
+            prover.prove_with_full_pk(&engine, &full_pk, &circuit.l, &circuit.r, &circuit.o, witness_fr)
         }
         (EngineArg::Fft, ProverArg::Naive, Some(full_pk)) => {
             let engine = FftQapEngine::new();
             let prover = NaiveProver::new();
-            prover.prove_with_full_pk(&engine, &full_pk, &l_ref, &r_ref, &o_ref, &witness_fr)
+            prover.prove_with_full_pk(&engine, &full_pk, &circuit.l, &circuit.r, &circuit.o, witness_fr)
         }
         (EngineArg::Fft, ProverArg::Pippenger, Some(full_pk)) => {
             let engine = FftQapEngine::new();
             let prover = PippengerProver::new();
-            prover.prove_with_full_pk(&engine, &full_pk, &l_ref, &r_ref, &o_ref, &witness_fr)
+            prover.prove_with_full_pk(&engine, &full_pk, &circuit.l, &circuit.r, &circuit.o, witness_fr)
         }
 
         // --- Legacy scalar-based path ---
         (EngineArg::Dense, ProverArg::Naive, None) => {
             let engine = DenseQapEngine::new();
             let prover = NaiveProver::new();
-            prover.prove(&engine, &l_ref, &r_ref, &o_ref, &witness_fr, tau, alpha, beta, gamma, delta)
+            prover.prove(&engine, &circuit.l, &circuit.r, &circuit.o, witness_fr, tau, alpha, beta, gamma, delta)
         }
         (EngineArg::Dense, ProverArg::Pippenger, None) => {
             let engine = DenseQapEngine::new();
             let prover = PippengerProver::new();
-            prover.prove(&engine, &l_ref, &r_ref, &o_ref, &witness_fr, tau, alpha, beta, gamma, delta)
+            prover.prove(&engine, &circuit.l, &circuit.r, &circuit.o, witness_fr, tau, alpha, beta, gamma, delta)
         }
         (EngineArg::Fft, ProverArg::Naive, None) => {
             let engine = FftQapEngine::new();
             let prover = NaiveProver::new();
-            prover.prove(&engine, &l_ref, &r_ref, &o_ref, &witness_fr, tau, alpha, beta, gamma, delta)
+            prover.prove(&engine, &circuit.l, &circuit.r, &circuit.o, witness_fr, tau, alpha, beta, gamma, delta)
         }
         (EngineArg::Fft, ProverArg::Pippenger, None) => {
             let engine = FftQapEngine::new();
             let prover = PippengerProver::new();
-            prover.prove(&engine, &l_ref, &r_ref, &o_ref, &witness_fr, tau, alpha, beta, gamma, delta)
+            prover.prove(&engine, &circuit.l, &circuit.r, &circuit.o, witness_fr, tau, alpha, beta, gamma, delta)
         }
     };
 

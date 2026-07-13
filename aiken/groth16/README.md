@@ -174,7 +174,11 @@ multiplier.r1cs + witness.wtns  ──►  groth16-prover  ──►  proof.bin 
 proof.bin  ──►  Aiken test/validator  ──►  on-chain verification
 ```
 
-### Quick start with the included `SimpleExample`
+### Quick start with the included circuits
+
+Two example circuits are provided. `SimpleExample` is a 3-gate multiplier (2 public inputs). `Privacy/spend_depth2` is a 1107-constraint Merkle-membership circuit with **all-private inputs** (only the constant wire is public).
+
+#### SimpleExample (3-gate multiplier)
 
 1. **Compile the circuit** (in `groth16-prover/circom/SimpleExample/`):
    ```bash
@@ -211,7 +215,7 @@ proof.bin  ──►  Aiken test/validator  ──►  on-chain verification
    ```
 
 6. **Use the exported VK in Aiken**:
-   Copy the contents of `/tmp/multiplier_vk.ak` into your Aiken project (e.g. `lib/circuit_vk.ak`). The file is a self-contained Aiken function that returns a `VerificationKey`.
+   Copy the contents of `/tmp/multiplier_vk.ak` into your Aiken project. The file is a self-contained Aiken function returning a `VerificationKey`.
 
    ```aiken
    use groth16/verifier as groth16
@@ -227,9 +231,44 @@ proof.bin  ──►  Aiken test/validator  ──►  on-chain verification
    }
    ```
 
-   > The `export-vk` command emits the VK in a format that is ready to paste. The proof bytes can be read from `/tmp/multiplier.proof` with `xxd -p` and split into the three 48/96/48 byte chunks.
+See the [`SimpleExample` README](../../groth16-prover/circom/SimpleExample/README.md) for a deeper walkthrough.
 
-See the [`SimpleExample` README](../../groth16-prover/circom/SimpleExample/README.md) for a deeper walkthrough of steps 1–4.
+#### Privacy/spend_depth2 (1107-constraint Merkle membership)
+
+Follow the same 6-step pattern using the files in `groth16-prover/circom/Privacy/`:
+
+```bash
+# 1. Compile
+circom spend_depth2.circom --r1cs --wasm --sym --prime bls12381
+
+# 2. Generate witness (from pre-computed input.json)
+snarkjs wtns calculate spend_depth2.wasm input.json witness.wtns
+
+# 3. Ceremony
+cargo run --release -- ceremony-dev \
+  --circuit spend_depth2.r1cs \
+  --proving-key /tmp/spend_depth2.pk \
+  --verifying-key /tmp/spend_depth2.vk
+
+# 4. Prove
+cargo run --release -- prove \
+  --circuit spend_depth2.r1cs \
+  --witness witness.wtns \
+  --proving-key /tmp/spend_depth2.pk \
+  --out /tmp/spend_depth2.proof
+
+# 5. Export VK
+cargo run --release -- export-vk \
+  --verifying-key /tmp/spend_depth2.vk \
+  --out /tmp/spend_depth2_vk.ak
+
+# 6. Aiken test already included — just run:
+#    cd aiken/groth16 && aiken check
+```
+
+> **Key property:** Because all user inputs are private, the public-input list is just `[1]` (the constant wire). The on-chain verification cost is **identical** to the 3-gate SimpleExample — roughly 20% of the Cardano script CPU budget — even though the circuit has 1107 constraints. Groth16 verification cost is constant regardless of circuit size.
+
+See the [`Privacy` README](../../groth16-prover/circom/Privacy/README.md) for a detailed walkthrough.
 
 ---
 

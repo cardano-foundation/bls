@@ -109,11 +109,6 @@ fn main() {
         .load_witness_from_bytes(&build_synthetic_wtns(), 32)
         .unwrap();
 
-    let l_ref: Vec<&[u64]> = circuit.l.iter().map(|v| v.as_slice()).collect();
-    let r_ref: Vec<&[u64]> = circuit.r.iter().map(|v| v.as_slice()).collect();
-    let o_ref: Vec<&[u64]> = circuit.o.iter().map(|v| v.as_slice()).collect();
-
-    let witness_fr: Vec<Fr> = circuit.witness.iter().map(|&v| Fr::from(v)).collect();
     let tau = Fr::from(3u64);
     let alpha = Fr::from(5u64);
     let beta = Fr::from(7u64);
@@ -129,29 +124,29 @@ fn main() {
     let fft = FftQapEngine::new();
 
     for _ in 0..100 {
-        let _ = naive.prove(&dense, &l_ref, &r_ref, &o_ref, &witness_fr, tau, alpha, beta, gamma, delta);
-        let _ = naive.prove(&fft, &l_ref, &r_ref, &o_ref, &witness_fr, tau, alpha, beta, gamma, delta);
-        let _ = pippenger.prove(&fft, &l_ref, &r_ref, &o_ref, &witness_fr, tau, alpha, beta, gamma, delta);
+        let _ = naive.prove(&dense, &circuit.l, &circuit.r, &circuit.o, &circuit.witness, tau, alpha, beta, gamma, delta);
+        let _ = naive.prove(&fft, &circuit.l, &circuit.r, &circuit.o, &circuit.witness, tau, alpha, beta, gamma, delta);
+        let _ = pippenger.prove(&fft, &circuit.l, &circuit.r, &circuit.o, &circuit.witness, tau, alpha, beta, gamma, delta);
     }
 
     // --- Implementation 4a: Circom + Dense + Naive ---
     let start = Instant::now();
     for _ in 0..iterations {
-        let _ = naive.prove(&dense, &l_ref, &r_ref, &o_ref, &witness_fr, tau, alpha, beta, gamma, delta);
+        let _ = naive.prove(&dense, &circuit.l, &circuit.r, &circuit.o, &circuit.witness, tau, alpha, beta, gamma, delta);
     }
     let t4a = start.elapsed();
 
     // --- Implementation 4b: Circom + FFT + Naive ---
     let start = Instant::now();
     for _ in 0..iterations {
-        let _ = naive.prove(&fft, &l_ref, &r_ref, &o_ref, &witness_fr, tau, alpha, beta, gamma, delta);
+        let _ = naive.prove(&fft, &circuit.l, &circuit.r, &circuit.o, &circuit.witness, tau, alpha, beta, gamma, delta);
     }
     let t4b = start.elapsed();
 
     // --- Implementation 4c: Circom + FFT + Pippenger ---
     let start = Instant::now();
     for _ in 0..iterations {
-        let _ = pippenger.prove(&fft, &l_ref, &r_ref, &o_ref, &witness_fr, tau, alpha, beta, gamma, delta);
+        let _ = pippenger.prove(&fft, &circuit.l, &circuit.r, &circuit.o, &circuit.witness, tau, alpha, beta, gamma, delta);
     }
     let t4c = start.elapsed();
 

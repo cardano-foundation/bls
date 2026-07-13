@@ -39,8 +39,11 @@ pub fn run(args: Args) -> Result<(), Box<dyn Error>> {
     let gamma_hex = point_to_hex(&vk.gamma_g2);
     let delta_hex = point_to_hex(&vk.delta_g2);
 
-    let mut ic_lines = Vec::with_capacity(vk.ic.len());
-    for (i, pt) in vk.ic.iter().enumerate() {
+    // Only export the first n_public ic entries — these are the only ones
+    // the on-chain verifier needs (the rest belong to the proving key).
+    let ic_public = &vk.ic[..vk.n_public];
+    let mut ic_lines = Vec::with_capacity(ic_public.len());
+    for (i, pt) in ic_public.iter().enumerate() {
         let hex = point_to_hex(pt);
         ic_lines.push(format!("    // ic[{i}]\n    #\"{hex}\","));
     }

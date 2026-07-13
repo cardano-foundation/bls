@@ -147,7 +147,7 @@ impl Phase2Accumulator {
     /// scalars (`alpha`, `beta`, `gamma`, `delta`), and computes all
     /// circuit-specific group elements via multi-scalar multiplication
     /// over the `.ptau` basis.
-    pub fn initialize<E: QapEngine, L: AsRef<[u64]>, R: AsRef<[u64]>, O: AsRef<[u64]>>(
+    pub fn initialize<E: QapEngine, T: Copy + Into<Fr>, L: AsRef<[T]>, R: AsRef<[T]>, O: AsRef<[T]>>(
         ptau: &mut PtauFile,
         engine: &E,
         l: &[L],
