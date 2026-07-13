@@ -67,10 +67,10 @@ Composed from two `IfThenElse` gadgets; enforces `s ∈ {0, 1}`.
 
 ```bash
 cd groth16-prover/circom/Privacy
-circom spend_depth2.circom --r1cs --wasm --sym --prime bls12381
+circom spend_depth2.circom --r1cs --wasm --sym
 ```
 
-> `--prime bls12381` is required so that field arithmetic matches the BLS12-381 curve used by the Rust prover and the Aiken verifier.
+> This project is strictly focused on BLS12-381. BN254 is not supported.
 
 ---
 
@@ -215,11 +215,11 @@ All tests pass, including the new end-to-end `spend_depth2` test.
 
 ---
 
-## Adapting for BLS12-381
+## Curve focus
 
-The `mimc.circom` round constants are the standard BN254 MiMC constants. When compiled with `--prime bls12381`, Circom automatically reduces them modulo the BLS12-381 scalar field. The companion `mimc.js` witness generator uses the BLS12-381 prime (`52435875175126190479447740508185965837690552500527637822603658699938581184513`) so that off-chain hashes are consistent with in-circuit hashes.
+This project is exclusively focused on BLS12-381. We are inspired by prior work on BN254, but we do not support it. All field arithmetic, point serialization, and trusted-setup artifacts target the BLS12-381 curve only.
 
-> **Production note:** For a production deployment on BLS12-381, the MiMC round constants should be regenerated specifically for the BLS12-381 field using the standard Iden3 seed procedure.
+> **Production note:** For a production deployment, the MiMC round constants should be regenerated specifically for the BLS12-381 field using the standard Iden3 seed procedure.
 
 ## References
 

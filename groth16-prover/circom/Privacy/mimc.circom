@@ -21,6 +21,8 @@
     along with circom. If not, see <https://www.gnu.org/licenses/>.
 */
 
+// This project is strictly focused on BLS12-381. BN254 is not supported.
+
 // USE THIS
 template Mimc2() {
     signal input in0;
