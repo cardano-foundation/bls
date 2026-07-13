@@ -32,7 +32,7 @@ pub trait Prover {
     ///
     /// The toxic waste parameters are the same fixed test values used
     /// throughout the crate: `tau=3, alpha=5, beta=7, gamma=11, delta=13`.
-    fn prove<E: QapEngine, L: AsRef<[u64]>, R: AsRef<[u64]>, O: AsRef<[u64]>>(
+    fn prove<E: QapEngine, T: Copy + Into<Fr>, L: AsRef<[T]>, R: AsRef<[T]>, O: AsRef<[T]>>(
         &self,
         engine: &E,
         l: &[L],
@@ -53,7 +53,7 @@ pub trait Prover {
     /// curve points from the proving key.
     ///
     /// Default implementation panics — concrete provers must override.
-    fn prove_with_full_pk<E: QapEngine, L: AsRef<[u64]>, R: AsRef<[u64]>, O: AsRef<[u64]>>(
+    fn prove_with_full_pk<E: QapEngine, T: Copy + Into<Fr>, L: AsRef<[T]>, R: AsRef<[T]>, O: AsRef<[T]>>(
         &self,
         engine: &E,
         full_pk: &crate::ceremony::FullProvingKey,
@@ -81,7 +81,7 @@ impl NaiveProver {
 }
 
 impl Prover for NaiveProver {
-    fn prove<E: QapEngine, Lm: AsRef<[u64]>, Rm: AsRef<[u64]>, Om: AsRef<[u64]>>(
+    fn prove<E: QapEngine, T: Copy + Into<Fr>, Lm: AsRef<[T]>, Rm: AsRef<[T]>, Om: AsRef<[T]>>(
         &self,
         engine: &E,
         l: &[Lm],
@@ -164,7 +164,7 @@ impl Prover for NaiveProver {
         (Proof { a, b, c }, PublicInput { v })
     }
 
-    fn prove_with_full_pk<E: QapEngine, Lm: AsRef<[u64]>, Rm: AsRef<[u64]>, Om: AsRef<[u64]>>(
+    fn prove_with_full_pk<E: QapEngine, T: Copy + Into<Fr>, Lm: AsRef<[T]>, Rm: AsRef<[T]>, Om: AsRef<[T]>>(
         &self,
         engine: &E,
         full_pk: &crate::ceremony::FullProvingKey,
@@ -244,7 +244,7 @@ impl PippengerProver {
 }
 
 impl Prover for PippengerProver {
-    fn prove<E: QapEngine, Lm: AsRef<[u64]>, Rm: AsRef<[u64]>, Om: AsRef<[u64]>>(
+    fn prove<E: QapEngine, T: Copy + Into<Fr>, Lm: AsRef<[T]>, Rm: AsRef<[T]>, Om: AsRef<[T]>>(
         &self,
         engine: &E,
         l: &[Lm],
@@ -338,7 +338,7 @@ impl Prover for PippengerProver {
         (Proof { a, b, c }, PublicInput { v })
     }
 
-    fn prove_with_full_pk<E: QapEngine, Lm: AsRef<[u64]>, Rm: AsRef<[u64]>, Om: AsRef<[u64]>>(
+    fn prove_with_full_pk<E: QapEngine, T: Copy + Into<Fr>, Lm: AsRef<[T]>, Rm: AsRef<[T]>, Om: AsRef<[T]>>(
         &self,
         engine: &E,
         full_pk: &crate::ceremony::FullProvingKey,
@@ -552,22 +552,18 @@ mod tests {
         let witness = witness();
         let tw = crate::ceremony::ToxicWaste::deterministic();
 
-        let l_ref: Vec<&[u64]> = L.iter().map(|v| v.as_slice()).collect();
-        let r_ref: Vec<&[u64]> = R.iter().map(|v| v.as_slice()).collect();
-        let o_ref: Vec<&[u64]> = O.iter().map(|v| v.as_slice()).collect();
-
         // Old scalar-based path
         let (proof_old, public_old) = prover.prove(
-            &engine, &l_ref, &r_ref, &o_ref, &witness,
+            &engine, &L, &R, &O, &witness,
             tw.tau, tw.alpha, tw.beta, tw.gamma, tw.delta,
         );
 
         // New group-element path
         let (full_pk, _vk) = crate::ceremony::single_party_ceremony_full_from_tw(
-            &engine, &l_ref, &r_ref, &o_ref, 2, tw,
+            &engine, &L, &R, &O, 2, tw,
         );
         let (proof_new, public_new) = prover.prove_with_full_pk(
-            &engine, &full_pk, &l_ref, &r_ref, &o_ref, &witness,
+            &engine, &full_pk, &L, &R, &O, &witness,
         );
 
         assert_eq!(proof_old.a, proof_new.a, "A must match between scalar and FullPK path");
@@ -583,22 +579,18 @@ mod tests {
         let witness = witness();
         let tw = crate::ceremony::ToxicWaste::deterministic();
 
-        let l_ref: Vec<&[u64]> = L.iter().map(|v| v.as_slice()).collect();
-        let r_ref: Vec<&[u64]> = R.iter().map(|v| v.as_slice()).collect();
-        let o_ref: Vec<&[u64]> = O.iter().map(|v| v.as_slice()).collect();
-
         // Old scalar-based path
         let (proof_old, public_old) = prover.prove(
-            &engine, &l_ref, &r_ref, &o_ref, &witness,
+            &engine, &L, &R, &O, &witness,
             tw.tau, tw.alpha, tw.beta, tw.gamma, tw.delta,
         );
 
         // New group-element path
         let (full_pk, _vk) = crate::ceremony::single_party_ceremony_full_from_tw(
-            &engine, &l_ref, &r_ref, &o_ref, 2, tw,
+            &engine, &L, &R, &O, 2, tw,
         );
         let (proof_new, public_new) = prover.prove_with_full_pk(
-            &engine, &full_pk, &l_ref, &r_ref, &o_ref, &witness,
+            &engine, &full_pk, &L, &R, &O, &witness,
         );
 
         assert_eq!(proof_old.a, proof_new.a, "A must match between scalar and FullPK path");
@@ -614,15 +606,11 @@ mod tests {
         let witness = witness();
         let tw = crate::ceremony::ToxicWaste::deterministic();
 
-        let l_ref: Vec<&[u64]> = L.iter().map(|v| v.as_slice()).collect();
-        let r_ref: Vec<&[u64]> = R.iter().map(|v| v.as_slice()).collect();
-        let o_ref: Vec<&[u64]> = O.iter().map(|v| v.as_slice()).collect();
-
         let (full_pk, _vk) = crate::ceremony::single_party_ceremony_full_from_tw(
-            &engine, &l_ref, &r_ref, &o_ref, 2, tw,
+            &engine, &L, &R, &O, 2, tw,
         );
         let (proof, public_input) = prover.prove_with_full_pk(
-            &engine, &full_pk, &l_ref, &r_ref, &o_ref, &witness,
+            &engine, &full_pk, &L, &R, &O, &witness,
         );
 
         assert!(

@@ -116,37 +116,102 @@ snarkjs wtns calculate spend_depth2.wasm input.json witness.wtns
 
 ---
 
-### Step 4: Produce the proof (groth16-prover CLI)
+### Step 4: Run the dev ceremony (groth16-prover CLI)
+
+**Inputs:**
+- `spend_depth2.r1cs` — constraints from Step 1
+
+**Outputs:**
+- `/tmp/spend_depth2.pk` — binary proving key (group elements only, no scalars)
+- `/tmp/spend_depth2.vk` — binary verifying key
+
+```bash
+cd ../../cli
+cargo run --release -- ceremony-dev \
+  --circuit ../circom/Privacy/spend_depth2.r1cs \
+  --proving-key /tmp/spend_depth2.pk \
+  --verifying-key /tmp/spend_depth2.vk
+```
+
+> **What happens.** The CLI loads the `.r1cs`, counts public variables (`n_public = 1` — only the constant wire, because all user inputs are private), then runs a single-party trusted setup. It computes all CRS group elements from random scalars and drops the scalars before writing the key files.
+
+---
+
+### Step 5: Produce the proof (groth16-prover CLI)
 
 **Inputs:**
 - `spend_depth2.r1cs` — constraints from Step 1
 - `witness.wtns` — witness from Step 3
-- Optional: `--proving-key` / `--verifying-key` files (or let the CLI run the trusted-setup ceremony on the fly)
+- `/tmp/spend_depth2.pk` — proving key from Step 4
 
-**Output:** `/tmp/privacy_proof.bin` — a binary Groth16 proof (arkworks serialization)
+**Outputs:**
+- `/tmp/spend_depth2.proof` — binary Groth16 proof (192 bytes)
+- `/tmp/spend_depth2.pub` — binary public-input commitment (48 bytes)
 
 ```bash
-cd ../../cli
 cargo run --release -- prove \
   --circuit ../circom/Privacy/spend_depth2.r1cs \
   --witness ../circom/Privacy/witness.wtns \
-  --out /tmp/privacy_proof.bin
+  --proving-key /tmp/spend_depth2.pk \
+  --engine fft --prover pippenger \
+  --out /tmp/spend_depth2.proof
 ```
 
-The CLI uses `FftQapEngine` + `PippengerProver` internally for fast proof generation.
+The CLI uses `FftQapEngine` + `PippengerProver` internally for fast proof generation. The proof is serialized in standard arkworks compressed format.
 
 ---
 
-### Step 5: Verify the proof (Aiken on-chain verifier)
+### Step 6: Verify the proof off-chain
 
-**Inputs:**
-- `privacy_proof.bin` — proof from Step 4
-- Verifying key (produced by the ceremony in Step 4, or reused)
-- Public inputs (`digest`, `nullifier`)
+```bash
+cargo run --release -- verify \
+  --proof /tmp/spend_depth2.proof \
+  --public /tmp/spend_depth2.pub \
+  --verifying-key /tmp/spend_depth2.vk
+```
 
-**Output:** On-chain accept / reject
+Expected output: `Verification result: VALID`
 
-Use the Aiken smart-contract verifier (see the top-level `aiken/` directory) to submit the proof and public inputs for on-chain verification.
+---
+
+### Step 7: Export the verification key for Aiken
+
+```bash
+cargo run --release -- export-vk \
+  --verifying-key /tmp/spend_depth2.vk \
+  --out /tmp/spend_depth2_vk.ak
+```
+
+The generated `/tmp/spend_depth2_vk.ak` is a self-contained Aiken function returning a `VerificationKey`. Because `n_public = 1`, the `ic` list contains only one point (the constant wire), making the VK tiny (~15 lines).
+
+---
+
+### Step 8: Verify on-chain (Aiken test)
+
+Copy the exported VK and the proof bytes into an Aiken test. The proof bytes can be read with:
+
+```bash
+xxd -p /tmp/spend_depth2.proof | tr -d '\n' | fold -w 96 -s
+```
+
+This emits three chunks: `A` (96 hex chars), `B` (192 hex chars), `C` (96 hex chars).
+
+An Aiken test has already been added to `aiken/groth16/lib/groth16/verifier.ak`:
+
+```aiken
+test test_verify_circom_spend_depth2_proof() {
+  verify(spend_depth2_proof(), [1], spend_depth2_vk())
+}
+```
+
+Run the tests:
+
+```bash
+cd aiken/groth16
+aiken check
+```
+
+All tests pass, including the new end-to-end `spend_depth2` test.
 
 ---
 

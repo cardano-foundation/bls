@@ -7,13 +7,13 @@ use ark_std::vec::Vec;
 /// - `DenseQapEngine` — classical dense Lagrange (pedagogical, O(n²))
 /// - `FftQapEngine` — FFT over roots of unity (production, O(N log N))
 ///
-/// The trait is generic over any row type that can be viewed as `&[u64]`,
+/// The trait is generic over the matrix element type `T` with `T: Copy + Into<Fr>`,
 /// so it accepts both fixed-size arrays (`&[[u64; 8]]`) and dynamic vectors
-/// (`&[Vec<u64>]`). This lets the same engine work with hard-coded circuits
+/// (`&[Vec<Fr>]`). This lets the same engine work with hard-coded circuits
 /// and Circom-generated R1CS files.
 pub trait QapEngine {
     /// Build the QAP polynomials u_s(x), v_s(x), w_s(x) from R1CS matrices.
-    fn build_qap<L: AsRef<[u64]>, R: AsRef<[u64]>, O: AsRef<[u64]>>(
+    fn build_qap<T: Copy + Into<Fr>, L: AsRef<[T]>, R: AsRef<[T]>, O: AsRef<[T]>>(
         &self,
         l: &[L],
         r: &[R],
@@ -38,7 +38,7 @@ pub trait QapEngine {
     ///
     /// In the dense path this evaluates each stored polynomial.
     /// In the FFT path this is a dot-product against Lagrange basis values.
-    fn evaluate_qap_at_tau<L: AsRef<[u64]>, R: AsRef<[u64]>, O: AsRef<[u64]>>(
+    fn evaluate_qap_at_tau<T: Copy + Into<Fr>, L: AsRef<[T]>, R: AsRef<[T]>, O: AsRef<[T]>>(
         &self,
         l: &[L],
         r: &[R],
@@ -57,7 +57,7 @@ impl DenseQapEngine {
 }
 
 impl QapEngine for DenseQapEngine {
-    fn build_qap<L: AsRef<[u64]>, R: AsRef<[u64]>, O: AsRef<[u64]>>(
+    fn build_qap<T: Copy + Into<Fr>, L: AsRef<[T]>, R: AsRef<[T]>, O: AsRef<[T]>>(
         &self,
         l: &[L],
         r: &[R],
@@ -75,21 +75,21 @@ impl QapEngine for DenseQapEngine {
 
         for i in 0..n_vars {
             // u_i(x) from L column
-            let y0_l = Fr::from(l[0].as_ref()[i]);
-            let y1_l = Fr::from(l[1].as_ref()[i]);
-            let y2_l = Fr::from(l[2].as_ref()[i]);
+            let y0_l = l[0].as_ref()[i].into();
+            let y1_l = l[1].as_ref()[i].into();
+            let y2_l = l[2].as_ref()[i].into();
             us.push(interpolate_3_points(y0_l, y1_l, y2_l, two_inv));
 
             // v_i(x) from R column
-            let y0_r = Fr::from(r[0].as_ref()[i]);
-            let y1_r = Fr::from(r[1].as_ref()[i]);
-            let y2_r = Fr::from(r[2].as_ref()[i]);
+            let y0_r = r[0].as_ref()[i].into();
+            let y1_r = r[1].as_ref()[i].into();
+            let y2_r = r[2].as_ref()[i].into();
             vs.push(interpolate_3_points(y0_r, y1_r, y2_r, two_inv));
 
             // w_i(x) from O column
-            let y0_o = Fr::from(o[0].as_ref()[i]);
-            let y1_o = Fr::from(o[1].as_ref()[i]);
-            let y2_o = Fr::from(o[2].as_ref()[i]);
+            let y0_o = o[0].as_ref()[i].into();
+            let y1_o = o[1].as_ref()[i].into();
+            let y2_o = o[2].as_ref()[i].into();
             ws.push(interpolate_3_points(y0_o, y1_o, y2_o, two_inv));
         }
 
@@ -124,7 +124,7 @@ impl QapEngine for DenseQapEngine {
         q
     }
 
-    fn evaluate_qap_at_tau<L: AsRef<[u64]>, R: AsRef<[u64]>, O: AsRef<[u64]>>(
+    fn evaluate_qap_at_tau<T: Copy + Into<Fr>, L: AsRef<[T]>, R: AsRef<[T]>, O: AsRef<[T]>>(
         &self,
         l: &[L],
         r: &[R],
@@ -157,7 +157,7 @@ impl FftQapEngine {
 }
 
 impl QapEngine for FftQapEngine {
-    fn build_qap<L: AsRef<[u64]>, R: AsRef<[u64]>, O: AsRef<[u64]>>(
+    fn build_qap<T: Copy + Into<Fr>, L: AsRef<[T]>, R: AsRef<[T]>, O: AsRef<[T]>>(
         &self,
         l: &[L],
         r: &[R],
@@ -178,7 +178,7 @@ impl QapEngine for FftQapEngine {
             let mut evals: Vec<Fr> = (0..domain_size)
                 .map(|j| {
                     if j < n_constraints {
-                        Fr::from(l[j].as_ref()[i])
+                        l[j].as_ref()[i].into()
                     } else {
                         Fr::zero()
                     }
@@ -191,7 +191,7 @@ impl QapEngine for FftQapEngine {
             let mut evals: Vec<Fr> = (0..domain_size)
                 .map(|j| {
                     if j < n_constraints {
-                        Fr::from(r[j].as_ref()[i])
+                        r[j].as_ref()[i].into()
                     } else {
                         Fr::zero()
                     }
@@ -204,7 +204,7 @@ impl QapEngine for FftQapEngine {
             let mut evals: Vec<Fr> = (0..domain_size)
                 .map(|j| {
                     if j < n_constraints {
-                        Fr::from(o[j].as_ref()[i])
+                        o[j].as_ref()[i].into()
                     } else {
                         Fr::zero()
                     }
@@ -231,12 +231,13 @@ impl QapEngine for FftQapEngine {
         l: &DensePolynomial<Fr>,
         r: &DensePolynomial<Fr>,
         o: &DensePolynomial<Fr>,
-        _t: &DensePolynomial<Fr>,
+        t: &DensePolynomial<Fr>,
     ) -> DensePolynomial<Fr> {
         let prod = l.naive_mul(r);
         let numerator = poly_sub(&prod, o);
 
-        let domain_size = Self::domain_size(3); // hard-coded for our 3-constraint circuit
+        // T(x) = x^domain_size - 1, so its degree is the domain size
+        let domain_size = t.degree();
         let domain = GeneralEvaluationDomain::<Fr>::new(domain_size)
             .expect("Failed to create evaluation domain");
 
@@ -248,7 +249,7 @@ impl QapEngine for FftQapEngine {
         quotient
     }
 
-    fn evaluate_qap_at_tau<L: AsRef<[u64]>, R: AsRef<[u64]>, O: AsRef<[u64]>>(
+    fn evaluate_qap_at_tau<T: Copy + Into<Fr>, L: AsRef<[T]>, R: AsRef<[T]>, O: AsRef<[T]>>(
         &self,
         l: &[L],
         r: &[R],
@@ -275,9 +276,9 @@ impl QapEngine for FftQapEngine {
             let mut w = Fr::zero();
             for c in 0..n_constraints {
                 let lc = lagrange_at_tau[c];
-                u += Fr::from(l[c].as_ref()[s]) * lc;
-                v += Fr::from(r[c].as_ref()[s]) * lc;
-                w += Fr::from(o[c].as_ref()[s]) * lc;
+                u += l[c].as_ref()[s].into() * lc;
+                v += r[c].as_ref()[s].into() * lc;
+                w += o[c].as_ref()[s].into() * lc;
             }
             us_tau.push(u);
             vs_tau.push(v);
@@ -335,7 +336,7 @@ pub fn poly_scalar_mul(poly: &DensePolynomial<Fr>, scalar: Fr) -> DensePolynomia
 
 /// Evaluate witness polynomials at τ using a QapEngine.
 /// Returns (l(τ), r(τ), o(τ), h(τ), T(τ)) where h is the quotient.
-pub fn evaluate_witness_and_quotient<E: QapEngine, L: AsRef<[u64]>, R: AsRef<[u64]>, O: AsRef<[u64]>>(
+pub fn evaluate_witness_and_quotient<E: QapEngine, T: Copy + Into<Fr>, L: AsRef<[T]>, R: AsRef<[T]>, O: AsRef<[T]>>(
     engine: &E,
     l: &[L],
     r: &[R],

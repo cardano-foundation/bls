@@ -117,19 +117,14 @@ fn main() {
     println!("  witness     = {:?}", circuit.witness);
 
     // ------------------------------------------------------------------
-    // 2. Build QAP engines from Circom matrices (dynamic Vec<Vec<u64>>)
+    // 2. Build QAP engines from Circom matrices (dynamic Vec<Vec<Fr>>)
     // ------------------------------------------------------------------
-    let l_ref: Vec<&[u64]> = circuit.l.iter().map(|v| v.as_slice()).collect();
-    let r_ref: Vec<&[u64]> = circuit.r.iter().map(|v| v.as_slice()).collect();
-    let o_ref: Vec<&[u64]> = circuit.o.iter().map(|v| v.as_slice()).collect();
-
     let dense = DenseQapEngine::new();
     let fft = FftQapEngine::new();
 
     // ------------------------------------------------------------------
     // 3. Prove with both engines using NaiveProver
     // ------------------------------------------------------------------
-    let witness_fr: Vec<Fr> = circuit.witness.iter().map(|&v| Fr::from(v)).collect();
     let tau = Fr::from(3u64);
     let alpha = Fr::from(5u64);
     let beta = Fr::from(7u64);
@@ -139,8 +134,8 @@ fn main() {
     let naive = NaiveProver::new();
     let pippenger = PippengerProver::new();
 
-    let (dense_proof, _) = naive.prove(&dense, &l_ref, &r_ref, &o_ref, &witness_fr, tau, alpha, beta, gamma, delta);
-    let (fft_proof, fft_public) = naive.prove(&fft, &l_ref, &r_ref, &o_ref, &witness_fr, tau, alpha, beta, gamma, delta);
+    let (dense_proof, _) = naive.prove(&dense, &circuit.l, &circuit.r, &circuit.o, &circuit.witness, tau, alpha, beta, gamma, delta);
+    let (fft_proof, fft_public) = naive.prove(&fft, &circuit.l, &circuit.r, &circuit.o, &circuit.witness, tau, alpha, beta, gamma, delta);
 
     println!("\nDense engine proof:");
     println!("  A = {:?}", dense_proof.a);
@@ -155,7 +150,7 @@ fn main() {
     // ------------------------------------------------------------------
     // 4. Prove with PippengerProver for speed
     // ------------------------------------------------------------------
-    let (pipp_proof, _) = pippenger.prove(&dense, &l_ref, &r_ref, &o_ref, &witness_fr, tau, alpha, beta, gamma, delta);
+    let (pipp_proof, _) = pippenger.prove(&dense, &circuit.l, &circuit.r, &circuit.o, &circuit.witness, tau, alpha, beta, gamma, delta);
     println!("\nPippengerProver (dense) proof:");
     println!("  A = {:?}", pipp_proof.a);
     println!("  B = {:?}", pipp_proof.b);

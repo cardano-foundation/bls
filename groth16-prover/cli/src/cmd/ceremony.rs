@@ -57,18 +57,11 @@ pub fn run(args: Args) -> Result<(), Box<dyn Error>> {
     let n_public = 1 + circuit.n_pub_out as usize + circuit.n_pub_in as usize;
 
     // ------------------------------------------------------------------
-    // 3. Build engine inputs
-    // ------------------------------------------------------------------
-    let l_ref: Vec<&[u64]> = circuit.l.iter().map(|v| v.as_slice()).collect();
-    let r_ref: Vec<&[u64]> = circuit.r.iter().map(|v| v.as_slice()).collect();
-    let o_ref: Vec<&[u64]> = circuit.o.iter().map(|v| v.as_slice()).collect();
-
-    // ------------------------------------------------------------------
-    // 4. Run ceremony
+    // 3. Run ceremony
     // ------------------------------------------------------------------
     let mut rng = rand::thread_rng();
     let engine = FftQapEngine::new();
-    let (pk, vk) = ceremony(&engine, &l_ref, &r_ref, &o_ref, n_public, &mut rng);
+    let (pk, vk) = ceremony(&engine, &circuit.l, &circuit.r, &circuit.o, n_public, &mut rng);
 
     eprintln!("Ceremony complete. Toxic waste generated and discarded from memory.");
     eprintln!("  Proving key:  {}  ({} bytes)", args.proving_key.display(), {

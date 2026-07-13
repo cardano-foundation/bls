@@ -160,7 +160,7 @@ pub struct FullProvingKey {
 /// * `rng`      — cryptographically secure RNG.
 ///
 /// Returns `(ProvingKey, VerifyingKey)`.
-pub fn ceremony<E: QapEngine, L: AsRef<[u64]>, R: AsRef<[u64]>, O: AsRef<[u64]>>(
+pub fn ceremony<E: QapEngine, T: Copy + Into<Fr>, L: AsRef<[T]>, R: AsRef<[T]>, O: AsRef<[T]>>(
     engine: &E,
     l: &[L],
     r: &[R],
@@ -249,7 +249,7 @@ pub fn verify_with_vk(
 ///
 /// The output format is identical to what a Phase-2 MPC would produce, so
 /// the downstream `prove` / `verify` code is agnostic.
-pub fn single_party_ceremony_full<E: QapEngine, L: AsRef<[u64]>, R: AsRef<[u64]>, O: AsRef<[u64]>>(
+pub fn single_party_ceremony_full<E: QapEngine, T: Copy + Into<Fr>, L: AsRef<[T]>, R: AsRef<[T]>, O: AsRef<[T]>>(
     engine: &E,
     l: &[L],
     r: &[R],
@@ -264,7 +264,7 @@ pub fn single_party_ceremony_full<E: QapEngine, L: AsRef<[u64]>, R: AsRef<[u64]>
 /// Same as `single_party_ceremony_full` but accepts explicit `ToxicWaste`.
 ///
 /// Useful for deterministic testing and parity checks.
-pub fn single_party_ceremony_full_from_tw<E: QapEngine, L: AsRef<[u64]>, R: AsRef<[u64]>, O: AsRef<[u64]>>(
+pub fn single_party_ceremony_full_from_tw<E: QapEngine, T: Copy + Into<Fr>, L: AsRef<[T]>, R: AsRef<[T]>, O: AsRef<[T]>>(
     engine: &E,
     l: &[L],
     r: &[R],
@@ -448,20 +448,16 @@ mod tests {
         let mut rng = rand::thread_rng();
         let engine = FftQapEngine::new();
 
-        let l_ref: Vec<&[u64]> = L.iter().map(|v| v.as_slice()).collect();
-        let r_ref: Vec<&[u64]> = R.iter().map(|v| v.as_slice()).collect();
-        let o_ref: Vec<&[u64]> = O.iter().map(|v| v.as_slice()).collect();
-
-        let (pk, vk) = ceremony(&engine, &l_ref, &r_ref, &o_ref, 2, &mut rng);
+        let (pk, vk) = ceremony(&engine, &L, &R, &O, 2, &mut rng);
 
         // Prove
         let prover = PippengerProver::new();
         let witness: Vec<Fr> = WITNESS.iter().map(|&v| Fr::from(v)).collect();
         let (proof, public_input) = prover.prove(
             &engine,
-            &l_ref,
-            &r_ref,
-            &o_ref,
+            &L,
+            &R,
+            &O,
             &witness,
             pk.toxic_waste.tau,
             pk.toxic_waste.alpha,
@@ -481,11 +477,7 @@ mod tests {
         let mut rng = rand::thread_rng();
         let engine = FftQapEngine::new();
 
-        let l_ref: Vec<&[u64]> = L.iter().map(|v| v.as_slice()).collect();
-        let r_ref: Vec<&[u64]> = R.iter().map(|v| v.as_slice()).collect();
-        let o_ref: Vec<&[u64]> = O.iter().map(|v| v.as_slice()).collect();
-
-        let (pk, _vk) = ceremony(&engine, &l_ref, &r_ref, &o_ref, 2, &mut rng);
+        let (pk, _vk) = ceremony(&engine, &L, &R, &O, 2, &mut rng);
 
         // Serialize
         let mut pk_bytes = Vec::new();
@@ -511,14 +503,10 @@ mod tests {
         let mut rng = rand::thread_rng();
         let engine = FftQapEngine::new();
 
-        let l_ref: Vec<&[u64]> = L.iter().map(|v| v.as_slice()).collect();
-        let r_ref: Vec<&[u64]> = R.iter().map(|v| v.as_slice()).collect();
-        let o_ref: Vec<&[u64]> = O.iter().map(|v| v.as_slice()).collect();
-
         let n_public = 2;
         let n_vars = L[0].len(); // 8 for the hard-coded 3-constraint circuit
 
-        let (full_pk, vk) = single_party_ceremony_full(&engine, &l_ref, &r_ref, &o_ref, n_public, &mut rng);
+        let (full_pk, vk) = single_party_ceremony_full(&engine, &L, &R, &O, n_public, &mut rng);
 
         // 1. Basic sanity checks on vector lengths
         assert_eq!(full_pk.a_query.len(), n_vars, "a_query should have one entry per variable");

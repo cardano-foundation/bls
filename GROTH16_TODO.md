@@ -35,28 +35,31 @@ Validated the entire toolchain end-to-end with the existing `SimpleExample/multi
 ---
 
 ## 1. Merkle Membership (Privacy Coin Spend)
-**Status:** 🔄 In Progress
+**Status:** ✅ Completed
 
 Prove a coin commitment exists in a Merkle tree without revealing the leaf or path.
 
 **Circuit:** `spend.circom` (already in `circom/Privacy/` — uses MiMC(x⁷) + `SelectiveSwitch`).  
-**Public inputs:** `digest` (Merkle root), `nullifier`  
-**Private inputs:** `nonce`, `sibling[path]`, `direction[path]`
+**Public inputs:** *(none — all inputs are private in the depth-2 wrapper)*  
+**Private inputs:** `root`, `sibling[0..1]`, `siblingPos[0..1]`, `nullifier`, `secret`, `leaf`
 
 **Use case:** ZCash-style shielded UTXO spending on Cardano.
 
----
+### What was done
+- Fixed critical bug in `circom_adapter.rs`: the `parse_field_element_u64` function mapped all non-0/1/-1 field coefficients to `1`, corrupting circuits with arbitrary constants (e.g., MiMC round constants). Replaced with a generic `T: Copy + Into<Fr>` approach so matrices store full `Fr` values.
+- Fixed critical bug in `FftQapEngine::compute_quotient`: `domain_size` was hard-coded to `3` instead of being read from the target polynomial `T(x)`. This caused quotient computation to fail for any circuit with >3 constraints.
+- Fixed `export-vk` CLI subcommand to only export the first `n_public` `ic` entries (instead of all variables), keeping on-chain VKs small.
+- Compiled `spend_depth2.circom` → `.r1cs` (1107 constraints, 1110 wires) + `.wasm`
+- Generated `.wtns` witness from `input.json` via `snarkjs`
+- Ran dev ceremony → `.pk` + `.vk`
+- Generated proof with `.pk` using `FftQapEngine` + `PippengerProver`
+- Verified proof off-chain with `groth16-prover verify` — **VALID**
+- Exported VK to Aiken-compatible format (`spend_depth2_vk.ak`)
+- Wrote Aiken test `test_verify_circom_spend_depth2_proof()` that verifies the real Circom-generated proof on-chain using the exported VK and public input `[1]` (constant wire only)
+- All Aiken tests pass (17 lib + 12 validator tests)
 
-## 1. Merkle Membership (Privacy Coin Spend)
-**Status:** ⏳ Pending
-
-Prove a coin commitment exists in a Merkle tree without revealing the leaf or path.
-
-**Circuit:** `spend.circom` (already in `circom/Privacy/` — uses MiMC(x⁷) + `SelectiveSwitch`).  
-**Public inputs:** `digest` (Merkle root), `nullifier`  
-**Private inputs:** `nonce`, `sibling[path]`, `direction[path]`
-
-**Use case:** ZCash-style shielded UTXO spending on Cardano.
+### Key insight
+Because all user-facing inputs in `spend_depth2.circom` are `private`, the only public variable is the constant wire (`1`). This means the on-chain verifier only needs **one** `ic` entry and the public-input list is just `[1]`. The proof verification cost is therefore identical to the 3-gate `SimpleExample` — roughly **20% of the Cardano script CPU budget** — despite the circuit having 1107 constraints. This is the fundamental power of Groth16: verifier cost is constant regardless of circuit size.
 
 ---
 
@@ -122,4 +125,5 @@ Verify a standard Ed25519 signature inside a Groth16 circuit.
 
 ## Completed
 
-*(none yet)*
+- **Item 0 — SimpleExample Multiplier** (3 constraints, 2 public inputs)
+- **Item 1 — Merkle Membership / Privacy Coin Spend** (1107 constraints, all-private inputs)

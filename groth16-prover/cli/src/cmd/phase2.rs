@@ -149,12 +149,7 @@ fn run_new(args: NewArgs) -> Result<(), Box<dyn Error>> {
     // 3. Determine public variable count
     let n_public = 1 + circuit.n_pub_out as usize + circuit.n_pub_in as usize;
 
-    // 4. Build engine inputs
-    let l_ref: Vec<&[u64]> = circuit.l.iter().map(|v| v.as_slice()).collect();
-    let r_ref: Vec<&[u64]> = circuit.r.iter().map(|v| v.as_slice()).collect();
-    let o_ref: Vec<&[u64]> = circuit.o.iter().map(|v| v.as_slice()).collect();
-
-    // 5. Initialize Phase-2 accumulator
+    // 4. Initialize Phase-2 accumulator
     let mut rng = rand::thread_rng();
     let engine = FftQapEngine::new();
 
@@ -162,9 +157,9 @@ fn run_new(args: NewArgs) -> Result<(), Box<dyn Error>> {
     let accumulator = Phase2Accumulator::initialize(
         &mut ptau,
         &engine,
-        &l_ref,
-        &r_ref,
-        &o_ref,
+        &circuit.l,
+        &circuit.r,
+        &circuit.o,
         n_public,
         &mut rng,
     )

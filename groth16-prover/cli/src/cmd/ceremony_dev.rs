@@ -60,18 +60,11 @@ pub fn run(args: Args) -> Result<(), Box<dyn Error>> {
     let n_public = 1 + circuit.n_pub_out as usize + circuit.n_pub_in as usize;
 
     // ------------------------------------------------------------------
-    // 3. Build engine inputs
-    // ------------------------------------------------------------------
-    let l_ref: Vec<&[u64]> = circuit.l.iter().map(|v| v.as_slice()).collect();
-    let r_ref: Vec<&[u64]> = circuit.r.iter().map(|v| v.as_slice()).collect();
-    let o_ref: Vec<&[u64]> = circuit.o.iter().map(|v| v.as_slice()).collect();
-
-    // ------------------------------------------------------------------
-    // 4. Run single-party ceremony (full proving key)
+    // 3. Run single-party ceremony (full proving key)
     // ------------------------------------------------------------------
     let mut rng = rand::thread_rng();
     let engine = FftQapEngine::new();
-    let (full_pk, vk) = single_party_ceremony_full(&engine, &l_ref, &r_ref, &o_ref, n_public, &mut rng);
+    let (full_pk, vk) = single_party_ceremony_full(&engine, &circuit.l, &circuit.r, &circuit.o, n_public, &mut rng);
 
     eprintln!("Dev ceremony complete. Full proving key generated (group elements only, no scalars).");
     eprintln!("  Proving key:  {}  ({} bytes)", args.proving_key.display(), {

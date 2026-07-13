@@ -67,9 +67,9 @@ template SelectiveSwitch() {
 template Spend(depth) {
     signal input digest;
     signal input nullifier;
-    signal private input nonce;
-    signal private input sibling[depth];
-    signal private input direction[depth];
+    signal input nonce;
+    signal input sibling[depth];
+    signal input direction[depth];
 
     // Compute commitment = H(nullifier, nonce)
     component commitmentHasher = Mimc2();

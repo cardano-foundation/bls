@@ -7,7 +7,6 @@
 use ark_bls12_381::Fr;
 use ark_ff::PrimeField;
 use ark_std::vec::Vec;
-use ark_std::One;
 use ark_std::Zero;
 use nom::{
     bytes::complete::{tag, take},
@@ -26,13 +25,13 @@ pub struct CircomCircuit {
     pub n_prv_in: u32,
     pub n_constraints: u32,
     /// Dense L matrix (constraints × wires)
-    pub l: Vec<Vec<u64>>,
+    pub l: Vec<Vec<Fr>>,
     /// Dense R matrix (constraints × wires)
-    pub r: Vec<Vec<u64>>,
+    pub r: Vec<Vec<Fr>>,
     /// Dense O matrix (constraints × wires)
-    pub o: Vec<Vec<u64>>,
+    pub o: Vec<Vec<Fr>>,
     /// Witness values (loaded separately from `.wtns`)
-    pub witness: Vec<u64>,
+    pub witness: Vec<Fr>,
 }
 
 impl CircomCircuit {
@@ -65,11 +64,6 @@ impl CircomCircuit {
     pub fn load_witness(&mut self, path: &str) -> Result<(), String> {
         let data = std::fs::read(path).map_err(|e| format!("Failed to read {}: {}", path, e))?;
         self.load_witness_from_bytes(&data, self.field_size as usize)
-    }
-
-    /// Convert the loaded witness to field elements.
-    pub fn witness_fr(&self) -> Vec<Fr> {
-        self.witness.iter().map(|&v| Fr::from(v)).collect()
     }
 
     fn parse_r1cs(data: &[u8]) -> Result<CircomCircuit, nom::Err<nom::error::Error<&[u8]>>> {
@@ -113,9 +107,9 @@ impl CircomCircuit {
         let n_wires = header.n_wires as usize;
 
         // Convert sparse constraints to dense matrices
-        let mut l = vec![vec![0u64; n_wires]; n_constraints];
-        let mut r = vec![vec![0u64; n_wires]; n_constraints];
-        let mut o = vec![vec![0u64; n_wires]; n_constraints];
+        let mut l = vec![vec![Fr::zero(); n_wires]; n_constraints];
+        let mut r = vec![vec![Fr::zero(); n_wires]; n_constraints];
+        let mut o = vec![vec![Fr::zero(); n_wires]; n_constraints];
 
         for (i, (a, b, c)) in constraints.0.iter().enumerate() {
             for &(wire, val) in a {
@@ -144,7 +138,7 @@ impl CircomCircuit {
         })
     }
 
-    fn parse_wtns(data: &[u8], field_size: usize) -> Result<Vec<u64>, nom::Err<nom::error::Error<&[u8]>>> {
+    fn parse_wtns(data: &[u8], field_size: usize) -> Result<Vec<Fr>, nom::Err<nom::error::Error<&[u8]>>> {
         let (rest, _) = parse_wtns_header(data)?;
 
         let mut witness = Vec::new();
@@ -161,8 +155,7 @@ impl CircomCircuit {
                 let mut srest = section_data;
                 for _ in 0..n_wires {
                     let (sr, val_bytes) = take(field_size)(srest)?;
-                    // Simplified: read first byte, assume small values
-                    let val = val_bytes[0] as u64;
+                    let val = Fr::from_le_bytes_mod_order(val_bytes);
                     witness.push(val);
                     srest = sr;
                 }
@@ -219,7 +212,7 @@ fn parse_header_section(input: &[u8]) -> IResult<&[u8], R1csHeader> {
 }
 
 /// One constraint is three sparse vectors (A, B, C).
-type Constraint = (Vec<(u32, u64)>, Vec<(u32, u64)>, Vec<(u32, u64)>);
+type Constraint = (Vec<(u32, Fr)>, Vec<(u32, Fr)>, Vec<(u32, Fr)>);
 
 /// Wrapper so we can return constraints from nom.
 struct R1csConstraints(Vec<Constraint>);
@@ -238,44 +231,25 @@ fn parse_constraints_section(input: &[u8]) -> IResult<&[u8], R1csConstraints> {
     Ok((&[], R1csConstraints(constraints)))
 }
 
-    fn parse_sparse_vector(input: &[u8]) -> IResult<&[u8], Vec<(u32, u64)>> {
+    fn parse_sparse_vector(input: &[u8]) -> IResult<&[u8], Vec<(u32, Fr)>> {
         let (input, n_terms) = le_u32(input)?;
         let mut rest = input;
         let mut terms = Vec::with_capacity(n_terms as usize);
         for _ in 0..n_terms {
             let (r, wire) = le_u32(rest)?;
             // In Circom .r1cs, values are stored as 32-byte field elements (BLS12-381).
-            // For our current circuits coefficients are only 0, 1, or -1 (p-1).
-            // We read the full 32 bytes and map to u64.
             let field_size = 32usize;
             let (r, val_bytes) = take(field_size)(r)?;
-            let val = parse_field_element_u64(val_bytes);
+            let val = parse_field_element(val_bytes);
             rest = r;
             terms.push((wire, val));
         }
         Ok((rest, terms))
     }
 
-    /// Parse a 32-byte BLS12-381 field element into u64.
-    ///
-    /// For the simple circuits we target, coefficients are only 0, 1, or -1.
-    /// We use `Fr::from_le_bytes_mod_order` to correctly interpret any
-    /// canonical or non-canonical little-endian encoding.  -1 is mapped
-    /// to 1 because the Groth16 QAP construction is homogeneous: scaling
-    /// all coefficients of a constraint by the same non-zero factor yields an
-    /// equivalent constraint. A future generalization would store `Fr` directly.
-    fn parse_field_element_u64(bytes: &[u8]) -> u64 {
-        use ark_bls12_381::Fr;
-        let fr = Fr::from_le_bytes_mod_order(bytes);
-        if fr.is_zero() {
-            0
-        } else if fr == Fr::from(1u64) || fr == -Fr::one() {
-            1
-        } else {
-            // Fallback for unexpected coefficients — warn and return first byte
-            eprintln!("WARNING: unexpected coefficient {fr} in .r1cs; treating as 1");
-            1
-        }
+    /// Parse a 32-byte BLS12-381 field element into `Fr`.
+    fn parse_field_element(bytes: &[u8]) -> Fr {
+        Fr::from_le_bytes_mod_order(bytes)
     }
 
 // ------------------------------------------------------------------
@@ -415,9 +389,9 @@ mod tests {
         // Compare against hard-coded matrices
         for j in 0..3 {
             for i in 0..8 {
-                assert_eq!(circuit.l[j][i], L[j][i], "L[{}][{}] mismatch", j, i);
-                assert_eq!(circuit.r[j][i], R[j][i], "R[{}][{}] mismatch", j, i);
-                assert_eq!(circuit.o[j][i], O[j][i], "O[{}][{}] mismatch", j, i);
+                assert_eq!(circuit.l[j][i], Fr::from(L[j][i]), "L[{}][{}] mismatch", j, i);
+                assert_eq!(circuit.r[j][i], Fr::from(R[j][i]), "R[{}][{}] mismatch", j, i);
+                assert_eq!(circuit.o[j][i], Fr::from(O[j][i]), "O[{}][{}] mismatch", j, i);
             }
         }
     }
@@ -426,7 +400,8 @@ mod tests {
     fn test_parse_synthetic_wtns() {
         let bytes = build_synthetic_wtns();
         let witness = CircomCircuit::parse_wtns(&bytes, 32).unwrap();
-        assert_eq!(witness, WITNESS.to_vec());
+        let expected: Vec<Fr> = WITNESS.iter().map(|&v| Fr::from(v)).collect();
+        assert_eq!(witness, expected);
     }
 
     #[test]
@@ -437,6 +412,7 @@ mod tests {
         let mut circuit = CircomCircuit::parse_r1cs(&r1cs_bytes).unwrap();
         circuit.load_witness_from_bytes(&wtns_bytes, 32).unwrap();
 
-        assert_eq!(circuit.witness, WITNESS.to_vec());
+        let expected: Vec<Fr> = WITNESS.iter().map(|&v| Fr::from(v)).collect();
+        assert_eq!(circuit.witness, expected);
     }
 }
