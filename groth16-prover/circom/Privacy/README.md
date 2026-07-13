@@ -45,9 +45,9 @@ Composed from two `IfThenElse` gadgets; enforces `s ∈ {0, 1}`.
 | `mimc.circom` | MiMC(x⁷) hash (`Mimc2`, `Mimc7`, `Mimc7Compression`) from circomlib |
 | `spend_depth2.circom` | Top-level circuit: `Spend(2)` with public inputs `digest`, `nullifier` |
 | `transcript.txt` | Sample transaction transcript (nullifier + nonce pairs) |
-| `compute_spend_inputs.js` | Node.js script that computes the witness input JSON from a transcript |
-| `mimc.js` | Native BigInt MiMC implementation for BLS12-381 |
-| `sparse_merkle_tree.js` | Sparse Merkle tree used by the input computer |
+| `helpers_js/compute_spend_inputs.js` | Node.js script that computes the witness input JSON from a transcript |
+| `helpers_js/mimc.js` | Native BigInt MiMC implementation for BLS12-381 |
+| `helpers_js/sparse_merkle_tree.js` | Sparse Merkle tree used by the input computer |
 | `input.json` | Pre-computed witness input for `spend_depth2` (nullifier `2`, depth `2`) |
 
 ---
@@ -74,7 +74,9 @@ circom spend_depth2.circom --r1cs --wasm --sym
 
 ---
 
-### Step 2: Generate the witness input (compute_spend_inputs.js)
+### Step 2: Generate the witness input
+
+The witness input (`input.json`) contains the private Merkle-path data. You can produce it with **either** the JavaScript helpers or the Rust library — both use the same MiMC hash and BLS12-381 field arithmetic.
 
 **Input:** `transcript.txt` — one line per commitment. Each line is either:
 - a single number (raw commitment), or
@@ -82,9 +84,29 @@ circom spend_depth2.circom --r1cs --wasm --sym
 
 **Output:** `input.json` — JSON mapping of signal names to string-represented field elements
 
+#### Option A — JavaScript (Node.js)
+
 ```bash
-node compute_spend_inputs.js 2 transcript.txt 2 input.json
+node helpers_js/compute_spend_inputs.js 2 transcript.txt 2 input.json
 # arguments: <depth> <transcript-file> <target-nullifier> [output-file]
+```
+
+#### Option B — Rust (from the `groth16-prover` crate)
+
+```rust
+use groth16_prover::privacy_inputs::{
+    compute_spend_inputs, parse_transcript_lines, TranscriptEntry
+};
+
+let lines = std::fs::read_to_string("transcript.txt")?
+    .lines()
+    .map(|s| s.to_string())
+    .collect::<Vec<_>>();
+
+let transcript = parse_transcript_lines(&lines)?;
+let inputs = compute_spend_inputs(2, &transcript, "2")?;
+
+// `inputs.to_json_map()` gives Vec<(String, String)> ready for JSON serialization
 ```
 
 Example `input.json` for depth 2, proving nullifier `2`:

@@ -70,7 +70,7 @@ module.exports = { computeInput };
 if (require.main === module) {
     const args = process.argv.slice(2);
     if (args.length < 3 || args.includes("-h") || args.includes("--help")) {
-        console.log(`Usage: node compute_spend_inputs.js <depth> <transcript-file> <nullifier> [output-file]`);
+        console.log(`Usage: node helpers_js/compute_spend_inputs.js <depth> <transcript-file> <nullifier> [output-file]`);
         console.log(`  output-file defaults to input.json`);
         process.exit(1);
     }
