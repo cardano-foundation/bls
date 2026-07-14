@@ -25,3 +25,11 @@ path = "src/bin/print_proof_pippenger.rs"
 [[bin]]
 name = "benchmark_provers"
 path = "src/bin/benchmark_provers.rs"
+
+[[bin]]
+name = "benchmark_circom"
+path = "src/bin/benchmark_circom.rs"
+
+[[bin]]
+name = "benchmark_privacy"
+path = "src/bin/benchmark_privacy.rs"
