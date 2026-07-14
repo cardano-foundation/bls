@@ -3,6 +3,122 @@ use predicates::prelude::*;
 use std::fs;
 use tempfile::NamedTempFile;
 
+use ark_bls12_381::{Fq, Fr, G1Affine, G2Affine};
+use ark_ec::{AffineRepr, CurveGroup};
+use ark_ff::Field;
+
+// ------------------------------------------------------------------
+// Synthetic .ptau generator (self-contained tests)
+// ------------------------------------------------------------------
+
+/// Build a minimal valid snarkjs `.ptau` file in memory.
+///
+/// The file stores uncompressed LEM (Little-Endian Montgomery) points
+/// for a fake Powers-of-Tau ceremony with the given `power`.
+/// `tau`, `alpha`, and `beta` are fixed to small integers so the
+/// resulting points are always valid curve elements.
+fn build_synthetic_ptau(power: u32) -> Vec<u8> {
+    let max_g2 = 1usize << power;
+    let max_g1 = max_g2 * 2 - 1;
+
+    let tau = Fr::from(2u64);
+    let alpha = Fr::from(3u64);
+    let beta = Fr::from(5u64);
+
+    let mut out = Vec::new();
+
+    // Header
+    out.extend_from_slice(b"ptau");
+    out.extend_from_slice(&1u32.to_le_bytes()); // version
+    out.extend_from_slice(&11u32.to_le_bytes()); // number of sections
+
+    // Helper to write a section: [type][size][data]
+    let mut write_section = |stype: u32, data: &[u8]| {
+        out.extend_from_slice(&stype.to_le_bytes());
+        out.extend_from_slice(&(data.len() as u64).to_le_bytes());
+        out.extend_from_slice(data);
+    };
+
+    // Section 1: header
+    let mut header = Vec::new();
+    header.extend_from_slice(&48u32.to_le_bytes());
+    let mut prime = [0u8; 48];
+    prime[0] = 0xab;
+    prime[1] = 0xff;
+    prime[2] = 0xff;
+    prime[3] = 0xff;
+    header.extend_from_slice(&prime);
+    header.extend_from_slice(&power.to_le_bytes());
+    header.extend_from_slice(&power.to_le_bytes());
+    write_section(1, &header);
+
+    // Helper: write Fq in LEM format
+    fn write_fq(buf: &mut Vec<u8>, val: &Fq) {
+        let limbs = val.0 .0; // [u64; 6]
+        for limb in limbs {
+            buf.extend_from_slice(&limb.to_le_bytes());
+        }
+    }
+
+    // Section 2: tauG1
+    let mut sec2 = Vec::new();
+    for i in 0..max_g1 {
+        let scalar = tau.pow([i as u64]);
+        let pt: G1Affine = (G1Affine::generator() * scalar).into_affine();
+        write_fq(&mut sec2, &pt.x);
+        write_fq(&mut sec2, &pt.y);
+    }
+    write_section(2, &sec2);
+
+    // Section 3: tauG2
+    let mut sec3 = Vec::new();
+    for i in 0..max_g2 {
+        let scalar = tau.pow([i as u64]);
+        let pt: G2Affine = (G2Affine::generator() * scalar).into_affine();
+        write_fq(&mut sec3, &pt.x.c0);
+        write_fq(&mut sec3, &pt.x.c1);
+        write_fq(&mut sec3, &pt.y.c0);
+        write_fq(&mut sec3, &pt.y.c1);
+    }
+    write_section(3, &sec3);
+
+    // Section 4: alphaTauG1
+    let mut sec4 = Vec::new();
+    for i in 0..max_g2 {
+        let scalar = alpha * tau.pow([i as u64]);
+        let pt: G1Affine = (G1Affine::generator() * scalar).into_affine();
+        write_fq(&mut sec4, &pt.x);
+        write_fq(&mut sec4, &pt.y);
+    }
+    write_section(4, &sec4);
+
+    // Section 5: betaTauG1
+    let mut sec5 = Vec::new();
+    for i in 0..max_g2 {
+        let scalar = beta * tau.pow([i as u64]);
+        let pt: G1Affine = (G1Affine::generator() * scalar).into_affine();
+        write_fq(&mut sec5, &pt.x);
+        write_fq(&mut sec5, &pt.y);
+    }
+    write_section(5, &sec5);
+
+    // Section 6: betaG2
+    let mut sec6 = Vec::new();
+    let pt: G2Affine = (G2Affine::generator() * beta).into_affine();
+    write_fq(&mut sec6, &pt.x.c0);
+    write_fq(&mut sec6, &pt.x.c1);
+    write_fq(&mut sec6, &pt.y.c0);
+    write_fq(&mut sec6, &pt.y.c1);
+    write_section(6, &sec6);
+
+    // Sections 7-11: empty
+    for stype in 7..=11 {
+        write_section(stype, &[]);
+    }
+
+    out
+}
+
 /// Run a full ceremony → prove → verify round-trip using random keys.
 #[test]
 fn full_ceremony_prove_verify_roundtrip() {
@@ -672,6 +788,8 @@ fn full_ceremony_dev_prove_verify_roundtrip() {
 #[test]
 fn phase2_new_creates_accumulator() {
     let (r1cs, _wtns) = create_test_artifacts();
+    let ptau = NamedTempFile::new().unwrap();
+    fs::write(ptau.path(), build_synthetic_ptau(4)).unwrap();
     let zkey = NamedTempFile::new().unwrap();
 
     let mut cmd = Command::cargo_bin("groth16-prover").unwrap();
@@ -680,7 +798,7 @@ fn phase2_new_creates_accumulator() {
         .arg("--circuit")
         .arg(r1cs.path())
         .arg("--srs")
-        .arg("/tmp/pot4_final.ptau")
+        .arg(ptau.path())
         .arg("--zkey")
         .arg(zkey.path());
 
@@ -697,6 +815,8 @@ fn phase2_new_creates_accumulator() {
 #[test]
 fn phase2_contribute_and_verify() {
     let (r1cs, _wtns) = create_test_artifacts();
+    let ptau = NamedTempFile::new().unwrap();
+    fs::write(ptau.path(), build_synthetic_ptau(4)).unwrap();
     let zkey0 = NamedTempFile::new().unwrap();
     let zkey1 = NamedTempFile::new().unwrap();
 
@@ -708,7 +828,7 @@ fn phase2_contribute_and_verify() {
         .arg("--circuit")
         .arg(r1cs.path())
         .arg("--srs")
-        .arg("/tmp/pot4_final.ptau")
+        .arg(ptau.path())
         .arg("--zkey")
         .arg(zkey0.path());
     cmd_new.assert().success();
@@ -746,6 +866,8 @@ fn phase2_contribute_and_verify() {
 #[test]
 fn phase2_full_roundtrip_prove_verify() {
     let (r1cs, wtns) = create_test_artifacts();
+    let ptau = NamedTempFile::new().unwrap();
+    fs::write(ptau.path(), build_synthetic_ptau(4)).unwrap();
     let zkey0 = NamedTempFile::new().unwrap();
     let zkey1 = NamedTempFile::new().unwrap();
     let pk_file = NamedTempFile::new().unwrap();
@@ -760,7 +882,7 @@ fn phase2_full_roundtrip_prove_verify() {
         .arg("--circuit")
         .arg(r1cs.path())
         .arg("--srs")
-        .arg("/tmp/pot4_final.ptau")
+        .arg(ptau.path())
         .arg("--zkey")
         .arg(zkey0.path());
     cmd_new.assert().success();
