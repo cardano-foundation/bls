@@ -1,8 +1,8 @@
 # groth16-prover
 
-A **didactic, end-to-end Groth16 prover** in Rust over the BLS12-381 curve.
+An **end-to-end Groth16 prover** in Rust over the BLS12-381 curve.
 
-> **Purpose.** This crate demonstrates the full Groth16 pipeline—from hard-coded R1CS matrices to a valid zero-knowledge proof—using [arkworks](https://arkworks.rs/) primitives. It is intentionally simplistic (hard-coded circuit, dense monomial polynomials, no randomizers) so that every intermediate value can be printed, inspected, and compared against an independent reference implementation.
+> **Purpose.** This crate implements the full Groth16 pipeline—from R1CS constraints to a valid zero-knowledge proof—using [arkworks](https://arkworks.rs/) primitives. It began as a didactic reference (hard-coded circuit, dense monomial polynomials, deterministic toxic waste) so that every intermediate value could be printed, inspected, and compared against an independent reference implementation. Since then it has grown into a production-capable toolkit with FFT-based QAP construction, Pippenger multi-scalar multiplication, a Circom adapter, a CLI, and a Phase 2 multi-party computation ceremony.
 
 > **Correctness guarantee.** The entire implementation has been cross-checked line-by-line against a [Sage](https://www.sagemath.org/) script that implements the same mathematics from scratch. See [`RustGroth16Correctness.md`](RustGroth16Correctness.md) for the bit-for-bit comparison of every sub-step.
 
