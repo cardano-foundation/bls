@@ -2,17 +2,15 @@
 
 This directory contains Circom circuits that can be loaded by the Rust prover via the `circom_adapter` module.
 
-## `SimpleExample/` — 3-gate multiplication chain
+## Available circuits
 
-The default example circuit. It implements:
+| Directory | What it proves | Status |
+|-----------|---------------|--------|
+| [`SimpleExample/`](SimpleExample/README.md) | 3-gate multiplication chain (`a = x1·x2·x3·x4`) | ✅ Complete |
+| [`Privacy/`](Privacy/README.md) | Merkle membership — shielded spend with MiMC(x⁷) | ✅ Complete |
+| [`PoseidonPreimage/`](PoseidonPreimage/README.md) | Poseidon hash pre-image knowledge | ✅ Complete |
 
-```
-x5 = x1 * x2
-x6 = x3 * x4
-a  = x5 * x6
-```
-
-See [`SimpleExample/README.md`](SimpleExample/README.md) for the full walkthrough.
+---
 
 ## The Circom pipeline (what each tool does)
 
@@ -28,7 +26,7 @@ The standard Circom workflow involves three distinct steps, each with a dedicate
 
 1. **Compilation is one-time.** The `.circom` file is compiled once to `.r1cs` + `.wasm`. The `.r1cs` captures the *structure* of the circuit (which gates exist and how they connect). The `.wasm` captures the *computation* (how to fill in the wires).
 
-2. **Witness generation is per-proof.** Each time you want to prove something, you provide concrete inputs (`input.json`), run the WASM calculator, and get a `.wtns` file. The witness is simply the assignment of every wire: `x1=2, x2=2, x3=3, x4=4, x5=4, x6=12, a=48` for our circuit.
+2. **Witness generation is per-proof.** Each time you want to prove something, you provide concrete inputs (`input.json`), run the WASM calculator, and get a `.wtns` file. The witness is simply the assignment of every wire.
 
 3. **Proving is independent.** The prover does not need to know how the witness was computed — it only checks that the witness satisfies the constraints in `.r1cs`. This is why our Rust crate can replace `snarkjs`'s prover entirely while still reusing Circom's compiler and witness generator.
 
@@ -55,13 +53,34 @@ Also install `snarkjs` for witness generation:
 npm install -g snarkjs
 ```
 
-## Compiling the default circuit
+---
+
+## Interesting Groth16 problems on Cardano
+
+Full pipeline for each item: **Circom → groth16-prover (dev ceremony) → Aiken on-chain validator**.
+
+### Completed
+
+- **0. SimpleExample Multiplier** (3 constraints, 2 public inputs) — validated the entire toolchain end-to-end.
+- **1. Merkle Membership / Privacy Coin Spend** (1107 constraints, all-private inputs) — ZCash-style shielded UTXO spending on Cardano. See [`Privacy/README.md`](Privacy/README.md).
+- **2. Poseidon Hash Pre-image** — prove knowledge of a secret whose Poseidon hash equals a public commitment. See [`PoseidonPreimage/README.md`](PoseidonPreimage/README.md).
+
+### Pending
+
+- **3. Range Proof / Comparison** — prove a committed value lies in range `[0, 2^n)` without revealing the value. Use case: confidential transaction amounts.
+- **4. Blake2b-224 Hash Pre-image (Cardano Key Hash)** — prove knowledge of a pre-image that hashes to a given Cardano key hash. Use case: proving ownership / linking proofs to on-chain Cardano addresses.
+- **5. Private Key → Public Key Ownership Proof** — prove knowledge of the private scalar that generates a given public key / address. Use case: wallet ownership proof without revealing the private key.
+- **6. EdDSA / Ed25519 Signature Verification In-Circuit** — verify a standard Ed25519 signature inside a Groth16 circuit. Use case: attest to off-chain events signed by standard Ed25519 keys (SSH, TLS, other blockchains).
+
+---
+
+## Compiling a circuit
 
 ```bash
 cd groth16-prover/circom/SimpleExample
 
 # Compile to BLS12-381 (must match the Rust prover curve)
-circom multiplier.circom --r1cs --wasm --sym --prime bls12381
+circom multiplier.circom --r1cs --wasm --sym
 
 # This produces:
 #   multiplier.r1cs   — binary R1CS constraint system
@@ -71,18 +90,7 @@ circom multiplier.circom --r1cs --wasm --sym --prime bls12381
 
 ## Generating the witness
 
-Create `input.json` with the private inputs (already provided in `SimpleExample/`):
-
-```json
-{
-    "x1": "2",
-    "x2": "2",
-    "x3": "3",
-    "x4": "4"
-}
-```
-
-Then run the WASM witness calculator via `snarkjs`:
+Create `input.json` with the private inputs, then run the WASM witness calculator via `snarkjs`:
 
 ```bash
 snarkjs wtns calculate multiplier.wasm input.json witness.wtns
@@ -90,7 +98,7 @@ snarkjs wtns calculate multiplier.wasm input.json witness.wtns
 
 ## Using in the Rust prover
 
-The Rust crate can load `multiplier.r1cs` and `witness.wtns` directly:
+The Rust crate can load `.r1cs` and `.wtns` directly:
 
 ```rust
 use groth16_prover::circom_adapter::CircomCircuit;
@@ -99,4 +107,4 @@ let circuit = CircomCircuit::from_r1cs("circom/SimpleExample/multiplier.r1cs").u
 circuit.load_witness("circom/SimpleExample/witness.wtns").unwrap();
 ```
 
-The parsed `L`, `R`, `O` matrices and witness vector are then fed into any `QapEngine` + `Prover` combination, producing a proof identical to the hard-coded circuit.
+The parsed `L`, `R`, `O` matrices and witness vector are then fed into any `QapEngine` + `Prover` combination, producing a proof.
