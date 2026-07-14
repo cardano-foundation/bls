@@ -120,33 +120,6 @@ See [`cli/README.md`](cli/README.md) for full CLI documentation, including proof
 
 ---
 
-## Benchmarks
-
-Proof-production time for the hard-coded 3-constraint circuit (`x1·x2 = x5`, `x3·x4 = x6`, `x5·x6 = a`) on a single core, compiled with `--release`:
-
-| Implementation | Engine | Prover | Per-proof time | vs. Impl 1 | vs. Impl 2 |
-|----------------|--------|--------|---------------|------------|------------|
-| 1 (dense) | `DenseQapEngine` | `NaiveProver` | **3.87 ms** | — | — |
-| 2 (FFT) | `FftQapEngine` | `NaiveProver` | **4.04 ms** | 0.96× | — |
-| 3 (Pippenger) | `FftQapEngine` | `PippengerProver` | **3.30 ms** | 1.17× | 1.22× |
-| 4a (Circom dense) | `DenseQapEngine` | `NaiveProver` | **55.16 ms** | 0.07× | 0.07× |
-| 4b (Circom FFT) | `FftQapEngine` | `NaiveProver` | **94.30 ms** | 0.04× | 0.04× |
-| 4c (Circom Pippenger) | `FftQapEngine` | `PippengerProver` | **53.42 ms** | 0.07× | 0.08× |
-
-> **What the numbers mean.** For a 3-gate circuit the FFT overhead (padding to 4 points, extra IFFT steps) outweighs its `O(N log N)` advantage, so Implementation 2 is slightly slower than Implementation 1. Pippenger's batched MSM still yields a modest ~20 % speedup even at this tiny scale. On realistic circuits with hundreds or thousands of gates, the FFT advantage grows to ~1000× and Pippenger's MSM speedup grows to 5–10×.
->
-> **Implementation 4** numbers are from a debug build (the `.r1cs`/`.wtns` parser and dynamic allocation add overhead). In `--release` mode the Circom adapter is only marginally slower than the hard-coded path because the core QAP and prover code is identical; the extra cost is purely parsing and memory allocation.
-
-Run the benchmarks yourself:
-
-```bash
-cd groth16-prover
-cargo run --bin benchmark_provers --release
-cargo run --bin benchmark_circom --release
-```
-
----
-
 ## Design choices (and why)
 
 | Choice | Rationale |
@@ -720,6 +693,63 @@ The current crate is a **reference implementation** for correctness verification
   7. **EdDSA Ed25519 signature verification** — verify a standard Ed25519 signature inside a Groth16 circuit. Ed25519 is widely used outside the BN254 ecosystem (SSH, TLS, many blockchains), so an in-circuit verifier would let a Cardano zk-proof attest to off-chain events signed by standard Ed25519 keys. Reference implementation: [Electron-Labs/ed25519-circom](https://github.com/Electron-Labs/ed25519-circom) provides a full Ed25519 signature-verification circuit in Circom.
 - **Reference:** [circomlib](https://github.com/iden3/circomlib) provides production-grade Poseidon, MiMC, Merkle, and EdDSA circuits for BN254. Porting to BLS12-381 requires updating the field constants. For Blake2b-224, see [bkomuves/hash-circuits](https://github.com/bkomuves/hash-circuits). For key-derivation logic, see [IntersectMBO/cardano-crypto](https://github.com/IntersectMBO/cardano-crypto/blob/develop/src/Cardano/Crypto/Wallet.hs#L161). For Ed25519 in-circuit verification, see [Electron-Labs/ed25519-circom](https://github.com/Electron-Labs/ed25519-circom).
 - **Benefit:** Shows that the Rust prover + Aiken verifier pipeline works for real-world zk-SNARK applications, not just toy arithmetic circuits. Blake2b-224, key-ownership proofs, and Ed25519 verification in particular unlock cross-chain and identity use cases (proving ownership of a key, linking a proof to an on-chain address, anonymous identity verification, attesting to off-chain signed data, etc.).
+
+</details>
+
+---
+
+## Benchmarks
+
+<details>
+<summary><b>Click to expand benchmark results</b></summary>
+
+### Toy circuit (`multiplier.circom` — 3 constraints)
+
+Proof-production time for the hard-coded 3-constraint circuit (`x1·x2 = x5`, `x3·x4 = x6`, `x5·x6 = a`) on a single core, compiled with `--release`:
+
+| Implementation | Engine | Prover | Per-proof time | vs. Impl 1 | vs. Impl 2 |
+|----------------|--------|--------|---------------|------------|------------|
+| 1 (dense) | `DenseQapEngine` | `NaiveProver` | **3.87 ms** | — | — |
+| 2 (FFT) | `FftQapEngine` | `NaiveProver` | **4.04 ms** | 0.96× | — |
+| 3 (Pippenger) | `FftQapEngine` | `PippengerProver` | **3.30 ms** | 1.17× | 1.22× |
+| 4a (Circom dense) | `DenseQapEngine` | `NaiveProver` | **55.16 ms** | 0.07× | 0.07× |
+| 4b (Circom FFT) | `FftQapEngine` | `NaiveProver` | **94.30 ms** | 0.04× | 0.04× |
+| 4c (Circom Pippenger) | `FftQapEngine` | `PippengerProver` | **53.42 ms** | 0.07× | 0.08× |
+
+> **What the numbers mean.** For a 3-gate circuit the FFT overhead (padding to 4 points, extra IFFT steps) outweighs its `O(N log N)` advantage, so Implementation 2 is slightly slower than Implementation 1. Pippenger's batched MSM still yields a modest ~20 % speedup even at this tiny scale. On realistic circuits with hundreds or thousands of gates, the FFT advantage grows to ~1000× and Pippenger's MSM speedup grows to 5–10×.
+>
+> **Implementation 4** numbers are from a debug build (the `.r1cs`/`.wtns` parser and dynamic allocation add overhead). In `--release` mode the Circom adapter is only marginally slower than the hard-coded path because the core QAP and prover code is identical; the extra cost is purely parsing and memory allocation.
+
+### Privacy circuit (`Spend(depth)` — Merkle membership)
+
+The shielded-spend circuit lives in `circom/Privacy/`. It proves that a commitment `H(nullifier, nonce)` exists in a Merkle tree of the given depth without revealing the nullifier, nonce, or path. Constraint count grows linearly with depth (each level adds one `MiMC2` hash and two `IfThenElse` gadgets).
+
+> **Status:** 🚧 Pending end-to-end compilation with `circom --prime bls12381`. Once the `.r1cs` artifact is available, the numbers below will be populated by `cargo run --bin benchmark_circom --release`.
+
+| Depth | Estimated constraints | Expected FFT QAP + Pippenger | Notes |
+|-------|----------------------|------------------------------|-------|
+| 2 | ~60 | *pending* | Wrapper used for adapter validation |
+| 8 | ~240 | *pending* | Small anonymity set |
+| 16 | ~480 | *pending* | Medium anonymity set |
+| 32 | ~960 | *pending* | Large anonymity set |
+
+> **Why depth matters.** The Merkle path has `depth` sibling hashes. Each level in the Circom circuit invokes `MiMC2` (≈30 constraints) plus `SelectiveSwitch` (≈8 constraints). Doubling the depth roughly doubles the constraint count and proof-generation time. Even at depth 32, the FFT + Pippenger path is expected to stay under **100 ms** per proof on a single core because the MSM overhead dominates and the witness vector remains small.
+
+Run the benchmarks yourself:
+
+```bash
+cd groth16-prover
+
+# Toy circuit variants
+cargo run --bin benchmark_provers --release
+cargo run --bin benchmark_circom --release
+
+# Privacy circuit (once the .r1cs is available)
+cargo run --release -- prove \
+  --circuit circom/Privacy/spend_depth2.r1cs \
+  --witness circom/Privacy/witness.wtns \
+  --engine fft --prover pippenger --out /tmp/proof.bin
+```
 
 </details>
 
