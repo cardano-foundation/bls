@@ -120,19 +120,6 @@ See [`cli/README.md`](cli/README.md) for full CLI documentation, including proof
 
 ---
 
-## Design choices (and why)
-
-| Choice | Rationale |
-|--------|-----------|
-| **Hard-coded circuit** | A 3-constraint multiplication chain (`x1·x2=x5`, `x3·x4=x6`, `x5·x6=a`) is large enough to exercise every Groth16 step, yet small enough to verify by hand. |
-| **Dense monomial basis** | `u_i(x)`, `v_i(x)`, `w_i(x)` are stored as dense coefficient vectors. This makes printing and comparison trivial. It is `O(n²)` and therefore unsuitable for production circuits with millions of constraints, but it is ideal for learning. |
-| **No randomizers (`r = s = 0`)** | Proof elements `A`, `B`, `C` use the textbook formulas without blinding. This removes entropy and makes the outputs deterministic and reproducible. A production prover would add random `r` and `s` for zero-knowledge. |
-| **Deterministic toxic waste** | `tau=3`, `alpha=5`, `beta=7`, `gamma=11`, `delta=13` are hard-coded small primes. In a real deployment these would be generated securely and destroyed; here they are fixed so that two independent codebases can produce the exact same curve points. |
-| **Two switchable QAP engines** | The dense path (classical Lagrange over `{0,1,2}`) is the default for pedagogical clarity. The FFT path (roots of unity, IFFT, `T(x)=x^N−1`) is implemented via the `QapEngine` trait and cross-checked against Sage bit-for-bit. Both paths share the same downstream proof-assembly code. |
-| **Two switchable MSM provers** | Proof assembly uses either `NaiveProver` (scalar-by-scalar accumulation, pedagogical) or `PippengerProver` (batched multi-scalar multiplication via `VariableBaseMSM::msm`, production). Both are generic over any `QapEngine` and produce identical proof points. |
-
----
-
 ## Implementation 1 (dense monomial)
 
 <details>
@@ -685,7 +672,7 @@ The current crate is a **reference implementation** for correctness verification
 - **Target:** Add several realistic Circom circuits that exercise different zk-SNARK patterns:
   1. **Poseidon hash** — demonstrate hash pre-image knowledge inside a Groth16 proof.
   2. **Merkle membership** — prove that a leaf exists in a Merkle tree without revealing the leaf or the path.  
-     **Status:** 🚧 **Started.** A shielded-spend circuit (`Spend(depth)`) based on Stanford CS251 Project #4 lives in `circom/Privacy/`. It uses MiMC(x⁷) hashing and `SelectiveSwitch` gadgets to verify a Merkle path. A depth-2 wrapper (`spend_depth2.circom`), sample transcript, and a Node.js input generator are included. The circuit still needs to be compiled with `circom --prime bls12381` and proven end-to-end with the Rust CLI.
+     **Status:** ✅ **Complete.** A shielded-spend circuit (`Spend(depth)`) based on Stanford CS251 Project #4 lives in `circom/Privacy/`. It uses MiMC(x⁷) hashing and `SelectiveSwitch` gadgets to verify a Merkle path. A depth-2 wrapper (`spend_depth2.circom`) has been compiled with `circom --prime bls12381` and the full pipeline is working end-to-end: witness-input generation (via `compute-inputs` CLI or Rust library), witness calculation (snarkjs), dev ceremony, proof generation (`prove` CLI with FFT + Pippenger), off-chain verification (`verify` CLI), and on-chain verification (Aiken test in `aiken/groth16/lib/groth16/verifier.ak`). The CLI also includes `smt insert` / `smt digest` / `smt path` commands for sparse Merkle tree operations backed by the same MiMC(x⁷) hash. See [`circom/Privacy/README.md`](circom/Privacy/README.md) for the full step-by-step walkthrough.
   3. **Range proof / comparison** — prove that a committed value lies in a range `[0, 2^n)`.
   4. **EdDSA / BabyJubJub signature** — verify a signature inside the circuit (requires JubJub curve gadgets).
   5. **Blake2b-224 hash** — prove knowledge of a pre-image that hashes to a given Cardano key hash. Cardano uses Blake2b-224 for address and key hashing, so an in-circuit Blake2b-224 gadget is essential for any zk-proof that needs to reason about Cardano keys or addresses. Reference implementation: [bkomuves/hash-circuits](https://github.com/bkomuves/hash-circuits) provides a generic Blake2b Circom circuit.
