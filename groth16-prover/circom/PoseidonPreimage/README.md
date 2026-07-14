@@ -56,10 +56,10 @@ Round constants and MDS matrix are from ZeroJ's `PoseidonParamsBLS12_381T3`, gen
 
 ```bash
 cd groth16-prover/circom/PoseidonPreimage
-circom poseidon_preimage.circom --r1cs --wasm --sym
+circom poseidon_preimage.circom --r1cs --wasm --sym --prime bls12381
 ```
 
-> This project is strictly focused on BLS12-381. BN254 is not supported.
+> **BLS12-381 only.** The `--prime bls12381` flag is required. Without it, Circom defaults to BN254 and the Rust prover will fail at the QAP quotient step ("Quotient remainder must be zero"). This project does not support BN254.
 
 ---
 
@@ -148,15 +148,7 @@ The generated `/tmp/poseidon_preimage_vk.ak` is a self-contained Aiken function 
 
 ### Step 7: Verify on-chain (Aiken test)
 
-Copy the exported VK and the proof bytes into an Aiken test. The proof bytes can be read with:
-
-```bash
-xxd -p /tmp/poseidon_preimage.proof | tr -d '\n' | fold -w 96 -s
-```
-
-This emits three chunks: `A` (96 hex chars), `B` (192 hex chars), `C` (96 hex chars).
-
-An Aiken test would look like:
+The on-chain verification test is already checked in at `aiken/groth16/lib/groth16/verifier.ak`:
 
 ```aiken
 test test_verify_poseidon_preimage_proof() {
@@ -170,6 +162,8 @@ Run the tests:
 cd aiken/groth16
 aiken check
 ```
+
+Expected: all tests pass, including `test_verify_poseidon_preimage_proof`.
 
 ---
 
