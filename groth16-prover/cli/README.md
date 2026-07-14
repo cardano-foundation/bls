@@ -18,11 +18,50 @@ This CLI covers everything from trusted-setup ceremonies (both dev and multi-par
 | `compute-inputs` | Build private Merkle-path JSON for the Spend(depth) circuit |
 | `smt` | Sparse Merkle Tree operations (insert, digest, path) |
 
+### Quickest possible workflow (dev ceremony)
+
+```bash
+cd groth16-prover/cli
+
+# 1. Ceremony (once per circuit)
+cargo run --release -- ceremony-dev \
+  --circuit ../circom/SimpleExample/multiplier.r1cs \
+  --proving-key /tmp/multiplier.pk \
+  --verifying-key /tmp/multiplier.vk
+
+# 2. Prove
+cargo run --release -- prove \
+  --circuit ../circom/SimpleExample/multiplier.r1cs \
+  --witness ../circom/SimpleExample/witness.wtns \
+  --proving-key /tmp/multiplier.pk \
+  --out /tmp/proof.bin
+
+# 3. Verify
+cargo run --release -- verify \
+  --proof /tmp/proof.bin \
+  --public /tmp/proof.pub \
+  --verifying-key /tmp/multiplier.vk
+```
+
+---
+
+## How it works
+
+1. **Ceremony** (once per circuit) — two switchable paths produce the same `*.pk` / `*.vk` format:
+   - **Dev mode** (`ceremony-dev`) — single-party, instant, insecure. Generates randomness locally, evaluates QAP, and writes pre-computed group elements (`a_query`, `b_g2_query`, `h_query`, etc.).
+   - **Production mode** (`phase2`) — multi-party MPC. Reuses a publicly verified Phase 1 SRS (e.g., Perpetual Powers of Tau). Participants sequentially contribute randomness; the final output is the same group-element-based `*.pk` / `*.vk`.
+2. **Load circuit** — parses the `.r1cs` binary format into dense L/R/O matrices
+3. **Load witness** — parses the `.wtns` binary format into wire values
+4. **Prove** — loads the proving key (group elements only, no scalars) and uses `FftQapEngine` + `PippengerProver` to compute the proof via multi-scalar multiplication; can be switched to `DenseQapEngine` or `NaiveProver` via flags
+5. **Serialize** — outputs the proof using `ark-serialize` compressed format
+6. **Verify** — loads the proof, public input, and verifying key, then checks the Groth16 pairing equation `e(A,B) == e(alpha·G1,beta·G2)·e(C,delta·G2)·e(V,gamma·G2)` where `e` is the optimal Ate pairing on BLS12-381
+
 ---
 
 ## Commands in detail
 
-### Ceremony commands
+<details>
+<summary><b>Ceremony commands — click to expand</b></summary>
 
 Every Groth16 circuit needs a **trusted setup** that produces a proving key (`.pk`) and a verifying key (`.vk`). The CLI supports two paths that output the **same** binary format; the prover and verifier do not care which path was used.
 
@@ -84,7 +123,10 @@ groth16-prover phase2 finalize \
 3. `verify` — checks every contribution proof and verifies that the delta chain is consistent.
 4. `finalize` — strips the accumulator down to the same `.pk` / `.vk` binary format that `ceremony-dev` produces. From this point on, the prover and verifier work exactly as in the dev path.
 
-### Proof lifecycle
+</details>
+
+<details>
+<summary><b>Proof lifecycle — click to expand</b></summary>
 
 #### `prove` — generate a Groth16 proof
 
@@ -133,6 +175,7 @@ groth16-prover verify --proof proof.bin --public proof.pub
    ```
    e(A, B) == e(alpha·G1, beta·G2) · e(C, delta·G2) · e(V, gamma·G2)
    ```
+   where `e` is the optimal Ate pairing on BLS12-381.
 5. Print `Verification result: VALID` or `INVALID`.
 
 #### `export-vk` — Aiken integration
@@ -147,7 +190,50 @@ groth16-prover export-vk \
 
 The output contains the `alpha_g1`, `beta_g2`, `gamma_g2`, `delta_g2`, `ic` list, and `n_public` fields. You can paste it directly into an Aiken validator or library.
 
-### Privacy / Shielded spend helpers
+### All engine + prover combinations
+
+```bash
+# 1. fft + pippenger   (default — fastest, recommended for production)
+groth16-prover prove --circuit c.r1cs --witness w.wtns --engine fft --prover pippenger
+
+# 2. fft + naive       (good for debugging FFT path; same proof points as pippenger)
+groth16-prover prove --circuit c.r1cs --witness w.wtns --engine fft --prover naive
+
+# 3. dense + pippenger (fast MSM but slow QAP; useful for parity testing)
+groth16-prover prove --circuit c.r1cs --witness w.wtns --engine dense --prover pippenger
+
+# 4. dense + naive     (pedagogical — every step is scalar-by-scalar, easiest to trace)
+groth16-prover prove --circuit c.r1cs --witness w.wtns --engine dense --prover naive
+```
+
+### Flags
+
+| Flag | Values | Default | Description |
+|------|--------|---------|-------------|
+| **Dev ceremony (`ceremony-dev`)** |
+| `--circuit FILE` | — | *required* | Path to `.r1cs` circuit file |
+| `--proving-key FILE` | — | *required* | Output path for the proving key |
+| `--verifying-key FILE` | — | *required* | Output path for the verification key |
+| **Production ceremony (`phase2`)** |
+| `--circuit FILE` | — | *required* | Path to `.r1cs` circuit file |
+| `--srs FILE` | — | *required* | Path to universal Phase 1 SRS (`.ptau`) |
+| `--zkey FILE` | — | *required* | Output path for the intermediate `.zkey` |
+| **Prove** |
+| `--circuit FILE` | — | *required* | Path to `.r1cs` circuit file |
+| `--witness FILE` | — | *required* | Path to `.wtns` witness file |
+| `--proving-key FILE` | — | — | Proving key from ceremony (optional, dev fallback) |
+| `--engine ENGINE` | `dense`, `fft` | `fft` | QAP construction engine |
+| `--prover PROVER` | `naive`, `pippenger` | `pippenger` | MSM strategy for proof assembly |
+| `--out FILE` | — | — | Output file (raw binary); public input written to `FILE.pub` |
+| **Verify** |
+| `--proof FILE` | — | *required* | Path to proof file (192 bytes) |
+| `--public FILE` | — | *required* | Path to public-input file (48 bytes) |
+| `--verifying-key FILE` | — | — | Verifying key from ceremony (optional, dev fallback) |
+
+</details>
+
+<details>
+<summary><b>Privacy / Shielded spend helpers — click to expand</b></summary>
 
 The CLI includes tools for the **Spend(depth)** circuit — a Zcash-style shielded-spend proof adapted from Stanford CS251. The circuit proves that a private commitment (`H(nullifier, nonce)`) exists in a public Merkle tree, without revealing the nullifier, the nonce, or the Merkle path.
 
@@ -212,82 +298,18 @@ groth16-prover smt path --state smt.json --leaf <commitment>
 2. `digest` — load the persisted state and print the root digest.
 3. `path` — load the state and (in a full implementation) rebuild the tree to retrieve the sibling hashes and direction bits for the requested leaf. The current implementation prints the digest and refers the user to `compute-inputs` for end-to-end witness generation.
 
----
-
-### All engine + prover combinations
-
-```bash
-# 1. fft + pippenger   (default — fastest, recommended for production)
-groth16-prover prove --circuit c.r1cs --witness w.wtns --engine fft --prover pippenger
-
-# 2. fft + naive       (good for debugging FFT path; same proof points as pippenger)
-groth16-prover prove --circuit c.r1cs --witness w.wtns --engine fft --prover naive
-
-# 3. dense + pippenger (fast MSM but slow QAP; useful for parity testing)
-groth16-prover prove --circuit c.r1cs --witness w.wtns --engine dense --prover pippenger
-
-# 4. dense + naive     (pedagogical — every step is scalar-by-scalar, easiest to trace)
-groth16-prover prove --circuit c.r1cs --witness w.wtns --engine dense --prover naive
-```
-
-### Flags
-
-| Flag | Values | Default | Description |
-|------|--------|---------|-------------|
-| **Dev ceremony (`ceremony-dev`)** |
-| `--circuit FILE` | — | *required* | Path to `.r1cs` circuit file |
-| `--proving-key FILE` | — | *required* | Output path for the proving key |
-| `--verifying-key FILE` | — | *required* | Output path for the verification key |
-| **Production ceremony (`phase2`)** |
-| `--circuit FILE` | — | *required* | Path to `.r1cs` circuit file |
-| `--srs FILE` | — | *required* | Path to universal Phase 1 SRS (`.ptau`) |
-| `--zkey FILE` | — | *required* | Output path for the intermediate `.zkey` |
-| **Prove** |
-| `--circuit FILE` | — | *required* | Path to `.r1cs` circuit file |
-| `--witness FILE` | — | *required* | Path to `.wtns` witness file |
-| `--proving-key FILE` | — | — | Proving key from ceremony (optional, dev fallback) |
-| `--engine ENGINE` | `dense`, `fft` | `fft` | QAP construction engine |
-| `--prover PROVER` | `naive`, `pippenger` | `pippenger` | MSM strategy for proof assembly |
-| `--out FILE` | — | — | Output file (raw binary); public input written to `FILE.pub` |
-| **Verify** |
-| `--proof FILE` | — | *required* | Path to proof file (192 bytes) |
-| `--public FILE` | — | *required* | Path to public-input file (48 bytes) |
-| `--verifying-key FILE` | — | — | Verifying key from ceremony (optional, dev fallback) |
+</details>
 
 ---
 
-## Build
-
-```bash
-cd groth16-prover/cli
-cargo build --release
-```
-
-The binary will be at `target/release/groth16-prover`.
-
----
-
-## How it works
-
-1. **Ceremony** (once per circuit) — two switchable paths produce the same `*.pk` / `*.vk` format:
-   - **Dev mode** (`ceremony-dev`) — single-party, instant, insecure. Generates randomness locally, evaluates QAP, and writes pre-computed group elements (`a_query`, `b_g2_query`, `h_query`, etc.).
-   - **Production mode** (`phase2`) — multi-party MPC. Reuses a publicly verified Phase 1 SRS (e.g., Perpetual Powers of Tau). Participants sequentially contribute randomness; the final output is the same group-element-based `*.pk` / `*.vk`.
-2. **Load circuit** — parses the `.r1cs` binary format into dense L/R/O matrices
-3. **Load witness** — parses the `.wtns` binary format into wire values
-4. **Prove** — loads the proving key (group elements only, no scalars) and uses `FftQapEngine` + `PippengerProver` to compute the proof via multi-scalar multiplication; can be switched to `DenseQapEngine` or `NaiveProver` via flags
-5. **Serialize** — outputs the proof using `ark-serialize` compressed format
-6. **Verify** — loads the proof, public input, and verifying key, then checks the Groth16 pairing equation
-
----
-
-## Complete example (with dev ceremony)
+## Complete example (dev ceremony)
 
 This example uses the **dev ceremony** (`ceremony-dev`) for speed. The resulting `.pk` / `.vk` files are in the exact same format as a production MPC ceremony, so the proving and verifying steps are identical.
 
 ```bash
 # 1. Compile the Circom circuit
 cd ../circom/SimpleExample
-circom multiplier.circom --r1cs --wasm --prime bls12381
+circom multiplier.circom --r1cs --wasm
 
 # 2. Generate witness
 snarkjs wtns calculate multiplier.wasm input.json witness.wtns
@@ -307,6 +329,58 @@ cargo run --release -- prove \
   --out /tmp/proof.bin
 
 # 5. Verify (uses the verification key from the ceremony)
+cargo run --release -- verify \
+  --proof /tmp/proof.bin \
+  --public /tmp/proof.pub \
+  --verifying-key /tmp/multiplier.vk
+```
+
+## Complete example (production ceremony)
+
+This example walks through the full multi-party Phase 2 MPC ceremony. The resulting `.pk` / `.vk` files are in the exact same binary format as the dev ceremony.
+
+```bash
+cd groth16-prover/cli
+
+# 1. Compile the Circom circuit
+cd ../circom/SimpleExample
+circom multiplier.circom --r1cs --wasm
+snarkjs wtns calculate multiplier.wasm input.json witness.wtns
+cd ../../cli
+
+# 2. Initialize from a universal Phase 1 SRS (e.g., Perpetual Powers of Tau)
+cargo run --release -- phase2 new \
+  --circuit ../circom/SimpleExample/multiplier.r1cs \
+  --srs ../universal.ptau \
+  --zkey /tmp/multiplier_0000.zkey
+
+# 3. Participants contribute sequentially
+cargo run --release -- phase2 contribute \
+  --zkey-in /tmp/multiplier_0000.zkey \
+  --zkey-out /tmp/multiplier_0001.zkey \
+  --name "Alice"
+
+cargo run --release -- phase2 contribute \
+  --zkey-in /tmp/multiplier_0001.zkey \
+  --zkey-out /tmp/multiplier_final.zkey \
+  --name "Bob"
+
+# 4. Verify the accumulator
+cargo run --release -- phase2 verify --zkey /tmp/multiplier_final.zkey
+
+# 5. Finalize to .pk / .vk
+cargo run --release -- phase2 finalize \
+  --zkey /tmp/multiplier_final.zkey \
+  --proving-key /tmp/multiplier.pk \
+  --verifying-key /tmp/multiplier.vk
+
+# 6. Prove and verify (same as dev ceremony)
+cargo run --release -- prove \
+  --circuit ../circom/SimpleExample/multiplier.r1cs \
+  --witness ../circom/SimpleExample/witness.wtns \
+  --proving-key /tmp/multiplier.pk \
+  --out /tmp/proof.bin
+
 cargo run --release -- verify \
   --proof /tmp/proof.bin \
   --public /tmp/proof.pub \
@@ -386,45 +460,19 @@ cargo run --release -- verify \
 
 ---
 
-## CLI test suite
-
-The integration tests in `tests/cli.rs` exercise every command via `assert_cmd`. They use synthetic `.r1cs` and `.wtns` artifacts so no external Circom compilation is needed.
-
-### What is covered
-
-| Test | What it checks |
-|------|----------------|
-| `full_ceremony_prove_verify_roundtrip` | Legacy `ceremony` → `prove` → `verify` with generated keys |
-| `full_ceremony_dev_prove_verify_roundtrip` | `ceremony-dev` → `prove` → `verify` with `FullProvingKey` |
-| `prove_default_stdout` | `prove` without `--out` prints 384 hex chars to stdout |
-| `prove_to_file` | `prove --out` writes 192-byte proof + 48-byte public input |
-| `prove_dense_engine` | `--engine dense` produces valid hex output |
-| `prove_naive_prover` | `--prover naive` produces valid hex output |
-| `prove_dense_naive` | `--engine dense --prover naive` combination works |
-| `prove_fft_pippenger_explicit` | `--engine fft --prover pippenger` combination works |
-| `prove_all_combinations_produce_valid_hex` | All 4 engine/prover combinations produce 384 hex chars |
-| `verify_valid_proof` | `verify` reports `VALID` for a freshly generated proof |
-| `verify_all_combinations` | Every engine/prover combination produces a verifiable proof |
-| `verify_tampered_public_input_fails` | Changing the public input causes `INVALID` |
-| `verify_invalid_proof_length` | 100-byte proof file is rejected |
-| `verify_invalid_public_length` | 10-byte public file is rejected |
-| `prove_missing_circuit` / `prove_missing_witness` | Required-arg errors |
-| `verify_missing_proof` / `verify_missing_public` | Required-arg errors |
-| `prove_invalid_circuit_file` / `prove_invalid_witness_file` | Bad file format errors |
-| `phase2_new_creates_accumulator` | `phase2 new` writes a non-empty accumulator |
-| `phase2_contribute_and_verify` | `contribute` + `verify` passes for one participant |
-| `phase2_full_roundtrip_prove_verify` | Full `new → contribute → finalize → prove → verify` |
-
-Run the tests:
+## Build
 
 ```bash
 cd groth16-prover/cli
-cargo test
+cargo build --release
 ```
+
+The binary will be at `target/release/groth16-prover`.
 
 ---
 
-## Proof serialization format (arkworks CanonicalSerialize)
+<details>
+<summary><b>Proof serialization format (arkworks CanonicalSerialize) — click to expand</b></summary>
 
 The proof files produced by this CLI use **arkworks' standard compressed serialization**, defined by the `CanonicalSerialize` / `CanonicalDeserialize` traits from the `ark-serialize` crate. This is the same format used by the arkworks `groth16` module internally.
 
@@ -511,6 +559,8 @@ Raw binary serialization is:
 
 For human inspection, use `hexdump -C proof.bin` or `xxd proof.bin`.
 
+</details>
+
 ---
 
 ## Proving key format
@@ -529,10 +579,51 @@ The CLI produces two formats.  The **preferred** one (group elements only) is wh
 
 See [`MPC_Ceremony_Research.md`](../MPC_Ceremony_Research.md) for the full ceremony roadmap.
 
-## Pairing equation
+---
 
-The verifier checks the standard Groth16 equation:
+<details>
+<summary><b>CLI test suite — click to expand</b></summary>
+
+The integration tests in `tests/cli.rs` exercise every command via `assert_cmd`. They use synthetic `.r1cs` and `.wtns` artifacts so no external Circom compilation is needed.
+
+### What is covered
+
+| Test | What it checks |
+|------|----------------|
+| `full_ceremony_prove_verify_roundtrip` | Legacy `ceremony` → `prove` → `verify` with generated keys |
+| `full_ceremony_dev_prove_verify_roundtrip` | `ceremony-dev` → `prove` → `verify` with `FullProvingKey` |
+| `prove_default_stdout` | `prove` without `--out` prints 384 hex chars to stdout |
+| `prove_to_file` | `prove --out` writes 192-byte proof + 48-byte public input |
+| `prove_dense_engine` | `--engine dense` produces valid hex output |
+| `prove_naive_prover` | `--prover naive` produces valid hex output |
+| `prove_dense_naive` | `--engine dense --prover naive` combination works |
+| `prove_fft_pippenger_explicit` | `--engine fft --prover pippenger` combination works |
+| `prove_all_combinations_produce_valid_hex` | All 4 engine/prover combinations produce 384 hex chars |
+| `verify_valid_proof` | `verify` reports `VALID` for a freshly generated proof |
+| `verify_all_combinations` | Every engine/prover combination produces a verifiable proof |
+| `verify_tampered_public_input_fails` | Changing the public input causes `INVALID` |
+| `verify_invalid_proof_length` | 100-byte proof file is rejected |
+| `verify_invalid_public_length` | 10-byte public file is rejected |
+| `prove_missing_circuit` / `prove_missing_witness` | Required-arg errors |
+| `verify_missing_proof` / `verify_missing_public` | Required-arg errors |
+| `prove_invalid_circuit_file` / `prove_invalid_witness_file` | Bad file format errors |
+| `phase2_new_creates_accumulator` | `phase2 new` writes a non-empty accumulator |
+| `phase2_contribute_and_verify` | `contribute` + `verify` passes for one participant |
+| `phase2_full_roundtrip_prove_verify` | Full `new → contribute → finalize → prove → verify` |
+| `smt_insert_and_digest` | Insert items, verify state JSON, digest output matches |
+| `smt_insert_raw_commitments` | Insert raw field-element commitments |
+| `smt_path_prints_digest` | Query path for a leaf after insertion |
+| `smt_missing_state_file` | Error handling for missing state file |
+| `compute_inputs_basic` | Basic transcript → JSON witness input generation |
+| `compute_inputs_nullifier_not_found` | Error when nullifier is missing from transcript |
+| `compute_inputs_with_raw_commitments` | Correct failure for raw-commitment transcripts |
+| `compute_inputs_missing_transcript` | Error handling for missing transcript file |
+
+Run the tests:
+
+```bash
+cd groth16-prover/cli
+cargo test
 ```
-e(A, B) == e(alpha·G1, beta·G2) · e(C, delta·G2) · e(V, gamma·G2)
-```
-where `e` is the optimal Ate pairing on BLS12-381.
+
+</details>
