@@ -21,17 +21,102 @@ All 38 library tests pass (R1CS relation, QAP interpolation, target polynomial, 
 
 ### 2. Use the CLI
 
-A command-line interface lives in `groth16-prover/cli/`:
+A full-featured command-line interface lives in `groth16-prover/cli/`. It covers the entire Groth16 lifecycle—from ceremony to proof generation and verification—and includes auxiliary tools for Circom witness computation and sparse Merkle tree operations.
+
+#### Ceremony
+
+Two switchable ceremony paths produce the same `.pk` / `.vk` binary format. The prover and verifier are agnostic to which path was used.
+
+**Dev ceremony** (single-party, instant — for testing and CI):
 
 ```bash
 cd groth16-prover/cli
+cargo run --release -- ceremony-dev \
+  --circuit ../circom/SimpleExample/multiplier.r1cs \
+  --proving-key /tmp/multiplier.pk \
+  --verifying-key /tmp/multiplier.vk
+```
+
+**Production ceremony** (multi-party MPC — for mainnet):
+
+```bash
+# 1. Initialize from a universal Phase 1 SRS
+cargo run --release -- phase2 new \
+  --circuit ../circom/SimpleExample/multiplier.r1cs \
+  --srs ../universal.ptau \
+  --zkey /tmp/multiplier_0000.zkey
+
+# 2. Participants contribute sequentially
+cargo run --release -- phase2 contribute \
+  --zkey-in /tmp/multiplier_0000.zkey \
+  --zkey-out /tmp/multiplier_0001.zkey \
+  --name "Alice"
+
+# 3. Verify and finalize
+cargo run --release -- phase2 verify --zkey /tmp/multiplier_0001.zkey
+cargo run --release -- phase2 finalize \
+  --zkey /tmp/multiplier_0001.zkey \
+  --proving-key /tmp/multiplier.pk \
+  --verifying-key /tmp/multiplier.vk
+```
+
+#### Prove and verify
+
+```bash
+# Generate a proof (uses FFT + Pippenger by default)
 cargo run --release -- prove \
   --circuit ../circom/SimpleExample/multiplier.r1cs \
   --witness ../circom/SimpleExample/witness.wtns \
+  --proving-key /tmp/multiplier.pk \
   --out /tmp/proof.bin
+
+# Verify
+cargo run --release -- verify \
+  --proof /tmp/proof.bin \
+  --public /tmp/proof.pub \
+  --verifying-key /tmp/multiplier.vk
 ```
 
-See [`cli/README.md`](cli/README.md) for full CLI documentation.
+Other engine / prover combinations can be selected via `--engine dense|fft` and `--prover naive|pippenger`.
+
+#### Export verifying key to Aiken
+
+Convert the binary `.vk` into a self-contained Aiken source file ready to paste into a validator:
+
+```bash
+cargo run --release -- export-vk \
+  --verifying-key /tmp/multiplier.vk \
+  --out /tmp/multiplier_vk.ak
+```
+
+#### Compute witness inputs for the Spend circuit
+
+The `compute-inputs` command reads a transcript and produces the private Merkle-path JSON needed by the Circom witness generator for the shielded-spend (`Spend(depth)`) circuit:
+
+```bash
+cargo run --release -- compute-inputs \
+  --depth 2 \
+  --transcript ../circom/Privacy/transcript.txt \
+  --nullifier 2 \
+  --out /tmp/input.json
+```
+
+#### Sparse Merkle Tree operations
+
+The CLI includes an insert-only sparse Merkle tree backed by MiMC(x⁷) over BLS12-381:
+
+```bash
+# Insert items and persist tree state
+cargo run --release -- smt insert --depth 2 --items "1,2,3" --state /tmp/smt.json
+
+# Print the current Merkle root
+cargo run --release -- smt digest --state /tmp/smt.json
+
+# Print the Merkle path for a leaf
+cargo run --release -- smt path --state /tmp/smt.json --index 1
+```
+
+See [`cli/README.md`](cli/README.md) for full CLI documentation, including proof serialization format, proving key structure, and complete end-to-end examples.
 
 ---
 
