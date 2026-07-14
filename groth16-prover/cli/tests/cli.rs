@@ -824,3 +824,230 @@ fn phase2_full_roundtrip_prove_verify() {
         .success()
         .stdout(predicate::str::contains("Verification result: VALID"));
 }
+
+// ------------------------------------------------------------------
+// SMT command tests
+// ------------------------------------------------------------------
+
+#[test]
+fn smt_insert_and_digest() {
+    let state_file = NamedTempFile::new().unwrap();
+
+    // Insert items
+    let mut cmd_insert = Command::cargo_bin("groth16-prover").unwrap();
+    cmd_insert
+        .arg("smt")
+        .arg("insert")
+        .arg("--depth")
+        .arg("2")
+        .arg("--items")
+        .arg("1 100,2 200")
+        .arg("--state")
+        .arg(state_file.path());
+    cmd_insert
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Inserted items into SMT"))
+        .stderr(predicate::str::contains("digest:"));
+
+    // Verify state file was written and contains valid JSON
+    let state_text = fs::read_to_string(state_file.path()).unwrap();
+    let state_json: serde_json::Value = serde_json::from_str(&state_text).unwrap();
+    assert_eq!(state_json["depth"], 2);
+    assert!(
+        state_json["digest"].as_str().unwrap().len() > 0,
+        "digest should be non-empty"
+    );
+
+    // Print digest
+    let mut cmd_digest = Command::cargo_bin("groth16-prover").unwrap();
+    cmd_digest
+        .arg("smt")
+        .arg("digest")
+        .arg("--state")
+        .arg(state_file.path());
+    cmd_digest
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            state_json["digest"].as_str().unwrap(),
+        ));
+}
+
+#[test]
+fn smt_insert_raw_commitments() {
+    let state_file = NamedTempFile::new().unwrap();
+
+    let mut cmd = Command::cargo_bin("groth16-prover").unwrap();
+    cmd.arg("smt")
+        .arg("insert")
+        .arg("--depth")
+        .arg("2")
+        .arg("--items")
+        .arg("10,20,30")
+        .arg("--state")
+        .arg(state_file.path());
+
+    cmd.assert()
+        .success()
+        .stderr(predicate::str::contains("Inserted items into SMT"));
+
+    let state_text = fs::read_to_string(state_file.path()).unwrap();
+    let state_json: serde_json::Value = serde_json::from_str(&state_text).unwrap();
+    assert_eq!(state_json["depth"], 2);
+    assert!(state_json["digest"].as_str().unwrap().len() > 0);
+}
+
+#[test]
+fn smt_path_prints_digest() {
+    let state_file = NamedTempFile::new().unwrap();
+
+    // First insert so we have a state file
+    let mut cmd_insert = Command::cargo_bin("groth16-prover").unwrap();
+    cmd_insert
+        .arg("smt")
+        .arg("insert")
+        .arg("--depth")
+        .arg("2")
+        .arg("--items")
+        .arg("1 100")
+        .arg("--state")
+        .arg(state_file.path());
+    cmd_insert.assert().success();
+
+    // Now query path
+    let mut cmd_path = Command::cargo_bin("groth16-prover").unwrap();
+    cmd_path
+        .arg("smt")
+        .arg("path")
+        .arg("--state")
+        .arg(state_file.path())
+        .arg("--leaf")
+        .arg("1");
+    cmd_path
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("digest:"));
+}
+
+#[test]
+fn smt_missing_state_file() {
+    let mut cmd = Command::cargo_bin("groth16-prover").unwrap();
+    cmd.arg("smt")
+        .arg("digest")
+        .arg("--state")
+        .arg("/nonexistent/path/smt.json");
+
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("failed to read state file"));
+}
+
+// ------------------------------------------------------------------
+// compute-inputs command tests
+// ------------------------------------------------------------------
+
+#[test]
+fn compute_inputs_basic() {
+    let transcript = NamedTempFile::new().unwrap();
+    fs::write(
+        transcript.path(),
+        "1 100\n2 200\n3 300\n",
+    )
+    .unwrap();
+    let out_file = NamedTempFile::new().unwrap();
+
+    let mut cmd = Command::cargo_bin("groth16-prover").unwrap();
+    cmd.arg("compute-inputs")
+        .arg("--depth")
+        .arg("2")
+        .arg("--transcript")
+        .arg(transcript.path())
+        .arg("--nullifier")
+        .arg("2")
+        .arg("--out")
+        .arg(out_file.path());
+
+    cmd.assert()
+        .success()
+        .stderr(predicate::str::contains("Witness input written to"))
+        .stderr(predicate::str::contains("digest:"))
+        .stderr(predicate::str::contains("nullifier:"))
+        .stderr(predicate::str::contains("nonce:"))
+        .stderr(predicate::str::contains("siblings:"));
+
+    // Verify JSON output
+    let json_text = fs::read_to_string(out_file.path()).unwrap();
+    let json: serde_json::Value = serde_json::from_str(&json_text).unwrap();
+    assert_eq!(json["nullifier"], "2");
+    assert_eq!(json["nonce"], "200");
+    assert!(json["digest"].as_str().unwrap().len() > 0);
+    assert!(json["sibling[0]"].is_string());
+    assert!(json["sibling[1]"].is_string());
+    assert!(json["direction[0]"].is_string());
+    assert!(json["direction[1]"].is_string());
+}
+
+#[test]
+fn compute_inputs_nullifier_not_found() {
+    let transcript = NamedTempFile::new().unwrap();
+    fs::write(transcript.path(), "1 100\n2 200\n").unwrap();
+    let out_file = NamedTempFile::new().unwrap();
+
+    let mut cmd = Command::cargo_bin("groth16-prover").unwrap();
+    cmd.arg("compute-inputs")
+        .arg("--depth")
+        .arg("2")
+        .arg("--transcript")
+        .arg(transcript.path())
+        .arg("--nullifier")
+        .arg("99")
+        .arg("--out")
+        .arg(out_file.path());
+
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("Nullifier not found"));
+}
+
+#[test]
+fn compute_inputs_with_raw_commitments() {
+    let transcript = NamedTempFile::new().unwrap();
+    fs::write(transcript.path(), "10\n20\n30\n").unwrap();
+    let out_file = NamedTempFile::new().unwrap();
+
+    let mut cmd = Command::cargo_bin("groth16-prover").unwrap();
+    cmd.arg("compute-inputs")
+        .arg("--depth")
+        .arg("2")
+        .arg("--transcript")
+        .arg(transcript.path())
+        .arg("--nullifier")
+        .arg("10")
+        .arg("--out")
+        .arg(out_file.path());
+
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("Nullifier not found"));
+}
+
+#[test]
+fn compute_inputs_missing_transcript() {
+    let out_file = NamedTempFile::new().unwrap();
+
+    let mut cmd = Command::cargo_bin("groth16-prover").unwrap();
+    cmd.arg("compute-inputs")
+        .arg("--depth")
+        .arg("2")
+        .arg("--transcript")
+        .arg("/nonexistent/transcript.txt")
+        .arg("--nullifier")
+        .arg("1")
+        .arg("--out")
+        .arg(out_file.path());
+
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("failed to read transcript"));
+}
