@@ -672,7 +672,7 @@ The current crate is a **reference implementation** for correctness verification
 - **Target:** Add several realistic Circom circuits that exercise different zk-SNARK patterns:
   1. **Poseidon hash** — demonstrate hash pre-image knowledge inside a Groth16 proof.
   2. **Merkle membership** — prove that a leaf exists in a Merkle tree without revealing the leaf or the path.  
-     **Status:** ✅ **Complete.** A shielded-spend circuit (`Spend(depth)`) based on Stanford CS251 Project #4 lives in `circom/Privacy/`. It uses MiMC(x⁷) hashing and `SelectiveSwitch` gadgets to verify a Merkle path. A depth-2 wrapper (`spend_depth2.circom`) has been compiled with `circom --prime bls12381` and the full pipeline is working end-to-end: witness-input generation (via `compute-inputs` CLI or Rust library), witness calculation (snarkjs), dev ceremony, proof generation (`prove` CLI with FFT + Pippenger), off-chain verification (`verify` CLI), and on-chain verification (Aiken test in `aiken/groth16/lib/groth16/verifier.ak`). The CLI also includes `smt insert` / `smt digest` / `smt path` commands for sparse Merkle tree operations backed by the same MiMC(x⁷) hash. See [`circom/Privacy/README.md`](circom/Privacy/README.md) for the full step-by-step walkthrough.
+     **Status:** ✅ **Complete.** A shielded-spend circuit (`Spend(depth)`) based on Stanford CS251 Project #4 lives in `circom/Privacy/`. It uses MiMC(x⁷) hashing and `SelectiveSwitch` gadgets to verify a Merkle path. A depth-2 wrapper (`spend_depth2.circom`) has been compiled with `circom --r1cs --wasm` and the full pipeline is working end-to-end: witness-input generation (via `compute-inputs` CLI or Rust library), witness calculation (snarkjs), dev ceremony, proof generation (`prove` CLI with FFT + Pippenger), off-chain verification (`verify` CLI), and on-chain verification (Aiken test in `aiken/groth16/lib/groth16/verifier.ak`). The CLI also includes `smt insert` / `smt digest` / `smt path` commands for sparse Merkle tree operations backed by the same MiMC(x⁷) hash. See [`circom/Privacy/README.md`](circom/Privacy/README.md) for the full step-by-step walkthrough.
   3. **Range proof / comparison** — prove that a committed value lies in a range `[0, 2^n)`.
   4. **EdDSA / BabyJubJub signature** — verify a signature inside the circuit (requires JubJub curve gadgets).
   5. **Blake2b-224 hash** — prove knowledge of a pre-image that hashes to a given Cardano key hash. Cardano uses Blake2b-224 for address and key hashing, so an in-circuit Blake2b-224 gadget is essential for any zk-proof that needs to reason about Cardano keys or addresses. Reference implementation: [bkomuves/hash-circuits](https://github.com/bkomuves/hash-circuits) provides a generic Blake2b Circom circuit.
@@ -709,18 +709,26 @@ Proof-production time for the hard-coded 3-constraint circuit (`x1·x2 = x5`, `x
 
 ### Privacy circuit (`Spend(depth)` — Merkle membership)
 
-The shielded-spend circuit lives in `circom/Privacy/`. It proves that a commitment `H(nullifier, nonce)` exists in a Merkle tree of the given depth without revealing the nullifier, nonce, or path. Constraint count grows linearly with depth (each level adds one `MiMC2` hash and two `IfThenElse` gadgets).
+The shielded-spend circuit lives in `circom/Privacy/`. It proves that a commitment `H(nullifier, nonce)` exists in a Merkle tree of the given depth without revealing the nullifier, nonce, or path. The depth-2 wrapper (`spend_depth2.circom`) has been compiled with `circom --r1cs --wasm` and produces **1,107 constraints**.
 
-> **Status:** 🚧 Pending end-to-end compilation with `circom --prime bls12381`. Once the `.r1cs` artifact is available, the numbers below will be populated by `cargo run --bin benchmark_circom --release`.
+Proof-production time on a single core, compiled with `--release`, using a `FullProvingKey` (group elements only, no scalars):
 
-| Depth | Estimated constraints | Expected FFT QAP + Pippenger | Notes |
-|-------|----------------------|------------------------------|-------|
-| 2 | ~60 | *pending* | Wrapper used for adapter validation |
-| 8 | ~240 | *pending* | Small anonymity set |
-| 16 | ~480 | *pending* | Medium anonymity set |
-| 32 | ~960 | *pending* | Large anonymity set |
+| Path | Engine | Prover | Per-proof time | vs. Legacy |
+|------|--------|--------|---------------|------------|
+| Legacy (scalars) | `FftQapEngine` | `NaiveProver` | **7.13 s** | — |
+| FullProvingKey | `FftQapEngine` | `NaiveProver` | **8.39 s** | 0.85× |
+| FullProvingKey | `FftQapEngine` | `PippengerProver` | **5.60 s** | 1.27× |
 
-> **Why depth matters.** The Merkle path has `depth` sibling hashes. Each level in the Circom circuit invokes `MiMC2` (≈30 constraints) plus `SelectiveSwitch` (≈8 constraints). Doubling the depth roughly doubles the constraint count and proof-generation time. Even at depth 32, the FFT + Pippenger path is expected to stay under **100 ms** per proof on a single core because the MSM overhead dominates and the witness vector remains small.
+> **What the numbers mean.** The current `prove_with_full_pk` implementation still rebuilds QAP polynomials from raw R1CS matrices on every proof, so the dominant cost is QAP construction + quotient computation (both `O(N log N)` via FFT). The FullProvingKey path saves time on the MSM step, but for 1,107 constraints the MSM is not yet the bottleneck. Pippenger's batched MSM still yields a ~30 % speedup over the naive scalar-by-scalar accumulation. Future work will pre-compute witness evaluations so the prover can skip QAP reconstruction entirely.
+
+| Depth | Constraints | Notes |
+|-------|-------------|-------|
+| 2 | 1,107 | Current benchmark target (`spend_depth2.circom`) |
+| 8 | ~4,400 | Estimated (≈550 constraints per level) |
+| 16 | ~8,800 | Estimated |
+| 32 | ~17,600 | Estimated |
+
+> **Why depth matters.** The Merkle path has `depth` sibling hashes. Each level in the Circom circuit invokes `MiMC2` (≈30 constraints) plus `SelectiveSwitch` (≈8 constraints). Doubling the depth roughly doubles the constraint count and proof-generation time.
 
 Run the benchmarks yourself:
 
@@ -731,11 +739,8 @@ cd groth16-prover
 cargo run --bin benchmark_provers --release
 cargo run --bin benchmark_circom --release
 
-# Privacy circuit (once the .r1cs is available)
-cargo run --release -- prove \
-  --circuit circom/Privacy/spend_depth2.r1cs \
-  --witness circom/Privacy/witness.wtns \
-  --engine fft --prover pippenger --out /tmp/proof.bin
+# Privacy circuit (spend_depth2)
+cargo run --bin benchmark_privacy --release
 ```
 
 </details>
