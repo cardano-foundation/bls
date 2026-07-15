@@ -60,7 +60,7 @@ The key advancement here is moving from **claim-level selective disclosure** (re
 
 ## Design
 
-**Executive summary:** The system has four actors: an Issuer who signs rich credentials and publishes Merkle roots; a Holder who stores the credential locally and generates proofs; a Verifier/Gate which is an Aiken script parameterized by a Groth16 verifying key; and an optional Relayer who submits transactions without learning the credential. The holder's proof is generated locally on their device, provided in the transaction redeemer, and verified on-chain. The script never checks an address, staking key, or known signature — only the mathematical validity of the proof.
+**Executive summary:** The system has four actors: an Issuer who signs rich credentials and publishes Merkle roots; a Holder who stores the credential locally and generates proofs; a Verifier/Gate which is a Plutus V3 script parameterized by a Groth16 verifying key (written in Aiken or generated via Julc); and an optional Relayer who submits transactions without learning the credential. The holder's proof is generated locally on their device, provided in the transaction redeemer, and verified on-chain. The script never checks an address, staking key, or known signature — only the mathematical validity of the proof.
 
 <details>
 <summary><b>Click to expand: Architecture & Actors</b></summary>
@@ -131,7 +131,7 @@ Because the credential is a single signed object (not one signature per claim as
 
 ### 2. Predicate Proof Generation
 
-When the holder wants to access a service, they generate a zero-knowledge proof for that service's specific predicate. The proof is generated **locally in the holder's wallet or device** — the credential fields and signing key never leave the holder's control.
+When the holder wants to access a service, they generate a zero-knowledge proof for that service's specific predicate. The proof is generated **locally in the holder's wallet or device** — the credential fields and signing key never leave the holder's control. The specific proving software (Rust/Circom or Java/zeroj) is chosen at the project level; see [Step 0](#step-0-groth16-implementation-prerequisite).
 
 **Public inputs** (visible on-chain):
 - Issuer public key (or commitment to it)
