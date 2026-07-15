@@ -176,7 +176,14 @@ proof.bin  ──►  Aiken test/validator  ──►  on-chain verification
 
 ### Quick start with the included circuits
 
-Two example circuits are provided. `SimpleExample` is a 3-gate multiplier (2 public inputs). `Privacy/spend_depth2` is a 1107-constraint Merkle-membership circuit with **all-private inputs** (only the constant wire is public).
+Several example circuits are provided:
+
+| Circuit | Constraints | Public inputs | Status |
+|---------|-------------|---------------|--------|
+| `SimpleExample` | 3 | 2 (constant + output) | ✅ Working e2e |
+| `Privacy/spend_depth2` | 1,107 | 1 (constant only) | ✅ Working e2e |
+| `PoseidonPreimage` | ~633 | 2 (constant + hash) | ✅ Working e2e |
+| `Blake2b224Preimage` | ~79,000 | 29 (constant + 28 hash bytes) | ⚠️ Circuit validated; proving blocked by RAM |
 
 #### SimpleExample (3-gate multiplier)
 
