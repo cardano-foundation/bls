@@ -9,6 +9,7 @@ This directory contains Circom circuits that can be loaded by the Rust prover vi
 | [`SimpleExample/`](SimpleExample/README.md) | 3-gate multiplication chain (`a = x1·x2·x3·x4`) | ✅ Complete |
 | [`Privacy/`](Privacy/README.md) | Merkle membership — shielded spend with MiMC(x⁷) | ✅ Complete |
 | [`PoseidonPreimage/`](PoseidonPreimage/README.md) | Poseidon hash pre-image knowledge | ✅ Complete |
+| [`Blake2b224Preimage/`](Blake2b224Preimage/README.md) | Blake2b-224 hash pre-image (Cardano key hash) | ⚠️ Circuit validated; proving blocked by RAM |
 
 ---
 
@@ -73,18 +74,21 @@ Full pipeline for each item: **Circom → groth16-prover (dev ceremony) → Aike
   **Use case:** Sealed-bid auctions, passwordless authentication.  
   See [`PoseidonPreimage/README.md`](PoseidonPreimage/README.md).
 
+### Circuit validated, proving blocked by memory
+
+- **4. Blake2b-224 Hash Pre-image (Cardano Key Hash)** — prove knowledge of a pre-image that hashes to a given Cardano key hash.  
+  **Public input:** `blake2b_224_hash`  
+  **Private input:** `pre_image`  
+  **Use case:** Proving ownership / linking proofs to on-chain Cardano addresses.  
+  **Status:** Circuit compiles (79K constraints) and witness generates correctly, but the dense-matrix ceremony requires ~200 GB RAM — blocked on memory. See [`Blake2b224Preimage/README.md`](Blake2b224Preimage/README.md) for scaling analysis and four approaches to resolve this.  
+  **Reference repo:** [bkomuves/hash-circuits](https://github.com/bkomuves/hash-circuits) provides the upstream Blake2b Circom circuit (MIT License).
+
 ### Pending
 
 - **3. Range Proof / Comparison** — prove a committed value lies in range `[0, 2^n)` without revealing the value.  
   **Public input:** `value_commitment`  
   **Private inputs:** `value`, `blinding_factor`  
   **Use case:** Confidential transaction amounts.
-
-- **4. Blake2b-224 Hash Pre-image (Cardano Key Hash)** — prove knowledge of a pre-image that hashes to a given Cardano key hash.  
-  **Public input:** `blake2b_224_hash`  
-  **Private input:** `pre_image`  
-  **Use case:** Proving ownership / linking proofs to on-chain Cardano addresses. Cardano uses Blake2b-224 for address and key hashing, so an in-circuit gadget is essential for any zk-proof that needs to reason about Cardano keys or addresses.  
-  **Reference repo:** [bkomuves/hash-circuits](https://github.com/bkomuves/hash-circuits) provides a generic Blake2b Circom circuit.
 
 - **5. Private Key → Public Key Ownership Proof** — prove knowledge of the private scalar that generates a given public key / address.  
   **Public input:** `public_key`  
