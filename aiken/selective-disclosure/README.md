@@ -349,20 +349,6 @@ The zeroj project includes end-to-end tests on Yaci DevKit (`PureJavaProverYaciE
 
 </details>
 
-<details>
-<summary><b>Click to expand: Risk Register</b></summary>
-
-| Risk | Likelihood | Impact | Mitigation |
-|------|------------|--------|------------|
-| Aiken BLS built-ins differ from BLST compression format | Low | High | Both paths use ZCash BLS12-381 spec; cross-language tests in `aiken/groth16` catch discrepancies |
-| Groth16 verifier exceeds execution budget | Low | High | Benchmarked: ~20 % of Cardano CPU budget for a full verify; headroom remains for additional script logic |
-| Aiken compiler generates oversized UPLC | Medium | Medium | Use Aiken's `optimize` flag; if still too large, split verifier across multiple validators or use reference scripts |
-| Serialization mismatch between prover and Aiken | Medium | High | Strict `SPEC.md` + automated round-trip tests in CI for Path A; zeroj has its own serialization layer |
-| Plutus V3 built-in behavior changes in future node versions | Low | High | Pin tests to a specific node version; monitor changelogs |
-| zeroj prover correctness bugs | Medium | High | Treat zeroj as experimental; cross-check critical proofs against Path A or an independent verifier |
-
-</details>
-
 ---
 
 ## Step 1: Predicate Proofs with Aiken
