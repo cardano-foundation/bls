@@ -1,5 +1,9 @@
 # SimpleExample — 3-gate multiplication chain
 
+> **In one sentence:** A minimal "hello world" circuit that proves `a = b × c × d × e` without revealing the four secret multipliers.
+>
+> **Business angle:** This is the foundational proof-of-concept for our entire Groth16 stack. It validates that a Rust prover can consume Circom artifacts, generate a zk-SNARK proof, and have it verified on-chain by an Aiken smart contract on Cardano. Every other circuit in this repo builds on this same pipeline.
+
 A minimal Circom circuit that demonstrates the full **Circom → Groth16 Rust Prover → Aiken Verifier** pipeline end-to-end.
 
 > **Pipeline overview.** This example walks through every artifact produced and consumed by each tool in the stack. Only the witness-generation step uses snarkjs; proving and verifying are done by our own Rust CLI and Aiken on-chain verifier respectively.

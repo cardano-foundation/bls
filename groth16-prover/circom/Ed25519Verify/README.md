@@ -1,5 +1,9 @@
 # Ed25519 Signature Verification In-Circuit
 
+> **In one sentence:** Prove that a standard Ed25519 signature is valid — without revealing the signature, the message, or the public key on-chain.
+>
+> **Business angle:** Ed25519 is the signature scheme used by Cardano wallets, SSH keys, and many other blockchains. This circuit would enable a user to prove "a message was signed by the owner of this key" inside a zk-SNARK, unlocking cross-chain identity attestation, proof-of-ownership for off-chain assets, and private credential verification. A dApp could verify a user's wallet signature without ever publishing the signature or public key on-chain.
+
 Verify a standard Ed25519 signature inside a Groth16 circuit — without revealing the signature components. This proves that a given message was signed by a specific Ed25519 public key, producing a zk-SNARK proof that can be verified on-chain (e.g., in Aiken on Cardano).
 
 > **Status:** Circuit compiles successfully with `circom --prime bls12381`. Witness generation **fails** due to BLS12-381 field incompatibility with the circuit's internal chunked-arithmetic templates. End-to-end proving is blocked at Step 2.
