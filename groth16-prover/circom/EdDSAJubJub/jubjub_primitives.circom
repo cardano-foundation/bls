@@ -76,7 +76,9 @@ template JubJubCheck() {
  * JubJub Montgomery curve operations.
  * Montgomery form: B*v^2 = u^3 + A*u^2 + u
  *   A = 2*(a+d)/(a-d) = 40962
- *   B = 4/(a-d) = 52435875175126190479447740508185965837690552500527637822603658699938581143549
+ *   B = 4/(a-d) = p - 40964 = -40964 (mod p)
+ *   Note: the full 77-digit B is ≡ -40964 mod p.  Using the small
+ *   representative avoids JavaScript Number precision loss in var.
  */
 template JubJubMontgomeryAdd() {
     signal input in1[2];
@@ -84,7 +86,7 @@ template JubJubMontgomeryAdd() {
     signal output out[2];
 
     var A = 40962;
-    var B = 52435875175126190479447740508185965837690552500527637822603658699938581143549;
+    var B = -40964;
 
     signal lamda;
 
@@ -100,7 +102,7 @@ template JubJubMontgomeryDouble() {
     signal output out[2];
 
     var A = 40962;
-    var B = 52435875175126190479447740508185965837690552500527637822603658699938581143549;
+    var B = -40964;
 
     signal lamda;
     signal x1_2;
