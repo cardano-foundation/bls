@@ -69,23 +69,25 @@ Both are **orders of magnitude smaller** than our smallest working end-to-end ci
 ### Circuit A — Simple Range Proof
 
 ```bash
-# 1. Compile
+# 1. Compile (run from the circuit directory)
+cd groth16-prover/circom/RangeProof
 circom range_proof_simple.circom --r1cs --wasm --sym --prime bls12381
 
 # 2. Generate witness (value = 123456789, which is < 2^32)
 echo '{"value": 123456789}' > input.json
 snarkjs wtns calculate range_proof_simple_js/range_proof_simple.wasm input.json witness.wtns
 
-# 3. Dev ceremony
+# 3. Dev ceremony (run from cli/)
+cd ../../cli
 cargo run --release -- ceremony-dev \
-  --circuit range_proof_simple.r1cs \
+  --circuit ../circom/RangeProof/range_proof_simple.r1cs \
   --proving-key /tmp/rp_simple.pk \
   --verifying-key /tmp/rp_simple.vk
 
 # 4. Generate proof
 cargo run --release -- prove \
-  --circuit range_proof_simple.r1cs \
-  --witness witness.wtns \
+  --circuit ../circom/RangeProof/range_proof_simple.r1cs \
+  --witness ../circom/RangeProof/witness.wtns \
   --proving-key /tmp/rp_simple.pk \
   --out /tmp/proof_simple.bin
 
@@ -99,6 +101,7 @@ cargo run --release -- verify \
 
 **Invalid case (value >= 2^32):**
 ```bash
+cd groth16-prover/circom/RangeProof
 echo '{"value": 4294967297}' > input_invalid.json
 snarkjs wtns calculate range_proof_simple_js/range_proof_simple.wasm input_invalid.json witness_invalid.wtns
 # → ERROR: Assert Failed (Num2Bits constraint violated)
@@ -107,7 +110,8 @@ snarkjs wtns calculate range_proof_simple_js/range_proof_simple.wasm input_inval
 ### Circuit B — Committed Range Proof
 
 ```bash
-# 1. Compile
+# 1. Compile (run from the circuit directory)
+cd groth16-prover/circom/RangeProof
 circom range_proof_committed.circom --r1cs --wasm --sym --prime bls12381
 
 # 2. Generate test inputs with correct Poseidon commitment
@@ -123,16 +127,17 @@ json.dump(d, open('input.json', 'w'))
 # 3. Generate witness
 snarkjs wtns calculate range_proof_committed_js/range_proof_committed.wasm input.json witness.wtns
 
-# 4. Dev ceremony
+# 4. Dev ceremony (run from cli/)
+cd ../../cli
 cargo run --release -- ceremony-dev \
-  --circuit range_proof_committed.r1cs \
+  --circuit ../circom/RangeProof/range_proof_committed.r1cs \
   --proving-key /tmp/rp_committed.pk \
   --verifying-key /tmp/rp_committed.vk
 
 # 5. Generate proof
 cargo run --release -- prove \
-  --circuit range_proof_committed.r1cs \
-  --witness witness.wtns \
+  --circuit ../circom/RangeProof/range_proof_committed.r1cs \
+  --witness ../circom/RangeProof/witness.wtns \
   --proving-key /tmp/rp_committed.pk \
   --out /tmp/proof_committed.bin
 
@@ -146,6 +151,7 @@ cargo run --release -- verify \
 
 **Invalid case (value out of range, same commitment):**
 ```bash
+cd groth16-prover/circom/RangeProof
 python3 -c "
 import json
 d = {'commitment': '14552169037149848092889607379555146473462630327079531275196027443808903025477',
