@@ -71,3 +71,45 @@ template JubJubCheck() {
 
     a*x2 + y2 === 1 + d*x2*y2;
 }
+
+/*
+ * JubJub Montgomery curve operations.
+ * Montgomery form: B*v^2 = u^3 + A*u^2 + u
+ *   A = 2*(a+d)/(a-d) = 40962
+ *   B = 4/(a-d) = 52435875175126190479447740508185965837690552500527637822603658699938581143549
+ */
+template JubJubMontgomeryAdd() {
+    signal input in1[2];
+    signal input in2[2];
+    signal output out[2];
+
+    var A = 40962;
+    var B = 52435875175126190479447740508185965837690552500527637822603658699938581143549;
+
+    signal lamda;
+
+    lamda <-- (in2[1] - in1[1]) / (in2[0] - in1[0]);
+    lamda * (in2[0] - in1[0]) === (in2[1] - in1[1]);
+
+    out[0] <== B*lamda*lamda - A - in1[0] - in2[0];
+    out[1] <== lamda * (in1[0] - out[0]) - in1[1];
+}
+
+template JubJubMontgomeryDouble() {
+    signal input in[2];
+    signal output out[2];
+
+    var A = 40962;
+    var B = 52435875175126190479447740508185965837690552500527637822603658699938581143549;
+
+    signal lamda;
+    signal x1_2;
+
+    x1_2 <== in[0] * in[0];
+
+    lamda <-- (3*x1_2 + 2*A*in[0] + 1) / (2*B*in[1]);
+    lamda * (2*B*in[1]) === (3*x1_2 + 2*A*in[0] + 1);
+
+    out[0] <== B*lamda*lamda - A - 2*in[0];
+    out[1] <== lamda * (in[0] - out[0]) - in[1];
+}
