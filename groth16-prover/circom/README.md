@@ -9,7 +9,8 @@ This directory contains Circom circuits that can be loaded by the Rust prover vi
 | [`SimpleExample/`](SimpleExample/README.md) | 3-gate multiplication chain (`a = x1·x2·x3·x4`) | ✅ Complete |
 | [`Privacy/`](Privacy/README.md) | Merkle membership — shielded spend with MiMC(x⁷) | ✅ Complete |
 | [`PoseidonPreimage/`](PoseidonPreimage/README.md) | Poseidon hash pre-image knowledge | ✅ Complete |
-| [`Blake2b224Preimage/`](Blake2b224Preimage/README.md) | Blake2b-224 hash pre-image (Cardano key hash) | ⚠️ Circuit validated; proving blocked by RAM |
+| [`Blake2b224Preimage/`](Blake2b224Preimage/README.md) | Blake2b-224 hash pre-image (Cardano key hash) | ⚠️ Circuit + witness validated; proving blocked by RAM |
+| [`Ed25519Verify/`](Ed25519Verify/README.md) | Ed25519 signature verification in-circuit | ⚠️ Circuit compiles; witness blocked by field incompatibility |
 
 ---
 
@@ -83,6 +84,14 @@ Full pipeline for each item: **Circom → groth16-prover (dev ceremony) → Aike
   **Status:** Circuit compiles (79K constraints) and witness generates correctly, but the dense-matrix ceremony requires ~200 GB RAM — blocked on memory. See [`Blake2b224Preimage/README.md`](Blake2b224Preimage/README.md) for scaling analysis and four approaches to resolve this.  
   **Reference repo:** [bkomuves/hash-circuits](https://github.com/bkomuves/hash-circuits) provides the upstream Blake2b Circom circuit (MIT License).
 
+### Circuit compiles, witness blocked by field incompatibility
+
+- **6. EdDSA / Ed25519 Signature Verification In-Circuit** — verify a standard Ed25519 signature inside a Groth16 circuit.  
+  **Public inputs:** `msg[n]`, `A[256]`, `R8[256]`  
+  **Private inputs:** `S[255]`, `PointA[4][3]`, `PointR[4][3]`  
+  **Use case:** Attest to off-chain events signed by standard Ed25519 keys (SSH, TLS, other blockchains).  
+  **Status:** Circuit compiles (~4M constraints on BLS12-381) from [`Electron-Labs/ed25519-circom`](https://github.com/Electron-Labs/ed25519-circom), but witness generation fails due to BLS12-381 field incompatibility with the upstream BN254-specific chunked-arithmetic templates. Even if fixed, the ceremony would need ~512 TB RAM with dense matrices. See [`Ed25519Verify/README.md`](Ed25519Verify/README.md) for full analysis and path forward.
+
 ### Pending
 
 - **3. Range Proof / Comparison** — prove a committed value lies in range `[0, 2^n)` without revealing the value.  
@@ -95,12 +104,6 @@ Full pipeline for each item: **Circom → groth16-prover (dev ceremony) → Aike
   **Private input:** `private_scalar`  
   **Use case:** Wallet ownership proof without revealing the private key. This is the core key-derivation step used in Cardano wallets: given a private scalar `x`, show that `pub = x · G`.  
   **Reference:** [IntersectMBO/cardano-crypto `generate`](https://github.com/IntersectMBO/cardano-crypto/blob/develop/src/Cardano/Crypto/Wallet.hs#L161) for the derivation logic.
-
-- **6. EdDSA / Ed25519 Signature Verification In-Circuit** — verify a standard Ed25519 signature inside a Groth16 circuit.  
-  **Public inputs:** `message_hash`, `public_key`, `signature_R`, `signature_S`  
-  **Private inputs:** *(none — signature verification is entirely public)*  
-  **Use case:** Attest to off-chain events signed by standard Ed25519 keys (SSH, TLS, other blockchains).  
-  **Reference repo:** [Electron-Labs/ed25519-circom](https://github.com/Electron-Labs/ed25519-circom) provides a full Ed25519 signature-verification circuit in Circom.
 
 ---
 

@@ -1,0 +1,9 @@
+{
+  "name": "ed25519-verify-circom",
+  "version": "1.0.0",
+  "description": "Ed25519 signature verification in Circom for BLS12-381",
+  "dependencies": {
+    "circomlib": "^2.0.5",
+    "@electron-labs/sha512": "^1.0.4"
+  }
+}
