@@ -308,6 +308,29 @@ Both paths use the same BLS12-381 curve and the same ZCash point-compression for
 | **Redeemer schema standard** | ⚠️ Partial | Aiken `ProofRedeemer` record must match the field order, byte widths, and integer encoding that the off-chain prover produces. Path A already has a working `Proof` type; a unified schema is desirable. |
 | **End-to-end selective-disclosure test** | ❌ Not started | A full Step 1–6 flow (see below) with a real predicate circuit, issued credential, and unlock transaction on a local devnet |
 
+#### Circom ingredient inventory (Path A)
+
+The Step 1 predicate circuit requires five cryptographic primitives. Here is the exact status of each in `groth16-prover/circom/`:
+
+| Primitive | Needed for | Status | Source |
+|-----------|-----------|--------|--------|
+| **Poseidon hash (BLS12-381)** | `claims_msg = Poseidon(dob_year, country)`, Merkle tree nodes | ✅ Working e2e | `circom/PoseidonPreimage/poseidon_bls12_381.circom` (~250 constraints) |
+| **Range proof** | `assert dob_year <= current_year - 21` (age ≥ 21) | ✅ Working e2e | `circom/RangeProof/range_proof_simple.circom` (~32 constraints for 32-bit) |
+| **Merkle verify (Poseidon-based)** | `Merkle_Verify(country, country_root, merkle_proof)` | ⚠️ Not yet built | Composable from Poseidon hash — ~100 lines of Circom; no external dependencies |
+| **EdDSA verify (JubJub)** | `EdDSA_Verify(issuer_pk, claims_msg, signature)` | ❌ **Missing — sole blocker** | See analysis below |
+| **Groth16 prover + Aiken verifier** | All steps | ✅ Working e2e | `groth16-prover/` + `aiken/groth16/` |
+
+**The one missing ingredient is EdDSA-JubJub verification in Circom.** circomlib ships `eddsa.circom` + `babyjub.circom`, but they are hard-coded for **BabyJubJub** (`a=168700, d=168696`, embedded in BN254) — not **JubJub** (`a=-1, d=0x2a93...eb1`, embedded in BLS12-381). Porting requires:
+
+1. Replace curve constants in `babyjub.circom` (`a`, `d`, `BASE8`) with JubJub values
+2. Recompute the 10 precomputed generator multiples in `pedersen.circom` (`BASE[10][2]`) for the JubJub subgroup generator
+3. Test point compression/decompression in `pointbits.circom` against JubJub test vectors
+4. Validate `eddsa.circom` end-to-end against the zeroj Java EdDSA test vectors (`zeroj-circuit-lib/.../jubjub/EdDSAJubjubTest.java`)
+
+The structural work (~80%) is already done by circomlib — the templates are generic twisted Edwards arithmetic. The port is **constants + precomputed tables + testing**, not a rewrite. Estimated effort: 2–4 days.
+
+See [`groth16-prover/circom/CardanoKeyOwnership/README.md`](../../groth16-prover/circom/CardanoKeyOwnership/README.md) for the broader Curve25519 → JubJub ownership-proof context.
+
 </details>
 
 <details>
