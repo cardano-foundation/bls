@@ -60,6 +60,148 @@ cargo run --release -- phase2 finalize \
   --verifying-key /tmp/multiplier.vk
 ```
 
+> **Current trust model.** We do **not** run a full two-phase MPC from scratch. Instead we reuse an existing, publicly audited **Phase 1** universal SRS (see below) and run our own **multi-party Phase 2** ceremony on top of it. This means security depends on:
+> 1. **Trust in the existing Phase 1 ceremony** (widely scrutinised, hundreds of participants).
+> 2. **1-of-N honesty in our Phase 2 ceremony** — as long as at least one participant honestly discards their randomness, the circuit-specific toxic waste (`alpha`, `beta`, `gamma`, `delta`) remains unknown.
+> The Phase 2 logic was rewritten from scratch because the best available Rust reference (Manta Network) is GPL-3.0, which is incompatible with our Apache-2.0 license.
+
+---
+
+#### What is an SRS? (Structured Reference String)
+
+A **Structured Reference String (SRS)** is a collection of pre-computed elliptic-curve group elements that a Groth16 prover needs to generate proofs. Think of it as a "public key" for the proving system — it encodes a secret random value (traditionally called `tau`) into group elements, but the raw scalar itself is never revealed.
+
+**High-level intuition**
+
+Groth16 requires evaluating polynomials at a secret point `tau`. Instead of giving the prover the scalar `tau` (which would let anyone forge proofs), the trusted setup computes:
+
+```
+G1, tau·G1, tau²·G1, ..., tau^N·G1
+G2, tau·G2, tau²·G2, ..., tau^N·G2
+```
+
+where `G1` and `G2` are the base points of the BLS12-381 curve. These group elements are the **SRS**. The prover can now compute `p(tau)·G1` for any polynomial `p(x)` using only the SRS and the polynomial's coefficients — no knowledge of `tau` required. This is the foundation of all zk-SNARK security: the proof is built *in the exponent*.
+
+**What an SRS contains (Groth16-specific)**
+
+| Element | Formula | Purpose |
+|---------|---------|---------|
+| `tau^i·G1` | `tau^i · G1` | Basis for computing `l(tau)·G1` (left wire polynomial) |
+| `tau^i·G2` | `tau^i · G2` | Basis for computing `r(tau)·G2` (right wire polynomial) |
+| `alpha·tau^i·G1` | `alpha · tau^i · G1` | Mixed term for proof element `C` |
+| `beta·tau^i·G1` | `beta · tau^i · G1` | Mixed term for proof element `C` |
+| `beta·G2` | `beta · G2` | Proof element `B` offset |
+
+In a **full two-phase ceremony**, the SRS is produced in **Phase 1** (universal, circuit-agnostic) and then specialised in **Phase 2** (circuit-specific). Our current implementation reuses an external Phase 1 SRS and runs Phase 2 ourselves.
+
+**Security assumption**
+
+The SRS is secure as long as **at least one participant in the ceremony was honest and destroyed their randomness**. If all participants colluded and shared their secrets, they could reconstruct `tau` and forge proofs. This is why large, open ceremonies with hundreds of participants are preferred — the probability that *everyone* is dishonest is negligible.
+
+---
+
+#### What is Perpetual Powers of Tau (PPoT)?
+
+[Perpetual Powers of Tau](https://github.com/privacy-scaling-explorations/perpetualpowersoftau) (PPoT) is a long-running, community-driven trusted-setup ceremony maintained by [Privacy & Scaling Explorations (PSE)](https://appliedzkp.org/). It produces universal SRS files (`.ptau`) for the BLS12-381 curve that can be reused by any Groth16 circuit up to a maximum constraint size.
+
+**Key facts about PPoT**
+
+- **Universal:** One SRS works for *any* circuit (up to `2^power` constraints).
+- **Open:** Anyone can contribute randomness. As of 2024 there are 80+ verified contributions.
+- **Auditable:** Every contribution includes a cryptographic proof of knowledge, and the full transcript is public.
+- **Format:** The output is a `.ptau` file — a binary blob of uncompressed Montgomery-curve points in snarkjs format.
+- **Reusable:** Because it is universal, you do not need to run a fresh Phase 1 for every new circuit.
+
+**Trust model with PPoT**
+
+By importing a PPoT `.ptau` file, we inherit the security of the existing Phase 1 ceremony (80+ participants). We then run our own Phase 2 ceremony on top of it, adding circuit-specific randomness (`alpha`, `beta`, `gamma`, `delta`). The final security guarantee is:
+
+> **At least one honest participant in PPoT Phase 1** AND **at least one honest participant in our Phase 2**.
+
+This is the same trust model used by production systems like Zcash, Filecoin, and Manta Network.
+
+---
+
+#### Hands-on: importing an external SRS from PPoT
+
+**Step 1 — Download a PPoT `.ptau` file**
+
+PPoT publishes prepared SRS files for different powers (constraint limits). For a circuit with up to `2^14 = 16,384` constraints, download the power-14 file:
+
+```bash
+# Download from the PPoT repository (example URL — check latest release)
+curl -L -o universal.ptau \
+  https://ppot.blob.core.windows.net/public/powersOfTau28_hez_final_14.ptau
+```
+
+> **Check the file size.** A power-14 `.ptau` is roughly **33 MB** (uncompressed BLS12-381 points). Larger powers scale linearly.
+
+**Step 2 — Import into the prover**
+
+The `groth16-prover` CLI can read `.ptau` files directly and use them as the Phase 1 SRS for a Phase 2 ceremony:
+
+```bash
+cd groth16-prover/cli
+
+# Initialize a new Phase 2 ceremony from the universal SRS
+cargo run --release -- phase2 new \
+  --circuit ../circom/SimpleExample/multiplier.r1cs \
+  --srs ../universal.ptau \
+  --zkey /tmp/multiplier_0000.zkey
+```
+
+What happens under the hood:
+1. The `.ptau` parser reads the `tauG1`, `tauG2`, `alphaTauG1`, `betaTauG1`, and `betaG2` sections.
+2. Every point is validated: on-curve and in the correct subgroup.
+3. The `Phase2Accumulator` is initialised by combining the universal SRS with the circuit R1CS (computing per-variable group elements via MSM over the `.ptau` basis).
+4. The initial `zkey` file is written. It contains **no scalars** — only group elements.
+
+**Step 3 — Multi-party Phase 2 contributions**
+
+After importing the SRS, run the circuit-specific MPC:
+
+```bash
+# Alice contributes
+cargo run --release -- phase2 contribute \
+  --zkey-in /tmp/multiplier_0000.zkey \
+  --zkey-out /tmp/multiplier_0001.zkey \
+  --name "Alice"
+
+# Bob contributes
+cargo run --release -- phase2 contribute \
+  --zkey-in /tmp/multiplier_0001.zkey \
+  --zkey-out /tmp/multiplier_0002.zkey \
+  --name "Bob"
+
+# Verify all contributions and finalize
+cargo run --release -- phase2 verify --zkey /tmp/multiplier_0002.zkey
+cargo run --release -- phase2 finalize \
+  --zkey /tmp/multiplier_0002.zkey \
+  --proving-key /tmp/multiplier.pk \
+  --verifying-key /tmp/multiplier.vk
+```
+
+Each `contribute` step:
+- Generates fresh randomness locally (e.g., from `/dev/urandom`).
+- Updates the `delta`-dependent group elements (`c_query`, `h_query`, `l_query`, `ic`).
+- Appends a **Schnorr-like ratio proof** showing the contribution was done correctly without revealing the secret.
+- Never transmits the secret randomness anywhere.
+
+The `verify` step checks every contribution proof and ensures the delta points chain correctly. If verification passes, you can be confident that no single party knows the final `delta`.
+
+**Why we rewrote Phase 2 from scratch**
+
+The most complete existing Rust implementation of Groth16 Phase 2 is [Manta Network's `manta-trusted-setup`](https://github.com/Manta-Network/manta-rs), which is licensed under **GPL-3.0**. Because `groth16-prover` is **Apache-2.0**, we cannot directly use or adapt GPL-3.0 code. Instead, we studied the Manta implementation (along with the original Zcash `phase2` and snarkjs reference) and wrote our own Phase 2 logic from first principles:
+
+- `initialize()` — consumes `.ptau` + `.r1cs` → `Phase2Accumulator`
+- `contribute()` — updates delta-dependent elements with ratio proof
+- `verify()` — checks contribution proofs and delta chaining
+- `finalize()` — produces `FullProvingKey` + `VerifyingKey`
+
+All circuit-specific group elements are computed via **MSM over the `.ptau` basis** — no raw `tau` scalar is ever reconstructed. The resulting `.pk` / `.vk` format is bit-for-bit compatible with `ark_groth16::ProvingKey<Bls12_381>`.
+
+---
+
 #### Prove and verify
 
 ```bash
