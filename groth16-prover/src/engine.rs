@@ -20,6 +20,10 @@ pub trait QapEngine {
         o: &[O],
     ) -> (Vec<DensePolynomial<Fr>>, Vec<DensePolynomial<Fr>>, Vec<DensePolynomial<Fr>>);
 
+    /// Return the evaluation domain size for the given number of constraints.
+    /// For FFT engines this is next-power-of-2; for dense engines it equals n_constraints.
+    fn domain_size(&self, num_constraints: usize) -> usize;
+
     /// Build the target polynomial T(x) that vanishes at all constraint points.
     fn target_poly(&self, num_constraints: usize) -> DensePolynomial<Fr>;
 
@@ -96,6 +100,10 @@ impl QapEngine for DenseQapEngine {
         (us, vs, ws)
     }
 
+    fn domain_size(&self, num_constraints: usize) -> usize {
+        num_constraints
+    }
+
     fn target_poly(&self, _num_constraints: usize) -> DensePolynomial<Fr> {
         // T(x) = (x - 0)(x - 1)(x - 2) = x³ - 3x² + 2x
         let points = [Fr::zero(), Fr::one(), Fr::from(2u64)];
@@ -157,6 +165,10 @@ impl FftQapEngine {
 }
 
 impl QapEngine for FftQapEngine {
+    fn domain_size(&self, num_constraints: usize) -> usize {
+        Self::domain_size(num_constraints)
+    }
+
     fn build_qap<T: Copy + Into<Fr>, L: AsRef<[T]>, R: AsRef<[T]>, O: AsRef<[T]>>(
         &self,
         l: &[L],

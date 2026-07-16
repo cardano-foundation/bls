@@ -1,7 +1,7 @@
 use ark_bls12_381::{Bls12_381, Fr, G1Affine, G1Projective, G2Affine, G2Projective};
 use ark_ec::{pairing::Pairing, AffineRepr, Group, VariableBaseMSM};
 use ark_ff::{Field, Zero};
-use ark_poly::{univariate::DensePolynomial, Polynomial};
+use ark_poly::{univariate::DensePolynomial, EvaluationDomain, GeneralEvaluationDomain, Polynomial};
 use ark_std::vec::Vec;
 
 use crate::engine::{poly_add, poly_scalar_mul, QapEngine};
@@ -175,18 +175,74 @@ impl Prover for NaiveProver {
     ) -> (Proof, PublicInput) {
         let n_public = full_pk.vk.n_public;
         let n_vars = witness.len();
+        let n_constraints = l.len();
 
-        // 1. Build witness polynomials and quotient h(x)
-        let (us, vs, ws) = engine.build_qap(l, r, o);
-        let mut l_poly = DensePolynomial::zero();
-        let mut r_poly = DensePolynomial::zero();
-        let mut o_poly = DensePolynomial::zero();
-        for i in 0..n_vars {
-            l_poly = poly_add(&l_poly, &poly_scalar_mul(&us[i], witness[i]));
-            r_poly = poly_add(&r_poly, &poly_scalar_mul(&vs[i], witness[i]));
-            o_poly = poly_add(&o_poly, &poly_scalar_mul(&ws[i], witness[i]));
-        }
-        let t = engine.target_poly(l.len());
+        // 1. Build witness polynomials l(x), r(x), o(x) and quotient h(x).
+        //    For FFT engines on large circuits, build on-the-fly to avoid
+        //    O(n_vars × domain_size) memory. For dense engines (tiny test
+        //    circuits), use the standard build_qap path.
+        let d_size = engine.domain_size(n_constraints);
+        let (l_poly, r_poly, o_poly) = if d_size > n_constraints {
+            // FFT engine — on-the-fly construction
+            let domain = GeneralEvaluationDomain::<Fr>::new(d_size)
+                .expect("Failed to create evaluation domain");
+
+            let mut lp = DensePolynomial::zero();
+            let mut rp = DensePolynomial::zero();
+            let mut op = DensePolynomial::zero();
+
+            for i in 0..n_vars {
+                let mut evals: Vec<Fr> = (0..d_size)
+                    .map(|j| if j < n_constraints { l[j].as_ref()[i].into() } else { Fr::zero() })
+                    .collect();
+                domain.ifft_in_place(&mut evals);
+                let wi = witness[i];
+                if lp.coeffs.len() < d_size {
+                    lp.coeffs.resize(d_size, Fr::zero());
+                }
+                for (k, &e) in evals.iter().enumerate() {
+                    lp.coeffs[k] += e * wi;
+                }
+
+                let mut evals: Vec<Fr> = (0..d_size)
+                    .map(|j| if j < n_constraints { r[j].as_ref()[i].into() } else { Fr::zero() })
+                    .collect();
+                domain.ifft_in_place(&mut evals);
+                if rp.coeffs.len() < d_size {
+                    rp.coeffs.resize(d_size, Fr::zero());
+                }
+                for (k, &e) in evals.iter().enumerate() {
+                    rp.coeffs[k] += e * wi;
+                }
+
+                let mut evals: Vec<Fr> = (0..d_size)
+                    .map(|j| if j < n_constraints { o[j].as_ref()[i].into() } else { Fr::zero() })
+                    .collect();
+                domain.ifft_in_place(&mut evals);
+                if op.coeffs.len() < d_size {
+                    op.coeffs.resize(d_size, Fr::zero());
+                }
+                for (k, &e) in evals.iter().enumerate() {
+                    op.coeffs[k] += e * wi;
+                }
+            }
+
+            (lp, rp, op)
+        } else {
+            // Dense engine — use standard build_qap (tiny circuit, no memory concern)
+            let (us, vs, ws) = engine.build_qap(l, r, o);
+            let mut lp = DensePolynomial::zero();
+            let mut rp = DensePolynomial::zero();
+            let mut op = DensePolynomial::zero();
+            for i in 0..n_vars {
+                lp = poly_add(&lp, &poly_scalar_mul(&us[i], witness[i]));
+                rp = poly_add(&rp, &poly_scalar_mul(&vs[i], witness[i]));
+                op = poly_add(&op, &poly_scalar_mul(&ws[i], witness[i]));
+            }
+            (lp, rp, op)
+        };
+
+        let t = engine.target_poly(n_constraints);
         let h = engine.compute_quotient(&l_poly, &r_poly, &o_poly, &t);
 
         // 2. A = sum witness[i] * a_query[i] + alpha_g1
@@ -349,18 +405,74 @@ impl Prover for PippengerProver {
     ) -> (Proof, PublicInput) {
         let n_public = full_pk.vk.n_public;
         let n_vars = witness.len();
+        let n_constraints = l.len();
 
-        // 1. Build witness polynomials and quotient h(x)
-        let (us, vs, ws) = engine.build_qap(l, r, o);
-        let mut l_poly = DensePolynomial::zero();
-        let mut r_poly = DensePolynomial::zero();
-        let mut o_poly = DensePolynomial::zero();
-        for i in 0..n_vars {
-            l_poly = poly_add(&l_poly, &poly_scalar_mul(&us[i], witness[i]));
-            r_poly = poly_add(&r_poly, &poly_scalar_mul(&vs[i], witness[i]));
-            o_poly = poly_add(&o_poly, &poly_scalar_mul(&ws[i], witness[i]));
-        }
-        let t = engine.target_poly(l.len());
+        // 1. Build witness polynomials l(x), r(x), o(x) and quotient h(x).
+        //    For FFT engines on large circuits, build on-the-fly to avoid
+        //    O(n_vars × domain_size) memory. For dense engines (tiny test
+        //    circuits), use the standard build_qap path.
+        let d_size = engine.domain_size(n_constraints);
+        let (l_poly, r_poly, o_poly) = if d_size > n_constraints {
+            // FFT engine — on-the-fly construction
+            let domain = GeneralEvaluationDomain::<Fr>::new(d_size)
+                .expect("Failed to create evaluation domain");
+
+            let mut lp = DensePolynomial::zero();
+            let mut rp = DensePolynomial::zero();
+            let mut op = DensePolynomial::zero();
+
+            for i in 0..n_vars {
+                let mut evals: Vec<Fr> = (0..d_size)
+                    .map(|j| if j < n_constraints { l[j].as_ref()[i].into() } else { Fr::zero() })
+                    .collect();
+                domain.ifft_in_place(&mut evals);
+                let wi = witness[i];
+                if lp.coeffs.len() < d_size {
+                    lp.coeffs.resize(d_size, Fr::zero());
+                }
+                for (k, &e) in evals.iter().enumerate() {
+                    lp.coeffs[k] += e * wi;
+                }
+
+                let mut evals: Vec<Fr> = (0..d_size)
+                    .map(|j| if j < n_constraints { r[j].as_ref()[i].into() } else { Fr::zero() })
+                    .collect();
+                domain.ifft_in_place(&mut evals);
+                if rp.coeffs.len() < d_size {
+                    rp.coeffs.resize(d_size, Fr::zero());
+                }
+                for (k, &e) in evals.iter().enumerate() {
+                    rp.coeffs[k] += e * wi;
+                }
+
+                let mut evals: Vec<Fr> = (0..d_size)
+                    .map(|j| if j < n_constraints { o[j].as_ref()[i].into() } else { Fr::zero() })
+                    .collect();
+                domain.ifft_in_place(&mut evals);
+                if op.coeffs.len() < d_size {
+                    op.coeffs.resize(d_size, Fr::zero());
+                }
+                for (k, &e) in evals.iter().enumerate() {
+                    op.coeffs[k] += e * wi;
+                }
+            }
+
+            (lp, rp, op)
+        } else {
+            // Dense engine — use standard build_qap (tiny circuit, no memory concern)
+            let (us, vs, ws) = engine.build_qap(l, r, o);
+            let mut lp = DensePolynomial::zero();
+            let mut rp = DensePolynomial::zero();
+            let mut op = DensePolynomial::zero();
+            for i in 0..n_vars {
+                lp = poly_add(&lp, &poly_scalar_mul(&us[i], witness[i]));
+                rp = poly_add(&rp, &poly_scalar_mul(&vs[i], witness[i]));
+                op = poly_add(&op, &poly_scalar_mul(&ws[i], witness[i]));
+            }
+            (lp, rp, op)
+        };
+
+        let t = engine.target_poly(n_constraints);
         let h = engine.compute_quotient(&l_poly, &r_poly, &o_poly, &t);
 
         // 2. A = MSM(a_query, witness) + alpha_g1
