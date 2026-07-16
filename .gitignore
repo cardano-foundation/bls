@@ -33,9 +33,11 @@ Thumbs.db
 *.wtns
 *.wasm
 node_modules/
+*_js/
 
 # Python
 __pycache__/
 
 # Circom witness inputs
 input.json
+*_input.json
