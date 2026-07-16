@@ -27,13 +27,13 @@ template WindowMulFixJubJub() {
     mux.s[1] <== in[1];
     mux.s[2] <== in[2];
 
-    component dbl2 = MontgomeryDouble();
-    component adr3 = MontgomeryAdd();
-    component adr4 = MontgomeryAdd();
-    component adr5 = MontgomeryAdd();
-    component adr6 = MontgomeryAdd();
-    component adr7 = MontgomeryAdd();
-    component adr8 = MontgomeryAdd();
+    component dbl2 = JubJubMontgomeryDouble();
+    component adr3 = JubJubMontgomeryAdd();
+    component adr4 = JubJubMontgomeryAdd();
+    component adr5 = JubJubMontgomeryAdd();
+    component adr6 = JubJubMontgomeryAdd();
+    component adr7 = JubJubMontgomeryAdd();
+    component adr8 = JubJubMontgomeryAdd();
 
     mux.c[0][0] <== base[0];
     mux.c[1][0] <== base[1];
@@ -110,11 +110,11 @@ template SegmentMulFixJubJub(nWindows) {
     component adders[nWindows];
     component cadders[nWindows];
 
-    component dblLast = MontgomeryDouble();
+    component dblLast = JubJubMontgomeryDouble();
 
     for (i=0; i<nWindows; i++) {
         windows[i] = WindowMulFixJubJub();
-        cadders[i] = MontgomeryAdd();
+        cadders[i] = JubJubMontgomeryAdd();
         if (i==0) {
             windows[i].base[0] <== e2m.out[0];
             windows[i].base[1] <== e2m.out[1];
@@ -141,7 +141,7 @@ template SegmentMulFixJubJub(nWindows) {
     }
 
     for (i=0; i<nWindows; i++) {
-        adders[i] = MontgomeryAdd();
+        adders[i] = JubJubMontgomeryAdd();
         if (i==0) {
             adders[i].in1[0] <== dblLast.out[0];
             adders[i].in1[1] <== dblLast.out[1];
