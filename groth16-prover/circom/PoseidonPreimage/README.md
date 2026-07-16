@@ -6,6 +6,45 @@
 
 Prove knowledge of a secret whose Poseidon hash equals a public commitment.
 
+---
+
+## System overview
+
+```mermaid
+flowchart LR
+    subgraph Prover["🧑‍💻 Prover (off-chain)"]
+        direction TB
+        priv["Private Input<br/>pre_image (secret number)"]
+        wit["Witness Generator"]
+    end
+
+    subgraph Circuit["⚡ Circom Circuit"]
+        direction TB
+        hash["PoseidonBLS12_381<br/>(t=3, 65 rounds)"]
+        zk["Groth16 Proof"]
+    end
+
+    subgraph Verifier["🔍 Verifier (on-chain)"]
+        direction TB
+        pub["Public Input<br/>hash_commitment"]
+        check["Pairing Check"]
+    end
+
+    priv --> wit
+    wit --> hash
+    hash --> zk
+    pub --> check
+    zk --> check
+    check -->|"✅ VALID"| result["Commitment Verified"]
+```
+
+**What happens:**
+1. **Prover** knows a secret number `pre_image` and wants to prove it matches a public commitment they previously posted.
+2. **Witness generator** feeds `pre_image` into the Poseidon hash function (65 rounds of S-box + MDS matrix on BLS12-381).
+3. **Circuit** constrains every round and checks that the final hash output equals the public `hash_commitment`, producing a zk-SNARK proof.
+4. **Verifier** (Aiken smart contract) receives the proof and the public commitment, then runs a pairing check to confirm the prover knew the secret — without the `pre_image` ever being revealed.
+
+
 > **What it proves.** Given a public `hash_commitment`, the prover demonstrates knowledge of a private `pre_image` such that `hash_commitment = PoseidonBLS12_381(pre_image, 0)` — without revealing the pre-image.
 
 > **Pipeline overview.** This example walks through every artifact produced and consumed by each tool in the stack. Only the witness-generation step uses snarkjs; proving and verifying are done by our own Rust CLI and Aiken on-chain verifier respectively.

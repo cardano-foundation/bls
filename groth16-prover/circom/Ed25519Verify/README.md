@@ -6,6 +6,53 @@
 
 Verify a standard Ed25519 signature inside a Groth16 circuit — without revealing the signature components. This proves that a given message was signed by a specific Ed25519 public key, producing a zk-SNARK proof that can be verified on-chain (e.g., in Aiken on Cardano).
 
+---
+
+## System overview
+
+```mermaid
+flowchart LR
+    subgraph Prover["🧑‍💻 Prover (off-chain)"]
+        direction TB
+        priv["Private Inputs<br/>S (signature scalar)<br/>PointA, PointR<br/>(decompressed points)"]
+        wit["Witness Generator"]
+    end
+
+    subgraph Circuit["⚡ Circom Circuit (~4M constraints)"]
+        direction TB
+        compress["PointCompress<br/>(assert A, R8)"]
+        hash["SHA-512(msg ‖ A ‖ R8)<br/>→ h mod q"]
+        scalarmul["ScalarMul: s·G<br/>ScalarMul: h·A"]
+        pointadd["PointAdd: R + h·A"]
+        eq["PointEqual:<br/>s·G == R + h·A"]
+        zk["Groth16 Proof"]
+    end
+
+    subgraph Verifier["🔍 Verifier (on-chain)"]
+        direction TB
+        pub["Public Inputs<br/>msg, A, R8"]
+        check["Pairing Check"]
+    end
+
+    priv --> wit
+    wit --> compress
+    compress --> hash
+    hash --> scalarmul
+    scalarmul --> pointadd
+    pointadd --> eq
+    eq --> zk
+    pub --> check
+    zk --> check
+    check -->|"✅ VALID"| result["Signature Verified"]
+```
+
+**What happens:**
+1. **Prover** knows the full Ed25519 signature (`S`, decompressed `PointA`, `PointR`) and wants to prove it is valid for a public message and public key bits (`A`, `R8`).
+2. **Witness generator** performs point compression, SHA-512 hashing, and scalar multiplication on Curve25519 — all inside the circuit's arithmetic constraints.
+3. **Circuit** (4M constraints) follows RFC 8032: compress points, hash, compute `s·G` and `h·A`, check equality. Produces a zk-SNARK proof.
+4. **Verifier** (Aiken smart contract) receives the proof and the public message/key, confirms the signature is valid via pairing check — without ever seeing `S`, `PointA`, or `PointR`.
+
+
 > **Status:** Circuit compiles successfully with `circom --prime bls12381`. Witness generation **fails** due to BLS12-381 field incompatibility with the circuit's internal chunked-arithmetic templates. End-to-end proving is blocked at Step 2.
 
 ---

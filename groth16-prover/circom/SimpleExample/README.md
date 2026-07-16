@@ -6,6 +6,44 @@
 
 A minimal Circom circuit that demonstrates the full **Circom → Groth16 Rust Prover → Aiken Verifier** pipeline end-to-end.
 
+---
+
+## System overview
+
+```mermaid
+flowchart LR
+    subgraph Prover["🧑‍💻 Prover (off-chain)"]
+        direction TB
+        priv["Private Inputs<br/>x1, x2, x3, x4"]
+        wit["Witness Generator"]
+    end
+
+    subgraph Circuit["⚡ Circom Circuit"]
+        direction TB
+        comp["Compiled R1CS"]
+        zk["Groth16 Proof"]
+    end
+
+    subgraph Verifier["🔍 Verifier (on-chain)"]
+        direction TB
+        pub["Public Inputs<br/>a"]
+        check["Pairing Check"]
+    end
+
+    priv --> wit
+    wit --> comp
+    comp --> zk
+    pub --> check
+    zk --> check
+    check -->|"✅ VALID"| result["Proof Accepted"]
+```
+
+**What happens:**
+1. **Prover** knows four secret numbers (`x1..x4`) and wants to prove their product `a` is correct.
+2. **Witness generator** computes all intermediate wire values.
+3. **Circuit** (compiled to R1CS) checks every gate constraint and produces a zk-SNARK proof.
+4. **Verifier** (Aiken smart contract on Cardano) receives the proof and the public output `a`, then runs a pairing-curve equation to confirm the proof is valid — without ever learning `x1..x4`.
+
 > **Pipeline overview.** This example walks through every artifact produced and consumed by each tool in the stack. Only the witness-generation step uses snarkjs; proving and verifying are done by our own Rust CLI and Aiken on-chain verifier respectively.
 
 ## Circuit

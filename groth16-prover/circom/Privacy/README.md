@@ -6,6 +6,47 @@
 
 A privacy-preserving donation / shielded-spend circuit adapted from **Stanford CS251 Programming Project #4** (Zcash-style Merkle-path verification).
 
+---
+
+## System overview
+
+```mermaid
+flowchart LR
+    subgraph Prover["🧑‍💻 Prover (off-chain)"]
+        direction TB
+        priv["Private Inputs<br/>nonce, Merkle path<br/>(siblings + directions)"]
+        wit["Witness Generator"]
+    end
+
+    subgraph Circuit["⚡ Circom Circuit"]
+        direction TB
+        hash["MiMC2(nullifier, nonce)<br/>→ commitment"]
+        walk["Merkle path walk<br/>(depth levels)"]
+        zk["Groth16 Proof"]
+    end
+
+    subgraph Verifier["🔍 Verifier (on-chain)"]
+        direction TB
+        pub["Public Inputs<br/>Merkle root digest<br/>nullifier"]
+        check["Pairing Check"]
+    end
+
+    priv --> wit
+    wit --> hash
+    hash --> walk
+    walk --> zk
+    pub --> check
+    zk --> check
+    check -->|"✅ VALID"| result["Spend Approved"]
+```
+
+**What happens:**
+1. **Prover** knows a secret `nonce` and the private Merkle path (sibling hashes + left/right directions) leading from their coin commitment to the public Merkle root.
+2. **Witness generator** computes the commitment `H(nullifier, nonce)` and walks up the tree level by level.
+3. **Circuit** constrains every hash step and every left/right swap, producing a zk-SNARK proof that the commitment is indeed in the tree.
+4. **Verifier** (Aiken smart contract) receives the proof, the public Merkle root `digest`, and the `nullifier`. It confirms the proof is valid and records the nullifier to prevent double-spending — all without learning the `nonce`, the path, or which leaf was spent.
+
+
 > **What it proves.** Given a public Merkle root `digest` and a public `nullifier`, the prover demonstrates knowledge of a private `nonce` and a valid Merkle path (siblings + directions) showing that `H(nullifier, nonce)` is present in the tree — without revealing the nonce or the path.
 
 > **Pipeline overview.** This example walks through every artifact produced and consumed by each tool in the stack. Only the witness-generation step uses snarkjs; proving and verifying are done by our own Rust CLI and Aiken on-chain verifier respectively.
