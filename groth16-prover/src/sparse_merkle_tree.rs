@@ -109,6 +109,7 @@ fn node_key(level: usize, index: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ark_std::Zero;
 
     #[test]
     fn test_empty_tree_digest() {
