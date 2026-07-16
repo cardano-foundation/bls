@@ -28,8 +28,9 @@ include "poseidon_bls12_381.circom";
 /*
  * ModuloL: reduce a field element mod the JubJub subgroup order l.
  *
- * The BLS12-381 scalar field has p ≈ 2·l, so the quotient q = in/l ∈ {0,1,2}.
- * We verify via the polynomial constraint q·(q-1)·(q-2) = 0.
+ * JubJub over BLS12-381 scalar field: cofactor = 8, so p/l ≈ 8.
+ * The quotient q = in/l is in [0, 7].  We enforce this by decomposing q
+ * into 3 bits: q = b0 + 2·b1 + 4·b2 with bi ∈ {0,1}.
  *
  * The prover is additionally constrained by the surrounding circuit:
  *   - For nonce r: R' = [r]·G must equal the public R
@@ -40,7 +41,7 @@ template ModuloL() {
     signal input in;
     signal output out;
 
-    var L = 26086536937990924832063051375011761842829050923986744224549735572780801545527;
+    var L = 6554484396890773809930967563523245729705921265872317281365359162392183254199;
 
     signal q;
     out <-- in % L;
@@ -48,11 +49,18 @@ template ModuloL() {
 
     in === q * L + out;
 
-    // q ∈ {0, 1, 2}  (since p < 3L)
-    // Decompose cubic into quadratic: t = q*(q-1), then t*(q-2) = 0
-    signal t;
-    t <== q * (q - 1);
-    t * (q - 2) === 0;
+    // q ∈ [0, 7]  (since p < 8L, cofactor = 8)
+    // Decompose into 3 bits: q = b0 + 2·b1 + 4·b2
+    signal b0;
+    signal b1;
+    signal b2;
+    b0 <-- q & 1;
+    b1 <-- (q >> 1) & 1;
+    b2 <-- (q >> 2) & 1;
+    q === b0 + 2 * b1 + 4 * b2;
+    b0 * (1 - b0) === 0;
+    b1 * (1 - b1) === 0;
+    b2 * (1 - b2) === 0;
 }
 
 /*
