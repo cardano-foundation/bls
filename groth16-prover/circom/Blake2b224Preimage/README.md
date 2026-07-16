@@ -1,5 +1,9 @@
 # Blake2b-224 Hash Pre-image (Cardano Key Hash)
 
+> **In one sentence:** Prove you know the public key behind a Cardano address — without revealing the public key itself.
+>
+> **Business angle:** Cardano addresses are derived from Ed25519 public keys via Blake2b-224 hashing. This circuit lets a user prove "I control the key that hashes to this address" without exposing the key, enabling anonymous identity verification, privacy-preserving KYC, and cross-chain address ownership proofs. A dApp could verify a user's Cardano identity inside a zk-SNARK without ever seeing their wallet public key.
+
 Prove knowledge of a 32-byte pre-image whose Blake2b-224 hash equals a publicly known Cardano key hash — without revealing the pre-image.
 
 > **Status:** Circuit validated (compiles, witness generates, hash output verified against Python reference). End-to-end proving **not yet executed** due to memory constraints (see [Scaling Notes](#scaling-notes)).

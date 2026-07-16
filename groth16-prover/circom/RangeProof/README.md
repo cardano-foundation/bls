@@ -1,5 +1,9 @@
 # Range Proof + Poseidon Commitment
 
+> **In one sentence:** Prove a secret number is between 0 and 2^32 — without revealing the number itself.
+>
+> **Business angle:** This is the mathematical engine behind confidential transactions. A Cardano user can prove "I am sending a valid amount (non-negative and within the uint32 range)" while keeping the exact amount hidden behind a cryptographic commitment. This enables private DeFi, concealed payroll, and regulatory-compliant stablecoin transfers where balances remain secret but range validity is publicly verifiable on-chain.
+
 Prove that a committed value lies in a range `[0, 2^n)` without revealing the value itself. This is the building block for confidential transaction amounts, sealed-bid auctions, and any zk-SNARK application that needs bounded private inputs.
 
 > **Status:** ✅ **Complete.** Both circuits compile, generate witnesses, and produce valid Groth16 proofs end-to-end on BLS12-381.

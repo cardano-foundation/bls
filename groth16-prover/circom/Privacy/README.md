@@ -1,5 +1,9 @@
 # Privacy — Shielded Spend (Merkle Membership) Circuit
 
+> **In one sentence:** Prove that a secret coin exists in a Merkle tree — without revealing which coin, where it sits in the tree, or the path used to find it.
+>
+> **Business angle:** This is the core building block for private transactions on Cardano. A user can spend a shielded UTXO by proving "I own a coin whose commitment is in this public Merkle tree" while keeping the coin's identity, the Merkle path, and the spending key completely secret. The on-chain verifier only sees a public Merkle root and a nullifier (preventing double-spends), making the transaction both private and auditable.
+
 A privacy-preserving donation / shielded-spend circuit adapted from **Stanford CS251 Programming Project #4** (Zcash-style Merkle-path verification).
 
 > **What it proves.** Given a public Merkle root `digest` and a public `nullifier`, the prover demonstrates knowledge of a private `nonce` and a valid Merkle path (siblings + directions) showing that `H(nullifier, nonce)` is present in the tree — without revealing the nonce or the path.

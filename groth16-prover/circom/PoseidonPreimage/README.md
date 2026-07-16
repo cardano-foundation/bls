@@ -1,5 +1,9 @@
 # Poseidon Hash Pre-image
 
+> **In one sentence:** Prove you know a secret number — without revealing it — by showing its hash matches a public commitment.
+>
+> **Business angle:** This is the simplest form of "commit-and-reveal" used in sealed-bid auctions, passwordless authentication, and concealed-vote systems. A bidder can publicly commit to a bid (by posting its hash), then later prove they knew the bid amount all along. On Cardano, this enables fair on-chain auctions and verifiable credential schemes where secrets remain hidden until the right moment.
+
 Prove knowledge of a secret whose Poseidon hash equals a public commitment.
 
 > **What it proves.** Given a public `hash_commitment`, the prover demonstrates knowledge of a private `pre_image` such that `hash_commitment = PoseidonBLS12_381(pre_image, 0)` — without revealing the pre-image.
