@@ -1,8 +1,0 @@
-{
-  "name": "range-proof-circom",
-  "version": "1.0.0",
-  "description": "Range proof circuits for BLS12-381",
-  "dependencies": {
-    "circomlib": "^2.0.5"
-  }
-}
