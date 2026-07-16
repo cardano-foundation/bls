@@ -6,6 +6,50 @@
 
 Prove that a committed value lies in a range `[0, 2^n)` without revealing the value itself. This is the building block for confidential transaction amounts, sealed-bid auctions, and any zk-SNARK application that needs bounded private inputs.
 
+---
+
+## System overview
+
+```mermaid
+flowchart LR
+    subgraph Prover["🧑‍💻 Prover (off-chain)"]
+        direction TB
+        priv["Private Inputs<br/>value, blinding_factor<br/>(committed variant only)"]
+        wit["Witness Generator"]
+    end
+
+    subgraph Circuit["⚡ Circom Circuit"]
+        direction TB
+        n2b["Num2Bits(n)<br/>decompose into n bits"]
+        poseidon["PoseidonBLS12_381<br/>(committed variant only)"]
+        eq["Hash / Range<br/>Equality Check"]
+        zk["Groth16 Proof"]
+    end
+
+    subgraph Verifier["🔍 Verifier (on-chain)"]
+        direction TB
+        pub["Public Inputs<br/>value (simple)<br/>commitment (committed)"]
+        check["Pairing Check"]
+    end
+
+    priv --> wit
+    wit --> n2b
+    n2b --> poseidon
+    poseidon --> eq
+    n2b --> eq
+    eq --> zk
+    pub --> check
+    zk --> check
+    check -->|"✅ VALID"| result["Range Verified"]
+```
+
+**What happens (committed variant):**
+1. **Prover** knows a secret `value` (e.g., transaction amount) and a secret `blinding_factor`, and wants to prove the value is within a valid range.
+2. **Witness generator** decomposes `value` into `n` bits and computes the Poseidon commitment `Poseidon(value, blinding_factor)`.
+3. **Circuit** constrains every bit to `{0,1}` (proving `0 ≤ value < 2^n`) and checks that the commitment matches the public commitment, producing a zk-SNARK proof.
+4. **Verifier** (Aiken smart contract) receives the proof and the public commitment (or public value for the simple variant), confirms validity via pairing check — the exact amount and blinding factor remain completely secret.
+
+
 > **Status:** ✅ **Complete.** Both circuits compile, generate witnesses, and produce valid Groth16 proofs end-to-end on BLS12-381.
 
 ---

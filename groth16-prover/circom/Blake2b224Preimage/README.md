@@ -6,6 +6,45 @@
 
 Prove knowledge of a 32-byte pre-image whose Blake2b-224 hash equals a publicly known Cardano key hash — without revealing the pre-image.
 
+---
+
+## System overview
+
+```mermaid
+flowchart LR
+    subgraph Prover["🧑‍💻 Prover (off-chain)"]
+        direction TB
+        priv["Private Input<br/>pre_image[32]<br/>(e.g. Ed25519 pubkey)"]
+        wit["Witness Generator"]
+    end
+
+    subgraph Circuit["⚡ Circom Circuit"]
+        direction TB
+        hash["Blake2b-224<br/>(12 rounds, 64-byte blocks)"]
+        zk["Groth16 Proof"]
+    end
+
+    subgraph Verifier["🔍 Verifier (on-chain)"]
+        direction TB
+        pub["Public Input<br/>blake2b_224_hash[28]<br/>(Cardano key hash)"]
+        check["Pairing Check"]
+    end
+
+    priv --> wit
+    wit --> hash
+    hash --> zk
+    pub --> check
+    zk --> check
+    check -->|"✅ VALID"| result["Identity Verified"]
+```
+
+**What happens:**
+1. **Prover** knows a 32-byte pre-image (e.g., an Ed25519 public key) and wants to prove it hashes to a known Cardano address key hash.
+2. **Witness generator** runs the Blake2b-224 compression function across the 12 internal rounds and produces the 28-byte digest.
+3. **Circuit** (79K constraints) constrains every bitwise XOR, rotation, and mixing step, producing a zk-SNARK proof that `Blake2b-224(pre_image) == hash`.
+4. **Verifier** (Aiken smart contract) receives the proof and the public 28-byte key hash, confirms validity via pairing check — the prover's public key remains completely secret.
+
+
 > **Status:** Circuit validated (compiles, witness generates, hash output verified against Python reference). End-to-end proving **not yet executed** due to memory constraints (see [Scaling Notes](#scaling-notes)).
 
 ---
