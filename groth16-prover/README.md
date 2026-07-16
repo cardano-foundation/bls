@@ -828,6 +828,29 @@ The current crate is a **reference implementation** for correctness verification
 - **Reference:** [circomlib](https://github.com/iden3/circomlib) provides production-grade Poseidon, MiMC, Merkle, and EdDSA circuits for BN254. Porting to BLS12-381 requires updating the field constants. For Blake2b-224, see [bkomuves/hash-circuits](https://github.com/bkomuves/hash-circuits). For key-derivation logic, see [IntersectMBO/cardano-crypto](https://github.com/IntersectMBO/cardano-crypto/blob/develop/src/Cardano/Crypto/Wallet.hs#L161). For Ed25519 in-circuit verification, see [Electron-Labs/ed25519-circom](https://github.com/Electron-Labs/ed25519-circom) and our adapted version in [`circom/Ed25519Verify/README.md`](circom/Ed25519Verify/README.md).
 - **Benefit:** Shows that the Rust prover + Aiken verifier pipeline works for real-world zk-SNARK applications, not just toy arithmetic circuits. Blake2b-224, key-ownership proofs, and Ed25519 verification in particular unlock cross-chain and identity use cases (proving ownership of a key, linking a proof to an on-chain address, anonymous identity verification, attesting to off-chain signed data, etc.).
 
+### (j) Sparse-matrix prover (beyond what zeroj supports)
+
+- **Current:** `circom_adapter` expands sparse R1CS into dense `Vec<Vec<Fr>>` matrices (L, R, O), each `n_constraints × n_wires × 32 bytes`. This is the fundamental scaling bottleneck — the EdDSA-JubJub circuit (12 601 wires) peaks at ~14 GiB RAM, and Blake2b-224 (78K wires) would need ~200 GiB.
+- **Target:** Operate directly on the sparse constraint representation throughout the prover. The QAP construction, witness polynomial evaluation, and quotient computation can all be reformulated to iterate over non-zero entries only, avoiding dense allocation entirely.
+- **Approach:**
+  1. Keep `CircomCircuit` storing sparse constraints (triplet lists) instead of dense matrices.
+  2. Modify `FftQapEngine::build_qap` to accumulate per-variable polynomials by iterating non-zero entries per constraint, rather than reading dense columns.
+  3. Witness polynomial `l(x) = Σ w_i · u_i(x)` can be built as a single IFFT of the sparse column evaluations — each constraint contributes only to the variables it touches.
+  4. Quotient `h(x) = (l·r − o) / T` is unchanged (operates on dense polynomials after accumulation).
+- **Benefit:** Unlocks circuits with 50K–500K wires (Blake2b-224, Ed25519, large Poseidon trees) on commodity hardware. The dense-matrix OOM at 12K wires disappears entirely.
+- **Reference:** arkworks' `ConstraintSynthesizer` trait already operates on sparse constraints; bellpepper and halo2 provers use sparse representations natively. No existing Rust Groth16 implementation combines sparse R1CS parsing with FFT-based QAP construction.
+
+### (k) Recursive proof composition
+
+- **Current:** Each proof is standalone — the on-chain verifier checks one Groth16 proof per transaction. For use cases requiring many proofs (e.g., rollups, batched attestations), each proof pays full on-chain verification cost.
+- **Target:** Support proving "I know a valid Groth16 proof π₁ for circuit C₁" inside a second Groth16 circuit C₂, producing a succinct proof π₂ that attests to the correctness of π₁. The on-chain verifier checks only π₂, regardless of how many inner proofs it covers.
+- **Approach:**
+  1. **Incremental Verifiable Computation (IVC)** via Nova/SuperNova — fold multiple proof steps into a single accumulating proof. The fold is cheap (one EC addition); the final SNARK wrap compresses to a Groth16 proof.
+  2. **SNARK-friendly verification gadget** — implement the Groth16 pairing check inside a Circom circuit (pairing operations on BLS12-381 can be expressed as R1CS constraints, though at high cost ~100K–500K constraints for the pairing itself).
+  3. **Halo2-style recursive aggregation** — use cycle of curves (BLS12-381 + JubJub) for efficient recursive verification without pairings.
+- **Benefit:** Amortises on-chain verification cost across N proofs — from O(N) pairing checks to O(1). Essential for rollup and batching use cases. Also enables incremental computation where each step's output feeds into the next.
+- **Reference:** [arkworks groth16::aggregate](https://docs.rs/ark-groth16/latest/ark_groth16/), [Nova](https://github.com/microsoft/Nova), [Zcash Halo2](https://github.com/zcash/halo2), [Pacifico](https://github.com/argumentcomputer/pacifico).
+
 </details>
 
 ---
