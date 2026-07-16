@@ -1,4 +1,4 @@
-# BLS12-381 Elliptic curve, BLS multi-signatures scheme and other curve applications
+# BLS12-381 deep dive and app possibilities using it
 
 ## Contents
 1. [Introduction](#high-level-introduction)
