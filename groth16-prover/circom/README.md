@@ -4,13 +4,14 @@ This directory contains Circom circuits that can be loaded by the Rust prover vi
 
 ## Available circuits
 
-| Directory | What it proves | Status |
-|-----------|---------------|--------|
-| [`SimpleExample/`](SimpleExample/README.md) | 3-gate multiplication chain (`a = x1·x2·x3·x4`) | ✅ Complete |
-| [`Privacy/`](Privacy/README.md) | Merkle membership — shielded spend with MiMC(x⁷) | ✅ Complete |
-| [`PoseidonPreimage/`](PoseidonPreimage/README.md) | Poseidon hash pre-image knowledge | ✅ Complete |
-| [`Blake2b224Preimage/`](Blake2b224Preimage/README.md) | Blake2b-224 hash pre-image (Cardano key hash) | ⚠️ Circuit + witness validated; proving blocked by RAM |
-| [`Ed25519Verify/`](Ed25519Verify/README.md) | Ed25519 signature verification in-circuit | ⚠️ Circuit compiles; witness blocked by field incompatibility |
+| Directory | What it proves | Constraints | Status |
+|-----------|---------------|-------------|--------|
+| [`SimpleExample/`](SimpleExample/README.md) | 3-gate multiplication chain (`a = x1·x2·x3·x4`) | 3 | ✅ Complete |
+| [`Privacy/`](Privacy/README.md) | Merkle membership — shielded spend with MiMC(x⁷) | 1,107 | ✅ Complete |
+| [`PoseidonPreimage/`](PoseidonPreimage/README.md) | Poseidon hash pre-image knowledge | ~300 | ✅ Complete |
+| [`RangeProof/`](RangeProof/README.md) | Range proof + Poseidon commitment (`value ∈ [0, 2^n)`) | ~`n + 250` | 🔄 In progress |
+| [`Blake2b224Preimage/`](Blake2b224Preimage/README.md) | Blake2b-224 hash pre-image (Cardano key hash) | ~79K | ⚠️ Circuit + witness validated; proving blocked by RAM |
+| [`Ed25519Verify/`](Ed25519Verify/README.md) | Ed25519 signature verification in-circuit | ~4M | ⚠️ Circuit compiles; witness blocked by field incompatibility |
 
 ---
 
