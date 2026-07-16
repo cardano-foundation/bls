@@ -226,3 +226,81 @@ points in compressed form, ready for an on-chain Groth16 verifier.
 `test_pbk_only.circom` is a minimal test circuit that exercises the
 fixed-base scalar multiplication independently (no Poseidon hashing).
 Its full pipeline also passes end-to-end.
+
+## Future ideas
+
+### Alternative signature schemes to reduce circuit size
+
+The current circuit is dominated by two fixed-base scalar multiplications
+(`[r]·G` and `[S]·G`), each contributing ~6 300 constraints — roughly 98%
+of the total 12 600. Any scheme requiring scalar multiplication in-circuit
+will face this same floor. Two alternative approaches could break through it:
+
+**BLS-style signatures (pairing-based).** Instead of the EdDSA equation
+`[S]·G = R + [k]·pk`, use a BLS-like equation `e([msg]·G, pk) = e(H(msg), [sk]·G)`.
+The verifier checks a pairing product — no scalar multiplication at all.
+Cost: one multi-pairing (~30K constraints for the pairing itself). This is
+higher than the current 12 600 for this circuit size, but becomes competitive
+at larger circuit sizes where the scalar multiplication cost grows linearly
+with bit width while pairing cost is constant. Also requires a signature
+scheme change on the off-chain side (BLS key pairs instead of EdDSA).
+
+**SNARK-friendly signatures.** Design a signature scheme whose verification
+is natively efficient in R1CS. Examples:
+- **Stern-type signatures** —基于零知识证明的签名，verification is a set-membership check (~1K constraints).
+- **Lamport one-time signatures** — hash-only verification, ~500 constraints, but keys are large (~256 hashes).
+- **BLSW (Boneh-Lynn-Shacham with small public keys)** — if JubJub had pairings, this would be ideal; it doesn't, but the BLS12-381 outer curve does.
+
+The practical tradeoff: EdDSA-JubJub is familiar, well-studied, and has
+compact keys/signatures. The 12 600 constraint count is a direct cost of
+R1CS scalar multiplication. If this becomes a bottleneck (e.g., for
+recursive proof composition where verification cost must be minimised),
+switching to a pairing-based or hash-based scheme would be the lever to pull.
+
+### Why further circuit optimisation hits diminishing returns
+
+The current circuit has been optimised from 18 112 wires to 12 601 (–31%).
+Further reductions face fundamental R1CS limits.
+
+**Constraint breakdown.** The 12 600 constraints decompose as:
+
+| Component | Constraints | % of total |
+|-----------|-------------|------------|
+| `[r]·G` fixed-base scalar mul (254-bit) | ~6 300 | ~50% |
+| `[S]·G` fixed-base scalar mul (254-bit) | ~6 300 | ~50% |
+| Poseidon T3 (nonce hash) | ~276 | ~2% |
+| Poseidon T6 (challenge hash) | ~1 632 | ~13% |
+| Num2Bits decompositions (3×254-bit) | ~762 | ~6% |
+| ModuloL (2× 3-bit range check) | ~12 | <1% |
+| JubJubAdd + equality constraints | ~18 | <1% |
+
+The two fixed-base scalar multiplications account for ~98% of constraints.
+Each bit of a 254-bit scalar requires one Montgomery ladder doubling and
+one conditional Edwards addition — roughly 25 constraints per bit per
+multiplication. This is the irreducible cost of scalar multiplication
+in R1CS: there is no sub-linear representation.
+
+**What was already tried and reverted.** An alternative equation
+`S ≡ r + k·sk (mod l)` (replacing `[S]·G = R + [k]·pk` with a scalar
+equation) was implemented and tested. It reduced to 11 427 wires but is
+**fundamentally broken**: `k * sk` in F_p gives `(k * sk) mod p`, not the
+integer product. Since `l² >> p` (~8.2×10⁷⁶), `(k * sk mod p) mod l ≠
+(k * sk) mod l`. The equation does not hold over the field.
+
+**Marginal improvements possible.** Reducing scalar width from 254 to 253
+bits (JubJub subgroup order `l` fits in 253 bits) saves ~256 constraints.
+Removing `ModuloL` (if the signature scheme is secure without it — the
+prover computes `S = r + k*sk` in F_p and verification still holds)
+saves ~12 constraints. Together: ~270 constraints, a ~2% reduction.
+
+**The real bottleneck is architectural, not algebraic.** The R1CS
+constraint count is dominated by scalar multiplication, which is linear
+in bit width and unavoidable for any signature scheme that requires
+discrete-log-based operations in-circuit. Breaking through this floor
+requires either:
+1. A signature scheme that avoids scalar multiplication entirely
+   (pairing-based or hash-based — see above).
+2. Moving out of R1CS into a different proof system (PLONK, Halo2)
+   where custom gates can express scalar multiplication more efficiently.
+3. Recursive composition — prove the signature in a separate circuit and
+   aggregate, amortising the verification cost.
