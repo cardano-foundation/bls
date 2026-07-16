@@ -12,6 +12,7 @@ This directory contains Circom circuits that can be loaded by the Rust prover vi
 | [`RangeProof/`](RangeProof/README.md) | Range proof + Poseidon commitment (`value ∈ [0, 2^n)`) | ~`n + 250` | ✅ Complete |
 | [`Blake2b224Preimage/`](Blake2b224Preimage/README.md) | Blake2b-224 hash pre-image (Cardano key hash) | ~79K | ⚠️ Circuit + witness validated; proving blocked by RAM |
 | [`Ed25519Verify/`](Ed25519Verify/README.md) | Ed25519 signature verification in-circuit | ~4M | ⚠️ Circuit compiles; witness blocked by field incompatibility |
+| [`EdDSAJubJub/`](EdDSAJubJub/README.md) | EdDSA-JubJub signature verification (deterministic nonce, Poseidon challenge) | 12 601 | ✅ Complete — full e2e pass |
 | [`CardanoKeyOwnership/`](CardanoKeyOwnership/README.md) | Private key → public key ownership proof | ~4M (Curve25519) / ~2–5K (JubJub) | ⚠️ Curve25519 blocked by field + memory; JubJub proposed |
 
 ---
@@ -101,7 +102,19 @@ Full pipeline for each item: **Circom → groth16-prover (dev ceremony) → Aike
   **Private inputs:** `value`, `blinding_factor`  
   **Use case:** Confidential transaction amounts.
 
-- **5. Private Key → Public Key Ownership Proof** — prove knowledge of the private scalar that generates a given public key / address.  
+- **5. EdDSA-JubJub Signature Verification** (12 601 constraints, 7 public inputs) — deterministic
+  EdDSA-JubJub signature proof over the JubJub curve embedded in BLS12-381's scalar field.
+  Full e2e pipeline passes: compile → witness gen → ceremony-dev → prove → verify.
+  See [`EdDSAJubJub/README.md`](EdDSAJubJub/README.md).  
+  **Optimisation applied:** Circuit reduced from 18 112 wires to 12 601 wires
+  (31 % reduction) via two structural changes documented in
+  [Optimisation measures](#optimisation-measures-eddsa-jubjub) below.
+  Memory: dense matrices consume ~14.2 GiB peak; full prover peak is ~14.2 GiB.
+  On-the-fly QAP construction (documented in `engine.rs` / `prover.rs`)
+  eliminated the previous OOM from storing all 12 601 QAP polynomials
+  simultaneously.
+
+- **6. Private Key → Public Key Ownership Proof** — prove knowledge of the private scalar that generates a given public key / address.  
   **Public input:** `public_key`  
   **Private input:** `private_scalar`  
   **Use case:** Wallet ownership proof without revealing the private key. This is the core key-derivation step used in Cardano wallets: given a private scalar `x`, show that `pub = x · G`.  
@@ -144,3 +157,83 @@ circuit.load_witness("circom/SimpleExample/witness.wtns").unwrap();
 ```
 
 The parsed `L`, `R`, `O` matrices and witness vector are then fed into any `QapEngine` + `Prover` combination, producing a proof.
+
+---
+
+## Optimisation measures — EdDSA-JubJub circuit
+
+The EdDSA-JubJub circuit was reduced from **18 112 wires** (original design)
+to **12 601 wires** (31 % reduction) via two structural changes. Both
+trade redundant computation for fewer constraints — acceptable because the
+prover runs offline.
+
+### Measure 1: Remove public key derivation (pkMul)
+
+**Original:** The circuit computed `pk = [sk]·G` internally via a second
+fixed-base scalar multiplication, then used the derived `pk` in both the
+challenge hash and the verification equation.
+
+**Problem:** `EscalarMulFixJubJub` at 253 bits costs ~4 119 wires per
+instantiation. Computing `pk` internally is redundant when `pk` is already
+a public input — the verifier binds it via the challenge hash `k`.
+
+**Fix:** Removed `JubJubPbk` / `EscalarMulFixJubJub` for pk computation.
+Instead, `pk = (pku, pkv)` is passed directly as a public input. The
+circuit now has two fixed-base muls (`[r]·G` and `[S]·G`) and one
+variable-base mul (`[k]·pk`), saving ~4 119 wires.
+
+**Cost:** The prover must supply the `pk` public input externally. This is
+not a security concern — `pk` is public — but the circuit no longer proves
+"this pk is derived from the same sk". Instead, knowledge of `sk` is
+implicit: the challenge `k` binds `pk`, and the verification equation
+`[S]·G = R + [k]·pk` is only satisfiable if the prover knows `sk`.
+
+### Measure 2: Single Poseidon T6 instead of 4× Poseidon T3
+
+**Original:** The challenge hash used four sequential Poseidon T3 invocations:
+`Poseidon(Poseidon(Poseidon(R.u, R.v), pk.u, pk.v), msg)`.
+
+**Problem:** Each Poseidon T3 adds ~276 constraints (5 rounds × ~55
+constraints per round). Four invocations cost ~1 104 constraints plus
+inter-component wiring.
+
+**Fix:** Replaced with a single `PoseidonBLS12_381_T6` invocation:
+`PoseidonT6(R.u, R.v, pk.u, pk.v, msg, 0)` — five inputs, one hash.
+The t=6 Poseidon with RF=8, RP=60 has ~1 632 constraints, but eliminates
+three intermediate hash outputs and their wiring overhead, yielding a net
+reduction.
+
+**Constants:** Poseidon T6 round constants (408 values) and the 6×6 MDS
+matrix were generated with `generate_parameters_grain.sage` and are
+inlined directly into `poseidon_bls12_381_t6.circom`. All three security
+algorithms (counting, interpolation, side-channel) pass.
+
+### Combined effect
+
+| Metric | Original | Optimised | Reduction |
+|--------|----------|-----------|-----------|
+| Wires | 18 112 | 12 601 | –31 % |
+| Constraints | ~12 600 | 12 600 | ~0 % (bottleneck is fixed-base muls) |
+| Dense matrix memory | ~20 GiB | ~14.2 GiB | –29 % |
+| Prover peak RAM | ~32 GiB (OOM) | ~14.2 GiB | –56 % |
+
+The constraint count did not drop proportionally because the two fixed-base
+scalar multiplications (`[r]·G` and `[S]·G`, each 254-bit) dominate: each
+instantiation contributes ~6 300 constraints regardless of the other
+circuit components. The memory reduction comes from fewer wires, which
+directly reduces the dense matrix dimensions (`n_wires × n_constraints ×
+32 bytes × 3 matrices`).
+
+### Prover-side memory fix
+
+Even with the optimised circuit, the original `prove_with_full_pk`
+implementation stored all 12 601 per-variable QAP polynomials (each
+16 384 × 32 bytes = 512 KiB) simultaneously alongside the dense matrices,
+peaking at ~32.7 GiB and OOM-killing at 12 601 wires.
+
+The fix (in `engine.rs` and `prover.rs`) builds each per-variable
+polynomial on-the-fly, accumulates it into the witness polynomial, and
+immediately drops it. The `domain_size()` method was added to the
+`QapEngine` trait so the prover knows the FFT domain size without
+materialising the full QAP. Peak RAM dropped to ~14.2 GiB (the dense
+matrices alone).
