@@ -1,7 +1,9 @@
 use ark_bls12_381::Fr;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use clap::{Parser, ValueEnum};
-use groth16_prover::ceremony::{FullProvingKey, ProvingKey};
+use groth16_prover::ceremony::{
+    single_party_ceremony_full_from_tw, FullProvingKey, ProvingKey, ToxicWaste,
+};
 use groth16_prover::circom_adapter::CircomCircuit;
 use groth16_prover::engine::{DenseQapEngine, FftQapEngine};
 use groth16_prover::prover::{NaiveProver, PippengerProver, Prover};
@@ -51,6 +53,18 @@ pub struct Args {
     #[arg(long, value_enum, default_value = "pippenger")]
     prover: ProverArg,
 
+    /// Build the witness polynomials on-the-fly using the group-element-only
+    /// FullProvingKey path (Implementation 5). This avoids materialising the
+    /// full `n_vars × domain_size` QAP matrix and is the default behaviour.
+    #[arg(long, group = "qap_mode")]
+    qap_on_fly: bool,
+
+    /// Use the legacy scalar-based QAP path (Implementation 4). The prover
+    /// re-evaluates the full QAP at `tau` on every proof instead of using the
+    /// pre-computed group elements from the proving key.
+    #[arg(long, group = "qap_mode")]
+    qap_not_on_fly: bool,
+
     /// Optional output file for the proof (raw binary).
     /// If omitted, the proof is printed as hex to stdout.
     #[arg(long, value_name = "FILE")]
@@ -88,27 +102,79 @@ pub fn run(args: Args) -> Result<(), Box<dyn Error>> {
     let witness_fr = &circuit.witness;
 
     // ------------------------------------------------------------------
-    // 3. Load proving key (or fall back to deterministic test values)
+    // 3. Decide which QAP construction mode to use
     // ------------------------------------------------------------------
-    let full_pk_opt: Option<FullProvingKey>;
-    let (tau, alpha, beta, gamma, delta) = if let Some(pk_path) = &args.proving_key {
-        let pk_bytes = fs::read(pk_path)
-            .map_err(|e| format!("failed to read proving key: {e}"))?;
+    // Default is on-the-fly (Implementation 5).  --qap-not-on-fly selects the
+    // legacy scalar-based path (Implementation 4).
+    let use_on_fly = !args.qap_not_on_fly;
+    if use_on_fly {
+        eprintln!("Using on-the-fly QAP construction (Implementation 5)");
+    } else {
+        eprintln!("Using legacy scalar-based QAP construction (Implementation 4)");
+    }
 
-        // Try the new FullProvingKey format first (group elements only, no scalars)
-        if let Ok(full_pk) = FullProvingKey::deserialize_compressed(&pk_bytes[..]) {
-            eprintln!("Loaded FullProvingKey from {} (group elements only, no scalars)", pk_path.display());
-            full_pk_opt = Some(full_pk);
-            // Scalars are intentionally left as dummy values — they are ignored
-            // when full_pk_opt is Some.
-            (Fr::from(0u64), Fr::from(0u64), Fr::from(0u64), Fr::from(0u64), Fr::from(0u64))
+    // ------------------------------------------------------------------
+    // 4. Load or build the right proving artifact
+    // ------------------------------------------------------------------
+    let n_public = (1 + circuit.n_pub_out + circuit.n_pub_in) as usize;
+    let dummy_scalars = (
+        Fr::from(0u64),
+        Fr::from(0u64),
+        Fr::from(0u64),
+        Fr::from(0u64),
+        Fr::from(0u64),
+    );
+    let (full_pk_opt, scalars) = if use_on_fly {
+        // On-the-fly path: FullProvingKey (group elements only).  If the user
+        // supplied a .pk, load it; otherwise generate one from the deterministic
+        // test values (dev-only fallback), using the same engine as the proof.
+        let full_pk = if let Some(pk_path) = &args.proving_key {
+            let pk_bytes =
+                fs::read(pk_path).map_err(|e| format!("failed to read proving key: {e}"))?;
+            let full_pk = FullProvingKey::deserialize_compressed(&pk_bytes[..]).map_err(|e| {
+                format!(
+                    "failed to deserialize FullProvingKey: {e:?}. \
+If your proving key is a legacy scalar-based key, use --qap-not-on-fly."
+                )
+            })?;
+            eprintln!(
+                "Loaded FullProvingKey from {} (group elements only, no scalars)",
+                pk_path.display()
+            );
+            full_pk
         } else {
-            // Fall back to the legacy scalar-based ProvingKey format
-            let pk = ProvingKey::deserialize_compressed(&pk_bytes[..])
-                .map_err(|e| format!("failed to deserialize proving key: {e:?} \
-(Tried both FullProvingKey and legacy ProvingKey formats.)"))?;
+            eprintln!("Warning: no proving key provided; generating deterministic FullProvingKey (dev only)");
+            let tw = ToxicWaste::deterministic();
+            match args.engine {
+                EngineArg::Dense => {
+                    let engine = DenseQapEngine::new();
+                    single_party_ceremony_full_from_tw(
+                        &engine, &circuit.l, &circuit.r, &circuit.o, n_public, tw,
+                    )
+                    .0
+                }
+                EngineArg::Fft => {
+                    let engine = FftQapEngine::new();
+                    single_party_ceremony_full_from_tw(
+                        &engine, &circuit.l, &circuit.r, &circuit.o, n_public, tw,
+                    )
+                    .0
+                }
+            }
+        };
+        (Some(full_pk), dummy_scalars)
+    } else {
+        // Legacy scalar-based path (Implementation 4): need toxic-waste scalars.
+        let scalars = if let Some(pk_path) = &args.proving_key {
+            let pk_bytes =
+                fs::read(pk_path).map_err(|e| format!("failed to read proving key: {e}"))?;
+            let pk = ProvingKey::deserialize_compressed(&pk_bytes[..]).map_err(|e| {
+                format!(
+                    "failed to deserialize legacy ProvingKey: {e:?}. \
+If your proving key is a FullProvingKey, use --qap-on-fly (or omit the flag)."
+                )
+            })?;
             eprintln!("Loaded legacy proving key from {}", pk_path.display());
-            full_pk_opt = None;
             (
                 pk.toxic_waste.tau,
                 pk.toxic_waste.alpha,
@@ -116,65 +182,88 @@ pub fn run(args: Args) -> Result<(), Box<dyn Error>> {
                 pk.toxic_waste.gamma,
                 pk.toxic_waste.delta,
             )
-        }
-    } else {
-        eprintln!("Warning: no proving key provided; using deterministic test toxic waste (dev only)");
-        full_pk_opt = None;
-        (
-            Fr::from(3u64),
-            Fr::from(5u64),
-            Fr::from(7u64),
-            Fr::from(11u64),
-            Fr::from(13u64),
-        )
+        } else {
+            eprintln!(
+                "Warning: no proving key provided; using deterministic test toxic waste (dev only)"
+            );
+            (
+                Fr::from(3u64),
+                Fr::from(5u64),
+                Fr::from(7u64),
+                Fr::from(11u64),
+                Fr::from(13u64),
+            )
+        };
+        (None, scalars)
     };
 
     // ------------------------------------------------------------------
-    // 4. Select engine and prover based on CLI flags
+    // 5. Select engine and prover based on CLI flags
     // ------------------------------------------------------------------
+    let (tau, alpha, beta, gamma, delta) = scalars;
     let (proof, public_input) = match (args.engine, args.prover, full_pk_opt) {
-        // --- FullProvingKey path (no scalars) ---
+        // --- FullProvingKey path (on-the-fly, Implementation 5) ---
         (EngineArg::Dense, ProverArg::Naive, Some(full_pk)) => {
             let engine = DenseQapEngine::new();
             let prover = NaiveProver::new();
-            prover.prove_with_full_pk(&engine, &full_pk, &circuit.l, &circuit.r, &circuit.o, witness_fr)
+            prover.prove_with_full_pk(
+                &engine, &full_pk, &circuit.l, &circuit.r, &circuit.o, witness_fr,
+            )
         }
         (EngineArg::Dense, ProverArg::Pippenger, Some(full_pk)) => {
             let engine = DenseQapEngine::new();
             let prover = PippengerProver::new();
-            prover.prove_with_full_pk(&engine, &full_pk, &circuit.l, &circuit.r, &circuit.o, witness_fr)
+            prover.prove_with_full_pk(
+                &engine, &full_pk, &circuit.l, &circuit.r, &circuit.o, witness_fr,
+            )
         }
         (EngineArg::Fft, ProverArg::Naive, Some(full_pk)) => {
             let engine = FftQapEngine::new();
             let prover = NaiveProver::new();
-            prover.prove_with_full_pk(&engine, &full_pk, &circuit.l, &circuit.r, &circuit.o, witness_fr)
+            prover.prove_with_full_pk(
+                &engine, &full_pk, &circuit.l, &circuit.r, &circuit.o, witness_fr,
+            )
         }
         (EngineArg::Fft, ProverArg::Pippenger, Some(full_pk)) => {
             let engine = FftQapEngine::new();
             let prover = PippengerProver::new();
-            prover.prove_with_full_pk(&engine, &full_pk, &circuit.l, &circuit.r, &circuit.o, witness_fr)
+            prover.prove_with_full_pk(
+                &engine, &full_pk, &circuit.l, &circuit.r, &circuit.o, witness_fr,
+            )
         }
 
-        // --- Legacy scalar-based path ---
+        // --- Legacy scalar-based path (Implementation 4) ---
         (EngineArg::Dense, ProverArg::Naive, None) => {
             let engine = DenseQapEngine::new();
             let prover = NaiveProver::new();
-            prover.prove(&engine, &circuit.l, &circuit.r, &circuit.o, witness_fr, tau, alpha, beta, gamma, delta)
+            prover.prove(
+                &engine, &circuit.l, &circuit.r, &circuit.o, witness_fr, tau, alpha, beta, gamma,
+                delta,
+            )
         }
         (EngineArg::Dense, ProverArg::Pippenger, None) => {
             let engine = DenseQapEngine::new();
             let prover = PippengerProver::new();
-            prover.prove(&engine, &circuit.l, &circuit.r, &circuit.o, witness_fr, tau, alpha, beta, gamma, delta)
+            prover.prove(
+                &engine, &circuit.l, &circuit.r, &circuit.o, witness_fr, tau, alpha, beta, gamma,
+                delta,
+            )
         }
         (EngineArg::Fft, ProverArg::Naive, None) => {
             let engine = FftQapEngine::new();
             let prover = NaiveProver::new();
-            prover.prove(&engine, &circuit.l, &circuit.r, &circuit.o, witness_fr, tau, alpha, beta, gamma, delta)
+            prover.prove(
+                &engine, &circuit.l, &circuit.r, &circuit.o, witness_fr, tau, alpha, beta, gamma,
+                delta,
+            )
         }
         (EngineArg::Fft, ProverArg::Pippenger, None) => {
             let engine = FftQapEngine::new();
             let prover = PippengerProver::new();
-            prover.prove(&engine, &circuit.l, &circuit.r, &circuit.o, witness_fr, tau, alpha, beta, gamma, delta)
+            prover.prove(
+                &engine, &circuit.l, &circuit.r, &circuit.o, witness_fr, tau, alpha, beta, gamma,
+                delta,
+            )
         }
     };
 
@@ -184,16 +273,24 @@ pub fn run(args: Args) -> Result<(), Box<dyn Error>> {
     // 4. Serialize proof
     // ------------------------------------------------------------------
     let mut proof_bytes = Vec::new();
-    proof.a.serialize_compressed(&mut proof_bytes)
+    proof
+        .a
+        .serialize_compressed(&mut proof_bytes)
         .map_err(|e| format!("failed to serialize proof.a: {e:?}"))?;
-    proof.b.serialize_compressed(&mut proof_bytes)
+    proof
+        .b
+        .serialize_compressed(&mut proof_bytes)
         .map_err(|e| format!("failed to serialize proof.b: {e:?}"))?;
-    proof.c.serialize_compressed(&mut proof_bytes)
+    proof
+        .c
+        .serialize_compressed(&mut proof_bytes)
         .map_err(|e| format!("failed to serialize proof.c: {e:?}"))?;
 
     // Also serialize public input V
     let mut public_bytes = Vec::new();
-    public_input.v.serialize_compressed(&mut public_bytes)
+    public_input
+        .v
+        .serialize_compressed(&mut public_bytes)
         .map_err(|e| format!("failed to serialize public_input.v: {e:?}"))?;
 
     // ------------------------------------------------------------------
@@ -207,8 +304,12 @@ pub fn run(args: Args) -> Result<(), Box<dyn Error>> {
 
         // Also write public input alongside (same stem + ".pub")
         let pub_path = out_path.with_extension("pub");
-        fs::write(&pub_path, &public_bytes)
-            .map_err(|e| format!("failed to write public input to {}: {e}", pub_path.display()))?;
+        fs::write(&pub_path, &public_bytes).map_err(|e| {
+            format!(
+                "failed to write public input to {}: {e}",
+                pub_path.display()
+            )
+        })?;
         eprintln!("Public input written to {}", pub_path.display());
     } else {
         // Hex-encode to stdout

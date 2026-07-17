@@ -144,7 +144,7 @@ fn full_ceremony_prove_verify_roundtrip() {
         .stderr(predicate::str::contains("Proving key written to"))
         .stderr(predicate::str::contains("Verifying key written to"));
 
-    // 2. Prove with the generated proving key
+    // 2. Prove with the generated proving key (legacy scalar path — must opt in with --qap-not-on-fly)
     let mut cmd_prove = Command::cargo_bin("groth16-prover").unwrap();
     cmd_prove
         .arg("prove")
@@ -154,9 +154,16 @@ fn full_ceremony_prove_verify_roundtrip() {
         .arg(wtns.path())
         .arg("--proving-key")
         .arg(pk_file.path())
+        .arg("--qap-not-on-fly")
         .arg("--out")
         .arg(out_file.path());
-    cmd_prove.assert().success();
+    cmd_prove
+        .assert()
+        .success()
+        .stderr(predicate::str::contains(
+            "Using legacy scalar-based QAP construction",
+        ))
+        .stderr(predicate::str::contains("Loaded legacy proving key"));
 
     // 3. Verify with the generated verifying key
     let pub_path = out_file.path().with_extension("pub");
@@ -296,7 +303,9 @@ fn prove_default_stdout() {
             // Should be 384 hex chars = 192 bytes (48 + 96 + 48)
             hex::decode(output.trim()).is_ok() && output.trim().len() == 384
         }))
-        .stderr(predicate::str::contains("Loaded circuit: 8 wires, 3 constraints"))
+        .stderr(predicate::str::contains(
+            "Loaded circuit: 8 wires, 3 constraints",
+        ))
         .stderr(predicate::str::contains("Proof generated successfully."));
 }
 
@@ -412,6 +421,120 @@ fn prove_fft_pippenger_explicit() {
         }));
 }
 
+#[test]
+fn prove_qap_on_fly_explicit() {
+    let (r1cs, wtns) = create_test_artifacts();
+
+    let mut cmd = Command::cargo_bin("groth16-prover").unwrap();
+    cmd.arg("prove")
+        .arg("--circuit")
+        .arg(r1cs.path())
+        .arg("--witness")
+        .arg(wtns.path())
+        .arg("--qap-on-fly");
+
+    cmd.assert()
+        .success()
+        .stderr(predicate::str::contains(
+            "Using on-the-fly QAP construction",
+        ))
+        .stdout(predicate::function(|output: &str| {
+            hex::decode(output.trim()).is_ok() && output.trim().len() == 384
+        }));
+}
+
+#[test]
+fn prove_qap_not_on_fly() {
+    let (r1cs, wtns) = create_test_artifacts();
+
+    let mut cmd = Command::cargo_bin("groth16-prover").unwrap();
+    cmd.arg("prove")
+        .arg("--circuit")
+        .arg(r1cs.path())
+        .arg("--witness")
+        .arg(wtns.path())
+        .arg("--qap-not-on-fly");
+
+    cmd.assert()
+        .success()
+        .stderr(predicate::str::contains(
+            "Using legacy scalar-based QAP construction",
+        ))
+        .stderr(predicate::str::contains(
+            "Warning: no proving key provided; using deterministic test toxic waste",
+        ))
+        .stdout(predicate::function(|output: &str| {
+            hex::decode(output.trim()).is_ok() && output.trim().len() == 384
+        }));
+}
+
+#[test]
+fn prove_qap_on_fly_with_legacy_pk_suggests_not_on_fly() {
+    let (r1cs, wtns) = create_test_artifacts();
+    let pk_file = NamedTempFile::new().unwrap();
+    let vk_file = NamedTempFile::new().unwrap();
+
+    // Legacy ceremony produces a scalar ProvingKey
+    let mut cmd_ceremony = Command::cargo_bin("groth16-prover").unwrap();
+    cmd_ceremony
+        .arg("ceremony")
+        .arg("--circuit")
+        .arg(r1cs.path())
+        .arg("--proving-key")
+        .arg(pk_file.path())
+        .arg("--verifying-key")
+        .arg(vk_file.path());
+    cmd_ceremony.assert().success();
+
+    // Default prove expects a FullProvingKey and should give a helpful error
+    let mut cmd = Command::cargo_bin("groth16-prover").unwrap();
+    cmd.arg("prove")
+        .arg("--circuit")
+        .arg(r1cs.path())
+        .arg("--witness")
+        .arg(wtns.path())
+        .arg("--proving-key")
+        .arg(pk_file.path());
+
+    cmd.assert().failure().stderr(predicate::str::contains(
+        "If your proving key is a legacy scalar-based key, use --qap-not-on-fly.",
+    ));
+}
+
+#[test]
+fn prove_qap_not_on_fly_with_full_pk_suggests_on_fly() {
+    let (r1cs, wtns) = create_test_artifacts();
+    let pk_file = NamedTempFile::new().unwrap();
+    let vk_file = NamedTempFile::new().unwrap();
+
+    // Dev ceremony produces a FullProvingKey
+    let mut cmd_ceremony = Command::cargo_bin("groth16-prover").unwrap();
+    cmd_ceremony
+        .arg("ceremony-dev")
+        .arg("--circuit")
+        .arg(r1cs.path())
+        .arg("--proving-key")
+        .arg(pk_file.path())
+        .arg("--verifying-key")
+        .arg(vk_file.path());
+    cmd_ceremony.assert().success();
+
+    // Legacy path with a FullProvingKey should give a helpful error
+    let mut cmd = Command::cargo_bin("groth16-prover").unwrap();
+    cmd.arg("prove")
+        .arg("--circuit")
+        .arg(r1cs.path())
+        .arg("--witness")
+        .arg(wtns.path())
+        .arg("--proving-key")
+        .arg(pk_file.path())
+        .arg("--qap-not-on-fly");
+
+    cmd.assert().failure().stderr(predicate::str::contains(
+        "If your proving key is a FullProvingKey, use --qap-on-fly (or omit the flag).",
+    ));
+}
+
 // ------------------------------------------------------------------
 // Parity: all four combinations produce valid proofs
 // ------------------------------------------------------------------
@@ -462,18 +585,18 @@ fn prove_all_combinations_produce_valid_hex() {
 fn prove_missing_circuit() {
     let mut cmd = Command::cargo_bin("groth16-prover").unwrap();
     cmd.arg("prove").arg("--witness").arg("/tmp/dummy.wtns");
-    cmd.assert()
-        .failure()
-        .stderr(predicate::str::contains("required arguments were not provided"));
+    cmd.assert().failure().stderr(predicate::str::contains(
+        "required arguments were not provided",
+    ));
 }
 
 #[test]
 fn prove_missing_witness() {
     let mut cmd = Command::cargo_bin("groth16-prover").unwrap();
     cmd.arg("prove").arg("--circuit").arg("/tmp/dummy.r1cs");
-    cmd.assert()
-        .failure()
-        .stderr(predicate::str::contains("required arguments were not provided"));
+    cmd.assert().failure().stderr(predicate::str::contains(
+        "required arguments were not provided",
+    ));
 }
 
 #[test]
@@ -615,18 +738,18 @@ fn verify_all_combinations() {
 fn verify_missing_proof() {
     let mut cmd = Command::cargo_bin("groth16-prover").unwrap();
     cmd.arg("verify").arg("--public").arg("/tmp/dummy.pub");
-    cmd.assert()
-        .failure()
-        .stderr(predicate::str::contains("required arguments were not provided"));
+    cmd.assert().failure().stderr(predicate::str::contains(
+        "required arguments were not provided",
+    ));
 }
 
 #[test]
 fn verify_missing_public() {
     let mut cmd = Command::cargo_bin("groth16-prover").unwrap();
     cmd.arg("verify").arg("--proof").arg("/tmp/dummy.bin");
-    cmd.assert()
-        .failure()
-        .stderr(predicate::str::contains("required arguments were not provided"));
+    cmd.assert().failure().stderr(predicate::str::contains(
+        "required arguments were not provided",
+    ));
 }
 
 #[test]
@@ -643,9 +766,9 @@ fn verify_invalid_proof_length() {
         .arg(proof_file.path())
         .arg("--public")
         .arg(pub_file.path());
-    cmd.assert()
-        .failure()
-        .stderr(predicate::str::contains("proof file must be exactly 192 bytes"));
+    cmd.assert().failure().stderr(predicate::str::contains(
+        "proof file must be exactly 192 bytes",
+    ));
 }
 
 #[test]
@@ -675,9 +798,9 @@ fn verify_invalid_public_length() {
         .arg(out_file.path())
         .arg("--public")
         .arg(bad_pub.path());
-    cmd.assert()
-        .failure()
-        .stderr(predicate::str::contains("public-input file must be exactly 48 bytes"));
+    cmd.assert().failure().stderr(predicate::str::contains(
+        "public-input file must be exactly 48 bytes",
+    ));
 }
 
 #[test]
@@ -700,10 +823,10 @@ fn verify_tampered_public_input_fails() {
     // Tamper with the public input file: replace it with the G1 generator
     // (a different valid point that will cause the pairing check to fail)
     let g1_generator: [u8; 48] = [
-        0x97, 0xf1, 0xd3, 0xa7, 0x31, 0x97, 0xd7, 0x94, 0x26, 0x95, 0x63, 0x8c,
-        0x4f, 0xa9, 0xac, 0x0f, 0xc3, 0x68, 0x8c, 0x4f, 0x97, 0x74, 0xb9, 0x05,
-        0xa1, 0x4e, 0x3a, 0x3f, 0x17, 0x1b, 0xac, 0x58, 0x6c, 0x55, 0xe8, 0x3f,
-        0xf9, 0x7a, 0x1a, 0xef, 0xfb, 0x3a, 0xf0, 0x0a, 0xdb, 0x22, 0xc6, 0xbb,
+        0x97, 0xf1, 0xd3, 0xa7, 0x31, 0x97, 0xd7, 0x94, 0x26, 0x95, 0x63, 0x8c, 0x4f, 0xa9, 0xac,
+        0x0f, 0xc3, 0x68, 0x8c, 0x4f, 0x97, 0x74, 0xb9, 0x05, 0xa1, 0x4e, 0x3a, 0x3f, 0x17, 0x1b,
+        0xac, 0x58, 0x6c, 0x55, 0xe8, 0x3f, 0xf9, 0x7a, 0x1a, 0xef, 0xfb, 0x3a, 0xf0, 0x0a, 0xdb,
+        0x22, 0xc6, 0xbb,
     ];
     let pub_path = out_file.path().with_extension("pub");
     fs::write(&pub_path, &g1_generator).unwrap();
@@ -804,7 +927,9 @@ fn phase2_new_creates_accumulator() {
 
     cmd.assert()
         .success()
-        .stderr(predicate::str::contains("Loaded circuit: 8 wires, 3 constraints"))
+        .stderr(predicate::str::contains(
+            "Loaded circuit: 8 wires, 3 constraints",
+        ))
         .stderr(predicate::str::contains("Accumulator initialized"))
         .stderr(predicate::str::contains("Initial accumulator written to"));
 
@@ -860,7 +985,9 @@ fn phase2_contribute_and_verify() {
     cmd_verify
         .assert()
         .success()
-        .stderr(predicate::str::contains("Accumulator is valid. All 1 contribution(s) passed verification."));
+        .stderr(predicate::str::contains(
+            "Accumulator is valid. All 1 contribution(s) passed verification.",
+        ));
 }
 
 #[test]
@@ -1072,11 +1199,7 @@ fn smt_missing_state_file() {
 #[test]
 fn compute_inputs_basic() {
     let transcript = NamedTempFile::new().unwrap();
-    fs::write(
-        transcript.path(),
-        "1 100\n2 200\n3 300\n",
-    )
-    .unwrap();
+    fs::write(transcript.path(), "1 100\n2 200\n3 300\n").unwrap();
     let out_file = NamedTempFile::new().unwrap();
 
     let mut cmd = Command::cargo_bin("groth16-prover").unwrap();

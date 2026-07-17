@@ -148,7 +148,8 @@ groth16-prover prove --circuit circuit.r1cs --witness witness.wtns --out proof.b
 3. Build the QAP polynomials. By default this uses `FftQapEngine` (FFT over roots of unity, `O(N log N)`); you can switch to `DenseQapEngine` (classical Lagrange interpolation, `O(N²)`) with `--engine dense`.
 4. Compute the quotient polynomial `h(x) = (l(x)·r(x) - o(x)) / T(x)`.
 5. Assemble the proof elements `A`, `B`, `C`. By default this uses `PippengerProver` (batched MSM, `O(n / log n)` group ops); you can switch to `NaiveProver` (scalar-by-scalar accumulation) with `--prover naive`.
-6. Serialize the proof and the public-input commitment using arkworks' compressed canonical format.
+6. Choose the QAP construction mode. By default the prover uses the group-element-only `FullProvingKey` path and builds the witness polynomials `l(x)`, `r(x)`, `o(x)` on-the-fly (Implementation 5). Use `--qap-not-on-fly` to force the legacy scalar-based QAP path (Implementation 4).
+7. Serialize the proof and the public-input commitment using arkworks' compressed canonical format.
 
 When `--out` is provided, two files are written:
 - `proof.bin` — the Groth16 proof (192 bytes: compressed G1 + G2 + G1)
@@ -224,6 +225,8 @@ groth16-prover prove --circuit c.r1cs --witness w.wtns --engine dense --prover n
 | `--proving-key FILE` | — | — | Proving key from ceremony (optional, dev fallback) |
 | `--engine ENGINE` | `dense`, `fft` | `fft` | QAP construction engine |
 | `--prover PROVER` | `naive`, `pippenger` | `pippenger` | MSM strategy for proof assembly |
+| `--qap-on-fly` | — | *default* | Use the group-element-only path with on-the-fly QAP construction (Implementation 5) |
+| `--qap-not-on-fly` | — | — | Use the legacy scalar-based QAP path (Implementation 4) |
 | `--out FILE` | — | — | Output file (raw binary); public input written to `FILE.pub` |
 | **Verify** |
 | `--proof FILE` | — | *required* | Path to proof file (192 bytes) |
@@ -598,6 +601,10 @@ The integration tests in `tests/cli.rs` exercise every command via `assert_cmd`.
 | `prove_naive_prover` | `--prover naive` produces valid hex output |
 | `prove_dense_naive` | `--engine dense --prover naive` combination works |
 | `prove_fft_pippenger_explicit` | `--engine fft --prover pippenger` combination works |
+| `prove_qap_on_fly_explicit` | `--qap-on-fly` produces a valid proof |
+| `prove_qap_not_on_fly` | `--qap-not-on-fly` produces a valid proof |
+| `prove_qap_on_fly_with_legacy_pk_suggests_not_on_fly` | Helpful error when a legacy `ProvingKey` is used without the flag |
+| `prove_qap_not_on_fly_with_full_pk_suggests_on_fly` | Helpful error when a `FullProvingKey` is used with `--qap-not-on-fly` |
 | `prove_all_combinations_produce_valid_hex` | All 4 engine/prover combinations produce 384 hex chars |
 | `verify_valid_proof` | `verify` reports `VALID` for a freshly generated proof |
 | `verify_all_combinations` | Every engine/prover combination produces a verifiable proof |

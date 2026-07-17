@@ -47,13 +47,18 @@ impl CircomCircuit {
     }
 
     /// Load a witness from raw `.wtns` bytes.
-    pub fn load_witness_from_bytes(&mut self, data: &[u8], field_size: usize) -> Result<(), String> {
-        let witness = Self::parse_wtns(data, field_size)
-            .map_err(|e| format!("Parse error: {:?}", e))?;
+    pub fn load_witness_from_bytes(
+        &mut self,
+        data: &[u8],
+        field_size: usize,
+    ) -> Result<(), String> {
+        let witness =
+            Self::parse_wtns(data, field_size).map_err(|e| format!("Parse error: {:?}", e))?;
         if witness.len() != self.n_wires as usize {
             return Err(format!(
                 "Witness length {} does not match n_wires {}",
-                witness.len(), self.n_wires
+                witness.len(),
+                self.n_wires
             ));
         }
         self.witness = witness;
@@ -94,14 +99,12 @@ impl CircomCircuit {
             rest = r;
         }
 
-        let header = header.ok_or_else(|| nom::Err::Error(nom::error::Error::new(
-            data,
-            nom::error::ErrorKind::Tag,
-        )))?;
-        let constraints = constraints.ok_or_else(|| nom::Err::Error(nom::error::Error::new(
-            data,
-            nom::error::ErrorKind::Tag,
-        )))?;
+        let header = header.ok_or_else(|| {
+            nom::Err::Error(nom::error::Error::new(data, nom::error::ErrorKind::Tag))
+        })?;
+        let constraints = constraints.ok_or_else(|| {
+            nom::Err::Error(nom::error::Error::new(data, nom::error::ErrorKind::Tag))
+        })?;
 
         let n_constraints = header.n_constraints as usize;
         let n_wires = header.n_wires as usize;
@@ -138,7 +141,10 @@ impl CircomCircuit {
         })
     }
 
-    fn parse_wtns(data: &[u8], field_size: usize) -> Result<Vec<Fr>, nom::Err<nom::error::Error<&[u8]>>> {
+    fn parse_wtns(
+        data: &[u8],
+        field_size: usize,
+    ) -> Result<Vec<Fr>, nom::Err<nom::error::Error<&[u8]>>> {
         let (rest, _) = parse_wtns_header(data)?;
 
         let mut witness = Vec::new();
@@ -199,16 +205,19 @@ fn parse_header_section(input: &[u8]) -> IResult<&[u8], R1csHeader> {
     let (input, n_prv_in) = le_u32(input)?;
     let (input, _n_labels) = le_u64(input)?;
     let (input, n_constraints) = le_u32(input)?;
-    Ok((input, R1csHeader {
-        field_size,
-        prime: prime.to_vec(),
-        n_wires,
-        n_pub_out,
-        n_pub_in,
-        n_prv_in,
-        _n_labels,
-        n_constraints,
-    }))
+    Ok((
+        input,
+        R1csHeader {
+            field_size,
+            prime: prime.to_vec(),
+            n_wires,
+            n_pub_out,
+            n_pub_in,
+            n_prv_in,
+            _n_labels,
+            n_constraints,
+        },
+    ))
 }
 
 /// One constraint is three sparse vectors (A, B, C).
@@ -231,26 +240,26 @@ fn parse_constraints_section(input: &[u8]) -> IResult<&[u8], R1csConstraints> {
     Ok((&[], R1csConstraints(constraints)))
 }
 
-    fn parse_sparse_vector(input: &[u8]) -> IResult<&[u8], Vec<(u32, Fr)>> {
-        let (input, n_terms) = le_u32(input)?;
-        let mut rest = input;
-        let mut terms = Vec::with_capacity(n_terms as usize);
-        for _ in 0..n_terms {
-            let (r, wire) = le_u32(rest)?;
-            // In Circom .r1cs, values are stored as 32-byte field elements (BLS12-381).
-            let field_size = 32usize;
-            let (r, val_bytes) = take(field_size)(r)?;
-            let val = parse_field_element(val_bytes);
-            rest = r;
-            terms.push((wire, val));
-        }
-        Ok((rest, terms))
+fn parse_sparse_vector(input: &[u8]) -> IResult<&[u8], Vec<(u32, Fr)>> {
+    let (input, n_terms) = le_u32(input)?;
+    let mut rest = input;
+    let mut terms = Vec::with_capacity(n_terms as usize);
+    for _ in 0..n_terms {
+        let (r, wire) = le_u32(rest)?;
+        // In Circom .r1cs, values are stored as 32-byte field elements (BLS12-381).
+        let field_size = 32usize;
+        let (r, val_bytes) = take(field_size)(r)?;
+        let val = parse_field_element(val_bytes);
+        rest = r;
+        terms.push((wire, val));
     }
+    Ok((rest, terms))
+}
 
-    /// Parse a 32-byte BLS12-381 field element into `Fr`.
-    fn parse_field_element(bytes: &[u8]) -> Fr {
-        Fr::from_le_bytes_mod_order(bytes)
-    }
+/// Parse a 32-byte BLS12-381 field element into `Fr`.
+fn parse_field_element(bytes: &[u8]) -> Fr {
+    Fr::from_le_bytes_mod_order(bytes)
+}
 
 // ------------------------------------------------------------------
 // .wtns parser helpers (nom)
@@ -270,7 +279,7 @@ fn parse_wtns_header(input: &[u8]) -> IResult<&[u8], ()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::r1cs::{L, R, O, WITNESS};
+    use crate::r1cs::{L, O, R, WITNESS};
 
     /// Build a synthetic `.r1cs`-style byte stream for our 3-constraint,
     /// 8-wire circuit. All non-zero coefficients are 1.
@@ -278,8 +287,8 @@ mod tests {
         let mut out = Vec::new();
         // File header
         out.extend_from_slice(b"r1cs");
-        out.extend_from_slice(&1u32.to_le_bytes());       // version
-        out.extend_from_slice(&2u32.to_le_bytes());       // n_sections
+        out.extend_from_slice(&1u32.to_le_bytes()); // version
+        out.extend_from_slice(&2u32.to_le_bytes()); // n_sections
 
         // Section 1: Header
         let field_size = 32u32;
@@ -300,7 +309,7 @@ mod tests {
         header.extend_from_slice(&n_labels.to_le_bytes());
         header.extend_from_slice(&n_constraints.to_le_bytes());
 
-        out.extend_from_slice(&1u32.to_le_bytes());       // section type
+        out.extend_from_slice(&1u32.to_le_bytes()); // section type
         out.extend_from_slice(&(header.len() as u64).to_le_bytes());
         out.extend_from_slice(&header);
 
@@ -336,7 +345,7 @@ mod tests {
         write_vec(&[(7, 1)]); // B
         write_vec(&[(1, 1)]); // C
 
-        out.extend_from_slice(&2u32.to_le_bytes());       // section type
+        out.extend_from_slice(&2u32.to_le_bytes()); // section type
         out.extend_from_slice(&(constraints.len() as u64).to_le_bytes());
         out.extend_from_slice(&constraints);
 
@@ -346,8 +355,8 @@ mod tests {
     fn build_synthetic_wtns() -> Vec<u8> {
         let mut out = Vec::new();
         out.extend_from_slice(b"wtns");
-        out.extend_from_slice(&1u32.to_le_bytes());   // version
-        out.extend_from_slice(&2u32.to_le_bytes());   // n_sections
+        out.extend_from_slice(&1u32.to_le_bytes()); // version
+        out.extend_from_slice(&2u32.to_le_bytes()); // n_sections
 
         // Section 1: Header
         let field_size = 32u32;
@@ -389,9 +398,27 @@ mod tests {
         // Compare against hard-coded matrices
         for j in 0..3 {
             for i in 0..8 {
-                assert_eq!(circuit.l[j][i], Fr::from(L[j][i]), "L[{}][{}] mismatch", j, i);
-                assert_eq!(circuit.r[j][i], Fr::from(R[j][i]), "R[{}][{}] mismatch", j, i);
-                assert_eq!(circuit.o[j][i], Fr::from(O[j][i]), "O[{}][{}] mismatch", j, i);
+                assert_eq!(
+                    circuit.l[j][i],
+                    Fr::from(L[j][i]),
+                    "L[{}][{}] mismatch",
+                    j,
+                    i
+                );
+                assert_eq!(
+                    circuit.r[j][i],
+                    Fr::from(R[j][i]),
+                    "R[{}][{}] mismatch",
+                    j,
+                    i
+                );
+                assert_eq!(
+                    circuit.o[j][i],
+                    Fr::from(O[j][i]),
+                    "O[{}][{}] mismatch",
+                    j,
+                    i
+                );
             }
         }
     }
@@ -414,5 +441,98 @@ mod tests {
 
         let expected: Vec<Fr> = WITNESS.iter().map(|&v| Fr::from(v)).collect();
         assert_eq!(circuit.witness, expected);
+    }
+
+    /// Implementation 5 parity: Circom-loaded circuit + FullProvingKey must
+    /// produce the same proof as the legacy scalar path.
+    #[test]
+    fn test_circom_full_pk_matches_scalar_path() {
+        use crate::ceremony::{single_party_ceremony_full_from_tw, ToxicWaste};
+        use crate::engine::FftQapEngine;
+        use crate::prover::{NaiveProver, PippengerProver, Prover};
+
+        let r1cs_bytes = build_synthetic_r1cs();
+        let wtns_bytes = build_synthetic_wtns();
+
+        let mut circuit = CircomCircuit::parse_r1cs(&r1cs_bytes).unwrap();
+        circuit.load_witness_from_bytes(&wtns_bytes, 32).unwrap();
+
+        let engine = FftQapEngine::new();
+        let tw = ToxicWaste::deterministic();
+        // Circom witness ordering: constant (1), public outputs, public inputs, private inputs, intermediates.
+        // Synthetic circuit: n_pub_out = 1, n_pub_in = 0, n_prv_in = 4, plus 2 intermediates = 8 wires.
+        let n_public = 1 + circuit.n_pub_out as usize + circuit.n_pub_in as usize;
+
+        // Legacy scalar path
+        let naive = NaiveProver::new();
+        let (proof_scalar, public_scalar) = naive.prove(
+            &engine,
+            &circuit.l,
+            &circuit.r,
+            &circuit.o,
+            &circuit.witness,
+            tw.tau,
+            tw.alpha,
+            tw.beta,
+            tw.gamma,
+            tw.delta,
+        );
+
+        // New FullProvingKey path (on-the-fly QAP construction)
+        let (full_pk, _vk) = single_party_ceremony_full_from_tw(
+            &engine, &circuit.l, &circuit.r, &circuit.o, n_public, tw,
+        );
+        let (proof_full, public_full) = naive.prove_with_full_pk(
+            &engine,
+            &full_pk,
+            &circuit.l,
+            &circuit.r,
+            &circuit.o,
+            &circuit.witness,
+        );
+
+        assert_eq!(
+            proof_scalar.a, proof_full.a,
+            "A must match between scalar and FullPK path"
+        );
+        assert_eq!(
+            proof_scalar.b, proof_full.b,
+            "B must match between scalar and FullPK path"
+        );
+        assert_eq!(
+            proof_scalar.c, proof_full.c,
+            "C must match between scalar and FullPK path"
+        );
+        assert_eq!(
+            public_scalar.v, public_full.v,
+            "V must match between scalar and FullPK path"
+        );
+
+        // Pippenger prover on the FullPK path must also match
+        let pippenger = PippengerProver::new();
+        let (proof_pipp, public_pipp) = pippenger.prove_with_full_pk(
+            &engine,
+            &full_pk,
+            &circuit.l,
+            &circuit.r,
+            &circuit.o,
+            &circuit.witness,
+        );
+        assert_eq!(
+            proof_full.a, proof_pipp.a,
+            "A must match between naive and Pippenger FullPK"
+        );
+        assert_eq!(
+            proof_full.b, proof_pipp.b,
+            "B must match between naive and Pippenger FullPK"
+        );
+        assert_eq!(
+            proof_full.c, proof_pipp.c,
+            "C must match between naive and Pippenger FullPK"
+        );
+        assert_eq!(
+            public_full.v, public_pipp.v,
+            "V must match between naive and Pippenger FullPK"
+        );
     }
 }
