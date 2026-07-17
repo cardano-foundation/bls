@@ -12,9 +12,10 @@
 4. [Step 0: Groth16 Implementation (Prerequisite)](#step-0-groth16-implementation-prerequisite)
 5. [Step 1: Predicate Proofs with Aiken](#step-1-predicate-proofs-with-aiken)
 6. [Step 2: Twisted ElGamal Extension](#step-2-twisted-elgamal-extension)
-7. [Compliance & Auditability](#compliance--auditability)
-8. [Threat Model & Deployment](#threat-model--deployment)
-9. [References](#references)
+7. [Step 3: Future Directions](#step-3-future-directions)
+8. [Compliance & Auditability](#compliance--auditability)
+9. [Threat Model & Deployment](#threat-model--deployment)
+10. [References](#references)
 
 ---
 
@@ -888,6 +889,66 @@ If you go this route, the composition is: **predicate proof for identity + ElGam
 
 ---
 
+## Step 3: Future Directions
+
+**Executive summary:** The Groth16-based design in Steps 0–2 provides practical, production-ready privacy today, but it relies on elliptic-curve cryptography that is not quantum-resistant. A long-term research direction is to complement or replace the zk-SNARK layer with **fully homomorphic encryption (FHE)** schemes that can evaluate predicates and proofs under encryption and remain secure against quantum adversaries.
+
+<details>
+<summary><b>Click to expand: FHE-Based, Quantum-Resistant Selective Disclosure</b></summary>
+
+### Why look beyond zk-SNARKs?
+
+| Concern | Groth16 / BLS12-381 | FHE-based alternative |
+|---------|---------------------|-----------------------|
+| **Quantum resistance** | ❌ Broken by Shor's algorithm on ECDLP | ✅ Lattice-based FHE is believed to be post-quantum |
+| **Predicate evaluation** | Prover computes predicate locally, verifier checks ZK proof | Predicate can be evaluated on encrypted credential fields by any party |
+| **Disclosure granularity** | Predicate result only | Predicate result only (or encrypted result) |
+| **Computational cost** | Fast proofs, cheap on-chain verification | Heavy ciphertext operations; practical only for simple predicates today |
+| **Maturity** | Production-ready | Rapidly maturing, but not yet ready for resource-constrained on-chain verification |
+
+### Relevant research
+
+1. **LACTv2** — a lattice-based anonymous credential protocol with attribute-hiding selective disclosure.
+
+   > https://github.com/jaymine/LACTv2
+
+   LACTv2 demonstrates how to issue credentials, selectively disclose attributes, and prove predicates using lattice primitives rather than elliptic-curve pairings. It is a concrete open-source reference for building selective disclosure without relying on ECDLP hardness, making it a candidate building block for a quantum-resistant version of this design.
+
+2. **A. De Salve, P. Mori, and L. Ricci, "A fully homomorphic encryption based scheme for verifiable credential selective disclosure," *IET Information Security*, 2018. DOI: [10.1049/iet-ifs.2018.5491](https://dl.acm.org/doi/10.1049/iet-ifs.2018.5491)**
+
+   > https://dl.acm.org/doi/10.1049/iet-ifs.2018.5491
+
+   This paper proposes a selective-disclosure scheme where credential attributes are encrypted with fully homomorphic encryption, and a verifier can check encrypted predicates without learning the underlying attributes. The construction is specifically aimed at post-quantum security and provides an academic foundation for replacing the Groth16 predicate proof with an FHE-based predicate check.
+
+### How it could fit into this design
+
+A future FHE layer could replace or augment the Step 1 predicate proof:
+
+```
+Current design (Step 1):
+  Credential fields → private inputs → Groth16 proof → on-chain pairing check
+
+FHE-augmented design:
+  Credential fields → encrypted with FHE public key
+                    → encrypted predicate evaluated by untrusted prover/verifier
+                    → encrypted result submitted to on-chain verifier
+                    → verifier decrypts only the predicate result (or checks a ZK proof of correct FHE evaluation)
+```
+
+**Practical path forward:**
+
+1. **Short term:** Keep the Groth16 / Aiken path for production deployments — it is fast, cheap to verify on-chain, and well-understood.
+2. **Medium term:** Monitor FHE proof systems (e.g., zk-FHE, FHE-SNARKs) that combine homomorphic evaluation with a succinct correctness proof. The on-chain verifier would check the succinct proof rather than evaluating FHE directly.
+3. **Long term:** If and when lattice-based FHE becomes cheap enough for on-chain verification, migrate predicate gates to an FHE-first construction. The high-level architecture (issuer, holder, Gate Script, redeemer) remains the same; only the cryptographic primitive inside the script changes.
+
+### Summary
+
+FHE-based selective disclosure is not yet a drop-in replacement for Groth16 on Cardano, but it is a **strategic future direction** for quantum resistance and for scenarios where the predicate itself should be evaluated on encrypted data by an untrusted party. The two references above provide both a concrete implementation starting point (LACTv2) and the theoretical basis (De Salve et al., 2018) for this research direction.
+
+</details>
+
+---
+
 ## Compliance & Auditability
 
 **Executive summary:** Privacy-by-default does not mean absence of oversight. Production deployments can layer compliance on top of the core proof-based authorization without weakening privacy. Three mechanisms are available: per-credential auditing (encrypt a viewing key to auditor keys at issuance, no per-transaction overhead), permissioned gates (KYC checks layered alongside the ZK proof), and emergency controls (revocation, pause, freeze, coercion resistance). An advanced Forensic Data Escrow allows governed conditional disclosure of encrypted metadata without exposing credential fields.
@@ -1007,3 +1068,14 @@ In all cases, the **Gate Script remains unchanged** — it validates only the pr
 5. Panther Protocol, "Programmable Privacy Is Live: Panther Protocol Deploys on Polygon," *Panther Protocol Blog*, May 2026. https://blog.pantherprotocol.io/programmable-privacy-is-live-panther-protocol-deploys-on-polygon/
 
    Introduces **programmable privacy** — confidential on-chain interactions with zero-knowledge credential verification. Insights absorbed into this design include the **UTxO-based anonymity set** (multiple locked UTxOs at the same script create a privacy pool where any valid proof can spend any UTxO), **local proof generation** (proofs generated in the holder's wallet, never on a server), and the principle that *"the protocol verifies only what's required — nothing more."* Also informs the **Forensic Data Escrow** concept for governed conditional disclosure.
+
+6. **LACTv2** — lattice-based anonymous credentials with selective attribute disclosure.
+   https://github.com/jaymine/LACTv2
+
+   A concrete open-source implementation of anonymous credentials built on lattice primitives rather than elliptic-curve pairings. It serves as a reference for a quantum-resistant alternative to the Groth16 credential layer used in Step 1.
+
+7. A. De Salve, P. Mori, and L. Ricci, "A fully homomorphic encryption based scheme for verifiable credential selective disclosure," *IET Information Security*, 2018. DOI: [10.1049/iet-ifs.2018.5491](https://dl.acm.org/doi/10.1049/iet-ifs.2018.5491)
+
+   https://dl.acm.org/doi/10.1049/iet-ifs.2018.5491
+
+   Proposes a selective-disclosure scheme where credential attributes are encrypted with fully homomorphic encryption and predicates are evaluated on encrypted data. The construction targets post-quantum security and provides the theoretical foundation for an FHE-based future direction (Step 3).
