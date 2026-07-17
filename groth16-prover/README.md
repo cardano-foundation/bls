@@ -1012,19 +1012,22 @@ The current crate is a **reference implementation** for correctness verification
 - **Benefit:** Amortises on-chain verification cost across N proofs — from O(N) pairing checks to O(1). Essential for rollup and batching use cases. Also enables incremental computation where each step's output feeds into the next.
 - **Reference:** [arkworks groth16::aggregate](https://docs.rs/ark-groth16/latest/ark_groth16/), [Nova](https://github.com/microsoft/Nova), [Zcash Halo2](https://github.com/zcash/halo2), [Pacifico](https://github.com/argumentcomputer/pacifico).
 
-### (l) Poseidon-based Merkle membership gadget
+### (l) Poseidon-based Merkle membership gadget ✅ DONE
 
-- **Current:** The only Merkle path verifier in the repo (`circom/Privacy/`) uses MiMC(x⁷) hashing, which is not the Poseidon hash used elsewhere on BLS12-381. There is no Poseidon-based Merkle membership circuit.
-- **Target:** A reusable Circom template `MerkleVerify(depth)` that, given a leaf, a root, and a path of `depth` sibling hashes, recomputes the root using `PoseidonBLS12_381` at each level and asserts equality with the public root.
-- **Approach:**
-  1. For each level `i` from 0 to `depth−1`: decide ordering (path bit `i` determines whether the running hash is left or right sibling), then compute `next = Poseidon(left, right)`.
-  2. Final signal `computed_root === root` — the root is the public input, the leaf and path are private inputs.
-  3. Constraint cost: ~250 constraints per level (Poseidon t=3) + ~1 constraint for the bit-select swap. Depth 20 ≈ 5 000 constraints; depth 32 ≈ 8 000 constraints.
-- **Sub-tasks:**
-  1. Write `MerkleVerify(depth)` template using `PoseidonBLS12_381` (t=3, existing).
-  2. Write a test circuit that pairs it with `PoseidonBLS12_381` for the leaf commitment and with `EdDSA_JubJubVerifier` for issuer signature — this is the full Step 1 predicate for selective-disclosure.
-  3. Validate end-to-end: compile → witness gen → ceremony-dev → prove → verify.
-- **Benefit:** Completes the final missing ingredient for the Path A selective-disclosure proof (`aiken/selective-disclosure/README.md`). Also reusable for any on-chain Merkle-proof use case (token airdrops, credential registries, etc.).
+- **Status:** Implemented end-to-end in `circom/PoseidonMerkle/`.
+- **What it does:** A reusable Circom template `PoseidonMerkle(depth)` proves that a leaf commitment `PoseidonBLS12_381(nullifier, nonce)` exists in a Merkle tree of the given depth, with only the tree root as a public input. The leaf secret, the path siblings, and the path directions are all private.
+- **Files:**
+  - `circom/PoseidonMerkle/poseidon_merkle.circom` — generic `PoseidonMerkle(depth)` template with `IfThenElse`, `SelectiveSwitch`, and Merkle walk using `PoseidonBLS12_381`.
+  - `circom/PoseidonMerkle/poseidon_merkle_depth2.circom` — top-level `PoseidonMerkle(2)` instantiation with public `digest`.
+  - `circom/PoseidonMerkle/helpers_py/poseidon_merkle.py` — Python helper for Poseidon hash, sparse Merkle tree, and `input.json` generation.
+  - `circom/PoseidonMerkle/README.md` — full pipeline documentation.
+- **Validation:**
+  - Compiled to 737 non-linear constraints / 1,914 wires for depth 2.
+  - Witness generated with `snarkjs`.
+  - Dev ceremony, proof production, and off-chain verification all pass via the Rust `groth16-prover` CLI.
+  - On-chain verification test passes in `aiken/groth16/lib/groth16/verifier.ak` (`test_verify_poseidon_merkle_depth2_proof`).
+- **Constraint cost:** ~250 constraints per level (Poseidon t=3) + ~1 constraint for the bit-select swap. Depth 2 = 737 constraints; depth 20 ≈ 5,000 constraints; depth 32 ≈ 8,000 constraints.
+- **Remaining:** Pair this gadget with `EdDSA_JubJubVerifier` for issuer signature to build the full Step 1 predicate for selective-disclosure.
 - **Reference:** [circomlib MerkleTree](https://github.com/iden3/circomlib/blob/master/circuits/merkleTree.circom) uses a depth-parameterised template with MiMC; the same structure applies with Poseidon substituted in. [Poseidon hash](https://www.poseidon-hash.info/) recommends t=3 for binary tree hashing (two inputs + capacity).
 
 </details>
