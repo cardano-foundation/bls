@@ -33,3 +33,7 @@ path = "src/bin/benchmark_circom.rs"
 [[bin]]
 name = "benchmark_privacy"
 path = "src/bin/benchmark_privacy.rs"
+
+[[bin]]
+name = "benchmark_circom_full_pk"
+path = "src/bin/benchmark_circom_full_pk.rs"

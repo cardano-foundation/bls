@@ -219,7 +219,7 @@ cargo run --release -- verify \
   --verifying-key /tmp/multiplier.vk
 ```
 
-Other engine / prover combinations can be selected via `--engine dense|fft` and `--prover naive|pippenger`.
+Other engine / prover combinations can be selected via `--engine dense|fft` and `--prover naive|pippenger`.  QAP construction mode can be selected with `--qap-on-fly` (default, Implementation 5) or `--qap-not-on-fly` (Implementation 4).
 
 #### Export verifying key to Aiken
 
@@ -707,19 +707,179 @@ cargo test circom_adapter
 cargo run --bin benchmark_circom --release
 ```
 
-### CLI (Implementation 4 in practice)
+### CLI (Implementation 4 / 5 in practice)
 
-The `groth16-prover-cli` crate wraps the Circom adapter into a command-line tool:
+The `groth16-prover-cli` crate wraps the Circom adapter into a command-line tool. By default it uses the on-the-fly `FullProvingKey` path (Implementation 5); add `--qap-not-on-fly` to force the legacy scalar-based path (Implementation 4):
 
 ```bash
 cd groth16-prover/cli
+
+# Default: Implementation 5 (on-the-fly, generates a deterministic FullProvingKey if none is supplied)
 cargo run --release -- prove \
   --circuit ../circom/SimpleExample/multiplier.r1cs \
   --witness ../circom/SimpleExample/witness.wtns \
   --out /tmp/proof.bin
+
+# Explicit Implementation 4: legacy scalar-based path
+cargo run --release -- prove \
+  --circuit ../circom/SimpleExample/multiplier.r1cs \
+  --witness ../circom/SimpleExample/witness.wtns \
+  --qap-not-on-fly \
+  --out /tmp/proof_impl4.bin
 ```
 
-This uses `FftQapEngine` + `PippengerProver` under the hood and outputs a standard arkworks-serialized proof. See [`cli/README.md`](cli/README.md) for details.
+Both use `FftQapEngine` + `PippengerProver` by default and output a standard arkworks-serialized proof. See [`cli/README.md`](cli/README.md) for details.
+
+</details>
+
+---
+
+## Implementation 5 (Circom adapter + FullProvingKey + on-the-fly QAP construction)
+
+<details>
+<summary><b>Step 5.1 — click to expand</b></summary>
+
+Implementation 5 combines the **Circom adapter** from Implementation 4 with the **group-element-only `FullProvingKey` ceremony** and an **on-the-fly QAP construction** that builds the witness polynomials `l(x)`, `r(x)`, `o(x)` without ever materialising the full `n_vars × domain_size` QAP matrix.
+
+### What it adds
+
+| Concern | Implementation 4 (scalar path) | Implementation 5 (FullProvingKey path) | Why it matters |
+|---------|-------------------------------|----------------------------------------|----------------|
+| **Circuit source** | Parsed from `.r1cs` | Parsed from `.r1cs` | Reuses the `circom_adapter` |
+| **Witness source** | Parsed from `.wtns` | Parsed from `.wtns` | Reuses the `circom_adapter` |
+| **Trusted-setup artifact** | Raw scalars (`tau`, `alpha`, `beta`, `gamma`, `delta`) | `FullProvingKey` — group elements only | No secrets in the `.pk`; MPC-compatible |
+| **QAP construction** | `engine.build_qap()` returns all `u_i(x)`, `v_i(x)`, `w_i(x)` (O(n_vars × domain_size) memory) | Per-variable IFFT accumulates `l(x)`, `r(x)`, `o(x)` directly | Avoids OOM on large circuits (e.g. Blake2b-224, Ed25519) |
+| **Proof element `A`** | Scalar eval `l(tau)·G1 + alpha·G1` | MSM over `a_query` | Same math, faster group arithmetic |
+| **Proof element `B`** | Scalar eval `r(tau)·G2 + beta·G2` | MSM over `b_g2_query` | Same math, faster group arithmetic |
+| **Proof element `C`** | Scalar eval + Pippenger over `psi_i` | MSM over `c_query` + `h_query` | Pippenger batched MSM |
+| **Public input `V`** | Scalar eval + Pippenger over `psi_i` | MSM over `l_query` | Pippenger batched MSM |
+
+### On-the-fly QAP construction
+
+The standard FFT path in Implementation 2/4 first builds every QAP polynomial:
+
+```rust
+let (us, vs, ws) = engine.build_qap(l, r, o);
+```
+
+which stores `n_vars` dense polynomials of length `domain_size`. For a circuit with 78K wires and a domain size of 2^17, that is **~8.4 GB** of intermediate field data before the witness is even applied.
+
+Implementation 5 skips the explicit `u_i(x)`, `v_i(x)`, `w_i(x)` storage and instead accumulates the witness polynomials directly:
+
+```rust
+for i in 0..n_vars {
+    // L-column evaluations padded to domain_size
+    let mut evals: Vec<Fr> = (0..d_size)
+        .map(|j| if j < n_constraints { l[j].as_ref()[i].into() } else { Fr::zero() })
+        .collect();
+    // Convert evaluations to coefficients of u_i(x)
+    domain.ifft_in_place(&mut evals);
+    // Add witness[i] * u_i(x) to l(x)
+    for (k, &e) in evals.iter().enumerate() {
+        l_poly.coeffs[k] += e * witness[i];
+    }
+    // ... repeat for r(x) and o(x)
+}
+```
+
+The memory footprint drops from `O(n_vars × domain_size)` to `O(domain_size)` for the three witness polynomials, while the arithmetic cost stays the same (`n_vars` IFFTs of length `domain_size`).
+
+### Architecture
+
+```rust
+pub trait Prover {
+    fn prove_with_full_pk<E: QapEngine, T: Copy + Into<Fr>, ...>(
+        &self,
+        engine: &E,
+        full_pk: &FullProvingKey,
+        l: &[L], r: &[R], o: &[O],
+        witness: &[Fr],
+    ) -> (Proof, PublicInput);
+}
+```
+
+The two existing prover implementations now share this single production path:
+
+- `NaiveProver::prove_with_full_pk` — uses scalar-by-scalar accumulation over `a_query`, `b_g2_query`, `c_query`, `h_query` and `l_query`.
+- `PippengerProver::prove_with_full_pk` — uses `VariableBaseMSM::msm` for every MSM in the proof.
+
+Because the on-the-fly construction lives inside `prove_with_full_pk`, both provers automatically benefit from the memory reduction.
+
+### Parity assertions
+
+`cargo test` includes parity tests that assert bit-for-bit equality between the old scalar path and the new `FullProvingKey` path:
+
+- `test_naive_full_pk_matches_scalar_prover` — `NaiveProver` + `DenseQapEngine` hard-coded circuit.
+- `test_pippenger_full_pk_matches_scalar_prover` — `PippengerProver` + `FftQapEngine` hard-coded circuit.
+
+For the Circom adapter, the binary `print_circom_proof` already proves that parsed matrices produce the same proof as the hard-coded circuit. Implementation 5 adds:
+
+- `test_circom_full_pk_matches_scalar_path` — asserts that the Circom-loaded circuit produces the same proof under `prove_with_full_pk` as under the legacy scalar path.
+- `benchmark_circom_full_pk` — verifies that the Circom-loaded circuit produces valid proofs under `prove_with_full_pk`.
+
+### Commands to reproduce
+
+```bash
+cd groth16-prover
+
+# Run the Implementation 5 benchmark
+ cargo run --bin benchmark_circom_full_pk --release
+
+# Run the underlying parity tests
+cargo test test_naive_full_pk_matches_scalar_prover
+cargo test test_pippenger_full_pk_matches_scalar_prover
+
+# Run the Circom adapter proof printer
+cargo run --bin print_circom_proof
+
+# CLI: prove with the default on-the-fly path (Implementation 5)
+cd cli
+cargo run --release -- prove \
+  --circuit ../circom/SimpleExample/multiplier.r1cs \
+  --witness ../circom/SimpleExample/witness.wtns \
+  --proving-key /tmp/multiplier.pk \
+  --out /tmp/proof.bin
+
+# CLI: prove with the legacy scalar-based path (Implementation 4)
+cargo run --release -- prove \
+  --circuit ../circom/SimpleExample/multiplier.r1cs \
+  --witness ../circom/SimpleExample/witness.wtns \
+  --proving-key /tmp/multiplier_legacy.pk \
+  --qap-not-on-fly \
+  --out /tmp/proof_legacy.bin
+```
+
+> **Note:** The on-the-fly path is triggered only when the engine's `domain_size` exceeds `n_constraints`. For `FftQapEngine` this is always true (padding to the next power of two); for `DenseQapEngine` it is false, so the small dense test circuits keep the original pedagogical path.
+
+### Produce a proof in one line (Implementation 5)
+
+```rust
+use groth16_prover::{
+    ceremony::{single_party_ceremony_full_from_tw, ToxicWaste},
+    circom_adapter::CircomCircuit,
+    engine::FftQapEngine,
+    prover::{PippengerProver, Prover},
+};
+use ark_bls12_381::Fr;
+
+let mut circuit = CircomCircuit::from_r1cs("multiplier.r1cs").unwrap();
+circuit.load_witness("witness.wtns").unwrap();
+
+let engine = FftQapEngine::new();
+let tw = ToxicWaste::deterministic();
+// n_public = 1 (constant) + public outputs + public inputs
+let n_public = 1 + circuit.n_pub_out as usize + circuit.n_pub_in as usize;
+let (full_pk, _vk) = single_party_ceremony_full_from_tw(
+    &engine, &circuit.l, &circuit.r, &circuit.o, n_public, tw,
+);
+
+let prover = PippengerProver::new();
+let (proof, public_input) = prover.prove_with_full_pk(
+    &engine, &full_pk, &circuit.l, &circuit.r, &circuit.o, &circuit.witness,
+);
+```
+
+> **Note:** The resulting proof is **bit-for-bit identical** to what the legacy scalar path would produce for the same circuit and toxic waste, because the underlying Groth16 formulas are unchanged; only the internal QAP construction is reordered to save memory.
 
 </details>
 
@@ -880,18 +1040,20 @@ The current crate is a **reference implementation** for correctness verification
 
 Proof-production time for the hard-coded 3-constraint circuit (`x1·x2 = x5`, `x3·x4 = x6`, `x5·x6 = a`) on a single core, compiled with `--release`:
 
-| Implementation | Engine | Prover | Per-proof time | vs. Impl 1 | vs. Impl 2 |
-|----------------|--------|--------|---------------|------------|------------|
-| 1 (dense) | `DenseQapEngine` | `NaiveProver` | **3.87 ms** | — | — |
-| 2 (FFT) | `FftQapEngine` | `NaiveProver` | **4.04 ms** | 0.96× | — |
-| 3 (Pippenger) | `FftQapEngine` | `PippengerProver` | **3.30 ms** | 1.17× | 1.22× |
-| 4a (Circom dense) | `DenseQapEngine` | `NaiveProver` | **55.16 ms** | 0.07× | 0.07× |
-| 4b (Circom FFT) | `FftQapEngine` | `NaiveProver` | **94.30 ms** | 0.04× | 0.04× |
-| 4c (Circom Pippenger) | `FftQapEngine` | `PippengerProver` | **53.42 ms** | 0.07× | 0.08× |
+| Implementation | Engine | Prover | Per-proof time | vs. Impl 1 | vs. Impl 2 | vs. Impl 4c |
+|----------------|--------|--------|---------------|------------|------------|-------------|
+| 1 (dense) | `DenseQapEngine` | `NaiveProver` | **3.99 ms** | — | — | — |
+| 2 (FFT) | `FftQapEngine` | `NaiveProver` | **5.56 ms** | 0.72× | — | — |
+| 3 (Pippenger) | `FftQapEngine` | `PippengerProver` | **3.76 ms** | 1.06× | 1.48× | — |
+| 4a (Circom dense) | `DenseQapEngine` | `NaiveProver` | **3.90 ms** | 1.02× | 1.43× | — |
+| 4b (Circom FFT) | `FftQapEngine` | `NaiveProver` | **5.58 ms** | 0.72× | 1.00× | — |
+| 4c (Circom Pippenger) | `FftQapEngine` | `PippengerProver` | **4.00 ms** | 1.00× | 1.39× | — |
+| 5a (Circom Full PK) | `FftQapEngine` | `NaiveProver` | **1.74 ms** | 2.29× | 3.20× | 2.30× |
+| 5b (Circom Full PK Pippenger) | `FftQapEngine` | `PippengerProver` | **1.72 ms** | 2.32× | 3.23× | 2.33× |
 
-> **What the numbers mean.** For a 3-gate circuit the FFT overhead (padding to 4 points, extra IFFT steps) outweighs its `O(N log N)` advantage, so Implementation 2 is slightly slower than Implementation 1. Pippenger's batched MSM still yields a modest ~20 % speedup even at this tiny scale. On realistic circuits with hundreds or thousands of gates, the FFT advantage grows to ~1000× and Pippenger's MSM speedup grows to 5–10×.
+> **What the numbers mean.** For a 3-gate circuit the FFT overhead (padding to 4 points, extra IFFT steps) outweighs its `O(N log N)` advantage, so Implementation 2 is slightly slower than Implementation 1. Pippenger's batched MSM yields a modest ~48 % speedup over naive FFT at this tiny scale. The Circom adapter parser overhead is now negligible in `--release` mode, so Implementations 4a–4c match the hard-coded-matrix timings. Implementation 5 moves to the group-element-only `FullProvingKey` path: the on-the-fly QAP construction is negligible for 8 wires, but the pre-computed `a_query`, `b_g2_query`, `c_query` and `l_query` points eliminate the per-proof QAP evaluation at `tau` and make the proof roughly 2.3–3.3× faster than every scalar path. On realistic circuits with hundreds or thousands of gates, the combined FFT + FullProvingKey + Pippenger path is the fastest production configuration.
 >
-> **Implementation 4** numbers are from a debug build (the `.r1cs`/`.wtns` parser and dynamic allocation add overhead). In `--release` mode the Circom adapter is only marginally slower than the hard-coded path because the core QAP and prover code is identical; the extra cost is purely parsing and memory allocation.
+> **Implementation 5** numbers are from a `--release` build with the `FullProvingKey` generated once outside the timed loop. The per-proof cost includes on-the-fly IFFT of the three witness polynomials over the 4-point FFT domain plus the final MSMs.
 
 ### Privacy circuit (`Spend(depth)` — Merkle membership)
 
@@ -924,6 +1086,9 @@ cd groth16-prover
 # Toy circuit variants
 cargo run --bin benchmark_provers --release
 cargo run --bin benchmark_circom --release
+
+# Toy circuit through Circom adapter + FullProvingKey (Implementation 5)
+cargo run --bin benchmark_circom_full_pk --release
 
 # Privacy circuit (spend_depth2)
 cargo run --bin benchmark_privacy --release
