@@ -563,7 +563,6 @@ fn hash_ratio_challenge(
 mod tests {
     use super::*;
     use ark_ec::AffineRepr;
-    use crate::engine::FftQapEngine;
     #[allow(unused_imports)]
     use crate::r1cs::{L, O, R, WITNESS};
 
@@ -602,7 +601,7 @@ mod tests {
         let mut rng = rand::thread_rng();
         let engine = FftQapEngine;
 
-        let mut ptau = PtauFile::open("/tmp/pot4_final.ptau").unwrap();
+        let mut ptau = PtauFile::open("test_data/pot4_final.ptau").unwrap();
         let n_public = 2; // constant wire + output 'a'
 
         let accumulator = Phase2Accumulator::initialize(
@@ -673,7 +672,7 @@ mod tests {
         let mut rng = rand::thread_rng();
         let engine = FftQapEngine;
 
-        let mut ptau = PtauFile::open("/tmp/pot4_final.ptau").unwrap();
+        let mut ptau = PtauFile::open("test_data/pot4_final.ptau").unwrap();
         let n_public = 2;
 
         let mut accumulator = Phase2Accumulator::initialize(
@@ -711,7 +710,7 @@ mod tests {
         let mut rng = rand::thread_rng();
         let engine = FftQapEngine;
 
-        let mut ptau = PtauFile::open("/tmp/pot4_final.ptau").unwrap();
+        let mut ptau = PtauFile::open("test_data/pot4_final.ptau").unwrap();
         let n_public = 2;
 
         let accumulator = Phase2Accumulator::initialize(
