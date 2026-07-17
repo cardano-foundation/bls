@@ -1081,6 +1081,30 @@ Proof-production time on a single core, compiled with `--release`, using a `Full
 
 > **Why depth matters.** The Merkle path has `depth` sibling hashes. Each level in the Circom circuit invokes `MiMC2` (≈30 constraints) plus `SelectiveSwitch` (≈8 constraints). Doubling the depth roughly doubles the constraint count and proof-generation time.
 
+### PoseidonMerkle circuit (`PoseidonMerkle(depth)` — Poseidon-based Merkle membership)
+
+The Poseidon-based Merkle membership circuit lives in `circom/PoseidonMerkle/`. It proves that a commitment `PoseidonBLS12_381(nullifier, nonce)` exists in a Merkle tree of the given depth without revealing the nullifier, nonce, or path. The depth-2 wrapper (`poseidon_merkle_depth2.circom`) produces **1,911 constraints** and **1,914 wires**.
+
+Proof-production time on a single core, compiled with `--release`. The dense Circom path (4a) is omitted because `DenseQapEngine` is hard-coded for the 3-gate toy circuit; all realistic paths use `FftQapEngine`.
+
+| Implementation | Engine | Prover | Full PK | Per-proof time | vs. 4b |
+|----------------|--------|--------|---------|---------------|--------|
+| 4b (Circom FFT Naive) | `FftQapEngine` | `NaiveProver` | no | **12.94 s** | — |
+| 4c (Circom FFT Pippenger) | `FftQapEngine` | `PippengerProver` | no | **11.59 s** | 1.12× |
+| 5a (Circom Full PK Naive) | `FftQapEngine` | `NaiveProver` | yes | **12.69 s** | 1.02× |
+| 5b (Circom Full PK Pippenger) | `FftQapEngine` | `PippengerProver` | yes | **10.31 s** | 1.25× |
+
+> **What the numbers mean.** At 1,911 constraints the dominant cost is still on-the-fly QAP construction (building the witness polynomials from the R1CS matrices via IFFT), not the multi-scalar multiplications. The `FullProvingKey` path therefore only modestly outperforms the scalar path: it eliminates per-proof QAP evaluation at `tau` and the final scalar MSM, but the IFFT/quotient steps remain. Pippenger's batched MSM gives a consistent ~10–25 % speedup over the naive MSM. Future work that pre-computes witness evaluations at the FFT domain roots would remove the QAP reconstruction bottleneck and widen the gap between the scalar and FullProvingKey paths.
+
+| Depth | Constraints | Notes |
+|-------|-------------|-------|
+| 2 | 1,911 | Current benchmark target (`poseidon_merkle_depth2.circom`) |
+| 8 | ~7,600 | Estimated (≈950 constraints per level) |
+| 16 | ~15,200 | Estimated |
+| 32 | ~30,400 | Estimated |
+
+> **Comparison with MiMC-based Merkle.** Each Poseidon level costs ≈250 constraints vs ≈38 for MiMC(x⁷), so the Poseidon tree is roughly 6–7× larger in constraints at the same depth. The trade-off is that Poseidon is the hash used elsewhere in the BLS12-381 stack (pre-image, EdDSA-JubJub challenge), enabling a single on-chain verifier VK format and avoiding MiMC's algebraic structure concerns.
+
 Run the benchmarks yourself:
 
 ```bash
@@ -1095,6 +1119,9 @@ cargo run --bin benchmark_circom_full_pk --release
 
 # Privacy circuit (spend_depth2)
 cargo run --bin benchmark_privacy --release
+
+# PoseidonMerkle circuit (poseidon_merkle_depth2)
+cargo run --bin benchmark_poseidon_merkle --release
 ```
 
 </details>

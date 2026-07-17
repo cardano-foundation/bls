@@ -37,3 +37,7 @@ path = "src/bin/benchmark_privacy.rs"
 [[bin]]
 name = "benchmark_circom_full_pk"
 path = "src/bin/benchmark_circom_full_pk.rs"
+
+[[bin]]
+name = "benchmark_poseidon_merkle"
+path = "src/bin/benchmark_poseidon_merkle.rs"
