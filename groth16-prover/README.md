@@ -986,6 +986,14 @@ The dense-matrix bottleneck is the dominant cost for large circuits. The table b
 > - **Synthetic hash (20K–50K):** Large circuits that would OOM on commodity hardware with the dense path. The sparse path successfully runs ceremony + prove + verify on the same machine.  
 > - **Blake2b-224 / Ed25519:** Dense paths OOM; sparse projections scale from the observed trend.  
 > - **Memory formula:** Sparse memory = `#non_zero_entries × 40 B` (wire_id + coeff) + `domain_size × 3 × 32 B` (witness polynomials). Dense memory = `n_constraints × n_wires × 32 B × 3` (L, R, O matrices).
+>
+> **Comparison with zeroj's pure-Java Groth16 prover.**  
+> The [zeroj](https://github.com/bloxbean/zeroj) toolkit (see [`ZerojAudit.md`](../ZerojAudit.md)) provides a pure-Java Groth16 prover for BLS12-381 (`Groth16ProverBLS381`) that already operates on a **native sparse constraint representation** (`Map<Integer, BigInteger>` per constraint, via `R1CSImporter`). This means zeroj does **not** suffer from the dense-matrix OOM bottleneck — it is architecturally similar to our Implementation 6 in that regard.  
+> A standalone benchmark class (`ZerojBenchmark.java`) has been added to `zeroj-audit/zeroj-crypto/src/bench/java/...` to measure zeroj's proving time on the same Circom circuits (PoseidonMerkle depth-2, EdDSAJubJub). **Note:** zeroj requires **Java 25 / GraalVM** to build (`sdk use java 25.0.2-graal`); the benchmark can be compiled and run manually against the pre-built zeroj JARs.  
+> Key differences:
+> - **zeroj** uses hand-written bucket-MSM and coset-FFT in pure Java; our crate uses arkworks' `VariableBaseMSM::msm` (Pippenger) and `ark-poly::GeneralEvaluationDomain` (FFT).
+> - **zeroj** supports both BN254 and BLS12-381 curves; our crate is BLS12-381 only.
+> - **zeroj** has a `CircuitBuilder` DSL for generating R1CS programmatically; our crate focuses on loading standard Circom `.r1cs` / `.wtns` artifacts.
 
 ### Parity assertions
 
@@ -1010,6 +1018,11 @@ cargo run --bin benchmark_sparse --release
 
 # Run large-circuit unblocking demo (synthetic 20K–50K constraint circuits)
 cargo run --bin benchmark_large_circuit --release
+
+# Compare with zeroj's pure-Java prover (requires Java 25 / GraalVM)
+cd ../zeroj-audit
+# javac -cp ... zeroj-crypto/src/bench/java/.../ZerojBenchmark.java
+# java  -cp ... com.bloxbean.cardano.zeroj.crypto.groth16.ZerojBenchmark
 
 # Sparse dev ceremony
 cd cli
@@ -1071,6 +1084,8 @@ let (proof, public_input) = prover.prove_with_full_pk_sparse(
 > **Note:** The resulting proof is **bit-for-bit identical** to the dense path for the same circuit and toxic waste, because the underlying Groth16 formulas are unchanged; only the memory layout and accumulation order differ.
 >
 > **Unblocking demonstration.** Run `cargo run --bin benchmark_large_circuit --release` to see synthetic circuits with 20 K–50 K constraints successfully proven on commodity hardware. The dense path would need 36–224 GiB of RAM (kernel OOM kill); the sparse path completes with 1.5–6.1 GiB and produces valid proofs verified by the pairing check.
+>
+> **Comparison with zeroj.** The [zeroj](https://github.com/bloxbean/zeroj) Java toolkit (`Groth16ProverBLS381`) already operates on a native sparse `Map<Integer, BigInteger>` constraint representation via `R1CSImporter`, so it does **not** suffer from the dense-matrix OOM either. It uses hand-written bucket-MSM and coset-FFT in pure Java. Our Implementation 6 achieves a similar sparse architecture in Rust using arkworks' `VariableBaseMSM::msm` (Pippenger) and `ark-poly` FFT. A standalone benchmark class (`ZerojBenchmark.java`) is provided in `zeroj-audit/zeroj-crypto/src/bench/java/...` for users who want to run a direct comparison on the same Circom circuits (requires Java 25 / GraalVM).
 
 </details>
 
