@@ -10,8 +10,8 @@
 
 use ark_serialize::CanonicalSerialize;
 use clap::Parser;
-use groth16_prover::ceremony::single_party_ceremony_full;
-use groth16_prover::circom_adapter::CircomCircuit;
+use groth16_prover::ceremony::{single_party_ceremony_full, single_party_ceremony_full_from_tw_sparse};
+use groth16_prover::circom_adapter::{CircomCircuit, SparseCircomCircuit};
 use groth16_prover::engine::FftQapEngine;
 use std::error::Error;
 use std::fs;
@@ -31,6 +31,12 @@ pub struct Args {
     /// Output path for the verification key (.vk extension recommended)
     #[arg(long, value_name = "FILE")]
     verifying_key: PathBuf,
+
+    /// Use sparse constraint representation (Implementation 6).
+    /// Avoids expanding the `.r1cs` into dense matrices, saving memory
+    /// for large circuits (e.g. Blake2b-224, Ed25519).
+    #[arg(long)]
+    sparse: bool,
 }
 
 /// Run the dev ceremony command
@@ -38,33 +44,62 @@ pub fn run(args: Args) -> Result<(), Box<dyn Error>> {
     // ------------------------------------------------------------------
     // 1. Load circuit
     // ------------------------------------------------------------------
-    let circuit = CircomCircuit::from_r1cs(
-        args.circuit
-            .to_str()
-            .ok_or("circuit path is not valid UTF-8")?,
-    )
-    .map_err(|e| format!("failed to load circuit: {e}"))?;
+    let (full_pk, vk) = if args.sparse {
+        let circuit = SparseCircomCircuit::from_r1cs(
+            args.circuit
+                .to_str()
+                .ok_or("circuit path is not valid UTF-8")?,
+        )
+        .map_err(|e| format!("failed to load circuit: {e}"))?;
 
-    eprintln!(
-        "Loaded circuit: {} wires, {} constraints (public: {} out + {} in, private: {})",
-        circuit.n_wires,
-        circuit.n_constraints,
-        circuit.n_pub_out,
-        circuit.n_pub_in,
-        circuit.n_prv_in
-    );
+        eprintln!(
+            "Loaded circuit (sparse): {} wires, {} constraints (public: {} out + {} in, private: {})",
+            circuit.n_wires,
+            circuit.n_constraints,
+            circuit.n_pub_out,
+            circuit.n_pub_in,
+            circuit.n_prv_in
+        );
 
-    // ------------------------------------------------------------------
-    // 2. Determine number of public variables
-    // ------------------------------------------------------------------
-    let n_public = 1 + circuit.n_pub_out as usize + circuit.n_pub_in as usize;
+        let n_public = 1 + circuit.n_pub_out as usize + circuit.n_pub_in as usize;
+        let mut rng = rand::thread_rng();
+        let engine = FftQapEngine::new();
+        let tw = groth16_prover::ceremony::ToxicWaste::random(&mut rng);
 
-    // ------------------------------------------------------------------
-    // 3. Run single-party ceremony (full proving key)
-    // ------------------------------------------------------------------
-    let mut rng = rand::thread_rng();
-    let engine = FftQapEngine::new();
-    let (full_pk, vk) = single_party_ceremony_full(&engine, &circuit.l, &circuit.r, &circuit.o, n_public, &mut rng);
+        let (full_pk, vk) = single_party_ceremony_full_from_tw_sparse(
+            &engine,
+            circuit.n_constraints as usize,
+            circuit.n_wires as usize,
+            n_public,
+            &circuit.l,
+            &circuit.r,
+            &circuit.o,
+            tw,
+        );
+        (full_pk, vk)
+    } else {
+        let circuit = CircomCircuit::from_r1cs(
+            args.circuit
+                .to_str()
+                .ok_or("circuit path is not valid UTF-8")?,
+        )
+        .map_err(|e| format!("failed to load circuit: {e}"))?;
+
+        eprintln!(
+            "Loaded circuit: {} wires, {} constraints (public: {} out + {} in, private: {})",
+            circuit.n_wires,
+            circuit.n_constraints,
+            circuit.n_pub_out,
+            circuit.n_pub_in,
+            circuit.n_prv_in
+        );
+
+        let n_public = 1 + circuit.n_pub_out as usize + circuit.n_pub_in as usize;
+        let mut rng = rand::thread_rng();
+        let engine = FftQapEngine::new();
+        let (full_pk, vk) = single_party_ceremony_full(&engine, &circuit.l, &circuit.r, &circuit.o, n_public, &mut rng);
+        (full_pk, vk)
+    };
 
     eprintln!("Dev ceremony complete. Full proving key generated (group elements only, no scalars).");
     eprintln!("  Proving key:  {}  ({} bytes)", args.proving_key.display(), {

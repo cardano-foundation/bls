@@ -1193,6 +1193,188 @@ fn smt_missing_state_file() {
 }
 
 // ------------------------------------------------------------------
+// Sparse mode CLI tests (Implementation 6)
+// ------------------------------------------------------------------
+
+#[test]
+fn ceremony_dev_sparse() {
+    let (r1cs, _wtns) = create_test_artifacts();
+    let pk_file = NamedTempFile::new().unwrap();
+    let vk_file = NamedTempFile::new().unwrap();
+
+    let mut cmd = Command::cargo_bin("groth16-prover").unwrap();
+    cmd.arg("ceremony-dev")
+        .arg("--sparse")
+        .arg("--circuit")
+        .arg(r1cs.path())
+        .arg("--proving-key")
+        .arg(pk_file.path())
+        .arg("--verifying-key")
+        .arg(vk_file.path());
+
+    cmd.assert()
+        .success()
+        .stderr(predicate::str::contains("Loaded circuit (sparse)"))
+        .stderr(predicate::str::contains("Dev ceremony complete"))
+        .stderr(predicate::str::contains("Full proving key written to"))
+        .stderr(predicate::str::contains("Verifying key written to"));
+}
+
+#[test]
+fn prove_sparse_stdout() {
+    let (r1cs, wtns) = create_test_artifacts();
+
+    let mut cmd = Command::cargo_bin("groth16-prover").unwrap();
+    cmd.arg("prove")
+        .arg("--sparse")
+        .arg("--circuit")
+        .arg(r1cs.path())
+        .arg("--witness")
+        .arg(wtns.path());
+
+    cmd.assert()
+        .success()
+        .stderr(predicate::str::contains("Loaded circuit (sparse)"))
+        .stderr(predicate::str::contains(
+            "Using sparse on-the-fly QAP construction",
+        ))
+        .stderr(predicate::str::contains(
+            "Proof generated successfully (sparse path)",
+        ))
+        .stdout(predicate::function(|output: &str| {
+            hex::decode(output.trim()).is_ok() && output.trim().len() == 384
+        }));
+}
+
+#[test]
+fn prove_sparse_to_file() {
+    let (r1cs, wtns) = create_test_artifacts();
+    let out_file = NamedTempFile::new().unwrap();
+
+    let mut cmd = Command::cargo_bin("groth16-prover").unwrap();
+    cmd.arg("prove")
+        .arg("--sparse")
+        .arg("--circuit")
+        .arg(r1cs.path())
+        .arg("--witness")
+        .arg(wtns.path())
+        .arg("--out")
+        .arg(out_file.path());
+
+    cmd.assert()
+        .success()
+        .stderr(predicate::str::contains("Proof written to"))
+        .stderr(predicate::str::contains("Public input written to"));
+
+    let proof = fs::read(out_file.path()).unwrap();
+    assert_eq!(proof.len(), 192, "proof must be 192 bytes");
+
+    let pub_path = out_file.path().with_extension("pub");
+    let public = fs::read(&pub_path).unwrap();
+    assert_eq!(public.len(), 48, "public input must be 48 bytes");
+}
+
+#[test]
+fn prove_sparse_naive() {
+    let (r1cs, wtns) = create_test_artifacts();
+
+    let mut cmd = Command::cargo_bin("groth16-prover").unwrap();
+    cmd.arg("prove")
+        .arg("--sparse")
+        .arg("--circuit")
+        .arg(r1cs.path())
+        .arg("--witness")
+        .arg(wtns.path())
+        .arg("--prover")
+        .arg("naive");
+
+    cmd.assert()
+        .success()
+        .stdout(predicate::function(|output: &str| {
+            hex::decode(output.trim()).is_ok() && output.trim().len() == 384
+        }));
+}
+
+#[test]
+fn prove_sparse_rejects_qap_not_on_fly() {
+    let (r1cs, wtns) = create_test_artifacts();
+
+    let mut cmd = Command::cargo_bin("groth16-prover").unwrap();
+    cmd.arg("prove")
+        .arg("--sparse")
+        .arg("--circuit")
+        .arg(r1cs.path())
+        .arg("--witness")
+        .arg(wtns.path())
+        .arg("--qap-not-on-fly");
+
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "--qap-not-on-fly is incompatible with --sparse",
+        ));
+}
+
+/// Full sparse roundtrip: ceremony-dev --sparse → prove --sparse → verify
+#[test]
+fn full_sparse_roundtrip() {
+    let (r1cs, wtns) = create_test_artifacts();
+    let pk_file = NamedTempFile::new().unwrap();
+    let vk_file = NamedTempFile::new().unwrap();
+    let out_file = NamedTempFile::new().unwrap();
+
+    // 1. Sparse dev ceremony
+    let mut cmd_ceremony = Command::cargo_bin("groth16-prover").unwrap();
+    cmd_ceremony
+        .arg("ceremony-dev")
+        .arg("--sparse")
+        .arg("--circuit")
+        .arg(r1cs.path())
+        .arg("--proving-key")
+        .arg(pk_file.path())
+        .arg("--verifying-key")
+        .arg(vk_file.path());
+    cmd_ceremony
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Dev ceremony complete"));
+
+    // 2. Sparse prove with generated PK
+    let mut cmd_prove = Command::cargo_bin("groth16-prover").unwrap();
+    cmd_prove
+        .arg("prove")
+        .arg("--sparse")
+        .arg("--circuit")
+        .arg(r1cs.path())
+        .arg("--witness")
+        .arg(wtns.path())
+        .arg("--proving-key")
+        .arg(pk_file.path())
+        .arg("--out")
+        .arg(out_file.path());
+    cmd_prove
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Loaded FullProvingKey"));
+
+    // 3. Verify
+    let pub_path = out_file.path().with_extension("pub");
+    let mut cmd_verify = Command::cargo_bin("groth16-prover").unwrap();
+    cmd_verify
+        .arg("verify")
+        .arg("--proof")
+        .arg(out_file.path())
+        .arg("--public")
+        .arg(&pub_path)
+        .arg("--verifying-key")
+        .arg(vk_file.path());
+    cmd_verify
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Verification result: VALID"));
+}
+
+// ------------------------------------------------------------------
 // compute-inputs command tests
 // ------------------------------------------------------------------
 
