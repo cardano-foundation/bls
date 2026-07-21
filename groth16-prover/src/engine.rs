@@ -381,6 +381,104 @@ pub fn evaluate_witness_and_quotient<E: QapEngine, T: Copy + Into<Fr>, L: AsRef<
     (l_tau, r_tau, o_tau, h_tau, t_tau)
 }
 
+// ------------------------------------------------------------------
+// Sparse QAP helpers (Implementation 6)
+// ------------------------------------------------------------------
+
+/// Evaluate the per-variable QAP contributions at τ from **sparse** constraints.
+///
+/// Instead of materialising the full `u_i(x)` polynomials, we accumulate
+/// `u_s(τ), v_s(τ), w_s(τ)` directly via the Lagrange basis:
+///
+///   `u_s(τ) = Σ_{c} L[c][s] · L_c(τ)`   (summed over non-zero entries only)
+///
+/// where `L_c(τ)` is the c-th Lagrange basis polynomial evaluated at τ.
+///
+/// Complexity: `O(#non_zero_entries)` field ops + `O(domain_size)` for Lagrange evals.
+pub fn evaluate_qap_at_tau_sparse(
+    n_vars: usize,
+    n_constraints: usize,
+    tau: Fr,
+    sparse_l: &[Vec<(u32, Fr)>],
+    sparse_r: &[Vec<(u32, Fr)>],
+    sparse_o: &[Vec<(u32, Fr)>],
+) -> (Vec<Fr>, Vec<Fr>, Vec<Fr>) {
+    let domain_size = FftQapEngine::domain_size(n_constraints);
+    let domain = GeneralEvaluationDomain::<Fr>::new(domain_size)
+        .expect("Failed to create evaluation domain");
+
+    // Compute all Lagrange basis evaluations at tau: L_0(tau), L_1(tau), ..., L_{N-1}(tau)
+    let lagrange_at_tau = domain.evaluate_all_lagrange_coefficients(tau);
+
+    let mut us_tau = vec![Fr::zero(); n_vars];
+    let mut vs_tau = vec![Fr::zero(); n_vars];
+    let mut ws_tau = vec![Fr::zero(); n_vars];
+
+    for c in 0..n_constraints {
+        let lc = lagrange_at_tau[c];
+        for &(wire_id, coeff) in &sparse_l[c] {
+            us_tau[wire_id as usize] += coeff * lc;
+        }
+        for &(wire_id, coeff) in &sparse_r[c] {
+            vs_tau[wire_id as usize] += coeff * lc;
+        }
+        for &(wire_id, coeff) in &sparse_o[c] {
+            ws_tau[wire_id as usize] += coeff * lc;
+        }
+    }
+
+    (us_tau, vs_tau, ws_tau)
+}
+
+/// Build witness polynomials `l(x)`, `r(x)`, `o(x)` directly from **sparse**
+/// constraints and a witness vector, without materialising the per-variable
+/// QAP polynomials `u_i(x)`, `v_i(x)`, `w_i(x)`.
+///
+/// The trick: in the FFT domain the constraint points are the `domain_size`-th
+/// roots of unity `ω^j`.  At each root `l(ω^j) = Σ_{(i, coeff) ∈ constraint j} w_i·coeff`.
+/// We compute these evaluations in one sparse pass, then do **three** IFFTs
+/// (one per wire polynomial) to get the coefficient forms.
+///
+/// Memory: `O(domain_size × 3)` for the three dense witness polynomials,
+/// plus the already-held sparse constraint data.  No `O(n_vars × domain_size)`
+/// dense-matrix allocation is needed.
+pub fn build_witness_polys_sparse(
+    domain: &GeneralEvaluationDomain<Fr>,
+    domain_size: usize,
+    n_constraints: usize,
+    sparse_l: &[Vec<(u32, Fr)>],
+    sparse_r: &[Vec<(u32, Fr)>],
+    sparse_o: &[Vec<(u32, Fr)>],
+    witness: &[Fr],
+) -> (DensePolynomial<Fr>, DensePolynomial<Fr>, DensePolynomial<Fr>) {
+    let mut l_evals = vec![Fr::zero(); domain_size];
+    let mut r_evals = vec![Fr::zero(); domain_size];
+    let mut o_evals = vec![Fr::zero(); domain_size];
+
+    for j in 0..n_constraints {
+        for &(wire_id, coeff) in &sparse_l[j] {
+            l_evals[j] += witness[wire_id as usize] * coeff;
+        }
+        for &(wire_id, coeff) in &sparse_r[j] {
+            r_evals[j] += witness[wire_id as usize] * coeff;
+        }
+        for &(wire_id, coeff) in &sparse_o[j] {
+            o_evals[j] += witness[wire_id as usize] * coeff;
+        }
+    }
+
+    // IFFT to get coefficient form
+    domain.ifft_in_place(&mut l_evals);
+    domain.ifft_in_place(&mut r_evals);
+    domain.ifft_in_place(&mut o_evals);
+
+    (
+        DensePolynomial::from_coefficients_vec(l_evals),
+        DensePolynomial::from_coefficients_vec(r_evals),
+        DensePolynomial::from_coefficients_vec(o_evals),
+    )
+}
+
 /// Sanity check: evaluate each QAP polynomial on the constraint points
 /// and assert they match the original matrix entries.
 #[cfg(test)]

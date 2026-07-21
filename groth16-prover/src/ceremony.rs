@@ -369,6 +369,112 @@ pub fn single_party_ceremony_full_from_tw<E: QapEngine, T: Copy + Into<Fr>, L: A
     (full_pk, vk)
 }
 
+/// Same as `single_party_ceremony_full_from_tw` but accepts **sparse**
+/// constraint matrices instead of dense ones.
+///
+/// This is the ceremony path for Implementation 6 (sparse-matrix prover).
+/// The toxic-waste scalars are consumed immediately; only group elements
+/// remain in the returned `FullProvingKey`.
+pub fn single_party_ceremony_full_from_tw_sparse(
+    engine: &impl crate::engine::QapEngine,
+    n_constraints: usize,
+    n_vars: usize,
+    n_public: usize,
+    sparse_l: &[Vec<(u32, Fr)>],
+    sparse_r: &[Vec<(u32, Fr)>],
+    sparse_o: &[Vec<(u32, Fr)>],
+    tw: ToxicWaste,
+) -> (FullProvingKey, VerifyingKey) {
+    use crate::engine::evaluate_qap_at_tau_sparse;
+
+    // 1. Evaluate QAP at tau using sparse path
+    let (us_tau, vs_tau, ws_tau) =
+        evaluate_qap_at_tau_sparse(n_vars, n_constraints, tw.tau, sparse_l, sparse_r, sparse_o);
+
+    assert!(
+        n_public <= n_vars,
+        "n_public ({}) cannot exceed n_vars ({})",
+        n_public,
+        n_vars
+    );
+
+    // 2. CRS fixed points
+    let g1_proj = G1Projective::generator();
+    let g2_proj = G2Projective::generator();
+
+    let alpha_g1 = G1Affine::from(g1_proj * tw.alpha);
+    let beta_g1 = G1Affine::from(g1_proj * tw.beta);
+    let beta_g2 = G2Affine::from(g2_proj * tw.beta);
+    let gamma_g2 = G2Affine::from(g2_proj * tw.gamma);
+    let delta_g1 = G1Affine::from(g1_proj * tw.delta);
+    let delta_g2 = G2Affine::from(g2_proj * tw.delta);
+
+    // 3. Inverses (consumed immediately, never stored)
+    let gamma_inv = tw.gamma.inverse().unwrap();
+    let delta_inv = tw.delta.inverse().unwrap();
+
+    // 4. Per-variable queries
+    let mut a_query = Vec::with_capacity(n_vars);
+    let mut b_g1_query = Vec::with_capacity(n_vars);
+    let mut b_g2_query = Vec::with_capacity(n_vars);
+    let mut c_query = Vec::with_capacity(n_vars);
+    let mut ic = Vec::with_capacity(n_vars);
+
+    for i in 0..n_vars {
+        let u_i = us_tau[i];
+        let v_i = vs_tau[i];
+        let w_i = ws_tau[i];
+
+        a_query.push(G1Affine::from(g1_proj * u_i));
+        b_g1_query.push(G1Affine::from(g1_proj * v_i));
+        b_g2_query.push(G2Affine::from(g2_proj * v_i));
+
+        let psi_scalar = v_i * tw.alpha + u_i * tw.beta + w_i;
+        c_query.push(G1Affine::from(g1_proj * (psi_scalar * delta_inv)));
+        ic.push(G1Affine::from(g1_proj * (psi_scalar * gamma_inv)));
+    }
+
+    // 5. l_query = public-input subset of ic
+    let l_query = ic[..n_public].to_vec();
+
+    // 6. h_query
+    let t = engine.target_poly(n_constraints);
+    let t_tau = t.evaluate(&tw.tau);
+    let h_scalar_base = t_tau * delta_inv;
+    let h_query_len = t.degree();
+    let mut h_query = Vec::with_capacity(h_query_len);
+    let mut tau_pow = Fr::one();
+    for _ in 0..h_query_len {
+        h_query.push(G1Affine::from(g1_proj * (tau_pow * h_scalar_base)));
+        tau_pow *= tw.tau;
+    }
+
+    // 7. Build VK
+    let vk = VerifyingKey {
+        alpha_g1,
+        beta_g2,
+        gamma_g2,
+        delta_g2,
+        ic,
+        n_public,
+    };
+
+    // 8. Build FullProvingKey
+    let full_pk = FullProvingKey {
+        vk: vk.clone(),
+        beta_g1,
+        delta_g1,
+        a_query,
+        b_g1_query,
+        b_g2_query,
+        c_query,
+        h_query,
+        l_query,
+    };
+
+    (full_pk, vk)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -65,6 +65,27 @@ pub trait Prover {
         let _ = (engine, full_pk, l, r, o, witness);
         unimplemented!("prove_with_full_pk must be implemented for this prover")
     }
+
+    /// Assemble the proof using a `FullProvingKey` and **sparse** constraints.
+    ///
+    /// This is the Implementation 6 path: the prover never materialises
+    /// dense R1CS matrices.  Witness polynomials are built directly from
+    /// the sparse constraint representation via three IFFTs.
+    ///
+    /// Default implementation panics — concrete provers must override.
+    fn prove_with_full_pk_sparse(
+        &self,
+        engine: &impl QapEngine,
+        full_pk: &crate::ceremony::FullProvingKey,
+        n_constraints: usize,
+        sparse_l: &[Vec<(u32, Fr)>],
+        sparse_r: &[Vec<(u32, Fr)>],
+        sparse_o: &[Vec<(u32, Fr)>],
+        witness: &[Fr],
+    ) -> (Proof, PublicInput) {
+        let _ = (engine, full_pk, n_constraints, sparse_l, sparse_r, sparse_o, witness);
+        unimplemented!("prove_with_full_pk_sparse must be implemented for this prover")
+    }
 }
 
 /// Naive prover — scalar-by-scalar accumulation.
@@ -241,6 +262,66 @@ impl Prover for NaiveProver {
             }
             (lp, rp, op)
         };
+
+        let t = engine.target_poly(n_constraints);
+        let h = engine.compute_quotient(&l_poly, &r_poly, &o_poly, &t);
+
+        // 2. A = sum witness[i] * a_query[i] + alpha_g1
+        let mut a_proj = G1Projective::from(full_pk.vk.alpha_g1);
+        for i in 0..n_vars {
+            a_proj += G1Projective::from(full_pk.a_query[i]) * witness[i];
+        }
+        let a = G1Affine::from(a_proj);
+
+        // 3. B = sum witness[i] * b_g2_query[i] + beta_g2
+        let mut b_proj = G2Projective::from(full_pk.vk.beta_g2);
+        for i in 0..n_vars {
+            b_proj += G2Projective::from(full_pk.b_g2_query[i]) * witness[i];
+        }
+        let b = G2Affine::from(b_proj);
+
+        // 4. C = sum_{private} witness[i] * c_query[i] + sum_j h_j * h_query[j]
+        let mut c_proj = G1Projective::zero();
+        for i in n_public..n_vars {
+            c_proj += G1Projective::from(full_pk.c_query[i]) * witness[i];
+        }
+        let h_len = h.coeffs.len().min(full_pk.h_query.len());
+        for j in 0..h_len {
+            c_proj += G1Projective::from(full_pk.h_query[j]) * h.coeffs[j];
+        }
+        let c = G1Affine::from(c_proj);
+
+        // 5. V = sum_{public} witness[i] * l_query[i]
+        let mut v_proj = G1Projective::zero();
+        for i in 0..n_public {
+            v_proj += G1Projective::from(full_pk.l_query[i]) * witness[i];
+        }
+        let v = G1Affine::from(v_proj);
+
+        (Proof { a, b, c }, PublicInput { v })
+    }
+
+    fn prove_with_full_pk_sparse(
+        &self,
+        engine: &impl QapEngine,
+        full_pk: &crate::ceremony::FullProvingKey,
+        n_constraints: usize,
+        sparse_l: &[Vec<(u32, Fr)>],
+        sparse_r: &[Vec<(u32, Fr)>],
+        sparse_o: &[Vec<(u32, Fr)>],
+        witness: &[Fr],
+    ) -> (Proof, PublicInput) {
+        use crate::engine::build_witness_polys_sparse;
+
+        let n_public = full_pk.vk.n_public;
+        let n_vars = witness.len();
+
+        // 1. Build witness polynomials l(x), r(x), o(x) from sparse constraints.
+        let d_size = engine.domain_size(n_constraints);
+        let domain = GeneralEvaluationDomain::<Fr>::new(d_size)
+            .expect("Failed to create evaluation domain");
+        let (l_poly, r_poly, o_poly) =
+            build_witness_polys_sparse(&domain, d_size, n_constraints, sparse_l, sparse_r, sparse_o, witness);
 
         let t = engine.target_poly(n_constraints);
         let h = engine.compute_quotient(&l_poly, &r_poly, &o_poly, &t);

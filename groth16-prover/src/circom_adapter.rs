@@ -14,7 +14,7 @@ use nom::{
     IResult,
 };
 
-/// Parsed R1CS circuit from a `.r1cs` file.
+/// Parsed R1CS circuit from a `.r1cs` file (dense representation).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CircomCircuit {
     pub field_size: u32,
@@ -30,6 +30,30 @@ pub struct CircomCircuit {
     pub r: Vec<Vec<Fr>>,
     /// Dense O matrix (constraints × wires)
     pub o: Vec<Vec<Fr>>,
+    /// Witness values (loaded separately from `.wtns`)
+    pub witness: Vec<Fr>,
+}
+
+/// Parsed R1CS circuit from a `.r1cs` file (sparse representation).
+///
+/// This is the native Circom format: each constraint stores only its
+/// non-zero `(wire_id, coefficient)` entries.  Memory drops from
+/// `O(n_constraints × n_wires)` to `O(#non_zero_entries)`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SparseCircomCircuit {
+    pub field_size: u32,
+    pub prime: Vec<u8>,
+    pub n_wires: u32,
+    pub n_pub_out: u32,
+    pub n_pub_in: u32,
+    pub n_prv_in: u32,
+    pub n_constraints: u32,
+    /// Sparse L matrix: per-constraint list of (wire_id, coeff)
+    pub l: Vec<Vec<(u32, Fr)>>,
+    /// Sparse R matrix: per-constraint list of (wire_id, coeff)
+    pub r: Vec<Vec<(u32, Fr)>>,
+    /// Sparse O matrix: per-constraint list of (wire_id, coeff)
+    pub o: Vec<Vec<(u32, Fr)>>,
     /// Witness values (loaded separately from `.wtns`)
     pub witness: Vec<Fr>,
 }
@@ -53,7 +77,7 @@ impl CircomCircuit {
         field_size: usize,
     ) -> Result<(), String> {
         let witness =
-            Self::parse_wtns(data, field_size).map_err(|e| format!("Parse error: {:?}", e))?;
+            parse_wtns(data, field_size).map_err(|e| format!("Parse error: {:?}", e))?;
         if witness.len() != self.n_wires as usize {
             return Err(format!(
                 "Witness length {} does not match n_wires {}",
@@ -72,39 +96,7 @@ impl CircomCircuit {
     }
 
     fn parse_r1cs(data: &[u8]) -> Result<CircomCircuit, nom::Err<nom::error::Error<&[u8]>>> {
-        let (rest, _) = parse_r1cs_header(data)?;
-
-        // Read sections until we find Header (1) and Constraints (2)
-        let mut header: Option<R1csHeader> = None;
-        let mut constraints: Option<R1csConstraints> = None;
-
-        let mut rest = rest;
-        while !rest.is_empty() {
-            let (r, section_type) = le_u32(rest)?;
-            let (r, section_size) = le_u64(r)?;
-            let section_size = section_size as usize;
-            let (r, section_data) = take(section_size)(r)?;
-
-            match section_type {
-                1 => {
-                    let (_, h) = parse_header_section(section_data)?;
-                    header = Some(h);
-                }
-                2 => {
-                    let (_, c) = parse_constraints_section(section_data)?;
-                    constraints = Some(c);
-                }
-                _ => {} // skip unknown sections
-            }
-            rest = r;
-        }
-
-        let header = header.ok_or_else(|| {
-            nom::Err::Error(nom::error::Error::new(data, nom::error::ErrorKind::Tag))
-        })?;
-        let constraints = constraints.ok_or_else(|| {
-            nom::Err::Error(nom::error::Error::new(data, nom::error::ErrorKind::Tag))
-        })?;
+        let (header, constraints) = parse_r1cs_raw(data)?;
 
         let n_constraints = header.n_constraints as usize;
         let n_wires = header.n_wires as usize;
@@ -114,7 +106,7 @@ impl CircomCircuit {
         let mut r = vec![vec![Fr::zero(); n_wires]; n_constraints];
         let mut o = vec![vec![Fr::zero(); n_wires]; n_constraints];
 
-        for (i, (a, b, c)) in constraints.0.iter().enumerate() {
+        for (i, (a, b, c)) in constraints.iter().enumerate() {
             for &(wire, val) in a {
                 l[i][wire as usize] = val;
             }
@@ -140,35 +132,61 @@ impl CircomCircuit {
             witness: Vec::new(),
         })
     }
+}
 
-    fn parse_wtns(
+impl SparseCircomCircuit {
+    /// Load a sparse circuit from raw `.r1cs` bytes.
+    pub fn from_bytes(data: &[u8]) -> Result<Self, String> {
+        Self::parse_r1cs(data).map_err(|e| format!("Parse error: {:?}", e))
+    }
+
+    /// Load a sparse circuit from a `.r1cs` file path.
+    pub fn from_r1cs(path: &str) -> Result<Self, String> {
+        let data = std::fs::read(path).map_err(|e| format!("Failed to read {}: {}", path, e))?;
+        Self::from_bytes(&data)
+    }
+
+    /// Load a witness from raw `.wtns` bytes.
+    pub fn load_witness_from_bytes(
+        &mut self,
         data: &[u8],
         field_size: usize,
-    ) -> Result<Vec<Fr>, nom::Err<nom::error::Error<&[u8]>>> {
-        let (rest, _) = parse_wtns_header(data)?;
-
-        let mut witness = Vec::new();
-        let mut rest = rest;
-        while !rest.is_empty() {
-            let (r, section_type) = le_u32(rest)?;
-            let (r, section_size) = le_u64(r)?;
-            let section_size = section_size as usize;
-            let (r, section_data) = take(section_size)(r)?;
-
-            if section_type == 2 {
-                // Witness data section
-                let n_wires = section_data.len() / field_size;
-                let mut srest = section_data;
-                for _ in 0..n_wires {
-                    let (sr, val_bytes) = take(field_size)(srest)?;
-                    let val = Fr::from_le_bytes_mod_order(val_bytes);
-                    witness.push(val);
-                    srest = sr;
-                }
-            }
-            rest = r;
+    ) -> Result<(), String> {
+        let witness =
+            parse_wtns(data, field_size).map_err(|e| format!("Parse error: {:?}", e))?;
+        if witness.len() != self.n_wires as usize {
+            return Err(format!(
+                "Witness length {} does not match n_wires {}",
+                witness.len(),
+                self.n_wires
+            ));
         }
-        Ok(witness)
+        self.witness = witness;
+        Ok(())
+    }
+
+    /// Load a witness from a `.wtns` file path.
+    pub fn load_witness(&mut self, path: &str) -> Result<(), String> {
+        let data = std::fs::read(path).map_err(|e| format!("Failed to read {}: {}", path, e))?;
+        self.load_witness_from_bytes(&data, self.field_size as usize)
+    }
+
+    fn parse_r1cs(data: &[u8]) -> Result<SparseCircomCircuit, nom::Err<nom::error::Error<&[u8]>>> {
+        let (header, constraints) = parse_r1cs_raw(data)?;
+
+        Ok(SparseCircomCircuit {
+            field_size: header.field_size,
+            prime: header.prime.to_vec(),
+            n_wires: header.n_wires,
+            n_pub_out: header.n_pub_out,
+            n_pub_in: header.n_pub_in,
+            n_prv_in: header.n_prv_in,
+            n_constraints: header.n_constraints,
+            l: constraints.iter().map(|(a, _, _)| a.clone()).collect(),
+            r: constraints.iter().map(|(_, b, _)| b.clone()).collect(),
+            o: constraints.iter().map(|(_, _, c)| c.clone()).collect(),
+            witness: Vec::new(),
+        })
     }
 }
 
@@ -223,10 +241,46 @@ fn parse_header_section(input: &[u8]) -> IResult<&[u8], R1csHeader> {
 /// One constraint is three sparse vectors (A, B, C).
 type Constraint = (Vec<(u32, Fr)>, Vec<(u32, Fr)>, Vec<(u32, Fr)>);
 
-/// Wrapper so we can return constraints from nom.
-struct R1csConstraints(Vec<Constraint>);
+/// Parse raw `.r1cs` bytes into header + sparse constraints.
+/// Shared by both `CircomCircuit` (dense) and `SparseCircomCircuit` (sparse).
+fn parse_r1cs_raw(data: &[u8]) -> Result<(R1csHeader, Vec<Constraint>), nom::Err<nom::error::Error<&[u8]>>> {
+    let (rest, _) = parse_r1cs_header(data)?;
 
-fn parse_constraints_section(input: &[u8]) -> IResult<&[u8], R1csConstraints> {
+    let mut header: Option<R1csHeader> = None;
+    let mut constraints: Option<Vec<Constraint>> = None;
+
+    let mut rest = rest;
+    while !rest.is_empty() {
+        let (r, section_type) = le_u32(rest)?;
+        let (r, section_size) = le_u64(r)?;
+        let section_size = section_size as usize;
+        let (r, section_data) = take(section_size)(r)?;
+
+        match section_type {
+            1 => {
+                let (_, h) = parse_header_section(section_data)?;
+                header = Some(h);
+            }
+            2 => {
+                let (_, c) = parse_constraints_section(section_data)?;
+                constraints = Some(c);
+            }
+            _ => {} // skip unknown sections
+        }
+        rest = r;
+    }
+
+    let header = header.ok_or_else(|| {
+        nom::Err::Error(nom::error::Error::new(data, nom::error::ErrorKind::Tag))
+    })?;
+    let constraints = constraints.ok_or_else(|| {
+        nom::Err::Error(nom::error::Error::new(data, nom::error::ErrorKind::Tag))
+    })?;
+
+    Ok((header, constraints))
+}
+
+fn parse_constraints_section(input: &[u8]) -> IResult<&[u8], Vec<Constraint>> {
     // The section size tells us how many bytes, but we parse until exhausted.
     let mut rest = input;
     let mut constraints = Vec::new();
@@ -237,7 +291,7 @@ fn parse_constraints_section(input: &[u8]) -> IResult<&[u8], R1csConstraints> {
         constraints.push((a, b, c));
         rest = r;
     }
-    Ok((&[], R1csConstraints(constraints)))
+    Ok((&[], constraints))
 }
 
 fn parse_sparse_vector(input: &[u8]) -> IResult<&[u8], Vec<(u32, Fr)>> {
@@ -270,6 +324,36 @@ fn parse_wtns_header(input: &[u8]) -> IResult<&[u8], ()> {
     let (input, _version) = le_u32(input)?;
     let (input, _n_sections) = le_u32(input)?;
     Ok((input, ()))
+}
+
+fn parse_wtns(
+    data: &[u8],
+    field_size: usize,
+) -> Result<Vec<Fr>, nom::Err<nom::error::Error<&[u8]>>> {
+    let (rest, _) = parse_wtns_header(data)?;
+
+    let mut witness = Vec::new();
+    let mut rest = rest;
+    while !rest.is_empty() {
+        let (r, section_type) = le_u32(rest)?;
+        let (r, section_size) = le_u64(r)?;
+        let section_size = section_size as usize;
+        let (r, section_data) = take(section_size)(r)?;
+
+        if section_type == 2 {
+            // Witness data section
+            let n_wires = section_data.len() / field_size;
+            let mut srest = section_data;
+            for _ in 0..n_wires {
+                let (sr, val_bytes) = take(field_size)(srest)?;
+                let val = Fr::from_le_bytes_mod_order(val_bytes);
+                witness.push(val);
+                srest = sr;
+            }
+        }
+        rest = r;
+    }
+    Ok(witness)
 }
 
 // ------------------------------------------------------------------
@@ -426,7 +510,7 @@ mod tests {
     #[test]
     fn test_parse_synthetic_wtns() {
         let bytes = build_synthetic_wtns();
-        let witness = CircomCircuit::parse_wtns(&bytes, 32).unwrap();
+        let witness = parse_wtns(&bytes, 32).unwrap();
         let expected: Vec<Fr> = WITNESS.iter().map(|&v| Fr::from(v)).collect();
         assert_eq!(witness, expected);
     }
