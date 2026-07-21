@@ -1030,6 +1030,26 @@ The current crate is a **reference implementation** for correctness verification
 - **Remaining:** Pair this gadget with `EdDSA_JubJubVerifier` for issuer signature to build the full Step 1 predicate for selective-disclosure.
 - **Reference:** [circomlib MerkleTree](https://github.com/iden3/circomlib/blob/master/circuits/merkleTree.circom) uses a depth-parameterised template with MiMC; the same structure applies with Poseidon substituted in. [Poseidon hash](https://www.poseidon-hash.info/) recommends t=3 for binary tree hashing (two inputs + capacity).
 
+### Next steps (prioritized)
+
+1. **Sparse-matrix prover** (highest impact — unlocks large circuits)  
+   Refactor `FftQapEngine` and the Circom adapter to keep constraints in sparse triplet form and accumulate witness polynomials (`l(x)`, `r(x)`, `o(x)`) by iterating non-zero entries only, avoiding the `n_constraints × n_wires` dense allocation entirely. This directly unblocks Blake2b-224 and Ed25519 circuits.
+
+2. **Prepared verifier + batched pairing verification** (solid production win)  
+   Add a `PreparedVerifyingKey` that caches G2 line coefficients for the Miller loop, and expose a batched verifier that checks multiple proofs with a single multi-pairing product. This lowers per-proof on-chain verification cost.
+
+3. **Batch normalization & fixed-base MSM tables** (performance)  
+   Implement batch projective-to-affine normalization using a shared Z-coordinate inversion (Montgomery trick), and precompute fixed-base w-NAF window tables for repeated SRS/CRS points reused during setup and proof generation.
+
+4. **Randomized R1CS test fixtures + parity assertions** (robustness)  
+   Generate random sparse R1CS instances that satisfy `A ∘ B = C`, and run them through both the dense/naive path and the optimized FFT/Pippenger path in debug mode, asserting bit-for-bit equality.
+
+5. **Finish the Lagrange-basis SRS** (completes Implementation 2)  
+   Build the group-element SRS in the Lagrange basis (`L_i(τ)·G1` instead of `τ^i·G1`) so the FFT path can skip monomial conversion and use the most efficient production pattern.
+
+6. **Recursive proof composition / aggregation** (advanced)  
+   Support proving “I know a valid Groth16 proof π₁ for circuit C₁” inside a second Groth16 circuit C₂, or adopt arkworks’ `groth16::aggregate_proofs` module, to amortise on-chain verification cost across many proofs.
+
 </details>
 
 ---
