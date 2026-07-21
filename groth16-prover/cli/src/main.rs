@@ -27,6 +27,8 @@ pub enum Command {
     /// format as a production MPC ceremony, but with locally-generated
     /// randomness.  Use this for testing, CI, and benchmarking.
     ///
+    /// Use `--sparse` for large circuits to avoid dense matrix allocation.
+    ///
     /// Example:
     ///
     ///   $ groth16-prover ceremony-dev --circuit circuit.r1cs --proving-key circuit.pk --verifying-key circuit.vk
@@ -41,11 +43,14 @@ pub enum Command {
     /// the random toxic waste from the ceremony step.  Otherwise the
     /// deterministic test values are used (dev only).
     ///
+    /// Use `--sparse` for large circuits (Implementation 6) to avoid
+    /// dense matrix allocation.
+    ///
     /// Examples:
     ///
     ///   $ groth16-prover prove --circuit circuit.r1cs --witness witness.wtns --proving-key circuit.pk --out proof.bin
     ///
-    ///   $ groth16-prover prove --circuit circuit.r1cs --witness witness.wtns  # hex to stdout (dev only)
+    ///   $ groth16-prover prove --circuit circuit.r1cs --witness witness.wtns --sparse --out proof.bin
     Prove(cmd::prove::Args),
 
     /// Verify a Groth16 proof against its public input
