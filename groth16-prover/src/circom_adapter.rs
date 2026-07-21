@@ -619,4 +619,233 @@ mod tests {
             "V must match between naive and Pippenger FullPK"
         );
     }
+
+    // ------------------------------------------------------------------
+    // Implementation 6 parity: sparse vs dense
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn test_sparse_parse_matches_dense() {
+        let bytes = build_synthetic_r1cs();
+        let dense = CircomCircuit::parse_r1cs(&bytes).unwrap();
+        let sparse = SparseCircomCircuit::parse_r1cs(&bytes).unwrap();
+
+        assert_eq!(dense.n_wires, sparse.n_wires);
+        assert_eq!(dense.n_constraints, sparse.n_constraints);
+        assert_eq!(dense.n_pub_out, sparse.n_pub_out);
+        assert_eq!(dense.n_pub_in, sparse.n_pub_in);
+        assert_eq!(dense.n_prv_in, sparse.n_prv_in);
+
+        // Verify every non-zero sparse entry matches the dense matrix
+        for c in 0..dense.n_constraints as usize {
+            for &(wire, coeff) in &sparse.l[c] {
+                assert_eq!(dense.l[c][wire as usize], coeff, "sparse L[{}][{}] mismatch", c, wire);
+            }
+            for &(wire, coeff) in &sparse.r[c] {
+                assert_eq!(dense.r[c][wire as usize], coeff, "sparse R[{}][{}] mismatch", c, wire);
+            }
+            for &(wire, coeff) in &sparse.o[c] {
+                assert_eq!(dense.o[c][wire as usize], coeff, "sparse O[{}][{}] mismatch", c, wire);
+            }
+        }
+
+        // Verify dense zeros are not present in sparse
+        for c in 0..dense.n_constraints as usize {
+            for i in 0..dense.n_wires as usize {
+                if dense.l[c][i] != Fr::zero() {
+                    assert!(sparse.l[c].iter().any(|(w, _)| *w == i as u32), "missing sparse L[{}][{}]", c, i);
+                }
+                if dense.r[c][i] != Fr::zero() {
+                    assert!(sparse.r[c].iter().any(|(w, _)| *w == i as u32), "missing sparse R[{}][{}]", c, i);
+                }
+                if dense.o[c][i] != Fr::zero() {
+                    assert!(sparse.o[c].iter().any(|(w, _)| *w == i as u32), "missing sparse O[{}][{}]", c, i);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_sparse_ceremony_matches_dense() {
+        use crate::ceremony::{single_party_ceremony_full_from_tw, single_party_ceremony_full_from_tw_sparse, ToxicWaste};
+        use crate::engine::FftQapEngine;
+
+        let bytes = build_synthetic_r1cs();
+        let dense = CircomCircuit::parse_r1cs(&bytes).unwrap();
+        let sparse = SparseCircomCircuit::parse_r1cs(&bytes).unwrap();
+
+        let engine = FftQapEngine::new();
+        let tw = ToxicWaste::deterministic();
+        let n_public = 1 + dense.n_pub_out as usize + dense.n_pub_in as usize;
+
+        let (pk_dense, vk_dense) = single_party_ceremony_full_from_tw(
+            &engine, &dense.l, &dense.r, &dense.o, n_public, tw.clone(),
+        );
+        let (pk_sparse, vk_sparse) = single_party_ceremony_full_from_tw_sparse(
+            &engine,
+            dense.n_constraints as usize,
+            dense.n_wires as usize,
+            n_public,
+            &sparse.l,
+            &sparse.r,
+            &sparse.o,
+            tw,
+        );
+
+        assert_eq!(vk_dense.alpha_g1, vk_sparse.alpha_g1, "VK alpha_g1 mismatch");
+        assert_eq!(vk_dense.beta_g2, vk_sparse.beta_g2, "VK beta_g2 mismatch");
+        assert_eq!(vk_dense.gamma_g2, vk_sparse.gamma_g2, "VK gamma_g2 mismatch");
+        assert_eq!(vk_dense.delta_g2, vk_sparse.delta_g2, "VK delta_g2 mismatch");
+        assert_eq!(vk_dense.ic, vk_sparse.ic, "VK ic mismatch");
+        assert_eq!(vk_dense.n_public, vk_sparse.n_public, "VK n_public mismatch");
+
+        assert_eq!(pk_dense.a_query, pk_sparse.a_query, "PK a_query mismatch");
+        assert_eq!(pk_dense.b_g1_query, pk_sparse.b_g1_query, "PK b_g1_query mismatch");
+        assert_eq!(pk_dense.b_g2_query, pk_sparse.b_g2_query, "PK b_g2_query mismatch");
+        assert_eq!(pk_dense.c_query, pk_sparse.c_query, "PK c_query mismatch");
+        assert_eq!(pk_dense.h_query, pk_sparse.h_query, "PK h_query mismatch");
+        assert_eq!(pk_dense.l_query, pk_sparse.l_query, "PK l_query mismatch");
+    }
+
+    #[test]
+    fn test_sparse_prover_matches_dense_naive() {
+        use crate::ceremony::{single_party_ceremony_full_from_tw, single_party_ceremony_full_from_tw_sparse, ToxicWaste};
+        use crate::engine::FftQapEngine;
+        use crate::prover::{NaiveProver, Prover};
+
+        let r1cs_bytes = build_synthetic_r1cs();
+        let wtns_bytes = build_synthetic_wtns();
+
+        let mut dense = CircomCircuit::parse_r1cs(&r1cs_bytes).unwrap();
+        dense.load_witness_from_bytes(&wtns_bytes, 32).unwrap();
+        let mut sparse = SparseCircomCircuit::parse_r1cs(&r1cs_bytes).unwrap();
+        sparse.load_witness_from_bytes(&wtns_bytes, 32).unwrap();
+
+        let engine = FftQapEngine::new();
+        let tw = ToxicWaste::deterministic();
+        let n_public = 1 + dense.n_pub_out as usize + dense.n_pub_in as usize;
+
+        let (pk_dense, _) = single_party_ceremony_full_from_tw(
+            &engine, &dense.l, &dense.r, &dense.o, n_public, tw.clone(),
+        );
+        let (pk_sparse, _) = single_party_ceremony_full_from_tw_sparse(
+            &engine,
+            dense.n_constraints as usize,
+            dense.n_wires as usize,
+            n_public,
+            &sparse.l,
+            &sparse.r,
+            &sparse.o,
+            tw,
+        );
+
+        let prover = NaiveProver::new();
+
+        let (proof_dense, public_dense) = prover.prove_with_full_pk(
+            &engine, &pk_dense, &dense.l, &dense.r, &dense.o, &dense.witness,
+        );
+        let (proof_sparse, public_sparse) = prover.prove_with_full_pk_sparse(
+            &engine, &pk_sparse,
+            dense.n_constraints as usize,
+            &sparse.l, &sparse.r, &sparse.o,
+            &sparse.witness,
+        );
+
+        assert_eq!(proof_dense.a, proof_sparse.a, "A mismatch sparse vs dense");
+        assert_eq!(proof_dense.b, proof_sparse.b, "B mismatch sparse vs dense");
+        assert_eq!(proof_dense.c, proof_sparse.c, "C mismatch sparse vs dense");
+        assert_eq!(public_dense.v, public_sparse.v, "V mismatch sparse vs dense");
+    }
+
+    #[test]
+    fn test_sparse_prover_matches_dense_pippenger() {
+        use crate::ceremony::{single_party_ceremony_full_from_tw, single_party_ceremony_full_from_tw_sparse, ToxicWaste};
+        use crate::engine::FftQapEngine;
+        use crate::prover::{PippengerProver, Prover};
+
+        let r1cs_bytes = build_synthetic_r1cs();
+        let wtns_bytes = build_synthetic_wtns();
+
+        let mut dense = CircomCircuit::parse_r1cs(&r1cs_bytes).unwrap();
+        dense.load_witness_from_bytes(&wtns_bytes, 32).unwrap();
+        let mut sparse = SparseCircomCircuit::parse_r1cs(&r1cs_bytes).unwrap();
+        sparse.load_witness_from_bytes(&wtns_bytes, 32).unwrap();
+
+        let engine = FftQapEngine::new();
+        let tw = ToxicWaste::deterministic();
+        let n_public = 1 + dense.n_pub_out as usize + dense.n_pub_in as usize;
+
+        let (pk_dense, _) = single_party_ceremony_full_from_tw(
+            &engine, &dense.l, &dense.r, &dense.o, n_public, tw.clone(),
+        );
+        let (pk_sparse, _) = single_party_ceremony_full_from_tw_sparse(
+            &engine,
+            dense.n_constraints as usize,
+            dense.n_wires as usize,
+            n_public,
+            &sparse.l,
+            &sparse.r,
+            &sparse.o,
+            tw,
+        );
+
+        let prover = PippengerProver::new();
+
+        let (proof_dense, public_dense) = prover.prove_with_full_pk(
+            &engine, &pk_dense, &dense.l, &dense.r, &dense.o, &dense.witness,
+        );
+        let (proof_sparse, public_sparse) = prover.prove_with_full_pk_sparse(
+            &engine, &pk_sparse,
+            dense.n_constraints as usize,
+            &sparse.l, &sparse.r, &sparse.o,
+            &sparse.witness,
+        );
+
+        assert_eq!(proof_dense.a, proof_sparse.a, "A mismatch sparse vs dense (Pippenger)");
+        assert_eq!(proof_dense.b, proof_sparse.b, "B mismatch sparse vs dense (Pippenger)");
+        assert_eq!(proof_dense.c, proof_sparse.c, "C mismatch sparse vs dense (Pippenger)");
+        assert_eq!(public_dense.v, public_sparse.v, "V mismatch sparse vs dense (Pippenger)");
+    }
+
+    #[test]
+    fn test_sparse_prover_produces_valid_proof() {
+        use crate::ceremony::{single_party_ceremony_full_from_tw_sparse, ToxicWaste};
+        use crate::engine::FftQapEngine;
+        use crate::prover::{PippengerProver, Prover};
+        use crate::ceremony::verify_with_vk;
+
+        let r1cs_bytes = build_synthetic_r1cs();
+        let wtns_bytes = build_synthetic_wtns();
+
+        let mut sparse = SparseCircomCircuit::parse_r1cs(&r1cs_bytes).unwrap();
+        sparse.load_witness_from_bytes(&wtns_bytes, 32).unwrap();
+
+        let engine = FftQapEngine::new();
+        let tw = ToxicWaste::deterministic();
+        let n_public = 1 + sparse.n_pub_out as usize + sparse.n_pub_in as usize;
+
+        let (pk_sparse, vk_sparse) = single_party_ceremony_full_from_tw_sparse(
+            &engine,
+            sparse.n_constraints as usize,
+            sparse.n_wires as usize,
+            n_public,
+            &sparse.l,
+            &sparse.r,
+            &sparse.o,
+            tw,
+        );
+
+        let prover = PippengerProver::new();
+        let (proof, public_input) = prover.prove_with_full_pk_sparse(
+            &engine, &pk_sparse,
+            sparse.n_constraints as usize,
+            &sparse.l, &sparse.r, &sparse.o,
+            &sparse.witness,
+        );
+
+        assert!(
+            verify_with_vk(&proof, &public_input, &vk_sparse),
+            "Sparse prover must produce a valid proof"
+        );
+    }
 }
