@@ -591,6 +591,66 @@ impl Prover for PippengerProver {
 
         (Proof { a, b, c }, PublicInput { v })
     }
+
+    fn prove_with_full_pk_sparse(
+        &self,
+        engine: &impl QapEngine,
+        full_pk: &crate::ceremony::FullProvingKey,
+        n_constraints: usize,
+        sparse_l: &[Vec<(u32, Fr)>],
+        sparse_r: &[Vec<(u32, Fr)>],
+        sparse_o: &[Vec<(u32, Fr)>],
+        witness: &[Fr],
+    ) -> (Proof, PublicInput) {
+        use crate::engine::build_witness_polys_sparse;
+
+        let n_public = full_pk.vk.n_public;
+
+        // 1. Build witness polynomials l(x), r(x), o(x) from sparse constraints.
+        let d_size = engine.domain_size(n_constraints);
+        let domain = GeneralEvaluationDomain::<Fr>::new(d_size)
+            .expect("Failed to create evaluation domain");
+        let (l_poly, r_poly, o_poly) =
+            build_witness_polys_sparse(&domain, d_size, n_constraints, sparse_l, sparse_r, sparse_o, witness);
+
+        let t = engine.target_poly(n_constraints);
+        let h = engine.compute_quotient(&l_poly, &r_poly, &o_poly, &t);
+
+        // 2. A = MSM(a_query, witness) + alpha_g1
+        let a_proj = G1Projective::msm(&full_pk.a_query, witness)
+            .expect("MSM length mismatch");
+        let a = G1Affine::from(a_proj + G1Projective::from(full_pk.vk.alpha_g1));
+
+        // 3. B = MSM(b_g2_query, witness) + beta_g2
+        let b_proj = G2Projective::msm(&full_pk.b_g2_query, witness)
+            .expect("MSM length mismatch");
+        let b = G2Affine::from(b_proj + G2Projective::from(full_pk.vk.beta_g2));
+
+        // 4. C = MSM(c_query[private], witness[private]) + MSM(h_query, h_coeffs)
+        let private_c = &full_pk.c_query[n_public..];
+        let private_w = &witness[n_public..];
+        let c_private = G1Projective::msm(private_c, private_w)
+            .expect("MSM length mismatch");
+
+        let h_len = h.coeffs.len().min(full_pk.h_query.len());
+        let h_c = if h_len > 0 {
+            G1Projective::msm(&full_pk.h_query[..h_len], &h.coeffs[..h_len])
+                .expect("MSM length mismatch")
+        } else {
+            G1Projective::zero()
+        };
+
+        let c = G1Affine::from(c_private + h_c);
+
+        // 5. V = MSM(l_query, witness[public])
+        let public_w = &witness[..n_public];
+        let v = G1Affine::from(
+            G1Projective::msm(&full_pk.l_query, public_w)
+                .expect("MSM length mismatch")
+        );
+
+        (Proof { a, b, c }, PublicInput { v })
+    }
 }
 
 /// Verify a Groth16 proof.
