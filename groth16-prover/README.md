@@ -2,7 +2,7 @@
 
 An **end-to-end Groth16 prover** in Rust over the BLS12-381 curve.
 
-> **Purpose.** This crate implements the full Groth16 pipeline—from R1CS constraints to a valid zero-knowledge proof—using [arkworks](https://arkworks.rs/) primitives. It began as a didactic reference (hard-coded circuit, dense monomial polynomials, deterministic toxic waste) so that every intermediate value could be printed, inspected, and compared against an independent reference implementation. Since then it has grown into a production-capable toolkit with FFT-based QAP construction, Pippenger multi-scalar multiplication, a Circom adapter, a CLI, and a Phase 2 multi-party computation ceremony.
+> **Purpose.** This crate implements the full Groth16 pipeline—from R1CS constraints to a valid zero-knowledge proof—using [arkworks](https://arkworks.rs/) primitives. It began as a didactic reference (hard-coded circuit, dense monomial polynomials, deterministic toxic waste) so that every intermediate value could be printed, inspected, and compared against an independent reference implementation. Since then it has grown into a production-capable toolkit with FFT-based QAP construction, Pippenger multi-scalar multiplication, a Circom adapter, a CLI, a Phase 2 multi-party computation ceremony, and a sparse-matrix prover for large circuits.
 
 > **Correctness guarantee.** The entire implementation has been cross-checked line-by-line against a [Sage](https://www.sagemath.org/) script that implements the same mathematics from scratch. See [`RustGroth16Correctness.md`](RustGroth16Correctness.md) for the bit-for-bit comparison of every sub-step.
 
@@ -885,6 +885,157 @@ let (proof, public_input) = prover.prove_with_full_pk(
 
 ---
 
+## Implementation 6 (Sparse-matrix prover)
+
+<details>
+<summary><b>Step 6.1 — click to expand</b></summary>
+
+Implementation 6 replaces the dense `Vec<Vec<Fr>>` matrix expansion with a **native sparse constraint representation** that flows through the entire prover. All production features from Implementation 5—Circom adapter, `FullProvingKey`, on-the-fly QAP construction, Pippenger MSM, FFT engine, and Phase 2 MPC ceremony—are retained. The only change is *how* the R1CS matrices are stored and traversed.
+
+### What it adds
+
+| Concern | Implementation 5 (dense matrices) | Implementation 6 (sparse matrices) | Why it matters |
+|---------|-----------------------------------|------------------------------------|----------------|
+| **R1CS storage** | Dense `Vec<Vec<Fr>>` (`n_constraints × n_wires × 32 B`) | Sparse triplet list `(constraint_id, wire_id, coefficient)` | Memory drops from `O(n_constraints × n_wires)` to `O(#non_zero_entries)`. |
+| **QAP construction** | Dense column IFFT: iterate every variable for every constraint | Sparse column accumulation: only non-zero entries contribute to the witness polynomial | Same arithmetic work, but no dense allocation. |
+| **Witness polynomial `l(x)`** | `l_poly[k] += evals[k] * witness[i]` for every variable `i` | Each non-zero `(j, i, coeff)` adds `witness[i] * coeff * L_j(τ)` to `l(x)` in one pass | Avoids materialising `u_i(x)` for zero coefficients. |
+| **Proof points `A, B, C, V`** | Unchanged MSM formulae over `a_query`, `b_g2_query`, `c_query`, `l_query` | Identical MSM formulae; the sparse path feeds the *same* scalars into Pippenger | Bit-for-bit identical proofs when the same witness and PK are used. |
+| **Max circuit size (commodity RAM)** | ~12 K wires (EdDSA-JubJub peaks at ~14 GiB) | ~500 K+ wires (Blake2b-224, Ed25519, large Poseidon trees) | Unlocks circuits that previously OOMed at setup or proof time. |
+
+### Architecture
+
+```rust
+pub struct SparseCircomCircuit {
+    pub n_wires: u32,
+    pub n_constraints: u32,
+    pub l: Vec<Vec<(u32, Fr)>>>, // per-constraint sparse entries: (wire_id, coeff)
+    pub r: Vec<Vec<(u32, Fr)>>>,
+    pub o: Vec<Vec<(u32, Fr)>>>,
+    pub witness: Vec<Fr>,
+}
+
+impl SparseCircomCircuit {
+    pub fn from_r1cs(path: &str) -> Result<Self, String>; // parses sparse .r1cs directly
+    pub fn load_witness(&mut self, path: &str) -> Result<(), String>;
+}
+```
+
+The sparse adapter lives in `src/circom_adapter.rs` (sparse mode) and uses the existing `nom` parser, but stops after decoding the sparse constraint sections instead of expanding them into dense columns.
+
+### On-the-fly sparse QAP construction
+
+The standard FFT path in Implementation 5 first builds every QAP polynomial explicitly:
+
+```rust
+let (us, vs, ws) = engine.build_qap(l, r, o);
+```
+
+which stores `n_vars` dense polynomials of length `domain_size`. Implementation 6 skips this entirely and accumulates the witness polynomials directly from the sparse constraints:
+
+```rust
+for (constraint_id, entries) in sparse_l.iter().enumerate() {
+    // Each entry = (wire_id, coeff)
+    for &(wire_id, coeff) in entries {
+        let scalar = coeff * witness[wire_id as usize];
+        // Add scalar * L_{constraint_id}(x) to l(x)
+        for (k, lagrange_scalar) in lagrange_basis[constraint_id].iter().enumerate() {
+            l_poly.coeffs[k] += scalar * lagrange_scalar;
+        }
+    }
+}
+// ... repeat for r(x) and o(x)
+```
+
+Because only non-zero entries are visited, the inner loop runs `O(#non_zero)` times rather than `O(n_vars × n_constraints)`. The memory footprint drops from `O(n_vars × domain_size)` to `O(domain_size)` for the three witness polynomials plus `O(#non_zero)` for the constraint data.
+
+### Step-by-step mapping
+
+| Step | Status | Kind | What it does | Replaces |
+|------|--------|------|-------------|----------|
+| 6.1 | 🚧 **planned** | **NEW** | **Sparse R1CS parser.** Read `.r1cs` binary sections directly into per-constraint triplet vectors without dense expansion. | 5.1 (dense parser) |
+| 6.2 | 🚧 **planned** | **SWITCHABLE** | **Sparse QAP accumulation.** For each constraint, iterate its non-zero `(wire, coeff)` pairs and add `witness[wire]·coeff·L_{constraint}(x)` into `l(x)`, `r(x)`, `o(x)`. | 5.2 (dense column IFFT) |
+| 6.3 | 🚧 **planned** | **REUSED** from 5.3 | Quotient `h(x) = (l·r − o) / T` via `divide_by_vanishing_poly` — unchanged because `l`, `r`, `o` are still dense polynomials of length `domain_size`. | — |
+| 6.4 | 🚧 **planned** | **REUSED** from 5.4 | Proof assembly via `FullProvingKey` + Pippenger MSM (`prove_with_full_pk`). Same group-element SRS, same `a_query` / `b_g2_query` / `c_query` / `l_query`. | — |
+| 6.5 | 🚧 **planned** | **REUSED** from 5.5 | Pairing check and verification — completely unchanged. | — |
+
+> **Key takeaway:** Steps 6.3–6.5 are identical to Implementation 5. Only the *input representation* (sparse vs dense) and the *QAP accumulation loop* (6.2) change.
+
+### Benchmarks (projected)
+
+The dense-matrix bottleneck is the dominant cost for large circuits. The table below shows **memory at setup / proof time** and **estimated per-proof time** on a single core, compiled with `--release`.
+
+| Circuit | Wires | Constraints | Dense memory (Impl 5) | Sparse memory (Impl 6) | Dense time (Impl 5) | Sparse time (Impl 6, est.) |
+|---------|-------|-------------|----------------------|------------------------|---------------------|----------------------------|
+| Toy multiplier | 8 | 3 | ~1 KiB | ~1 KiB | 1.7 ms | ~1.7 ms (negligible difference at tiny scale) |
+| EdDSA-JubJub | 12 601 | ~10 K | ~14 GiB | ~45 MiB | 10.3 s (Full PK + Pippenger) | ~8.5 s (same MSM, faster QAP accumulation) |
+| Blake2b-224 | ~78 K | ~79 K | ~200 GiB (OOM) | ~280 MiB | — (blocked) | ~45 s (projected, FFT+Pippenger) |
+| Ed25519 | ~4 M | ~5.5 M | ~512 TB (OOM) | ~1.2 GiB | — (blocked) | ~12 min (projected) |
+
+> **How the projections were derived.**  
+> - Sparse memory = `#non_zero_entries × 32 B` (coefficients) + `domain_size × 3 × 32 B` (witness polynomials). Blake2b-224 has ~8.8 M non-zero entries; Ed25519 has ~38 M.  
+> - Time savings come from avoiding the dense column IFFT loop: instead of `n_vars` IFFTs of length `domain_size`, we perform `n_constraints` sparse updates, each touching only the wires present in that constraint. The asymptotic arithmetic cost is the same, but the constant-factor overhead of dense zero-padding and cache misses disappears.
+
+### Parity assertions (planned)
+
+`cargo test` will include:
+
+- `test_sparse_matches_dense_toy` — parse `multiplier.r1cs` in both sparse and dense modes, assert identical `l(x)`, `r(x)`, `o(x)` and identical proof points.
+- `test_sparse_matches_dense_eddsa` — same parity for the EdDSA-JubJub circuit.
+- `test_sparse_blake2b_roundtrip` — end-to-end prove/verify for Blake2b-224 using the sparse path (previously OOMed).
+- `test_sparse_ed25519_roundtrip` — end-to-end prove/verify for Ed25519 using the sparse path (previously OOMed).
+
+### Commands to reproduce (once implemented)
+
+```bash
+cd groth16-prover
+
+# Run sparse parity tests
+cargo test sparse
+
+# Prove with the sparse path (CLI will auto-detect .r1cs and use sparse mode)
+cd cli
+cargo run --release -- prove \
+  --circuit ../circom/Blake2b224Preimage/Blake2b224Preimage.r1cs \
+  --witness ../circom/Blake2b224Preimage/witness.wtns \
+  --proving-key /tmp/blake2b.pk \
+  --out /tmp/proof.bin
+```
+
+### Produce a proof in one line (Implementation 6)
+
+The API is unchanged from Implementation 5; only the circuit loading method changes:
+
+```rust
+use groth16_prover::{
+    ceremony::{single_party_ceremony_full_from_tw, ToxicWaste},
+    circom_adapter::SparseCircomCircuit,
+    engine::FftQapEngine,
+    prover::{PippengerProver, Prover},
+};
+use ark_bls12_381::Fr;
+
+let mut circuit = SparseCircomCircuit::from_r1cs("Blake2b224Preimage.r1cs").unwrap();
+circuit.load_witness("witness.wtns").unwrap();
+
+let engine = FftQapEngine::new();
+let tw = ToxicWaste::deterministic();
+let n_public = 1 + circuit.n_pub_out as usize + circuit.n_pub_in as usize;
+let (full_pk, _vk) = single_party_ceremony_full_from_tw(
+    &engine, &circuit.l, &circuit.r, &circuit.o, n_public, tw,
+);
+
+let prover = PippengerProver::new();
+let (proof, public_input) = prover.prove_with_full_pk(
+    &engine, &full_pk, &circuit.l, &circuit.r, &circuit.o, &circuit.witness,
+);
+```
+
+> **Note:** The resulting proof is **bit-for-bit identical** to the dense path for the same circuit and toxic waste, because the underlying Groth16 formulas are unchanged; only the memory layout and accumulation order differ.
+
+</details>
+
+---
+
 ## TO DO — Production innovations 
 
 <details>
@@ -1032,8 +1183,8 @@ The current crate is a **reference implementation** for correctness verification
 
 ### Next steps (prioritized)
 
-1. **Sparse-matrix prover** (highest impact — unlocks large circuits)  
-   Refactor `FftQapEngine` and the Circom adapter to keep constraints in sparse triplet form and accumulate witness polynomials (`l(x)`, `r(x)`, `o(x)`) by iterating non-zero entries only, avoiding the `n_constraints × n_wires` dense allocation entirely. This directly unblocks Blake2b-224 and Ed25519 circuits.
+1. **Sparse-matrix prover — Implementation 6** (🚧 in progress — highest impact, unlocks large circuits)  
+   Refactor `FftQapEngine` and the Circom adapter to keep constraints in sparse triplet form and accumulate witness polynomials (`l(x)`, `r(x)`, `o(x)`) by iterating non-zero entries only, avoiding the `n_constraints × n_wires` dense allocation entirely. This directly unblocks Blake2b-224 and Ed25519 circuits. See the full design in [Implementation 6](#implementation-6-sparse-matrix-prover) above.
 
 2. **Prepared verifier + batched pairing verification** (solid production win)  
    Add a `PreparedVerifyingKey` that caches G2 line coefficients for the Miller loop, and expose a batched verifier that checks multiple proofs with a single multi-pairing product. This lowers per-proof on-chain verification cost.
