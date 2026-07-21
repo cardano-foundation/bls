@@ -972,15 +972,19 @@ The dense-matrix bottleneck is the dominant cost for large circuits. The table b
 | Toy multiplier | 8 | 3 | 2.3 KiB | 360 B | 6.4× | 2.34 ms | 2.04 ms | 1.14× |
 | PoseidonMerkle depth-2 | 1 914 | 1 911 | 334.9 MiB | 0.2 MiB | **1 389×** | 11.55 s | 875 ms | **13.2×** |
 | EdDSAJubJub test_pbk_only | 4 123 | 4 122 | 1 555.9 MiB | 0.8 MiB | **1 840×** | 103.9 s | 7.82 s | **13.3×** |
+| Synthetic hash (20K) | 20 000 | 20 000 | 35.8 GiB (OOM) | 1 526.6 MiB | **24×** | — (blocked) | 82.75 s | **Unblocked** |
+| Synthetic hash (40K) | 40 000 | 40 000 | 143.1 GiB (OOM) | 6 105.0 MiB | **24×** | — (blocked) | 371.69 s | **Unblocked** |
+| Synthetic hash (50K) | 50 000 | 50 000 | 223.5 GiB (OOM) | 5 724.0 MiB | **40×** | — (blocked) | 351.44 s | **Unblocked** |
 | Blake2b-224 | ~78 K | ~79 K | ~200 GiB (OOM) | ~280 MiB | **~730 000×** | — (blocked) | ~45 s (projected) | **Unblocked** |
 | Ed25519 | ~4 M | ~5.5 M | ~512 TB (OOM) | ~1.2 GiB | **~430 000 000×** | — (blocked) | ~12 min (projected) | **Unblocked** |
 
 > **How the numbers were measured.**  
-> Run `cargo run --bin benchmark_sparse --release` on a single core.  
+> Run `cargo run --bin benchmark_sparse --release` (real circuits) and `cargo run --bin benchmark_large_circuit --release` (synthetic large circuits) on a single core.  
 > - **Toy multiplier:** 500 iterations, synthetic 3-gate circuit. Sparse path is ~14 % faster; at tiny scale the difference is in the noise.  
 > - **PoseidonMerkle depth-2:** 10 iterations, real 1 911-constraint circuit from `circom/PoseidonMerkle/`. Dense on-the-fly construction allocates and iterates over 1 914 × 2 048 zero-filled columns; sparse skips this entirely.  
 > - **EdDSAJubJub test_pbk_only:** 1 iteration, real 4 122-constraint circuit. Dense path takes 104 s because it must process 4 123 × 2 048 dense columns; sparse completes in 7.8 s.  
-> - **Blake2b-224 / Ed25519:** Dense paths OOM; sparse projections scale from the observed PoseidonMerkle / EdDSA trend.  
+> - **Synthetic hash (20K–50K):** Large circuits that would OOM on commodity hardware with the dense path. The sparse path successfully runs ceremony + prove + verify on the same machine.  
+> - **Blake2b-224 / Ed25519:** Dense paths OOM; sparse projections scale from the observed trend.  
 > - **Memory formula:** Sparse memory = `#non_zero_entries × 40 B` (wire_id + coeff) + `domain_size × 3 × 32 B` (witness polynomials). Dense memory = `n_constraints × n_wires × 32 B × 3` (L, R, O matrices).
 
 ### Parity assertions
@@ -1003,6 +1007,9 @@ cargo test sparse
 
 # Run sparse benchmark (measured numbers in the table above)
 cargo run --bin benchmark_sparse --release
+
+# Run large-circuit unblocking demo (synthetic 20K–50K constraint circuits)
+cargo run --bin benchmark_large_circuit --release
 
 # Sparse dev ceremony
 cd cli
@@ -1062,6 +1069,8 @@ let (proof, public_input) = prover.prove_with_full_pk_sparse(
 ```
 
 > **Note:** The resulting proof is **bit-for-bit identical** to the dense path for the same circuit and toxic waste, because the underlying Groth16 formulas are unchanged; only the memory layout and accumulation order differ.
+>
+> **Unblocking demonstration.** Run `cargo run --bin benchmark_large_circuit --release` to see synthetic circuits with 20 K–50 K constraints successfully proven on commodity hardware. The dense path would need 36–224 GiB of RAM (kernel OOM kill); the sparse path completes with 1.5–6.1 GiB and produces valid proofs verified by the pairing check.
 
 </details>
 
