@@ -340,13 +340,28 @@ The test prints:
 | `zeroj-onchain-julc/.../Groth16BLS12381Verifier.java` | JULC on-chain validator |
 | `zeroj-onchain-julc/.../Groth16BLS12381PureJavaProverTest.java` | E2E test: Java prove → JULC verify |
 
-### Audit additions (local modifications inside submodule)
+### Audit additions (patch files in `patches/`)
+
+> **Policy:** The `zeroj-audit/` submodule stays at a **clean upstream commit** (`bee6039`, v0.1.0-pre10). Any local modifications are applied as patch files in `patches/` and never committed inside the submodule. This keeps the submodule pointer stable and makes upstream updates trivial (`git fetch origin && git reset --hard origin/main`).
 
 | File | Description |
 |------|-------------|
-| `zeroj-crypto/.../Groth16SetupBLS381.java` | Added `setupDeterministic(...)` overload |
-| `zeroj-crypto/.../Groth16ProverBLS381.java` | Added `proveDeterministic(...)` overload |
-| `zeroj-onchain-julc/.../DeterministicCrossCheckTest.java` | Deterministic cross-check test |
+| `patches/zeroj-prove-deterministic.patch` | Re-adds `proveDeterministic(...)` to `Groth16ProverBLS381.java` — upstream refactored `proveInternal()` to use `FlatScalars`/`ProverBackend` and dropped the old overload. This patch restores it for cross-checking. |
+| `patches/zeroj-deterministic-crosscheck.patch` | Adds `DeterministicCrossCheckTest.java` with pairing verification and toxic-waste constants `tau=3, alpha=5, beta=7, gamma=11, delta=13` (matching the Rust/Sage fixture). |
+| `zeroj-crypto/.../Groth16SetupBLS381.java` | `setup(...)` with explicit alpha/beta/gamma/delta (present upstream at `bee6039`) |
+| `zeroj-crypto/.../Groth16ScaleBenchmark.java` | Built-in prover scale benchmark (ADR-0027 M7, present upstream) |
+
+To apply patches:
+```bash
+cd zeroj-audit
+git apply ../patches/zeroj-prove-deterministic.patch
+git apply ../patches/zeroj-deterministic-crosscheck.patch
+```
+To reset the submodule to clean upstream:
+```bash
+cd zeroj-audit
+git reset --hard bee6039
+```
 
 ---
 
@@ -556,31 +571,22 @@ All instructions below are **self-contained** — you do not need write access t
 | Gradle | 9.x (wrapper included in zeroj) | `./gradlew` inside `zeroj-audit/` |
 | Rust | stable | [rustup.rs](https://rustup.rs) |
 
-> **Note on Java 25.** zeroj's `build.gradle` pins `sourceCompatibility = JavaVersion.VERSION_25`. Running with Java 17 will fail. If you do not have Java 25 installed, download the GraalVM CE tarball, unpack it to `/tmp/graalvm-community-openjdk-25.0.2+10.1`, and export `JAVA_HOME` before invoking Gradle (see step 9.3).
+> **Note on Java 25.** zeroj's `build.gradle` pins `sourceCompatibility = JavaVersion.VERSION_25`. Running with Java 17 will fail. If you do not have Java 25 installed, download a GraalVM JDK 25 tarball, unpack it to e.g. `/tmp/graalvm-jdk-25.0.3+9.1`, and export `JAVA_HOME` before invoking Gradle (see step 9.3).
 
-### 9.2 Clone zeroj and apply the local patch
+### 9.2 Clone zeroj and apply local patches
 
 ```bash
-# 1. Clone zeroj at the exact commit that already contains the deterministic overloads
+# 1. Clone zeroj at the exact upstream commit used by this audit
 git clone https://github.com/bloxbean/zeroj.git zeroj-audit
 cd zeroj-audit
-git checkout cd19cb5   # "Add deterministic overloads for cross-checking..."
+git checkout bee6039   # v0.1.0-pre10 — "Merge pull request #21 ..."
 
-# 2. Copy the patch from this audit repo into the submodule
-#    (adjust the relative path if you cloned the parent repo differently)
-cp ../patches/zeroj-deterministic-crosscheck.patch .
-
-# 3. Apply the patch (toxic-waste alignment + pairing verification)
-git apply zeroj-deterministic-crosscheck.patch
+# 2. Apply local patches (never committed inside the submodule)
+git apply ../patches/zeroj-prove-deterministic.patch
+git apply ../patches/zeroj-deterministic-crosscheck.patch
 ```
 
-The patch makes **only** these changes to `zeroj-onchain-julc/.../DeterministicCrossCheckTest.java`:
-- Changes the five toxic-waste constants to `tau=3, alpha=5, beta=7, gamma=11, delta=13`.
-- Adds imports for `BLS12381Pairing`, `Fp`, `Fp2`, `G1Point`, `G2Point`, and `Groth16ProvingKeyBLS381`.
-- Adds a `verifyPairing(...)` helper that recomputes `vk_x` from the public inputs and runs the pure-Java pairing check.
-- Asserts that the pairing check passes at the end of the test.
-
-No other zeroj source files are modified.
+> **Note:** `setup(...)` with explicit alpha/beta/gamma/delta is present upstream at `bee6039` (it was formerly called `setupDeterministic`). `proveDeterministic(...)` was removed during the upstream refactor to `FlatScalars`/`ProverBackend`; the patch restores it. `DeterministicCrossCheckTest.java` is not in upstream — it is added by the second patch.
 
 ### 9.3 Run the zeroj deterministic test
 
@@ -591,8 +597,8 @@ cd zeroj-audit
 ./gradlew :zeroj-onchain-julc:test \
   --tests "DeterministicCrossCheckTest.deterministicCrossCheck"
 
-# If you downloaded GraalVM CE to /tmp:
-JAVA_HOME=/tmp/graalvm-community-openjdk-25.0.2+10.1 \
+# If you downloaded GraalVM to /tmp:
+JAVA_HOME=/tmp/graalvm-jdk-25.0.3+9.1 \
   ./gradlew :zeroj-onchain-julc:test \
   --tests "DeterministicCrossCheckTest.deterministicCrossCheck"
 ```
@@ -602,12 +608,7 @@ JAVA_HOME=/tmp/graalvm-community-openjdk-25.0.2+10.1 \
 - The final line is `Pairing verification: PASSED`.
 - The Gradle report shows `DeterministicCrossCheckTest > deterministicCrossCheck() PASSED`.
 
-> **Keep the submodule clean.** The patch is applied only to reproduce the cross-check. After running, discard it so the submodule does not show as modified in the parent repo:
-> ```bash
-> cd zeroj-audit
-> git checkout -- zeroj-onchain-julc/src/test/java/com/bloxbean/cardano/zeroj/onchain/julc/groth16/validator/DeterministicCrossCheckTest.java
-> ```
-> The patch file itself stays in the parent repo (`patches/zeroj-deterministic-crosscheck.patch`) for future re-use.
+> **Submodule status.** The `zeroj-audit/` submodule in this repo is pinned to **clean upstream** commit `bee6039` (v0.1.0-pre10). No local commits inside the submodule — all modifications live as patch files in `patches/`.
 
 ### 9.4 Run the Rust / Sage reference for the same fixture
 

@@ -1,66 +1,150 @@
 diff --git a/zeroj-onchain-julc/src/test/java/com/bloxbean/cardano/zeroj/onchain/julc/groth16/validator/DeterministicCrossCheckTest.java b/zeroj-onchain-julc/src/test/java/com/bloxbean/cardano/zeroj/onchain/julc/groth16/validator/DeterministicCrossCheckTest.java
-index ab3cf05..74e4701 100644
---- a/zeroj-onchain-julc/src/test/java/com/bloxbean/cardano/zeroj/onchain/julc/groth16/validator/DeterministicCrossCheckTest.java
+new file mode 100644
+index 0000000..a7e04f0
+--- /dev/null
 +++ b/zeroj-onchain-julc/src/test/java/com/bloxbean/cardano/zeroj/onchain/julc/groth16/validator/DeterministicCrossCheckTest.java
-@@ -1,10 +1,12 @@
- package com.bloxbean.cardano.zeroj.onchain.julc.groth16.validator;
- 
- import com.bloxbean.cardano.zeroj.api.R1CSConstraint;
--import com.bloxbean.cardano.zeroj.bls12381.ec.JacobianG1BLS381;
--import com.bloxbean.cardano.zeroj.bls12381.ec.JacobianG2BLS381;
+@@ -0,0 +1,253 @@
++package com.bloxbean.cardano.zeroj.onchain.julc.groth16.validator;
++
++import com.bloxbean.cardano.zeroj.api.R1CSConstraint;
 +import com.bloxbean.cardano.zeroj.bls12381.ec.*;
 +import com.bloxbean.cardano.zeroj.bls12381.field.*;
 +import com.bloxbean.cardano.zeroj.bls12381.pairing.BLS12381Pairing;
- import com.bloxbean.cardano.zeroj.crypto.groth16.Groth16ProverBLS381;
- import com.bloxbean.cardano.zeroj.crypto.groth16.Groth16ProofBLS381;
++import com.bloxbean.cardano.zeroj.crypto.groth16.Groth16ProverBLS381;
++import com.bloxbean.cardano.zeroj.crypto.groth16.Groth16ProofBLS381;
 +import com.bloxbean.cardano.zeroj.crypto.groth16.Groth16ProvingKeyBLS381;
- import com.bloxbean.cardano.zeroj.crypto.setup.Groth16SetupBLS381;
- import org.junit.jupiter.api.Test;
- 
-@@ -27,14 +29,14 @@ import static org.junit.jupiter.api.Assertions.*;
-  *
-  * <p>Witness: [1, 48, 2, 2, 3, 4, 4, 12]</p>
-  *
-- * <p>Deterministic toxic waste (for reproducible cross-checking):</p>
-- * <pre>
-- *   tau   = 5
-- *   alpha = 7
-- *   beta  = 11
-- *   gamma = 13
-- *   delta = 17
-- * </pre>
-+     * <p>Deterministic toxic waste (for reproducible cross-checking):</p>
-+     * <pre>
-+     *   tau   = 3
-+     *   alpha = 5
-+     *   beta  = 7
-+     *   gamma = 11
-+     *   delta = 13
-+     * </pre>
-  *
-  * <p>The test prints every intermediate group-element coordinate in hex so that
-  * the same circuit + same toxic waste can be reproduced in Rust / Sage and the
-@@ -43,11 +45,11 @@ import static org.junit.jupiter.api.Assertions.*;
- class DeterministicCrossCheckTest {
- 
-     // Deterministic toxic waste — MUST match the values used in Rust / Sage cross-check
--    static final BigInteger TAU   = BigInteger.valueOf(5);
--    static final BigInteger ALPHA = BigInteger.valueOf(7);
--    static final BigInteger BETA  = BigInteger.valueOf(11);
--    static final BigInteger GAMMA = BigInteger.valueOf(13);
--    static final BigInteger DELTA = BigInteger.valueOf(17);
++import com.bloxbean.cardano.zeroj.crypto.setup.Groth16SetupBLS381;
++import org.junit.jupiter.api.Test;
++
++import java.math.BigInteger;
++import java.util.ArrayList;
++import java.util.List;
++import java.util.Map;
++
++import static org.junit.jupiter.api.Assertions.*;
++
++/**
++ * Deterministic cross-check test for the 3-constraint multiplication chain circuit.
++ *
++ * <p>Circuit (matches Rust / Sage reference):</p>
++ * <pre>
++ *   x1 * x2 == x5
++ *   x3 * x4 == x6
++ *   x5 * x6 == a
++ * </pre>
++ *
++ * <p>Witness: [1, 48, 2, 2, 3, 4, 4, 12]</p>
++ *
++ *     * <p>Deterministic toxic waste (for reproducible cross-checking):</p>
++ *     * <pre>
++ *     *   tau   = 3
++ *     *   alpha = 5
++ *     *   beta  = 7
++ *     *   gamma = 11
++ *     *   delta = 13
++ *     * </pre>
++ *
++ * <p>The test prints every intermediate group-element coordinate in hex so that
++ * the same circuit + same toxic waste can be reproduced in Rust / Sage and the
++ * outputs compared bit-for-bit.</p>
++ */
++class DeterministicCrossCheckTest {
++
++    // Deterministic toxic waste — MUST match the values used in Rust / Sage cross-check
 +    static final BigInteger TAU   = BigInteger.valueOf(3);
 +    static final BigInteger ALPHA = BigInteger.valueOf(5);
 +    static final BigInteger BETA  = BigInteger.valueOf(7);
 +    static final BigInteger GAMMA = BigInteger.valueOf(11);
 +    static final BigInteger DELTA = BigInteger.valueOf(13);
- 
-     // Witness vector: [1, a, x1, x2, x3, x4, x5, x6]
-     static final BigInteger[] WITNESS = {
-@@ -137,6 +139,47 @@ class DeterministicCrossCheckTest {
-         assertTrue(proof.a().isOnCurve(), "A must be on curve");
-         assertTrue(proof.b().isOnCurve(), "B must be on curve");
-         assertTrue(proof.c().isOnCurve(), "C must be on curve");
++
++    // Witness vector: [1, a, x1, x2, x3, x4, x5, x6]
++    static final BigInteger[] WITNESS = {
++        BigInteger.ONE,   // wire 0: constant 1
++        BigInteger.valueOf(48), // wire 1: public output a
++        BigInteger.valueOf(2),  // wire 2: x1
++        BigInteger.valueOf(2),  // wire 3: x2
++        BigInteger.valueOf(3),  // wire 4: x3
++        BigInteger.valueOf(4),  // wire 5: x4
++        BigInteger.valueOf(4),  // wire 6: x5 (intermediate)
++        BigInteger.valueOf(12)  // wire 7: x6 (intermediate)
++    };
++
++    @Test
++    void deterministicCrossCheck() {
++        int numWires = 8;
++        int numPublic = 1; // wire 1 (output a) is public; wire 0 is the constant 1
++
++        List<R1CSConstraint> constraints = buildConstraints();
++
++        // Sanity-check R1CS relation manually
++        assertTrue(checkR1CS(constraints, WITNESS), "R1CS relation must hold");
++
++        // Deterministic trusted setup (explicit toxic waste — differential tests only)
++        var setup = Groth16SetupBLS381.setup(
++                constraints, numWires, numPublic, TAU,
++                ALPHA, BETA, GAMMA, DELTA);
++
++        var pk = setup.provingKey();
++        int domainSize = Integer.highestOneBit(constraints.size());
++        if (domainSize < constraints.size()) domainSize <<= 1;
++        if (domainSize < 4) domainSize = 4;
++
++        // Deterministic prove with r = 0, s = 0 (unblinded — matches textbook equation)
++        var proof = Groth16ProverBLS381.proveDeterministic(
++                pk, WITNESS, constraints, numWires, domainSize,
++                BigInteger.ZERO, BigInteger.ZERO);
++
++        // Print everything for cross-checking
++        System.out.println("=== Deterministic Cross-Check Output ===");
++        System.out.println();
++        System.out.println("Toxic waste (deterministic):");
++        System.out.println("  tau   = " + TAU);
++        System.out.println("  alpha = " + ALPHA);
++        System.out.println("  beta  = " + BETA);
++        System.out.println("  gamma = " + GAMMA);
++        System.out.println("  delta = " + DELTA);
++        System.out.println();
++
++        System.out.println("Witness vector:");
++        for (int i = 0; i < WITNESS.length; i++) {
++            System.out.println("  w[" + i + "] = " + WITNESS[i]);
++        }
++        System.out.println();
++
++        System.out.println("Proof A (G1):");
++        printG1(proof.a());
++        System.out.println();
++
++        System.out.println("Proof B (G2):");
++        printG2(proof.b());
++        System.out.println();
++
++        System.out.println("Proof C (G1):");
++        printG1(proof.c());
++        System.out.println();
++
++        System.out.println("Verification key IC points (public input commitment base):");
++        for (int i = 0; i < setup.ic().length; i++) {
++            System.out.println("  IC[" + i + "] (G1):");
++            printG1(setup.ic()[i]);
++        }
++        System.out.println();
++
++        System.out.println("VK fixed points:");
++        System.out.println("  alphaG1 (G1):");
++        printG1(pk.alphaG1());
++        System.out.println("  betaG2  (G2):");
++        printG2(pk.betaG2());
++        System.out.println("  deltaG2 (G2):");
++        printG2(pk.deltaG2());
++        System.out.println("  gammaG2 (G2):");
++        printG2(setup.gammaG2());
++        System.out.println();
++
++        // Basic sanity checks
++        assertTrue(proof.a().isOnCurve(), "A must be on curve");
++        assertTrue(proof.b().isOnCurve(), "B must be on curve");
++        assertTrue(proof.c().isOnCurve(), "C must be on curve");
 +
 +        // Pairing verification (check 5)
 +        boolean verified = verifyPairing(proof, pk, setup.ic(), setup.gammaG2());
@@ -102,6 +186,74 @@ index ab3cf05..74e4701 100644
 +        return new G2Point(
 +                Fp2.of(Fp.of(p.x().reBigInt()), Fp.of(p.x().imBigInt())),
 +                Fp2.of(Fp.of(p.y().reBigInt()), Fp.of(p.y().imBigInt())));
-     }
- 
-     // Build the exact 3-constraint multiplication chain circuit
++    }
++
++    // Build the exact 3-constraint multiplication chain circuit
++    private static List<R1CSConstraint> buildConstraints() {
++        List<R1CSConstraint> cs = new ArrayList<>();
++
++        // Constraint 0: x1 * x2 == x5
++        //   wire 2 (x1) * wire 3 (x2) = wire 6 (x5)
++        cs.add(new R1CSConstraint(
++                Map.of(2, BigInteger.ONE),
++                Map.of(3, BigInteger.ONE),
++                Map.of(6, BigInteger.ONE)));
++
++        // Constraint 1: x3 * x4 == x6
++        //   wire 4 (x3) * wire 5 (x4) = wire 7 (x6)
++        cs.add(new R1CSConstraint(
++                Map.of(4, BigInteger.ONE),
++                Map.of(5, BigInteger.ONE),
++                Map.of(7, BigInteger.ONE)));
++
++        // Constraint 2: x5 * x6 == a
++        //   wire 6 (x5) * wire 7 (x6) = wire 1 (a)
++        cs.add(new R1CSConstraint(
++                Map.of(6, BigInteger.ONE),
++                Map.of(7, BigInteger.ONE),
++                Map.of(1, BigInteger.ONE)));
++
++        return cs;
++    }
++
++    // Manual R1CS sanity check: (A·w) ∘ (B·w) == C·w
++    private static boolean checkR1CS(List<R1CSConstraint> cs, BigInteger[] w) {
++        for (R1CSConstraint c : cs) {
++            BigInteger aw = evalLinComb(c.a(), w);
++            BigInteger bw = evalLinComb(c.b(), w);
++            BigInteger cw = evalLinComb(c.c(), w);
++            if (!aw.multiply(bw).equals(cw)) {
++                return false;
++            }
++        }
++        return true;
++    }
++
++    private static BigInteger evalLinComb(Map<Integer, BigInteger> lc, BigInteger[] w) {
++        BigInteger sum = BigInteger.ZERO;
++        for (var e : lc.entrySet()) {
++            sum = sum.add(e.getValue().multiply(w[e.getKey()]));
++        }
++        return sum;
++    }
++
++    private static void printG1(JacobianG1BLS381.AffineG1 p) {
++        if (p.isInfinity()) {
++            System.out.println("    (infinity)");
++            return;
++        }
++        System.out.println("    x = 0x" + p.xBigInt().toString(16));
++        System.out.println("    y = 0x" + p.yBigInt().toString(16));
++    }
++
++    private static void printG2(JacobianG2BLS381.AffineG2 p) {
++        if (p.isInfinity()) {
++            System.out.println("    (infinity)");
++            return;
++        }
++        System.out.println("    x.im = 0x" + p.x().imBigInt().toString(16));
++        System.out.println("    x.re = 0x" + p.x().reBigInt().toString(16));
++        System.out.println("    y.im = 0x" + p.y().imBigInt().toString(16));
++        System.out.println("    y.re = 0x" + p.y().reBigInt().toString(16));
++    }
++}

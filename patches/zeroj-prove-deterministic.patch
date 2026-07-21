@@ -1,0 +1,33 @@
+From: OpenCode <agent@opencodes.ai>
+Date: Tue, 21 Jul 2026 12:00:00 +0000
+Subject: [PATCH] Add proveDeterministic() overload for cross-checking
+
+Upstream zeroj v0.1.0-pre10 (bee6039) has a refactored proveInternal()
+that takes G1Readers + ProverBackend + FlatScalars.  The old
+proveDeterministic() overload was removed during that refactor.
+This patch re-adds it using the new signature so that deterministic
+cross-check tests (DeterministicCrossCheckTest) can still compile.
+
+--- a/zeroj-crypto/src/main/java/com/bloxbean/cardano/zeroj/crypto/groth16/Groth16ProverBLS381.java
++++ b/zeroj-crypto/src/main/java/com/bloxbean/cardano/zeroj/crypto/groth16/Groth16ProverBLS381.java
+@@ -169,6 +169,20 @@ public final class Groth16ProverBLS381 {
+         return proveInternal(pk, readers, backend, witness, hCoeffs, randomScalar(rng), randomScalar(rng));
+     }
+ 
++    /**
++     * Deterministic proving with explicitly supplied randomizers (for cross-checking
++     * against independent implementations). Pass {@code r = 0, s = 0} for an unblinded
++     * proof that matches the textbook Groth16 equation without randomization.
++     */
++    public static Groth16ProofBLS381 proveDeterministic(
++            Groth16ProvingKeyBLS381 pk, BigInteger[] witness,
++            List<R1CSConstraint> constraints, int numWires, int domainSize,
++            BigInteger r, BigInteger s) {
++        BigInteger[] hCoeffs = computeH(constraints, witness, constraints.size(), domainSize);
++        return proveInternal(pk, heapReaders(pk), ProverBackend.PURE_JAVA,
++                FlatScalars.pack(witness, witness.length), FlatScalars.pack(hCoeffs, hCoeffs.length), r, s);
++    }
++
+     private static Groth16ProofBLS381 proveInternal(
+             Groth16ProvingKeyBLS381 pk, G1Readers readers, ProverBackend backend, FlatScalars witness,
+             FlatScalars hCoeffs, BigInteger r, BigInteger s) {
