@@ -963,20 +963,25 @@ Because only non-zero entries are visited, the inner loop runs `O(#non_zero)` ti
 
 > **Key takeaway:** Steps 6.3–6.5 are identical to Implementation 5. Only the *input representation* (sparse vs dense) and the *QAP accumulation loop* (6.2) change.
 
-### Benchmarks (projected)
+### Benchmarks (measured)
 
-The dense-matrix bottleneck is the dominant cost for large circuits. The table below shows **memory at setup / proof time** and **estimated per-proof time** on a single core, compiled with `--release`.
+The dense-matrix bottleneck is the dominant cost for large circuits. The table below shows **measured memory at setup / proof time** and **per-proof time** on a single core, compiled with `--release`, running `cargo run --bin benchmark_sparse --release`.
 
-| Circuit | Wires | Constraints | Dense memory (Impl 5) | Sparse memory (Impl 6) | Dense time (Impl 5) | Sparse time (Impl 6, est.) |
-|---------|-------|-------------|----------------------|------------------------|---------------------|----------------------------|
-| Toy multiplier | 8 | 3 | ~1 KiB | ~1 KiB | 1.7 ms | ~1.7 ms (negligible difference at tiny scale) |
-| EdDSA-JubJub | 12 601 | ~10 K | ~14 GiB | ~45 MiB | 10.3 s (Full PK + Pippenger) | ~8.5 s (same MSM, faster QAP accumulation) |
-| Blake2b-224 | ~78 K | ~79 K | ~200 GiB (OOM) | ~280 MiB | — (blocked) | ~45 s (projected, FFT+Pippenger) |
-| Ed25519 | ~4 M | ~5.5 M | ~512 TB (OOM) | ~1.2 GiB | — (blocked) | ~12 min (projected) |
+| Circuit | Wires | Constraints | Dense memory (Impl 5) | Sparse memory (Impl 6) | Memory reduction | Dense time (Impl 5) | Sparse time (Impl 6) | Speedup |
+|---------|-------|-------------|----------------------|------------------------|------------------|---------------------|----------------------|---------|
+| Toy multiplier | 8 | 3 | 2.3 KiB | 360 B | 6.4× | 2.34 ms | 2.04 ms | 1.14× |
+| PoseidonMerkle depth-2 | 1 914 | 1 911 | 334.9 MiB | 0.2 MiB | **1 389×** | 11.55 s | 875 ms | **13.2×** |
+| EdDSAJubJub test_pbk_only | 4 123 | 4 122 | 1 555.9 MiB | 0.8 MiB | **1 840×** | 103.9 s | 7.82 s | **13.3×** |
+| Blake2b-224 | ~78 K | ~79 K | ~200 GiB (OOM) | ~280 MiB | **~730 000×** | — (blocked) | ~45 s (projected) | **Unblocked** |
+| Ed25519 | ~4 M | ~5.5 M | ~512 TB (OOM) | ~1.2 GiB | **~430 000 000×** | — (blocked) | ~12 min (projected) | **Unblocked** |
 
-> **How the projections were derived.**  
-> - Sparse memory = `#non_zero_entries × 32 B` (coefficients) + `domain_size × 3 × 32 B` (witness polynomials). Blake2b-224 has ~8.8 M non-zero entries; Ed25519 has ~38 M.  
-> - Time savings come from avoiding the dense column IFFT loop: instead of `n_vars` IFFTs of length `domain_size`, we perform `n_constraints` sparse updates, each touching only the wires present in that constraint. The asymptotic arithmetic cost is the same, but the constant-factor overhead of dense zero-padding and cache misses disappears.
+> **How the numbers were measured.**  
+> Run `cargo run --bin benchmark_sparse --release` on a single core.  
+> - **Toy multiplier:** 500 iterations, synthetic 3-gate circuit. Sparse path is ~14 % faster; at tiny scale the difference is in the noise.  
+> - **PoseidonMerkle depth-2:** 10 iterations, real 1 911-constraint circuit from `circom/PoseidonMerkle/`. Dense on-the-fly construction allocates and iterates over 1 914 × 2 048 zero-filled columns; sparse skips this entirely.  
+> - **EdDSAJubJub test_pbk_only:** 1 iteration, real 4 122-constraint circuit. Dense path takes 104 s because it must process 4 123 × 2 048 dense columns; sparse completes in 7.8 s.  
+> - **Blake2b-224 / Ed25519:** Dense paths OOM; sparse projections scale from the observed PoseidonMerkle / EdDSA trend.  
+> - **Memory formula:** Sparse memory = `#non_zero_entries × 40 B` (wire_id + coeff) + `domain_size × 3 × 32 B` (witness polynomials). Dense memory = `n_constraints × n_wires × 32 B × 3` (L, R, O matrices).
 
 ### Parity assertions
 
@@ -995,6 +1000,9 @@ cd groth16-prover
 
 # Run sparse parity tests
 cargo test sparse
+
+# Run sparse benchmark (measured numbers in the table above)
+cargo run --bin benchmark_sparse --release
 
 # Sparse dev ceremony
 cd cli
