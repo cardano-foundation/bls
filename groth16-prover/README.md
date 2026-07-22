@@ -27,7 +27,8 @@ A full-featured command-line interface lives in `groth16-prover/cli/`. It covers
 
 Two switchable ceremony paths produce the same `.pk` / `.vk` binary format. The prover and verifier are agnostic to which path was used.
 
-**Dev ceremony** (single-party, instant — for testing and CI):
+<details>
+<summary><b>Dev ceremony</b> (single-party, instant — for testing and CI)</summary>
 
 ```bash
 cd groth16-prover/cli
@@ -37,7 +38,10 @@ cargo run --release -- ceremony-dev \
   --verifying-key /tmp/multiplier.vk
 ```
 
-**Production ceremony** (multi-party MPC — for mainnet):
+</details>
+
+<details>
+<summary><b>Production ceremony</b> (multi-party MPC — for mainnet)</summary>
 
 ```bash
 # 1. Initialize from a universal Phase 1 SRS
@@ -60,6 +64,8 @@ cargo run --release -- phase2 finalize \
   --verifying-key /tmp/multiplier.vk
 ```
 
+</details>
+
 > **Current trust model.** We do **not** run a full two-phase MPC from scratch. Instead we reuse an existing, publicly audited **Phase 1** universal SRS (see below) and run our own **multi-party Phase 2** ceremony on top of it. This means security depends on:
 > 1. **Trust in the existing Phase 1 ceremony** (widely scrutinised, hundreds of participants).
 > 2. **1-of-N honesty in our Phase 2 ceremony** — as long as at least one participant honestly discards their randomness, the circuit-specific toxic waste (`alpha`, `beta`, `gamma`, `delta`) remains unknown.
@@ -68,6 +74,9 @@ cargo run --release -- phase2 finalize \
 ---
 
 #### What is an SRS? (Structured Reference String)
+
+<details>
+<summary><b>Click to expand</b></summary>
 
 A **Structured Reference String (SRS)** is a collection of pre-computed elliptic-curve group elements that a Groth16 prover needs to generate proofs. Think of it as a "public key" for the proving system — it encodes a secret random value (traditionally called `tau`) into group elements, but the raw scalar itself is never revealed.
 
@@ -98,9 +107,14 @@ In a **full two-phase ceremony**, the SRS is produced in **Phase 1** (universal,
 
 The SRS is secure as long as **at least one participant in the ceremony was honest and destroyed their randomness**. If all participants colluded and shared their secrets, they could reconstruct `tau` and forge proofs. This is why large, open ceremonies with hundreds of participants are preferred — the probability that *everyone* is dishonest is negligible.
 
+</details>
+
 ---
 
 #### What is Perpetual Powers of Tau (PPoT)?
+
+<details>
+<summary><b>Click to expand</b></summary>
 
 [Perpetual Powers of Tau](https://github.com/privacy-scaling-explorations/perpetualpowersoftau) (PPoT) is a long-running, community-driven trusted-setup ceremony maintained by [Privacy & Scaling Explorations (PSE)](https://appliedzkp.org/). It produces universal SRS files (`.ptau`) for the BLS12-381 curve that can be reused by any Groth16 circuit up to a maximum constraint size.
 
@@ -120,9 +134,14 @@ By importing a PPoT `.ptau` file, we inherit the security of the existing Phase 
 
 This is the same trust model used by production systems like Zcash, Filecoin, and Manta Network.
 
+</details>
+
 ---
 
 #### Hands-on: importing an external SRS from PPoT
+
+<details>
+<summary><b>Click to expand</b></summary>
 
 **Step 1 — Download a PPoT `.ptau` file**
 
@@ -199,6 +218,8 @@ The most complete existing Rust implementation of Groth16 Phase 2 is [Manta Netw
 - `finalize()` — produces `FullProvingKey` + `VerifyingKey`
 
 All circuit-specific group elements are computed via **MSM over the `.ptau` basis** — no raw `tau` scalar is ever reconstructed. The resulting `.pk` / `.vk` format is bit-for-bit compatible with `ark_groth16::ProvingKey<Bls12_381>`.
+
+</details>
 
 ---
 
@@ -1103,12 +1124,12 @@ let (proof, public_input) = prover.prove_with_full_pk_sparse(
 
 ---
 
-## TO DO — Production innovations 
+## Production innovations
+
+### Completed
 
 <details>
-<summary><b>Pending improvements — click to expand</b></summary>
-
-The current crate is a **reference implementation** for correctness verification. The following items, already present in the [zeroj](https://github.com/bloxbean/zeroj) Java toolkit (see [`ZerojAudit.md`](../zeroj-assessment/ZerojAudit.md)), would need to be adopted for production use:
+<summary><b>Click to expand completed items</b></summary>
 
 ### (a) FFT / Lagrange basis as an alternative to dense monomials (zeroj supports that)
 
@@ -1133,38 +1154,6 @@ The current crate is a **reference implementation** for correctness verification
   3. ✅ Map circom wire indices to the QAP variable ordering — verified by parity test against hard-coded circuit.
   4. ✅ Verify that the FFT domain size matches `next_power_of_2(num_constraints)` — handled automatically by `FftQapEngine::target_poly`.
 
-### (d) Prepared verifier and batched pairing verification (beyond what zeroj supports)
-
-- **Current:** The verifier recomputes every pairing from scratch each time a proof is checked.
-- **Target:** Add a `PreparedVerifyingKey` that precomputes and caches fixed verification-key data (e.g., G2 line coefficients for the Miller loop). Also expose a batched verifier that checks multiple proofs with a single multi-pairing product.
-- **Reference:** [Groth.jl](https://github.com/0xpantera/Groth.jl) implements `prepare_verifying_key`, `prepare_inputs`, and `verify_with_prepared`; batched pairing verification reduced their `N=16` batch from `18.212 ms` to `13.854 ms` on the same fixture. Arkworks also provides `PreparedVerifyingKey`.
-- **Benefit:** On-chain verification becomes cheaper because the heavy G2 preparation is done once per VK, not per proof. Batching further amortizes the Miller-loop cost across many proofs.
-
-### (e) Proof aggregation (beyond what zeroj supports)
-
-- **Current:** Each proof is verified individually.
-- **Target:** Support Groth16 proof aggregation (rolling multiple proofs into a single succinct proof that can be verified with one pairing check).
-- **Reference:** Arkworks has an optional `groth16::aggregate_proofs` module. Groth.jl tracks this on their roadmap.
-- **Benefit:** Essential for rollup and batching use cases where many proofs need to be verified on-chain in a single transaction.
-
-### (f) Batch normalization and fixed-base MSM tables (beyond what zeroj supports)
-
-- **Current:** Individual `G1Affine::from(projective)` calls and naive scalar-by-scalar point accumulation.
-- **Target:**
-  1. **Batch normalization** — Convert a vector of projective points to affine in one pass using a shared Z-coordinate inversion (Montgomery trick). This is faster than `N` individual inversions.
-  2. **Fixed-base MSM tables** — Precompute w-NAF window tables for repeated base points (e.g., SRS1/2/3 and CRS fixed points used during setup). Reuse these tables when the same bases are multiplied by different scalars.
-- **Reference:** Groth.jl uses `batch_to_affine!` and `FixedBaseTable` with measured speedups on setup query generation.
-- **Benefit:** Batch normalization saves ~30–50% on point serialization and pairing input preparation. Fixed-base tables speed up setup and any verifier-side IC recomputation.
-
-### (g) Randomized R1CS test fixtures and parity assertions 
-
-- **Current:** Only one hard-coded 3-constraint circuit is tested.
-- **Target:**
-  1. Generate randomized R1CS fixtures (random sparse constraints and random witnesses satisfying `A∘B=C`) for property-based testing.
-  2. Keep dense/naive computation paths as **parity assertions** alongside optimized paths (FFT, coset quotient). In debug/test mode, run both and assert identical results.
-- **Reference:** Groth.jl keeps dense quotient computation (`compute_h_polynomial`) as an explicit parity check while the production prover uses the coset-only path. Their test suite covers multiple circuits with randomized seeds.
-- **Benefit:** Catches bugs in the optimized path early by comparing against a slow-but-correct reference on every test run.
-
 ### (h) Multi-party computation (MPC) ceremony
 
 - **Current:** Two ceremony paths coexist:
@@ -1186,28 +1175,7 @@ The current crate is a **reference implementation** for correctness verification
 - **Reference:** [Perpetual Powers of Tau](https://github.com/privacy-scaling-explorations/perpetualpowersoftau), snarkjs `powersoftau` workflow, [Ethereum KZG Ceremony](https://github.com/ethereum/kzg-ceremony), and arkworks' `groth16::generator::generate_random_parameters`.
 - **Benefit:** Eliminates the single point of failure. Even if N−1 participants collude, the ceremony remains secure as long as at least one participant honestly discards their contribution.
 
-### (i) Additional Circom use-case circuits
-
-- **Current:** Only one circuit (`multiplier.circom`) lives in `circom/SimpleExample/`. It is a trivial 3-gate multiplication chain used to validate the Circom adapter end-to-end.
-- **Target:** Add several realistic Circom circuits that exercise different zk-SNARK patterns:
-  1. **Poseidon hash** — demonstrate hash pre-image knowledge inside a Groth16 proof.  
-     **Status:** ✅ **Complete.** A `PoseidonPreimage` circuit lives in `circom/PoseidonPreimage/`. It uses a BLS12-381 Poseidon permutation (t=3, alpha=5, RF=8, RP=57) with round constants and MDS matrix from ZeroJ's `PoseidonParamsBLS12_381T3`. The circuit proves `hash_commitment = Poseidon(pre_image, 0)` without revealing `pre_image`. See [`circom/PoseidonPreimage/README.md`](circom/PoseidonPreimage/README.md) for the full step-by-step walkthrough.
-  2. **Merkle membership** — prove that a leaf exists in a Merkle tree without revealing the leaf or the path.  
-     **Status:** ✅ **Complete.** A shielded-spend circuit (`Spend(depth)`) based on Stanford CS251 Project #4 lives in `circom/Privacy/`. It uses MiMC(x⁷) hashing and `SelectiveSwitch` gadgets to verify a Merkle path. A depth-2 wrapper (`spend_depth2.circom`) has been compiled with `circom --r1cs --wasm` and the full pipeline is working end-to-end: witness-input generation (via `compute-inputs` CLI or Rust library), witness calculation (snarkjs), dev ceremony, proof generation (`prove` CLI with FFT + Pippenger), off-chain verification (`verify` CLI), and on-chain verification (Aiken test in `aiken/groth16/lib/groth16/verifier.ak`). The CLI also includes `smt insert` / `smt digest` / `smt path` commands for sparse Merkle tree operations backed by the same MiMC(x⁷) hash. See [`circom/Privacy/README.md`](circom/Privacy/README.md) for the full step-by-step walkthrough.
-  3. **Range proof / comparison** — prove that a committed value lies in a range `[0, 2^n)`.  
-     **Status:** ✅ **Complete.** Two circuits in `circom/RangeProof/`: `RangeProofSimple(n)` (public value, ~n constraints) and `RangeProofCommitted(n)` (Poseidon commitment, ~n+250 constraints). Both compile, generate witnesses, and produce valid Groth16 proofs end-to-end on BLS12-381. See [`circom/RangeProof/README.md`](circom/RangeProof/README.md) for full pipeline and the JSON string-precision caveat.
-   4. **EdDSA / JubJub signature** — verify a signature inside the circuit (requires JubJub curve gadgets).  
-      **Status:** ✅ **Complete.** An EdDSA-JubJub verifier circuit lives in `circom/EdDSAJubJub/`. The circuit was ported from circomlib's BabyJubJub to JubJub (`a=−1, d=0x2a93...eb1`, embedded in BLS12-381 scalar field), optimised from 18 112 wires to 12 601 (–31%), and validated end-to-end: compile → witness gen → ceremony-dev → prove → verify. See [`circom/EdDSAJubJub/README.md`](circom/EdDSAJubJub/README.md).
-  5. **Blake2b-224 hash** — prove knowledge of a pre-image that hashes to a given Cardano key hash.  
-     **Status:** ⚠️ **Circuit validated.** A `Blake2b224Preimage` circuit lives in `circom/Blake2b224Preimage/`. It compiles to ~79K constraints (77,312 non-linear + 2,059 linear) and the witness generates correctly, cross-checked against Python's `hashlib.blake2b`. The full end-to-end pipeline is **blocked on memory**: the dense-matrix ceremony requires ~200 GB RAM because `circom_adapter` expands sparse R1CS into dense `Vec<Vec<Fr>>` (79K constraints × 78K wires × 32 bytes). Four approaches to resolve this are documented in [`circom/Blake2b224Preimage/README.md`](circom/Blake2b224Preimage/README.md).  
-     **Reference:** [bkomuves/hash-circuits](https://github.com/bkomuves/hash-circuits) provides the upstream Blake2b Circom circuit (MIT License).
-  6. **Private key → public key ownership proof** — prove that you know the private key that generates a given Cardano public key / address, without revealing the private key. This is the core key-derivation step used in Cardano wallets ([cardano-crypto `generate`](https://github.com/IntersectMBO/cardano-crypto/blob/develop/src/Cardano/Crypto/Wallet.hs#L161)): given a private scalar `x`, show that `pub = x · G` (for the appropriate curve generator G). A Circom circuit that replicates this scalar-multiplication-and-derivation logic would allow a user to prove wallet ownership on-chain inside a Groth16 proof.
-  7. **EdDSA Ed25519 signature verification** — verify a standard Ed25519 signature inside a Groth16 circuit. Ed25519 is widely used outside the BN254 ecosystem (SSH, TLS, many blockchains), so an in-circuit verifier would let a Cardano zk-proof attest to off-chain events signed by standard Ed25519 keys.  
-     **Status:** ⚠️ **Circuit compiles.** The `Ed25519Verify` circuit in `circom/Ed25519Verify/` was adapted from [Electron-Labs/ed25519-circom](https://github.com/Electron-Labs/ed25519-circom) (archived, MIT License). It compiles to ~4M non-linear + ~1.5M linear constraints on BLS12-381. However, **witness generation fails** due to BLS12-381 field incompatibility with the upstream BN254-specific chunked-arithmetic templates (`ChunkedMul`, `ModulusWith25519Chunked51`, `BigModInv51`). Even if fixed, the dense-matrix ceremony would require ~512 TB RAM. See [`circom/Ed25519Verify/README.md`](circom/Ed25519Verify/README.md) for full analysis and path forward.
-- **Reference:** [circomlib](https://github.com/iden3/circomlib) provides production-grade Poseidon, MiMC, Merkle, and EdDSA circuits for BN254. Porting to BLS12-381 requires updating the field constants. For Blake2b-224, see [bkomuves/hash-circuits](https://github.com/bkomuves/hash-circuits). For key-derivation logic, see [IntersectMBO/cardano-crypto](https://github.com/IntersectMBO/cardano-crypto/blob/develop/src/Cardano/Crypto/Wallet.hs#L161). For Ed25519 in-circuit verification, see [Electron-Labs/ed25519-circom](https://github.com/Electron-Labs/ed25519-circom) and our adapted version in [`circom/Ed25519Verify/README.md`](circom/Ed25519Verify/README.md).
-- **Benefit:** Shows that the Rust prover + Aiken verifier pipeline works for real-world zk-SNARK applications, not just toy arithmetic circuits. Blake2b-224, key-ownership proofs, and Ed25519 verification in particular unlock cross-chain and identity use cases (proving ownership of a key, linking a proof to an on-chain address, anonymous identity verification, attesting to off-chain signed data, etc.).
-
-### (j) Sparse-matrix prover (beyond what zeroj supports) ✅ DONE
+### (j) Sparse-matrix prover (beyond what zeroj supports)
 
 - **Status:** ✅ **Implemented** as [Implementation 6](#implementation-6-sparse-matrix-prover).
 - **What changed:** `circom_adapter` now provides `SparseCircomCircuit` which keeps the native sparse `.r1cs` representation (per-constraint lists of `(wire_id, coeff)` triplets) instead of expanding into dense `Vec<Vec<Fr>>` matrices. A new `build_witness_polys_sparse` helper in `engine.rs` evaluates the sparse constraints at the FFT domain roots and does 3× IFFT to get `l(x)`, `r(x)`, `o(x)` directly — no `n_vars × domain_size` dense allocation is ever created.
@@ -1217,18 +1185,7 @@ The current crate is a **reference implementation** for correctness verification
 - **Tests:** 5 parity tests pass (sparse vs dense): parser equivalence, ceremony key equality, naive prover proof equality, Pippenger prover proof equality, and end-to-end verification. 7 CLI integration tests also pass.
 - **Benefit:** Unlocks circuits with 50K–500K wires (Blake2b-224, Ed25519, large Poseidon trees) on commodity hardware. The dense-matrix OOM at 12K wires disappears entirely. Memory drops from `O(n_constraints × n_wires)` to `O(#non_zero_entries)`.
 
-### (k) Recursive proof composition
-
-- **Current:** Each proof is standalone — the on-chain verifier checks one Groth16 proof per transaction. For use cases requiring many proofs (e.g., rollups, batched attestations), each proof pays full on-chain verification cost.
-- **Target:** Support proving "I know a valid Groth16 proof π₁ for circuit C₁" inside a second Groth16 circuit C₂, producing a succinct proof π₂ that attests to the correctness of π₁. The on-chain verifier checks only π₂, regardless of how many inner proofs it covers.
-- **Approach:**
-  1. **Incremental Verifiable Computation (IVC)** via Nova/SuperNova — fold multiple proof steps into a single accumulating proof. The fold is cheap (one EC addition); the final SNARK wrap compresses to a Groth16 proof.
-  2. **SNARK-friendly verification gadget** — implement the Groth16 pairing check inside a Circom circuit (pairing operations on BLS12-381 can be expressed as R1CS constraints, though at high cost ~100K–500K constraints for the pairing itself).
-  3. **Halo2-style recursive aggregation** — use cycle of curves (BLS12-381 + JubJub) for efficient recursive verification without pairings.
-- **Benefit:** Amortises on-chain verification cost across N proofs — from O(N) pairing checks to O(1). Essential for rollup and batching use cases. Also enables incremental computation where each step's output feeds into the next.
-- **Reference:** [arkworks groth16::aggregate](https://docs.rs/ark-groth16/latest/ark_groth16/), [Nova](https://github.com/microsoft/Nova), [Zcash Halo2](https://github.com/zcash/halo2), [Pacifico](https://github.com/argumentcomputer/pacifico).
-
-### (l) Poseidon-based Merkle membership gadget ✅ DONE
+### (l) Poseidon-based Merkle membership gadget
 
 - **Status:** Implemented end-to-end in `circom/PoseidonMerkle/`.
 - **What it does:** A reusable Circom template `PoseidonMerkle(depth)` proves that a leaf commitment `PoseidonBLS12_381(nullifier, nonce)` exists in a Merkle tree of the given depth, with only the tree root as a public input. The leaf secret, the path siblings, and the path directions are all private.
@@ -1246,25 +1203,84 @@ The current crate is a **reference implementation** for correctness verification
 - **Remaining:** Pair this gadget with `EdDSA_JubJubVerifier` for issuer signature to build the full Step 1 predicate for selective-disclosure.
 - **Reference:** [circomlib MerkleTree](https://github.com/iden3/circomlib/blob/master/circuits/merkleTree.circom) uses a depth-parameterised template with MiMC; the same structure applies with Poseidon substituted in. [Poseidon hash](https://www.poseidon-hash.info/) recommends t=3 for binary tree hashing (two inputs + capacity).
 
-### Next steps (prioritized)
+### (i) Additional Circom use-case circuits — completed
 
-1. **Sparse-matrix prover — Implementation 6** (✅ **done** — highest impact, unlocks large circuits)  
-   Refactored `FftQapEngine` and the Circom adapter to keep constraints in sparse triplet form and accumulate witness polynomials (`l(x)`, `r(x)`, `o(x)`) by iterating non-zero entries only, avoiding the `n_constraints × n_wires` dense allocation entirely. This directly unblocks Blake2b-224 and Ed25519 circuits. See the full design in [Implementation 6](#implementation-6-sparse-matrix-prover) above.
+- **Target:** Add several realistic Circom circuits that exercise different zk-SNARK patterns:
+  1. **Poseidon hash** — demonstrate hash pre-image knowledge inside a Groth16 proof.  
+     **Status:** ✅ **Complete.** A `PoseidonPreimage` circuit lives in `circom/PoseidonPreimage/`. It uses a BLS12-381 Poseidon permutation (t=3, alpha=5, RF=8, RP=57) with round constants and MDS matrix from ZeroJ's `PoseidonParamsBLS12_381T3`. The circuit proves `hash_commitment = Poseidon(pre_image, 0)` without revealing `pre_image`. See [`circom/PoseidonPreimage/README.md`](circom/PoseidonPreimage/README.md) for the full step-by-step walkthrough.
+  2. **Merkle membership** — prove that a leaf exists in a Merkle tree without revealing the leaf or the path.  
+     **Status:** ✅ **Complete.** A shielded-spend circuit (`Spend(depth)`) based on Stanford CS251 Project #4 lives in `circom/Privacy/`. It uses MiMC(x⁷) hashing and `SelectiveSwitch` gadgets to verify a Merkle path. A depth-2 wrapper (`spend_depth2.circom`) has been compiled with `circom --r1cs --wasm` and the full pipeline is working end-to-end: witness-input generation (via `compute-inputs` CLI or Rust library), witness calculation (snarkjs), dev ceremony, proof generation (`prove` CLI with FFT + Pippenger), off-chain verification (`verify` CLI), and on-chain verification (Aiken test in `aiken/groth16/lib/groth16/verifier.ak`). The CLI also includes `smt insert` / `smt digest` / `smt path` commands for sparse Merkle tree operations backed by the same MiMC(x⁷) hash. See [`circom/Privacy/README.md`](circom/Privacy/README.md) for the full step-by-step walkthrough.
+  3. **Range proof / comparison** — prove that a committed value lies in a range `[0, 2^n)`.  
+     **Status:** ✅ **Complete.** Two circuits in `circom/RangeProof/`: `RangeProofSimple(n)` (public value, ~n constraints) and `RangeProofCommitted(n)` (Poseidon commitment, ~n+250 constraints). Both compile, generate witnesses, and produce valid Groth16 proofs end-to-end on BLS12-381. See [`circom/RangeProof/README.md`](circom/RangeProof/README.md) for full pipeline and the JSON string-precision caveat.
+   4. **EdDSA / JubJub signature** — verify a signature inside the circuit (requires JubJub curve gadgets).  
+      **Status:** ✅ **Complete.** An EdDSA-JubJub verifier circuit lives in `circom/EdDSAJubJub/`. The circuit was ported from circomlib's BabyJubJub to JubJub (`a=−1, d=0x2a93...eb1`, embedded in BLS12-381 scalar field), optimised from 18 112 wires to 12 601 (–31%), and validated end-to-end: compile → witness gen → ceremony-dev → prove → verify. See [`circom/EdDSAJubJub/README.md`](circom/EdDSAJubJub/README.md).
 
-2. **Prepared verifier + batched pairing verification** (solid production win)  
-   Add a `PreparedVerifyingKey` that caches G2 line coefficients for the Miller loop, and expose a batched verifier that checks multiple proofs with a single multi-pairing product. This lowers per-proof on-chain verification cost.
+</details>
 
-3. **Batch normalization & fixed-base MSM tables** (performance)  
-   Implement batch projective-to-affine normalization using a shared Z-coordinate inversion (Montgomery trick), and precompute fixed-base w-NAF window tables for repeated SRS/CRS points reused during setup and proof generation.
+### Pending
 
-4. **Randomized R1CS test fixtures + parity assertions** (robustness)  
-   Generate random sparse R1CS instances that satisfy `A ∘ B = C`, and run them through both the dense/naive path and the optimized FFT/Pippenger path in debug mode, asserting bit-for-bit equality.
+<details>
+<summary><b>Click to expand pending items</b></summary>
 
-5. **Finish the Lagrange-basis SRS** (completes Implementation 2)  
-   Build the group-element SRS in the Lagrange basis (`L_i(τ)·G1` instead of `τ^i·G1`) so the FFT path can skip monomial conversion and use the most efficient production pattern.
+### (m) Prepared verifier and batched pairing verification (beyond what zeroj supports)
 
-6. **Recursive proof composition / aggregation** (advanced)  
-   Support proving “I know a valid Groth16 proof π₁ for circuit C₁” inside a second Groth16 circuit C₂, or adopt arkworks’ `groth16::aggregate_proofs` module, to amortise on-chain verification cost across many proofs.
+- **Current:** The verifier recomputes every pairing from scratch each time a proof is checked.
+- **Target:** Add a `PreparedVerifyingKey` that precomputes and caches fixed verification-key data (e.g., G2 line coefficients for the Miller loop). Also expose a batched verifier that checks multiple proofs with a single multi-pairing product.
+- **Reference:** [Groth.jl](https://github.com/0xpantera/Groth.jl) implements `prepare_verifying_key`, `prepare_inputs`, and `verify_with_prepared`; batched pairing verification reduced their `N=16` batch from `18.212 ms` to `13.854 ms` on the same fixture. Arkworks also provides `PreparedVerifyingKey`.
+- **Benefit:** On-chain verification becomes cheaper because the heavy G2 preparation is done once per VK, not per proof. Batching further amortizes the Miller-loop cost across many proofs.
+
+### (n) Batch normalization and fixed-base MSM tables (beyond what zeroj supports)
+
+- **Current:** Individual `G1Affine::from(projective)` calls and naive scalar-by-scalar point accumulation.
+- **Target:**
+  1. **Batch normalization** — Convert a vector of projective points to affine in one pass using a shared Z-coordinate inversion (Montgomery trick). This is faster than `N` individual inversions.
+  2. **Fixed-base MSM tables** — Precompute w-NAF window tables for repeated base points (e.g., SRS1/2/3 and CRS fixed points used during setup). Reuse these tables when the same bases are multiplied by different scalars.
+- **Reference:** Groth.jl uses `batch_to_affine!` and `FixedBaseTable` with measured speedups on setup query generation.
+- **Benefit:** Batch normalization saves ~30–50% on point serialization and pairing input preparation. Fixed-base tables speed up setup and any verifier-side IC recomputation.
+
+### (o) Randomized R1CS test fixtures and parity assertions 
+
+- **Current:** Only one hard-coded 3-constraint circuit is tested.
+- **Target:**
+  1. Generate randomized R1CS fixtures (random sparse constraints and random witnesses satisfying `A∘B=C`) for property-based testing.
+  2. Keep dense/naive computation paths as **parity assertions** alongside optimized paths (FFT, coset quotient). In debug/test mode, run both and assert identical results.
+- **Reference:** Groth.jl keeps dense quotient computation (`compute_h_polynomial`) as an explicit parity check while the production prover uses the coset-only path. Their test suite covers multiple circuits with randomized seeds.
+- **Benefit:** Catches bugs in the optimized path early by comparing against a slow-but-correct reference on every test run.
+
+### (p) Finish the Lagrange-basis SRS
+
+- **Status:** ⚠️ **Partial.** The `QapEngine` trait, `DenseQapEngine`, and `FftQapEngine` are all implemented (see item (a) above). The only remaining gap is building the group-element SRS in the Lagrange basis (`L_i(τ)·G1` instead of `τ^i·G1`) so the FFT path can skip monomial conversion and use the most efficient production pattern.
+- **Benefit:** Completes the FFT production path and removes the last monomial fallback.
+
+### (q) Additional Circom use-case circuits — pending
+
+- **Target:** Add several realistic Circom circuits that exercise different zk-SNARK patterns:
+  5. **Blake2b-224 hash** — prove knowledge of a pre-image that hashes to a given Cardano key hash.  
+     **Status:** ⚠️ **Circuit validated.** A `Blake2b224Preimage` circuit lives in `circom/Blake2b224Preimage/`. It compiles to ~79K constraints (77,312 non-linear + 2,059 linear) and the witness generates correctly, cross-checked against Python's `hashlib.blake2b`. The full end-to-end pipeline is **blocked on memory**: the dense-matrix ceremony requires ~200 GB RAM because `circom_adapter` expands sparse R1CS into dense `Vec<Vec<Fr>>` (79K constraints × 78K wires × 32 bytes). Four approaches to resolve this are documented in [`circom/Blake2b224Preimage/README.md`](circom/Blake2b224Preimage/README.md).  
+     **Reference:** [bkomuves/hash-circuits](https://github.com/bkomuves/hash-circuits) provides the upstream Blake2b Circom circuit (MIT License).
+  6. **Private key → public key ownership proof** — prove that you know the private key that generates a given Cardano public key / address, without revealing the private key. This is the core key-derivation step used in Cardano wallets ([cardano-crypto `generate`](https://github.com/IntersectMBO/cardano-crypto/blob/develop/src/Cardano/Crypto/Wallet.hs#L161)): given a private scalar `x`, show that `pub = x · G` (for the appropriate curve generator G). A Circom circuit that replicates this scalar-multiplication-and-derivation logic would allow a user to prove wallet ownership on-chain inside a Groth16 proof.
+  7. **EdDSA Ed25519 signature verification** — verify a standard Ed25519 signature inside a Groth16 circuit. Ed25519 is widely used outside the BN254 ecosystem (SSH, TLS, many blockchains), so an in-circuit verifier would let a Cardano zk-proof attest to off-chain events signed by standard Ed25519 keys.  
+     **Status:** ⚠️ **Circuit compiles.** The `Ed25519Verify` circuit in `circom/Ed25519Verify/` was adapted from [Electron-Labs/ed25519-circom](https://github.com/Electron-Labs/ed25519-circom) (archived, MIT License). It compiles to ~4M non-linear + ~1.5M linear constraints on BLS12-381. However, **witness generation fails** due to BLS12-381 field incompatibility with the upstream BN254-specific chunked-arithmetic templates (`ChunkedMul`, `ModulusWith25519Chunked51`, `BigModInv51`). Even if fixed, the dense-matrix ceremony would require ~512 TB RAM. See [`circom/Ed25519Verify/README.md`](circom/Ed25519Verify/README.md) for full analysis and path forward.
+- **Reference:** [circomlib](https://github.com/iden3/circomlib) provides production-grade Poseidon, MiMC, Merkle, and EdDSA circuits for BN254. Porting to BLS12-381 requires updating the field constants. For Blake2b-224, see [bkomuves/hash-circuits](https://github.com/bkomuves/hash-circuits). For key-derivation logic, see [IntersectMBO/cardano-crypto](https://github.com/IntersectMBO/cardano-crypto/blob/develop/src/Cardano/Crypto/Wallet.hs#L161). For Ed25519 in-circuit verification, see [Electron-Labs/ed25519-circom](https://github.com/Electron-Labs/ed25519-circom) and our adapted version in [`circom/Ed25519Verify/README.md`](circom/Ed25519Verify/README.md).
+- **Benefit:** Shows that the Rust prover + Aiken verifier pipeline works for real-world zk-SNARK applications, not just toy arithmetic circuits. Blake2b-224, key-ownership proofs, and Ed25519 verification in particular unlock cross-chain and identity use cases (proving ownership of a key, linking a proof to an on-chain address, anonymous identity verification, attesting to off-chain signed data, etc.).
+
+### (r) Proof aggregation (beyond what zeroj supports)
+
+- **Current:** Each proof is verified individually.
+- **Target:** Support Groth16 proof aggregation (rolling multiple proofs into a single succinct proof that can be verified with one pairing check).
+- **Reference:** Arkworks has an optional `groth16::aggregate_proofs` module. Groth.jl tracks this on their roadmap.
+- **Benefit:** Essential for rollup and batching use cases where many proofs need to be verified on-chain in a single transaction.
+
+### (s) Recursive proof composition
+
+- **Current:** Each proof is standalone — the on-chain verifier checks one Groth16 proof per transaction. For use cases requiring many proofs (e.g., rollups, batched attestations), each proof pays full on-chain verification cost.
+- **Target:** Support proving "I know a valid Groth16 proof π₁ for circuit C₁" inside a second Groth16 circuit C₂, producing a succinct proof π₂ that attests to the correctness of π₁. The on-chain verifier checks only π₂, regardless of how many inner proofs it covers.
+- **Approach:**
+  1. **Incremental Verifiable Computation (IVC)** via Nova/SuperNova — fold multiple proof steps into a single accumulating proof. The fold is cheap (one EC addition); the final SNARK wrap compresses to a Groth16 proof.
+  2. **SNARK-friendly verification gadget** — implement the Groth16 pairing check inside a Circom circuit (pairing operations on BLS12-381 can be expressed as R1CS constraints, though at high cost ~100K–500K constraints for the pairing itself).
+  3. **Halo2-style recursive aggregation** — use cycle of curves (BLS12-381 + JubJub) for efficient recursive verification without pairings.
+- **Benefit:** Amortises on-chain verification cost across N proofs — from O(N) pairing checks to O(1). Essential for rollup and batching use cases. Also enables incremental computation where each step's output feeds into the next.
+- **Reference:** [arkworks groth16::aggregate](https://docs.rs/ark-groth16/latest/ark_groth16/), [Nova](https://github.com/microsoft/Nova), [Zcash Halo2](https://github.com/zcash/halo2), [Pacifico](https://github.com/argumentcomputer/pacifico).
 
 </details>
 
