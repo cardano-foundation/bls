@@ -12,7 +12,7 @@ This directory contains Circom circuits that can be loaded by the Rust prover vi
 | [`PoseidonMerkle/`](PoseidonMerkle/README.md) | Merkle membership with PoseidonBLS12_381 hashing | 737 (depth 2) | ✅ Complete |
 | [`RangeProof/`](RangeProof/README.md) | Range proof + Poseidon commitment (`value ∈ [0, 2^n)`) | ~`n + 250` | ✅ Complete |
 | [`Blake2b224Preimage/`](Blake2b224Preimage/README.md) | Blake2b-224 hash pre-image (Cardano key hash) | ~79K | ⚠️ Circuit + witness validated; proving blocked by RAM |
-| [`Ed25519Verify/`](Ed25519Verify/README.md) | Ed25519 signature verification in-circuit | ~4M | ⚠️ Circuit compiles; witness blocked by field incompatibility |
+| [`Ed25519Verify/`](Ed25519Verify/README.md) | Ed25519 signature verification in-circuit | ~4M | ❌ **Blocked** — BN254-specific chunked arithmetic incompatible with BLS12-381 field |
 | [`EdDSAJubJub/`](EdDSAJubJub/README.md) | EdDSA-JubJub signature verification (deterministic nonce, Poseidon challenge) | 12 601 | ✅ Complete — full e2e pass |
 | [`CardanoKeyOwnership/`](CardanoKeyOwnership/README.md) | Private key → public key ownership proof (JubJub) | ~4K | ✅ Complete — full e2e pass |
 
@@ -79,41 +79,16 @@ Full pipeline for each item: **Circom → groth16-prover (dev ceremony) → Aike
   **Use case:** Sealed-bid auctions, passwordless authentication.  
   See [`PoseidonPreimage/README.md`](PoseidonPreimage/README.md).
 
-### Circuit validated, proving blocked by memory
-
-- **4. Blake2b-224 Hash Pre-image (Cardano Key Hash)** — prove knowledge of a pre-image that hashes to a given Cardano key hash.  
-  **Public input:** `blake2b_224_hash`  
-  **Private input:** `pre_image`  
-  **Use case:** Proving ownership / linking proofs to on-chain Cardano addresses.  
-  **Status:** Circuit compiles (79K constraints) and witness generates correctly, but the dense-matrix ceremony requires ~200 GB RAM — blocked on memory. See [`Blake2b224Preimage/README.md`](Blake2b224Preimage/README.md) for scaling analysis and four approaches to resolve this.  
-  **Reference repo:** [bkomuves/hash-circuits](https://github.com/bkomuves/hash-circuits) provides the upstream Blake2b Circom circuit (MIT License).
-
-### Circuit compiles, witness blocked by field incompatibility
-
-- **6. EdDSA / Ed25519 Signature Verification In-Circuit** — verify a standard Ed25519 signature inside a Groth16 circuit.  
-  **Public inputs:** `msg[n]`, `A[256]`, `R8[256]`  
-  **Private inputs:** `S[255]`, `PointA[4][3]`, `PointR[4][3]`  
-  **Use case:** Attest to off-chain events signed by standard Ed25519 keys (SSH, TLS, other blockchains).  
-  **Status:** Circuit compiles (~4M constraints on BLS12-381) from [`Electron-Labs/ed25519-circom`](https://github.com/Electron-Labs/ed25519-circom), but witness generation fails due to BLS12-381 field incompatibility with the upstream BN254-specific chunked-arithmetic templates. Even if fixed, the ceremony would need ~512 TB RAM with dense matrices. See [`Ed25519Verify/README.md`](Ed25519Verify/README.md) for full analysis and path forward.
-
-### Pending
-
 - **3. Range Proof / Comparison** — prove a committed value lies in range `[0, 2^n)` without revealing the value.  
   **Public input:** `value_commitment`  
   **Private inputs:** `value`, `blinding_factor`  
-  **Use case:** Confidential transaction amounts.
+  **Use case:** Confidential transaction amounts.  
+  **Status:** ✅ **Complete.** Two circuits in `circom/RangeProof/`: `RangeProofSimple(n)` and `RangeProofCommitted(n)`. Both compile, generate witnesses, and produce valid Groth16 proofs end-to-end on BLS12-381. See [`RangeProof/README.md`](RangeProof/README.md).
 
-- **5. EdDSA-JubJub Signature Verification** (12 601 constraints, 7 public inputs) — deterministic
-  EdDSA-JubJub signature proof over the JubJub curve embedded in BLS12-381's scalar field.
-  Full e2e pipeline passes: compile → witness gen → ceremony-dev → prove → verify.
+- **5. EdDSA-JubJub Signature Verification** (12 601 constraints, 7 public inputs) — deterministic EdDSA-JubJub signature proof over the JubJub curve embedded in BLS12-381's scalar field.  
+  Full e2e pipeline passes: compile → witness gen → ceremony-dev → prove → verify.  
   See [`EdDSAJubJub/README.md`](EdDSAJubJub/README.md).  
-  **Optimisation applied:** Circuit reduced from 18 112 wires to 12 601 wires
-  (31 % reduction) via two structural changes documented in
-  [Optimisation measures](#optimisation-measures-eddsa-jubjub) below.
-  Memory: dense matrices consume ~14.2 GiB peak; full prover peak is ~14.2 GiB.
-  On-the-fly QAP construction (documented in `engine.rs` / `prover.rs`)
-  eliminated the previous OOM from storing all 12 601 QAP polynomials
-  simultaneously.
+  **Optimisation applied:** Circuit reduced from 18 112 wires to 12 601 wires (31 % reduction) via two structural changes documented in [Optimisation measures](#optimisation-measures-eddsa-jubjub) below.
 
 - **6. Private Key → Public Key Ownership Proof** — prove knowledge of the private scalar that generates a given public key / address.  
   **Public input:** `public_key`  
@@ -121,6 +96,26 @@ Full pipeline for each item: **Circom → groth16-prover (dev ceremony) → Aike
   **Use case:** Wallet ownership proof without revealing the private key. This is the core key-derivation step used in Cardano wallets: given a private scalar `x`, show that `pub = x · G`.  
   **Status:** ✅ **Implemented end-to-end.** A working JubJub-based ownership circuit (`cardano_key_ownership.circom`) compiles, generates witnesses, and produces valid Groth16 proofs verified by the Rust prover CLI. It proves `[sk]·G_JubJub == pk` using fixed-base scalar multiplication over 254 bits (~4K constraints). Curve25519 ownership proof remains blocked by BLS12-381 field incompatibility.  
   **Reference:** [IntersectMBO/cardano-crypto `generate`](https://github.com/IntersectMBO/cardano-crypto/blob/develop/src/Cardano/Crypto/Wallet.hs#L161) for the derivation logic.
+
+### Circuit validated, proving blocked by memory
+
+- **4. Blake2b-224 Hash Pre-image (Cardano Key Hash)** — prove knowledge of a pre-image that hashes to a given Cardano key hash.  
+  **Public input:** `blake2b_224_hash`  
+  **Private input:** `pre_image`  
+  **Use case:** Proving ownership / linking proofs to on-chain Cardano addresses.  
+  **Status:** Circuit compiles (79K constraints) and witness generates correctly, but the dense-matrix ceremony requires ~200 GB RAM — blocked on memory. Implementation 6 (sparse-matrix prover) theoretically unblocks this; see [`Blake2b224Preimage/README.md`](Blake2b224Preimage/README.md) for scaling analysis.  
+  **Reference repo:** [bkomuves/hash-circuits](https://github.com/bkomuves/hash-circuits) provides the upstream Blake2b Circom circuit (MIT License).
+
+### Blocked by field incompatibility
+
+- **7. EdDSA / Ed25519 Signature Verification In-Circuit** — verify a standard Ed25519 signature inside a Groth16 circuit.  
+  **Public inputs:** `msg[n]`, `A[256]`, `R8[256]`  
+  **Private inputs:** `S[255]`, `PointA[4][3]`, `PointR[4][3]`  
+  **Use case:** Attest to off-chain events signed by standard Ed25519 keys (SSH, TLS, other blockchains).  
+  **Status:** ❌ **Blocked.** The `Ed25519Verify` circuit in `circom/Ed25519Verify/` was adapted from [Electron-Labs/ed25519-circom](https://github.com/Electron-Labs/ed25519-circom) (archived, MIT License). It compiles to ~4M non-linear + ~1.5M linear constraints on BLS12-381. However, **witness generation fails** due to BLS12-381 field incompatibility with the upstream BN254-specific chunked-arithmetic templates (`ChunkedMul`, `ModulusWith25519Chunked51`, `BigModInv51`). These templates use Circom `<--` witness hints and hard-coded constants tuned to BN254's scalar field; when compiled for BLS12-381, the hints produce values that do not satisfy the `===` constraints.  
+  **Important caveat:** Ed25519-on-BLS12-381 is **not** impossible. The [zeroj](https://github.com/bloxbean/zeroj) toolkit implements full Ed25519 point arithmetic, BIP-32 derivation, and CIP-1852 path derivation natively on BLS12-381 via a custom Java DSL (`Fe25519`, `Ed25519Point`, `Bip32Ed25519`, `Cip1852Derivation`), taking ~19M constraints for a full derivation path (see [`ZerojAudit.md`](../../zeroj-assessment/ZerojAudit.md)). The blocker here is specific to the **Electron-Labs Circom templates**, which would require a complete rewrite of the chunked-arithmetic gadgets to work on BLS12-381.  
+  **Memory:** Even if the field arithmetic were fixed, the dense-matrix ceremony would require ~512 TB RAM. The sparse prover (Implementation 6) could theoretically unblock memory, but the field incompatibility must be resolved first.  
+  See [`Ed25519Verify/README.md`](Ed25519Verify/README.md) for full analysis and path forward.
 
 ---
 
