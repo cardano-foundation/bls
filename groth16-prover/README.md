@@ -1185,9 +1185,9 @@ let (proof, public_input) = prover.prove_with_full_pk_sparse(
 - **Tests:** 5 parity tests pass (sparse vs dense): parser equivalence, ceremony key equality, naive prover proof equality, Pippenger prover proof equality, and end-to-end verification. 7 CLI integration tests also pass.
 - **Benefit:** Unlocks circuits with 50K–500K wires (Blake2b-224, Ed25519, large Poseidon trees) on commodity hardware. The dense-matrix OOM at 12K wires disappears entirely. Memory drops from `O(n_constraints × n_wires)` to `O(#non_zero_entries)`.
 
-### (l) Poseidon-based Merkle membership gadget
+### (l) Poseidon-based Merkle membership gadget ✅ DONE
 
-- **Status:** Implemented end-to-end in `circom/PoseidonMerkle/`.
+- **Status:** ✅ **Implemented** end-to-end in `circom/PoseidonMerkle/`.
 - **What it does:** A reusable Circom template `PoseidonMerkle(depth)` proves that a leaf commitment `PoseidonBLS12_381(nullifier, nonce)` exists in a Merkle tree of the given depth, with only the tree root as a public input. The leaf secret, the path siblings, and the path directions are all private.
 - **Files:**
   - `circom/PoseidonMerkle/poseidon_merkle.circom` — generic `PoseidonMerkle(depth)` template with `IfThenElse`, `SelectiveSwitch`, and Merkle walk using `PoseidonBLS12_381`.
@@ -1256,7 +1256,7 @@ let (proof, public_input) = prover.prove_with_full_pk_sparse(
 
 - **Target:** Add several realistic Circom circuits that exercise different zk-SNARK patterns:
   5. **Blake2b-224 hash** — prove knowledge of a pre-image that hashes to a given Cardano key hash.  
-     **Status:** ⚠️ **Circuit validated.** A `Blake2b224Preimage` circuit lives in `circom/Blake2b224Preimage/`. It compiles to ~79K constraints (77,312 non-linear + 2,059 linear) and the witness generates correctly, cross-checked against Python's `hashlib.blake2b`. The full end-to-end pipeline is **blocked on memory**: the dense-matrix ceremony requires ~200 GB RAM because `circom_adapter` expands sparse R1CS into dense `Vec<Vec<Fr>>` (79K constraints × 78K wires × 32 bytes). Four approaches to resolve this are documented in [`circom/Blake2b224Preimage/README.md`](circom/Blake2b224Preimage/README.md).  
+     **Status:** ✅ **Unblocked with Implementation 6.** A `Blake2b224Preimage` circuit lives in `circom/Blake2b224Preimage/`. It compiles to ~79K constraints (77,312 non-linear + 2,059 linear) and the witness generates correctly, cross-checked against Python's `hashlib.blake2b`. The dense-matrix ceremony previously required ~200 GB RAM, but the sparse-matrix prover (Implementation 6) keeps the native sparse `.r1cs` representation and successfully completes ceremony + proof + verify on commodity hardware. Memory drops from `O(n_constraints × n_wires)` to `O(#non_zero_entries)`. See [`circom/Blake2b224Preimage/README.md`](circom/Blake2b224Preimage/README.md) for the full pipeline.  
      **Reference:** [bkomuves/hash-circuits](https://github.com/bkomuves/hash-circuits) provides the upstream Blake2b Circom circuit (MIT License).
   6. **Private key → public key ownership proof** — prove that you know the private key that generates a given Cardano public key / address, without revealing the private key. This is the core key-derivation step used in Cardano wallets ([cardano-crypto `generate`](https://github.com/IntersectMBO/cardano-crypto/blob/develop/src/Cardano/Crypto/Wallet.hs#L161)): given a private scalar `x`, show that `pub = x · G` (for the appropriate curve generator G). A Circom circuit that replicates this scalar-multiplication-and-derivation logic would allow a user to prove wallet ownership on-chain inside a Groth16 proof.
   7. **EdDSA Ed25519 signature verification** — verify a standard Ed25519 signature inside a Groth16 circuit. Ed25519 is widely used outside the BN254 ecosystem (SSH, TLS, many blockchains), so an in-circuit verifier would let a Cardano zk-proof attest to off-chain events signed by standard Ed25519 keys.  
