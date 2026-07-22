@@ -948,6 +948,54 @@ FHE-based selective disclosure is not yet a drop-in replacement for Groth16 on C
 
 </details>
 
+<details>
+<summary><b>Click to expand: CIP-???? Native Confidential Transfers — Comparison & Critique</b></summary>
+
+A parallel proposal, [CIP-???? | Native Confidential Transfers](https://github.com/cardano-foundation/CIPs/pull/1233), aims to hide transaction amounts at the **ledger layer** using Pedersen commitments over **ristretto255** and **Bulletproofs** range proofs. This section compares that design with our Step 0–2 research, which demonstrates that **the same amount confidentiality is achievable within Cardano's existing BLS12-381 primitive set** — without new curves, without new proof systems, and without a hard fork.
+
+### The Core Disagreement: New Primitives vs. Existing Infrastructure
+
+| Aspect | CIP-???? (Ledger-Native) | Our Research (Steps 0–2, Smart-Contract ZK) |
+|--------|--------------------------|---------------------------------------------|
+| **Amounts hidden?** | ✅ Yes (Pedersen commitments over ristretto255) | ✅ **Yes** (Twisted ElGamal / Pedersen over BLS12-381 G1) |
+| **Identity hidden?** | ❌ No — addresses public | ✅ Yes — predicate proofs in Gate Scripts |
+| **Curve / group used** | **ristretto255** (NEW to Cardano) | **BLS12-381 G1** (already live since Chang hard fork) |
+| **Range proof system** | **Bulletproofs** (NEW verifier logic needed) | **Groth16** (already implemented end-to-end; PLONK possible) |
+| **Requires hard fork** | ✅ Yes — add ristretto255 + Bulletproofs to ledger | ❌ **No** — deployable today as Aiken scripts |
+| **Plutus builtins needed** | ❌ None exist for ristretto255 | ✅ All already exist: `G1_add`, `G1_scalarMul`, `G1_neg`, `G1_equal`, `G1_hashToGroup`, `millerLoop`, `finalVerify` |
+| **Proof verification cost** | O(n log n) per tx (Bulletproofs, grows with #commitments) | **O(1)** per tx (Groth16 — constant ~20% of script CPU budget regardless of circuit size) |
+| **ZK composability** | ❌ ristretto255 field incompatible with BLS12-381 R1CS | ✅ **Same scalar field** — circuits natively reason about commitments |
+| **Script address support** | ❌ Explicitly restricted to key-locked addresses | ✅ **Core architecture** — Gate Script IS the verifier |
+| **Programmable tokens (CIP-113)** | ❌ Incompatible — scripts can't inspect hidden amounts | ✅ **Naturally compatible** — proof is the programmable authorization |
+| **Staking compatibility** | ❌ Confidential ADA excluded from stake | ✅ **Preserved** — transparent ADA stakes normally; confidentiality is orthogonal |
+| **Audit granularity** | One viewing key per account (all history exposed) | Per-credential auditor keys (different auditors for different credentials) |
+| **Transaction size (range proof)** | ~1–2 KB (Bulletproofs, aggregated) | **192 bytes** (Groth16, constant regardless of constraints) |
+| **Trusted setup** | None (Bulletproofs) | Per-circuit (reusable universal SRS + Phase-2 MPC — **already implemented**) |
+
+### Key Critique Points
+
+1. **BLS12-381 G1 is already a prime-order group.** The CIP correctly identifies that raw Curve25519 has cofactor 8, but ristretto255 is not the only solution — BLS12-381 G1 (the subgroup used by all Plutus builtins) is prime-order, canonical, and already consensus-critical. Adding ristretto255 to the ledger duplicates functionality that exists today.
+
+2. **Twisted ElGamal works identically over BLS12-381 G1.** Our Step 2 research explicitly confirmed this. The CIP's §5 (Amount Transport) — `C = v·H + r·G`, ephemeral key `E = e·G`, shared secret `s = e·P_view` — uses only point addition, scalar multiplication, and equality checks, all of which are existing Plutus builtins. The mathematics are identical; only the curve label differs.
+
+3. **Bulletproofs verification cost is linear and a scalability concern.** For a ledger layer where every node verifies every confidential transaction, O(n log n) cost (growing with inputs, outputs, and assets) is a bottleneck. Groth16 verification is genuinely constant-time — the same cost for 3 constraints or 79,000 constraints — and we have measured it at ~20% of a Plutus script CPU budget.
+
+4. **"No trusted setup" is misleadingly framed.** The CIP requires a **protocol hard fork**, which introduces social trust (every node operator must trust the implementation). Our Groth16 approach uses a **cryptographic trusted setup** (Powers of Tau + Phase-2 MPC) that is 1-of-N secure, reusable across circuits, and already fully implemented in our codebase.
+
+5. **The CIP precludes ZK composability.** Because ristretto255 operates over a different field than BLS12-381, a future Groth16 circuit cannot efficiently reason about a ristretto255 commitment (e.g., "prove my hidden balance exceeds X"). Our BLS12-381-native commitments enable a single circuit to prove both predicate satisfaction (identity) and range constraints (amount) in one 192-byte proof.
+
+6. **Script-address confidentiality is solved, not open.** The CIP calls this an "open question." Our Gate Script architecture is a working, tested script-locked ZK verifier validated for multiple circuits. The CIP's restriction to key-locked addresses is a self-imposed limitation of its ledger-native architecture.
+
+### Bottom Line
+
+Both approaches achieve amount confidentiality. The CIP's approach requires the network to adopt a new curve family and a new proof system. Our approach achieves the same confidentiality **using primitives Cardano already has** — BLS12-381 G1 for commitments, existing pairing builtins for Groth16 verification — deployable today without governance consensus. The choice is between:
+- **CIP path:** Universal amount hiding for all transactions, but requires hard fork, new primitives, linear verification cost, and sacrifices ZK composability.
+- **Our path:** Application-layer amount hiding via Twisted ElGamal + Groth16 range proofs, deployable today, constant verification, fully composable with BLS12-381 ZK circuits, and preserves staking/programmability.
+
+For a strategic comparison of primitive choices, see our full analysis: [`cip-primitive-confrontation.md`](../../tmp/opencode/cip-primitive-confrontation.md).
+
+</details>
+
 ---
 
 ## Compliance & Auditability
