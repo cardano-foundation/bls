@@ -1,6 +1,6 @@
 # A Simple Zero-Knowledge Proof Example
 
-This document walks through a **complete, concrete Groth16 proof** that can be followed almost on paper. We use the same 3-constraint circuit that the Rust, Sage, and [zeroj](../ZerojAudit.md) implementations exercise, but explain every step in plain language.
+This document walks through a **complete, concrete Groth16 proof** that can be followed almost on paper. We use the same 3-constraint circuit that the Rust, Sage, and [zeroj](../zeroj-assessment/ZerojAudit.md) implementations exercise, but explain every step in plain language.
 
 > **Goal:** Prove that you know numbers `x1, x2, x3, x4` such that  
 > `((x1 · x2) · (x3 · x4)) = 48`  

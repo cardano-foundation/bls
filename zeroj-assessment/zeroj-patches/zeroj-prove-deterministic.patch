@@ -1,13 +1,4 @@
-From: OpenCode <agent@opencodes.ai>
-Date: Tue, 21 Jul 2026 12:00:00 +0000
-Subject: [PATCH] Add proveDeterministic() overload for cross-checking
-
-Upstream zeroj v0.1.0-pre10 (bee6039) has a refactored proveInternal()
-that takes G1Readers + ProverBackend + FlatScalars.  The old
-proveDeterministic() overload was removed during that refactor.
-This patch re-adds it using the new signature so that deterministic
-cross-check tests (DeterministicCrossCheckTest) can still compile.
-
+diff --git a/zeroj-crypto/src/main/java/com/bloxbean/cardano/zeroj/crypto/groth16/Groth16ProverBLS381.java b/zeroj-crypto/src/main/java/com/bloxbean/cardano/zeroj/crypto/groth16/Groth16ProverBLS381.java
 --- a/zeroj-crypto/src/main/java/com/bloxbean/cardano/zeroj/crypto/groth16/Groth16ProverBLS381.java
 +++ b/zeroj-crypto/src/main/java/com/bloxbean/cardano/zeroj/crypto/groth16/Groth16ProverBLS381.java
 @@ -169,6 +169,20 @@ public final class Groth16ProverBLS381 {

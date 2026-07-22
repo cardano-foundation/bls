@@ -1,6 +1,6 @@
 # zeroj Audit — Cross-Check Against Rust / Sage Groth16 Implementation
 
-**Repo:** https://github.com/bloxbean/zeroj (submodule at `zeroj-audit/`)  
+**Repo:** https://github.com/bloxbean/zeroj (submodule at `zeroj-assessment/zeroj-audit/`)  
 **Language:** Java (pure Java + BLST for compression)  
 **Curve:** BLS12-381 (same as our Rust / Sage stack)  
 **Scope:** Groth16 prover, trusted setup, and on-chain verifier for Cardano
@@ -330,7 +330,7 @@ The test prints:
 
 ## 5. Files Referenced
 
-### zeroj upstream (submodule at `zeroj-audit/`)
+### zeroj upstream (submodule at `zeroj-assessment/zeroj-audit/`)
 
 | File | Description |
 |------|-------------|
@@ -340,26 +340,26 @@ The test prints:
 | `zeroj-onchain-julc/.../Groth16BLS12381Verifier.java` | JULC on-chain validator |
 | `zeroj-onchain-julc/.../Groth16BLS12381PureJavaProverTest.java` | E2E test: Java prove → JULC verify |
 
-### Audit additions (patch files in `patches/`)
+### Audit additions (patch files in `zeroj-assessment/zeroj-patches/`)
 
-> **Policy:** The `zeroj-audit/` submodule stays at a **clean upstream commit** (`bee6039`, v0.1.0-pre10). Any local modifications are applied as patch files in `patches/` and never committed inside the submodule. This keeps the submodule pointer stable and makes upstream updates trivial (`git fetch origin && git reset --hard origin/main`).
+> **Policy:** The `zeroj-assessment/zeroj-audit/` submodule stays at a **clean upstream commit** (`bee6039`, v0.1.0-pre10). Any local modifications are applied as patch files in `zeroj-assessment/zeroj-patches/` and never committed inside the submodule. This keeps the submodule pointer stable and makes upstream updates trivial (`git fetch origin && git reset --hard origin/main`).
 
 | File | Description |
 |------|-------------|
-| `patches/zeroj-prove-deterministic.patch` | Re-adds `proveDeterministic(...)` to `Groth16ProverBLS381.java` — upstream refactored `proveInternal()` to use `FlatScalars`/`ProverBackend` and dropped the old overload. This patch restores it for cross-checking. |
-| `patches/zeroj-deterministic-crosscheck.patch` | Adds `DeterministicCrossCheckTest.java` with pairing verification and toxic-waste constants `tau=3, alpha=5, beta=7, gamma=11, delta=13` (matching the Rust/Sage fixture). |
+| `zeroj-assessment/zeroj-patches/zeroj-prove-deterministic.patch` | Re-adds `proveDeterministic(...)` to `Groth16ProverBLS381.java` — upstream refactored `proveInternal()` to use `FlatScalars`/`ProverBackend` and dropped the old overload. This patch restores it for cross-checking. |
+| `zeroj-assessment/zeroj-patches/zeroj-deterministic-crosscheck.patch` | Adds `DeterministicCrossCheckTest.java` with pairing verification and toxic-waste constants `tau=3, alpha=5, beta=7, gamma=11, delta=13` (matching the Rust/Sage fixture). |
 | `zeroj-crypto/.../Groth16SetupBLS381.java` | `setup(...)` with explicit alpha/beta/gamma/delta (present upstream at `bee6039`) |
 | `zeroj-crypto/.../Groth16ScaleBenchmark.java` | Built-in prover scale benchmark (ADR-0027 M7, present upstream) |
 
 To apply patches:
 ```bash
-cd zeroj-audit
-git apply ../patches/zeroj-prove-deterministic.patch
-git apply ../patches/zeroj-deterministic-crosscheck.patch
+cd zeroj-assessment/zeroj-audit
+git apply ../zeroj-patches/zeroj-prove-deterministic.patch
+git apply ../zeroj-patches/zeroj-deterministic-crosscheck.patch
 ```
 To reset the submodule to clean upstream:
 ```bash
-cd zeroj-audit
+cd zeroj-assessment/zeroj-audit
 git reset --hard bee6039
 ```
 
@@ -498,7 +498,7 @@ public class EasyCircuit {
 From the repo root:
 
 ```bash
-cd zeroj-audit
+cd zeroj-assessment/zeroj-audit
 JAVA_HOME=/path/to/java25 ./gradlew :zeroj-onchain-julc:test \
   --tests "DeterministicCrossCheckTest.deterministicCrossCheck"
 ```
@@ -568,7 +568,7 @@ All instructions below are **self-contained** — you do not need write access t
 |------|---------|---------------|
 | Git | any | system package manager |
 | Java | **25** (e.g. GraalVM CE 25.0.2) | [github.com/graalvm/graalvm-ce-builds](https://github.com/graalvm/graalvm-ce-builds/releases) or `sdk use java 25.0.2-graal` |
-| Gradle | 9.x (wrapper included in zeroj) | `./gradlew` inside `zeroj-audit/` |
+| Gradle | 9.x (wrapper included in zeroj) | `./gradlew` inside `zeroj-assessment/zeroj-audit/` |
 | Rust | stable | [rustup.rs](https://rustup.rs) |
 
 > **Note on Java 25.** zeroj's `build.gradle` pins `sourceCompatibility = JavaVersion.VERSION_25`. Running with Java 17 will fail. If you do not have Java 25 installed, download a GraalVM JDK 25 tarball, unpack it to e.g. `/tmp/graalvm-jdk-25.0.3+9.1`, and export `JAVA_HOME` before invoking Gradle (see step 9.3).
@@ -577,13 +577,13 @@ All instructions below are **self-contained** — you do not need write access t
 
 ```bash
 # 1. Clone zeroj at the exact upstream commit used by this audit
-git clone https://github.com/bloxbean/zeroj.git zeroj-audit
-cd zeroj-audit
+git clone https://github.com/bloxbean/zeroj.git zeroj-assessment/zeroj-audit
+cd zeroj-assessment/zeroj-audit
 git checkout bee6039   # v0.1.0-pre10 — "Merge pull request #21 ..."
 
 # 2. Apply local patches (never committed inside the submodule)
-git apply ../patches/zeroj-prove-deterministic.patch
-git apply ../patches/zeroj-deterministic-crosscheck.patch
+git apply ../zeroj-patches/zeroj-prove-deterministic.patch
+git apply ../zeroj-patches/zeroj-deterministic-crosscheck.patch
 ```
 
 > **Note:** `setup(...)` with explicit alpha/beta/gamma/delta is present upstream at `bee6039` (it was formerly called `setupDeterministic`). `proveDeterministic(...)` was removed during the upstream refactor to `FlatScalars`/`ProverBackend`; the patch restores it. `DeterministicCrossCheckTest.java` is not in upstream — it is added by the second patch.
@@ -591,7 +591,7 @@ git apply ../patches/zeroj-deterministic-crosscheck.patch
 ### 9.3 Run the zeroj deterministic test
 
 ```bash
-cd zeroj-audit
+cd zeroj-assessment/zeroj-audit
 
 # If Java 25 is on your PATH:
 ./gradlew :zeroj-onchain-julc:test \
@@ -608,11 +608,11 @@ JAVA_HOME=/tmp/graalvm-jdk-25.0.3+9.1 \
 - The final line is `Pairing verification: PASSED`.
 - The Gradle report shows `DeterministicCrossCheckTest > deterministicCrossCheck() PASSED`.
 
-> **Submodule status.** The `zeroj-audit/` submodule in this repo is pinned to **clean upstream** commit `bee6039` (v0.1.0-pre10). No local commits inside the submodule — all modifications live as patch files in `patches/`.
+> **Submodule status.** The `zeroj-assessment/zeroj-audit/` submodule in this repo is pinned to **clean upstream** commit `bee6039` (v0.1.0-pre10). No local commits inside the submodule — all modifications live as patch files in `zeroj-assessment/zeroj-patches/`.
 
 ### 9.4 Run the Rust / Sage reference for the same fixture
 
-From the parent audit repository (next to `zeroj-audit/`):
+From the parent audit repository (next to `zeroj-assessment/zeroj-audit/`):
 
 ```bash
 cd groth16-prover
