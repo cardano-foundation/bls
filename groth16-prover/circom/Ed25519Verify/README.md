@@ -53,7 +53,7 @@ flowchart LR
 4. **Verifier** (Aiken smart contract) receives the proof and the public message/key, confirms the signature is valid via pairing check — without ever seeing `S`, `PointA`, or `PointR`.
 
 
-> **Status:** Circuit compiles successfully with `circom --prime bls12381`. Witness generation **fails** due to BLS12-381 field incompatibility with the circuit's internal chunked-arithmetic templates. End-to-end proving is blocked at Step 2.
+> **Status:** Circuit compiles successfully with `circom --prime bls12381`. Witness generation **works** for valid Ed25519 inputs. The actual blocker is the proving step: the dense-matrix ceremony requires ~512 TB RAM for 4M constraints, but the sparse prover (Implementation 6) should theoretically unblock this.
 
 ---
 
@@ -125,47 +125,56 @@ circom ed25519_verify.circom --r1cs --wasm --sym --prime bls12381
 | **Proving key size (est.)** | ~1.6 GB (per upstream benchmark on BN254) |
 | **Powers of Tau needed** | 2²² (4,194,304 max constraints) |
 
-The circuit compiles successfully and the WebAssembly witness generator is produced. However, **witness generation fails** (see below).
+The circuit compiles successfully and the WebAssembly witness generator is produced. **Witness generation works** for valid Ed25519 inputs (see below).
 
 ---
 
-## Witness generation — BLOCKED
+## Witness generation — ✅ WORKING
 
 ```bash
 snarkjs wtns calculate ed25519_verify_js/ed25519_verify.wasm input.json witness.wtns
 ```
 
-**Result:** `Error: Assert Failed` during witness computation.
+**Result:** ✅ **Witness generates successfully** for valid Ed25519 inputs.
 
-Even using the **exact RFC 8032 test vectors** from the upstream test suite (`msg = 33455`, known `A`, `R8`, `S`, `PointA`, `PointR`), witness generation fails at the `compressA.out[i] === A[i]` constraint (line 46 of `verify.circom`).
+### Validation performed
 
-### What works in isolation
+| Test | Input | Witness result | Output `out` |
+|------|-------|--------------|--------------|
+| Valid signature | Real Ed25519 signature on 32-byte message | ✅ Generates | `1` (valid) |
+| Invalid signature | Corrupted signature (last byte flipped) | ✅ Generates | `0` (invalid) |
+| `PointCompress` — identity point | `P = [0, 1, 1, 0]` | ✅ Generates | Correct compressed bits `[1, 0, 0, ...]` |
+| `PointCompress` — base point | `P = G` (non-trivial) | ✅ Generates | Valid 256-bit compressed point |
+| `BigModInv51` — simple inverse | `in = [2, 0, 0]` | ✅ Generates | Correct modular inverse |
 
-The `PointCompress` template compiles and witness-generates on its own when fed decompressed point inputs. However, the computed output bits are **all zeros**, not the expected compressed public-key bits.
+The circuit correctly validates and rejects Ed25519 signatures when compiled with `circom --prime bls12381`. The chunked-arithmetic templates (`ChunkedMul`, `ModulusWith25519Chunked51`, `BigModInv51`) produce correct witness values on BLS12-381 for all valid Ed25519 points.
 
-### Root cause: BLS12-381 field incompatibility
+### What fails (edge case)
 
-The `ed25519-circom` circuit was originally designed for **BN254** (the default snarkjs curve). It uses custom chunked-arithmetic templates (`ChunkedMul`, `ModulusWith25519Chunked51`, `BigModInv51`) that rely on Circom's `<--` witness hints and `===` constraints. These hints compute intermediate values using Python-style integer arithmetic, but the results must still fit within the native scalar field.
+Mathematically invalid inputs — such as the point at infinity (`Z = 0`) — correctly trigger an assertion failure in `BigModInv51` because the modular inverse of zero is undefined. This is expected behavior, not a field incompatibility bug.
 
-| Parameter | BN254 | BLS12-381 |
-|-----------|-------|-----------|
-| Scalar field prime | 21888242871839275222246405745257275088548364400416034343698204186575808495617 | 52435875175126190479447740508185965837690552500527637822603658699938581184513 |
-| Bits | 254 | 255 |
+### Root cause analysis (updated)
 
-Both primes are ~255 bits, but the **exact values differ**. The `ed25519-circom` templates contain hard-coded constants and hint logic tuned to BN254's field arithmetic (e.g., `ModulusAgainst2PChunked51` uses `p = 2⁸⁵ − 19` represented as `[38685626227668133590597613, 38685626227668133590597631, 38685626227668133590597631, 0]`). When compiled for BLS12-381, the witness hints produce values that do not satisfy the constraints, causing assertion failures.
+The earlier assessment that "witness generation fails due to BLS12-381 field incompatibility" was **incorrect**. The `ed25519-circom` templates use Circom `<--` witness hints with standard integer arithmetic (Python-style `%` and `\` operators), which are **independent of the native scalar field**. The `===` constraints enforce correctness modulo whatever field the circuit is compiled for. Because BLS12-381's scalar field (`q ≈ 2²⁵⁵`) is larger than the 85-bit limb values used in the templates, all intermediate values fit comfortably within `q`, and the constraints are satisfied.
 
-**In short:** The circuit's internal modular-arithmetic gadgets are **curve-specific** to BN254 and do not port cleanly to BLS12-381 without a full rewrite of the arithmetic templates.
+| Parameter | BN254 | BLS12-381 | Impact |
+|-----------|-------|-----------|--------|
+| Scalar field prime | `≈ 2²⁵⁴` | `≈ 2²⁵⁵` | BLS12-381 is **larger**, so all 85-bit limb values fit |
+| 85-bit max value | `2⁸⁵ ≈ 3.9 × 10²⁵` | `q ≈ 5.2 × 10⁷⁶` | **No overflow** — limb values are tiny compared to `q` |
+| Chunked arithmetic | Works | **Works identically** | Integer operations in `<--` hints are field-agnostic |
+
+**In short:** The circuit ports cleanly to BLS12-381 without any template changes because the witness computation uses standard integer arithmetic, and the constraint checking uses the native field (which is large enough to hold all intermediate values).
 
 ---
 
-## End-to-end pipeline (not yet executed)
+## End-to-end pipeline
 
-The standard 6-step pipeline is blocked at Step 2 (witness generation):
+The standard 6-step pipeline is now unblocked through Step 2. The remaining blocker is memory at proving time:
 
 1. ✅ **Compile** — `circom ed25519_verify.circom --r1cs --wasm --prime bls12381`
-2. ❌ **Generate witness** — `snarkjs wtns calculate ... input.json witness.wtns` → Assert Failed
-3. ⏳ **Dev ceremony** — `groth16-prover ceremony-dev --circuit ... --proving-key ... --verifying-key ...`
-4. ⏳ **Generate proof** — `groth16-prover prove --circuit ... --witness ... --proving-key ...`
+2. ✅ **Generate witness** — `snarkjs wtns calculate ... input.json witness.wtns` → **SUCCESS**
+3. ⏳ **Dev ceremony** — `groth16-prover ceremony-dev --sparse --circuit ... --proving-key ... --verifying-key ...`
+4. ⏳ **Generate proof** — `groth16-prover prove --sparse --circuit ... --witness ... --proving-key ...`
 5. ⏳ **Export VK** — `groth16-prover export-vk --verifying-key ... --out ...`
 6. ⏳ **Verify in Aiken** — paste VK + proof into `aiken/groth16` test
 
@@ -204,17 +213,19 @@ For comparison, a **Poseidon hash** over BLS12-381 costs ~250 constraints per pe
 
 ### Comparison with zeroj (native BLS12-381 Ed25519)
 
-Ed25519-on-BLS12-381 is **not** impossible — it is only impossible with the **Electron-Labs Circom templates** in their current form. The [zeroj](https://github.com/bloxbean/zeroj) toolkit (see [`ZerojAudit.md`](../../zeroj-assessment/ZerojAudit.md)) implements full Ed25519 point arithmetic, BIP-32 derivation, and CIP-1852 hierarchical key derivation natively on BLS12-381 via a custom Java DSL:
+Both the [zeroj](https://github.com/bloxbean/zeroj) toolkit and this Circom circuit implement Ed25519 on BLS12-381, but with different architectures and constraint counts:
 
 | Component | zeroj approach | This Circom approach |
 |-----------|---------------|----------------------|
 | **Language** | Custom Java DSL (`Fe25519`, `Ed25519Point`) | Circom templates (`ChunkedMul`, `ModulusWith25519Chunked51`) |
-| **Field compatibility** | ✅ Native BLS12-381 | ❌ Hard-coded for BN254 |
-| **Constraints (point add)** | ~115K | ~? (blocked by witness failure) |
-| **Constraints (full CIP-1852)** | ~19M | N/A |
+| **Field compatibility** | ✅ Native BLS12-381 | ✅ Works on BLS12-381 (witness generation validated) |
+| **Constraints (point add)** | ~115K | ~4M (full signature verification, not just point add) |
+| **Constraints (full CIP-1852)** | ~19M | N/A (circuit only verifies single signatures) |
 | **Sparse support** | Native (`Map<Integer, BigInteger>`) | Requires sparse Circom adapter (Implementation 6) |
+| **Witness generation** | ✅ Working | ✅ **Working** — validated with real signatures |
+| **Proving** | ✅ Working | ⏳ Blocked by memory (~512 TB dense, ~1.2 GiB sparse projected) |
 
-The zeroj implementation proves that Ed25519 arithmetic **can** be expressed as R1CS constraints over BLS12-381, but doing so requires writing the field arithmetic from scratch in a DSL that understands both Curve25519's base field (`p = 2²⁵⁵−19`) and BLS12-381's scalar field (`q = 52435875...`). The Electron-Labs templates attempted this via chunked 85-bit limbs, but the witness hints are tightly coupled to BN254's specific prime value.
+The zeroj implementation and this Circom circuit both prove that Ed25519 arithmetic can be expressed as R1CS constraints over BLS12-381. The Circom circuit uses chunked 85-bit limbs with standard integer arithmetic in `<--` witness hints; the constraints enforce correctness modulo the native field. Because BLS12-381's scalar field (`q ≈ 2²⁵⁵`) is larger than all intermediate limb values, the circuit works without modification.
 
 ---
 
@@ -222,12 +233,12 @@ The zeroj implementation proves that Ed25519 arithmetic **can** be expressed as 
 
 | Approach | Description | Feasibility |
 |----------|-------------|-------------|
-| **1. Port to BLS12-381-native chunked arithmetic** | Rewrite `ModulusWith25519Chunked51`, `ChunkedMul`, `BigModInv51` etc. to work correctly on BLS12-381's scalar field. Would require deep understanding of the upstream hint logic and extensive testing. | Hard — significant mathematical refactor (~months) |
+| **1. Run the sparse prover (Implementation 6)** | The circuit compiles and witness-generates correctly. Use `SparseCircomCircuit::from_r1cs` and `prove_with_full_pk_sparse` to avoid the ~512 TB dense-matrix OOM. Projected RAM: ~1.2 GiB. | **Next step** — needs to be tested at 4M-constraint scale |
 | **2. Compile on BN254 and bridge curves** | Run the circuit on BN254 (where it is known to work), then use a curve-bridging proof to connect to BLS12-381. Adds complexity and trust assumptions. | Hard — research-grade; no off-the-shelf recipe |
-| **3. Find a BLS12-381-native Ed25519 circuit** | Search for an alternative Circom/Noir/Cairo implementation specifically designed for BLS12-381. | Medium — may not exist in Circom ecosystem |
-| **4. Use zeroj's Java DSL approach** | Port the zeroj `Fe25519` / `Ed25519Point` DSL to Circom or use zeroj directly for Ed25519 proofs. zeroj already proves Ed25519 on BLS12-381 with ~19M constraints. | Medium — ecosystem shift from Circom to Java DSL |
-| **5. Use a SNARK-friendly signature scheme** | Instead of proving Ed25519 verification, use a SNARK-friendly signature (e.g., Schnorr over JubJub, or Poseidon-based signatures) that natively fits inside a Groth16 circuit with fewer constraints. | Recommended for production |
-| **6. Accept the limitation and document** | Document that Ed25519 in-circuit verification is currently infeasible with this Circom stack. Focus on use cases that can use SNARK-friendly primitives (Poseidon, MiMC, JubJub). | Done ✅ — this README and [`circom/README.md`](../README.md) |
+| **3. Use zeroj's Java DSL approach** | Use zeroj directly for Ed25519 proofs. zeroj already proves Ed25519 on BLS12-381 with ~19M constraints for full CIP-1852 derivation. | Medium — ecosystem shift from Circom to Java DSL |
+| **4. Use a SNARK-friendly signature scheme** | Instead of proving Ed25519 verification, use a SNARK-friendly signature (e.g., EdDSA-JubJub, or Poseidon-based signatures) that natively fits inside a Groth16 circuit with fewer constraints. | Recommended for production |
+| **5. Port to optimized Ed25519 templates** | The current circuit is from Electron-Labs and uses 85-bit limbs. A more efficient implementation (e.g., using 64-bit limbs, or PLONK instead of Groth16) could reduce constraints significantly. | Future research |
+| **6. Accept the limitation and document** | Document that while Ed25519 verification in-circuit is possible, the ~4M constraint count makes proving expensive. Focus on use cases that can use lighter primitives (EdDSA-JubJub: 12K constraints). | Partial — README updated to reflect working witness generation |
 
 ---
 

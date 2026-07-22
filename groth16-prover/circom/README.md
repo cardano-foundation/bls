@@ -12,7 +12,7 @@ This directory contains Circom circuits that can be loaded by the Rust prover vi
 | [`PoseidonMerkle/`](PoseidonMerkle/README.md) | Merkle membership with PoseidonBLS12_381 hashing | 737 (depth 2) | ✅ Complete |
 | [`RangeProof/`](RangeProof/README.md) | Range proof + Poseidon commitment (`value ∈ [0, 2^n)`) | ~`n + 250` | ✅ Complete |
 | [`Blake2b224Preimage/`](Blake2b224Preimage/README.md) | Blake2b-224 hash pre-image (Cardano key hash) | ~79K | ⚠️ Circuit + witness validated; proving blocked by RAM |
-| [`Ed25519Verify/`](Ed25519Verify/README.md) | Ed25519 signature verification in-circuit | ~4M | ❌ **Blocked** — BN254-specific chunked arithmetic incompatible with BLS12-381 field |
+| [`Ed25519Verify/`](Ed25519Verify/README.md) | Ed25519 signature verification in-circuit | ~4M | ✅ **Witness works** — proving blocked by memory (dense), sparse prover should unblock |
 | [`EdDSAJubJub/`](EdDSAJubJub/README.md) | EdDSA-JubJub signature verification (deterministic nonce, Poseidon challenge) | 12 601 | ✅ Complete — full e2e pass |
 | [`CardanoKeyOwnership/`](CardanoKeyOwnership/README.md) | Private key → public key ownership proof (JubJub) | ~4K | ✅ Complete — full e2e pass |
 
@@ -106,15 +106,15 @@ Full pipeline for each item: **Circom → groth16-prover (dev ceremony) → Aike
   **Status:** Circuit compiles (79K constraints) and witness generates correctly, but the dense-matrix ceremony requires ~200 GB RAM — blocked on memory. Implementation 6 (sparse-matrix prover) theoretically unblocks this; see [`Blake2b224Preimage/README.md`](Blake2b224Preimage/README.md) for scaling analysis.  
   **Reference repo:** [bkomuves/hash-circuits](https://github.com/bkomuves/hash-circuits) provides the upstream Blake2b Circom circuit (MIT License).
 
-### Blocked by field incompatibility
+### Circuit validated, proving blocked by memory
 
 - **7. EdDSA / Ed25519 Signature Verification In-Circuit** — verify a standard Ed25519 signature inside a Groth16 circuit.  
   **Public inputs:** `msg[n]`, `A[256]`, `R8[256]`  
   **Private inputs:** `S[255]`, `PointA[4][3]`, `PointR[4][3]`  
   **Use case:** Attest to off-chain events signed by standard Ed25519 keys (SSH, TLS, other blockchains).  
-  **Status:** ❌ **Blocked.** The `Ed25519Verify` circuit in `circom/Ed25519Verify/` was adapted from [Electron-Labs/ed25519-circom](https://github.com/Electron-Labs/ed25519-circom) (archived, MIT License). It compiles to ~4M non-linear + ~1.5M linear constraints on BLS12-381. However, **witness generation fails** due to BLS12-381 field incompatibility with the upstream BN254-specific chunked-arithmetic templates (`ChunkedMul`, `ModulusWith25519Chunked51`, `BigModInv51`). These templates use Circom `<--` witness hints and hard-coded constants tuned to BN254's scalar field; when compiled for BLS12-381, the hints produce values that do not satisfy the `===` constraints.  
-  **Important caveat:** Ed25519-on-BLS12-381 is **not** impossible. The [zeroj](https://github.com/bloxbean/zeroj) toolkit implements full Ed25519 point arithmetic, BIP-32 derivation, and CIP-1852 path derivation natively on BLS12-381 via a custom Java DSL (`Fe25519`, `Ed25519Point`, `Bip32Ed25519`, `Cip1852Derivation`), taking ~19M constraints for a full derivation path (see [`ZerojAudit.md`](../../zeroj-assessment/ZerojAudit.md)). The blocker here is specific to the **Electron-Labs Circom templates**, which would require a complete rewrite of the chunked-arithmetic gadgets to work on BLS12-381.  
-  **Memory:** Even if the field arithmetic were fixed, the dense-matrix ceremony would require ~512 TB RAM. The sparse prover (Implementation 6) could theoretically unblock memory, but the field incompatibility must be resolved first.  
+  **Status:** ✅ **Witness generation works.** The `Ed25519Verify` circuit in `circom/Ed25519Verify/` compiles to ~4M non-linear + ~1.5M linear constraints on BLS12-381. Contrary to earlier assessment, **witness generation succeeds** with valid Ed25519 signatures. The chunked-arithmetic templates (`ChunkedMul`, `ModulusWith25519Chunked51`, `BigModInv51`) use standard integer arithmetic in `<--` witness hints that is field-agnostic; the `===` constraints enforce correctness modulo the native BLS12-381 scalar field, which is large enough to hold all 85-bit limb values without overflow.  
+  **Important caveat:** Earlier reports of "field incompatibility" were incorrect. The circuit works on BLS12-381 without template modifications.  
+  **Memory:** The dense-matrix ceremony would require ~512 TB RAM. The sparse prover (Implementation 6) is the path forward — projected ~1.2 GiB RAM for 4M constraints.  
   See [`Ed25519Verify/README.md`](Ed25519Verify/README.md) for full analysis and path forward.
 
 ---
