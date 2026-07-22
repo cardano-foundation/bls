@@ -215,15 +215,15 @@ The circuit uses `EscalarMulFixJubJub(254, BASE8)` — a fixed-base windowed sca
 | Poseidon Pre-image | ~300 | ~400 | ~5 MB | ✅ Working e2e |
 | Privacy / Spend(depth=2) | 1,107 | 1,110 | ~39 MB | ✅ Working e2e |
 | Blake2b-224 Pre-image | ~79K | ~78K | ~200 GB | ✅ Unblocked (sparse prover) |
-| Ed25519 Verify | ~4M | ~4M | ~512 TB | ⏳ Blocked (field + memory) |
+| Ed25519 Verify | ~4M | ~4M | ~512 TB (dense) / ~1.5 GiB (sparse) | ✅ Witness works — sparse prover should unblock |
 | **CardanoKeyOwnership (JubJub)** | **~4K** | **~4K** | **~1.5 MiB** | **✅ Working e2e** |
-| CardanoKeyOwnership (Curve25519) | ~4M | ~4M | ~512 TB | ⏳ Blocked (field + memory) |
+| CardanoKeyOwnership (Curve25519) | ~4M | ~4M | ~512 TB (dense) | Not implemented — could use same templates as Ed25519Verify |
 
 ---
 
 ## References
 
-- [Ed25519Verify/README.md](../Ed25519Verify/README.md) — Full analysis of why Curve25519 arithmetic doesn't work on BLS12-381
+- [Ed25519Verify/README.md](../Ed25519Verify/README.md) — Full Ed25519 signature verification circuit on BLS12-381 (witness works, sparse prover in progress)
 - [EdDSAJubJub/README.md](../EdDSAJubJub/README.md) — JubJub curve parameters and point operations
 - [RFC 8032](https://datatracker.ietf.org/doc/html/rfc8032) — EdDSA and Ed25519 specification
 - [IntersectMBO/cardano-crypto](https://github.com/IntersectMBO/cardano-crypto) — Cardano key derivation logic

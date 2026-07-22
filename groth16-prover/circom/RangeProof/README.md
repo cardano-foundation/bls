@@ -240,7 +240,7 @@ This is a common pitfall when using snarkjs with BLS12-381. Always use strings f
 | Poseidon Pre-image | ~300 | ~400 | ~5 MB | ✅ Working e2e |
 | Privacy / Spend(depth=2) | 1,107 | 1,110 | ~39 MB | ✅ Working e2e |
 | Blake2b-224 Pre-image | ~79K | ~78K | ~200 GB | ⏳ Blocked (memory) |
-| Ed25519 Verify | ~4M | ~4M | ~512 TB | ⏳ Blocked (field + memory) |
+| Ed25519 Verify | ~4M | ~4M | ~512 TB (dense) / ~1.5 GiB (sparse) | ✅ Witness works — sparse prover should unblock |
 
 ---
 
