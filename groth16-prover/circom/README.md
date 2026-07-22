@@ -94,7 +94,7 @@ Full pipeline for each item: **Circom → groth16-prover (dev ceremony) → Aike
   **Public input:** `public_key`  
   **Private input:** `private_scalar`  
   **Use case:** Wallet ownership proof without revealing the private key. This is the core key-derivation step used in Cardano wallets: given a private scalar `x`, show that `pub = x · G`.  
-  **Status:** ✅ **Implemented end-to-end.** A working JubJub-based ownership circuit (`cardano_key_ownership.circom`) compiles, generates witnesses, and produces valid Groth16 proofs verified by the Rust prover CLI. It proves `[sk]·G_JubJub == pk` using fixed-base scalar multiplication over 254 bits (~4K constraints). Curve25519 ownership proof remains blocked by BLS12-381 field incompatibility.  
+  **Status:** ✅ **Implemented end-to-end.** A working JubJub-based ownership circuit (`cardano_key_ownership.circom`) compiles, generates witnesses, and produces valid Groth16 proofs verified by the Rust prover CLI. It proves `[sk]·G_JubJub == pk` using fixed-base scalar multiplication over 254 bits (~4K constraints). A Curve25519 ownership proof would require the same chunked-arithmetic templates used in `Ed25519Verify` (~4M constraints) and is feasible but not yet implemented.  
   **Reference:** [IntersectMBO/cardano-crypto `generate`](https://github.com/IntersectMBO/cardano-crypto/blob/develop/src/Cardano/Crypto/Wallet.hs#L161) for the derivation logic.
 
 ### Circuit validated, proving blocked by memory
