@@ -1,4 +1,4 @@
 [submodule "zeroj-audit"]
-	path = zeroj-audit
+	path = zeroj-assessment/zeroj-audit
 	url = https://github.com/bloxbean/zeroj.git
 	branch = main

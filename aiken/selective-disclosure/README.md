@@ -264,7 +264,7 @@ Phase 2: Unlocking
 | Path | Off-chain prover | On-chain verifier | Status | Documentation |
 |------|-----------------|-------------------|--------|---------------|
 | **A — Rust / Circom** | `circom` compiler + [`groth16-prover`](../../groth16-prover/README.md) (Rust/arkworks) | [`aiken/groth16`](../../aiken/groth16/README.md) (parameterized Aiken library) | ✅ Working e2e | [`groth16-prover/circom/README.md`](../../groth16-prover/circom/README.md) |
-| **B — Java / zeroj** | [`zeroj`](../../zeroj-audit/README.md) Circuit DSL / pure-Java prover | `zeroj-onchain-julc` (Julc → Plutus V3) | ⚠️ Experimental: undergoing audit | [`zeroj-audit/README.md`](../../zeroj-audit/README.md) |
+| **B — Java / zeroj** | [`zeroj`](../../zeroj-assessment/zeroj-audit/README.md) Circuit DSL / pure-Java prover | `zeroj-onchain-julc` (Julc → Plutus V3) | ⚠️ Experimental: undergoing audit | [`zeroj-audit/README.md`](../../zeroj-assessment/zeroj-audit/README.md) |
 
 **Path A** is the reference implementation used to validate the Aiken verifier. It compiles Circom circuits to R1CS, generates witnesses with `snarkjs`, produces proofs with the Rust `groth16-prover`, and verifies them on-chain with the parameterized Aiken `groth16` library. The pipeline is fully working for several circuits (3-gate multiplier, 1107-constraint MiMC Merkle membership, Poseidon pre-image, 737-constraint Poseidon Merkle membership).
 
@@ -364,7 +364,7 @@ If you prefer a pure-Java toolchain, zeroj provides an end-to-end path from circ
 5. **Verify off-chain** with `BLS12381Pairing.pairingCheck(...)`
 6. **Verify on-chain** by deploying the Julc-generated Plutus V3 script and submitting the proof as a redeemer
 
-The zeroj project includes end-to-end tests on Yaci DevKit (`PureJavaProverYaciE2ETest`, `CircomToOnChainE2ETest`). See [`zeroj-audit/README.md`](../../zeroj-audit/README.md) for build instructions, module overview, and the getting-started guide.
+The zeroj project includes end-to-end tests on Yaci DevKit (`PureJavaProverYaciE2ETest`, `CircomToOnChainE2ETest`). See [`zeroj-audit/README.md`](../../zeroj-assessment/zeroj-audit/README.md) for build instructions, module overview, and the getting-started guide.
 
 > **Warning:** zeroj is experimental and AI-generated with human-assisted review. Do not use it in production without an independent audit.
 
