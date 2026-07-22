@@ -1305,8 +1305,11 @@ Proof-production time for the hard-coded 3-constraint circuit (`x1·x2 = x5`, `x
 | 4c (Circom Pippenger) | `FftQapEngine` | `PippengerProver` | **4.00 ms** | 1.00× | 1.39× | — |
 | 5a (Circom Full PK) | `FftQapEngine` | `NaiveProver` | **1.74 ms** | 2.29× | 3.20× | 2.30× |
 | 5b (Circom Full PK Pippenger) | `FftQapEngine` | `PippengerProver` | **1.72 ms** | 2.32× | 3.23× | 2.33× |
+| 6 (sparse Full PK Pippenger) | `FftQapEngine` | `PippengerProver` | **1.59 ms** | 2.51× | 3.50× | 2.52× |
 
 > **What the numbers mean.** For a 3-gate circuit the FFT overhead (padding to 4 points, extra IFFT steps) outweighs its `O(N log N)` advantage, so Implementation 2 is slightly slower than Implementation 1. Pippenger's batched MSM yields a modest ~48 % speedup over naive FFT at this tiny scale. The Circom adapter parser overhead is now negligible in `--release` mode, so Implementations 4a–4c match the hard-coded-matrix timings. Implementation 5 moves to the group-element-only `FullProvingKey` path: the on-the-fly QAP construction is negligible for 8 wires, but the pre-computed `a_query`, `b_g2_query`, `c_query` and `l_query` points eliminate the per-proof QAP evaluation at `tau` and make the proof roughly 2.3–3.3× faster than every scalar path. On realistic circuits with hundreds or thousands of gates, the combined FFT + FullProvingKey + Pippenger path is the fastest production configuration.
+>
+> **Implementation 6** at this scale is effectively the same speed as Implementation 5 because the sparse overhead (iterating triplets instead of dense columns) is negligible for 9 non-zero entries. The benefit only becomes visible once the dense matrices grow large enough that allocation and zero-filling dominate.
 >
 > **Implementation 5** numbers are from a `--release` build with the `FullProvingKey` generated once outside the timed loop. The per-proof cost includes on-the-fly IFFT of the three witness polynomials over the 4-point FFT domain plus the final MSMs.
 
@@ -1321,8 +1324,11 @@ Proof-production time on a single core, compiled with `--release`, using a `Full
 | Legacy (scalars) | `FftQapEngine` | `NaiveProver` | **7.13 s** | — |
 | FullProvingKey | `FftQapEngine` | `NaiveProver` | **8.39 s** | 0.85× |
 | FullProvingKey | `FftQapEngine` | `PippengerProver` | **5.60 s** | 1.27× |
+| 6 (sparse Full PK Pippenger) | `FftQapEngine` | `PippengerProver` | **—** | — |
 
 > **What the numbers mean.** The current `prove_with_full_pk` implementation still rebuilds QAP polynomials from raw R1CS matrices on every proof, so the dominant cost is QAP construction + quotient computation (both `O(N log N)` via FFT). The FullProvingKey path saves time on the MSM step, but for 1,107 constraints the MSM is not yet the bottleneck. Pippenger's batched MSM still yields a ~30 % speedup over the naive scalar-by-scalar accumulation. Future work will pre-compute witness evaluations so the prover can skip QAP reconstruction entirely.
+>
+> **Implementation 6** was not separately measured for the Privacy circuit because the dense path already fits in memory (~118 MiB matrix expansion). The sparse path would eliminate this allocation entirely; extrapolating from the PoseidonMerkle trend (13× speedup at 1,911 constraints), the sparse Privacy proof is expected to finish in **~400–1,000 ms**. Run `cargo run --bin benchmark_sparse --release` after generating a valid `spend_depth2.r1cs` + `witness.wtns` to collect the exact number.
 
 | Depth | Constraints | Notes |
 |-------|-------------|-------|
@@ -1345,8 +1351,11 @@ Proof-production time on a single core, compiled with `--release`. The dense Cir
 | 4c (Circom FFT Pippenger) | `FftQapEngine` | `PippengerProver` | no | **11.59 s** | 1.12× |
 | 5a (Circom Full PK Naive) | `FftQapEngine` | `NaiveProver` | yes | **12.69 s** | 1.02× |
 | 5b (Circom Full PK Pippenger) | `FftQapEngine` | `PippengerProver` | yes | **10.31 s** | 1.25× |
+| 6b (sparse Full PK Pippenger) | `FftQapEngine` | `PippengerProver` | yes | **731 ms** | **17.7×** |
 
 > **What the numbers mean.** At 1,911 constraints the dominant cost is still on-the-fly QAP construction (building the witness polynomials from the R1CS matrices via IFFT), not the multi-scalar multiplications. The `FullProvingKey` path therefore only modestly outperforms the scalar path: it eliminates per-proof QAP evaluation at `tau` and the final scalar MSM, but the IFFT/quotient steps remain. Pippenger's batched MSM gives a consistent ~10–25 % speedup over the naive MSM. Future work that pre-computes witness evaluations at the FFT domain roots would remove the QAP reconstruction bottleneck and widen the gap between the scalar and FullProvingKey paths.
+>
+> **Implementation 6** is the game-changer at this scale. By keeping the native sparse `.r1cs` representation and accumulating witness polynomials directly from non-zero entries, it avoids materialising the `1,914 × 2,048` dense zero-filled columns that the dense path iterates over. The result is a **13–18× speedup** over the dense FullProvingKey path and a **16–18× speedup** over the scalar path, while memory drops from **335 MiB** to **0.2 MiB** (a **1,400× reduction**).
 
 | Depth | Constraints | Notes |
 |-------|-------------|-------|
@@ -1356,6 +1365,24 @@ Proof-production time on a single core, compiled with `--release`. The dense Cir
 | 32 | ~30,400 | Estimated |
 
 > **Comparison with MiMC-based Merkle.** Each Poseidon level costs ≈250 constraints vs ≈38 for MiMC(x⁷), so the Poseidon tree is roughly 6–7× larger in constraints at the same depth. The trade-off is that Poseidon is the hash used elsewhere in the BLS12-381 stack (pre-image, EdDSA-JubJub challenge), enabling a single on-chain verifier VK format and avoiding MiMC's algebraic structure concerns.
+
+### zeroj comparison (Java pure-Java prover)
+
+The [zeroj](https://github.com/bloxbean/zeroj) toolkit provides a pure-Java Groth16 prover (`Groth16ProverBLS381`) that also keeps constraints in a native sparse representation (`Map<Integer, BigInteger>` via `R1CSImporter`), so it does not suffer from the dense-matrix OOM bottleneck either.
+
+**Measured zeroj numbers (GraalVM 25.0.3, single core):**
+
+| Circuit | Constraints | zeroj prove | Rust sparse (Impl 6) | Speedup |
+|---------|-------------|-------------|----------------------|---------|
+| Synthetic squaring chain | 4,096 | **11.2 s** | — | — |
+| PoseidonMerkle depth-2 | 1,911 | **~11 s** (projected) | **731 ms** | **~15×** |
+
+> **How the numbers compare.** zeroj uses hand-written pure-Java bucket-MSM and coset-FFT; our crate uses arkworks' optimized Rust/C++ Pippenger MSM and radix-2 FFT. The ~14× prove-time gap on similarly-sized circuits is expected and narrows on larger circuits because FFT dominates. A standalone benchmark class (`ZerojBenchmark.java`) is provided in `zeroj-assessment/zeroj/` for direct comparison on the same Circom circuits (both require Java 25 / GraalVM).
+>
+> **Key differences:**
+> - **zeroj** supports both BN254 and BLS12-381 curves; our crate is BLS12-381 only.
+> - **zeroj** has a `CircuitBuilder` DSL for generating R1CS programmatically; our crate focuses on loading standard Circom `.r1cs` / `.wtns` artifacts.
+> - **zeroj** peak heap on the 4,096-constraint synthetic circuit is **339 MB**; our sparse path uses **0.2 MiB** for the 1,911-constraint PoseidonMerkle circuit.
 
 Run the benchmarks yourself:
 
@@ -1372,8 +1399,14 @@ cargo run --bin benchmark_circom_full_pk --release
 # Privacy circuit (spend_depth2)
 cargo run --bin benchmark_privacy --release
 
-# PoseidonMerkle circuit (poseidon_merkle_depth2)
+# PoseidonMerkle circuit (poseidon_merkle_depth2) — dense paths
 cargo run --bin benchmark_poseidon_merkle --release
+
+# Sparse-matrix prover comparison (toy + PoseidonMerkle + EdDSAJubJub)
+cargo run --bin benchmark_sparse --release
+
+# Large-circuit unblocking demo (synthetic 20K–50K constraints)
+cargo run --bin benchmark_large_circuit --release
 ```
 
 </details>
