@@ -14,7 +14,7 @@ This directory contains Circom circuits that can be loaded by the Rust prover vi
 | [`Blake2b224Preimage/`](Blake2b224Preimage/README.md) | Blake2b-224 hash pre-image (Cardano key hash) | ~79K | ⚠️ Circuit + witness validated; proving blocked by RAM |
 | [`Ed25519Verify/`](Ed25519Verify/README.md) | Ed25519 signature verification in-circuit | ~4M | ⚠️ Circuit compiles; witness blocked by field incompatibility |
 | [`EdDSAJubJub/`](EdDSAJubJub/README.md) | EdDSA-JubJub signature verification (deterministic nonce, Poseidon challenge) | 12 601 | ✅ Complete — full e2e pass |
-| [`CardanoKeyOwnership/`](CardanoKeyOwnership/README.md) | Private key → public key ownership proof | ~4M (Curve25519) / ~2–5K (JubJub) | ⚠️ Curve25519 blocked by field + memory; JubJub proposed |
+| [`CardanoKeyOwnership/`](CardanoKeyOwnership/README.md) | Private key → public key ownership proof (JubJub) | ~4K | ✅ Complete — full e2e pass |
 
 ---
 
@@ -119,7 +119,7 @@ Full pipeline for each item: **Circom → groth16-prover (dev ceremony) → Aike
   **Public input:** `public_key`  
   **Private input:** `private_scalar`  
   **Use case:** Wallet ownership proof without revealing the private key. This is the core key-derivation step used in Cardano wallets: given a private scalar `x`, show that `pub = x · G`.  
-  **Status:** Full research & tradeoff analysis documented in [`CardanoKeyOwnership/README.md`](CardanoKeyOwnership/README.md). Curve25519 ownership proof is blocked by the same BLS12-381 field incompatibility as Ed25519Verify (~4M constraints, ~512 TB RAM). JubJub-based ownership proof (~2–5K constraints) is feasible and proposed as the practical path forward.  
+  **Status:** ✅ **Implemented end-to-end.** A working JubJub-based ownership circuit (`cardano_key_ownership.circom`) compiles, generates witnesses, and produces valid Groth16 proofs verified by the Rust prover CLI. It proves `[sk]·G_JubJub == pk` using fixed-base scalar multiplication over 254 bits (~4K constraints). Curve25519 ownership proof remains blocked by BLS12-381 field incompatibility.  
   **Reference:** [IntersectMBO/cardano-crypto `generate`](https://github.com/IntersectMBO/cardano-crypto/blob/develop/src/Cardano/Crypto/Wallet.hs#L161) for the derivation logic.
 
 ---
