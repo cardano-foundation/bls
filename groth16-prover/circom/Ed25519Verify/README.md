@@ -202,17 +202,32 @@ All of these operations are expensive in R1CS. The upstream circuit uses chunked
 
 For comparison, a **Poseidon hash** over BLS12-381 costs ~250 constraints per permutation. Ed25519 verification costs **10,000× more** constraints than a Poseidon hash, making it fundamentally unsuited for zk-SNARKs unless the proving infrastructure is massively scaled (sparse matrices, distributed proving, or a different proof system like STARKs).
 
+### Comparison with zeroj (native BLS12-381 Ed25519)
+
+Ed25519-on-BLS12-381 is **not** impossible — it is only impossible with the **Electron-Labs Circom templates** in their current form. The [zeroj](https://github.com/bloxbean/zeroj) toolkit (see [`ZerojAudit.md`](../../zeroj-assessment/ZerojAudit.md)) implements full Ed25519 point arithmetic, BIP-32 derivation, and CIP-1852 hierarchical key derivation natively on BLS12-381 via a custom Java DSL:
+
+| Component | zeroj approach | This Circom approach |
+|-----------|---------------|----------------------|
+| **Language** | Custom Java DSL (`Fe25519`, `Ed25519Point`) | Circom templates (`ChunkedMul`, `ModulusWith25519Chunked51`) |
+| **Field compatibility** | ✅ Native BLS12-381 | ❌ Hard-coded for BN254 |
+| **Constraints (point add)** | ~115K | ~? (blocked by witness failure) |
+| **Constraints (full CIP-1852)** | ~19M | N/A |
+| **Sparse support** | Native (`Map<Integer, BigInteger>`) | Requires sparse Circom adapter (Implementation 6) |
+
+The zeroj implementation proves that Ed25519 arithmetic **can** be expressed as R1CS constraints over BLS12-381, but doing so requires writing the field arithmetic from scratch in a DSL that understands both Curve25519's base field (`p = 2²⁵⁵−19`) and BLS12-381's scalar field (`q = 52435875...`). The Electron-Labs templates attempted this via chunked 85-bit limbs, but the witness hints are tightly coupled to BN254's specific prime value.
+
 ---
 
 ## Path forward
 
 | Approach | Description | Feasibility |
 |----------|-------------|-------------|
-| **1. Port to BLS12-381-native chunked arithmetic** | Rewrite `ModulusWith25519Chunked51`, `ChunkedMul`, `BigModInv51` etc. to work correctly on BLS12-381's scalar field. Would require deep understanding of the upstream hint logic and extensive testing. | Hard — significant mathematical refactor |
+| **1. Port to BLS12-381-native chunked arithmetic** | Rewrite `ModulusWith25519Chunked51`, `ChunkedMul`, `BigModInv51` etc. to work correctly on BLS12-381's scalar field. Would require deep understanding of the upstream hint logic and extensive testing. | Hard — significant mathematical refactor (~months) |
 | **2. Compile on BN254 and bridge curves** | Run the circuit on BN254 (where it is known to work), then use a curve-bridging proof to connect to BLS12-381. Adds complexity and trust assumptions. | Hard — research-grade; no off-the-shelf recipe |
-| **3. Find a BLS12-381-native Ed25519 circuit** | Search for an alternative Circom/Noir/Cairo implementation specifically designed for BLS12-381. | Medium — may not exist |
-| **4. Use a SNARK-friendly signature scheme** | Instead of proving Ed25519 verification, use a SNARK-friendly signature (e.g., Schnorr over JubJub, or Poseidon-based signatures) that natively fits inside a Groth16 circuit with fewer constraints. | Recommended for production |
-| **5. Accept the limitation and document** | Document that Ed25519 in-circuit verification is currently infeasible with this prover stack. Focus on use cases that can use SNARK-friendly primitives (Poseidon, MiMC). | Low-hanging — just documentation |
+| **3. Find a BLS12-381-native Ed25519 circuit** | Search for an alternative Circom/Noir/Cairo implementation specifically designed for BLS12-381. | Medium — may not exist in Circom ecosystem |
+| **4. Use zeroj's Java DSL approach** | Port the zeroj `Fe25519` / `Ed25519Point` DSL to Circom or use zeroj directly for Ed25519 proofs. zeroj already proves Ed25519 on BLS12-381 with ~19M constraints. | Medium — ecosystem shift from Circom to Java DSL |
+| **5. Use a SNARK-friendly signature scheme** | Instead of proving Ed25519 verification, use a SNARK-friendly signature (e.g., Schnorr over JubJub, or Poseidon-based signatures) that natively fits inside a Groth16 circuit with fewer constraints. | Recommended for production |
+| **6. Accept the limitation and document** | Document that Ed25519 in-circuit verification is currently infeasible with this Circom stack. Focus on use cases that can use SNARK-friendly primitives (Poseidon, MiMC, JubJub). | Done ✅ — this README and [`circom/README.md`](../README.md) |
 
 ---
 

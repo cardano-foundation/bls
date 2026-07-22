@@ -1259,11 +1259,21 @@ let (proof, public_input) = prover.prove_with_full_pk_sparse(
 - **Status:** ⚠️ **Partial.** The `QapEngine` trait, `DenseQapEngine`, and `FftQapEngine` are all implemented (see item (a) above). The only remaining gap is building the group-element SRS in the Lagrange basis (`L_i(τ)·G1` instead of `τ^i·G1`) so the FFT path can skip monomial conversion and use the most efficient production pattern.
 - **Benefit:** Completes the FFT production path and removes the last monomial fallback.
 
-### (q) Additional Circom use-case circuits — pending
+### (q) Additional Circom use-case circuits — blocked / done
 
-- **Target:** Add remaining realistic Circom circuits that exercise different zk-SNARK patterns:
-  7. **EdDSA Ed25519 signature verification** — verify a standard Ed25519 signature inside a Groth16 circuit. Ed25519 is widely used outside the BN254 ecosystem (SSH, TLS, many blockchains), so an in-circuit verifier would let a Cardano zk-proof attest to off-chain events signed by standard Ed25519 keys.  
-     **Status:** ⚠️ **Circuit compiles; witness + proving blocked.** The `Ed25519Verify` circuit in `circom/Ed25519Verify/` was adapted from [Electron-Labs/ed25519-circom](https://github.com/Electron-Labs/ed25519-circom) (archived, MIT License). It compiles to ~4M non-linear + ~1.5M linear constraints on BLS12-381. However, **witness generation fails** due to BLS12-381 field incompatibility with the upstream BN254-specific chunked-arithmetic templates (`ChunkedMul`, `ModulusWith25519Chunked51`, `BigModInv51`). Even if fixed, the dense-matrix ceremony would require ~512 TB RAM; the sparse prover (Implementation 6) could theoretically unblock it, but the field incompatibility must be resolved first. See [`circom/Ed25519Verify/README.md`](circom/Ed25519Verify/README.md) for full analysis and path forward.
+- **Target:** Add remaining realistic Circom circuits that exercise different zk-SNARK patterns.
+- **Status summary:** All realistic circuits that can be ported to BLS12-381 are now complete. The only remaining blocker is Ed25519 in-circuit verification, which is **fundamentally infeasible** with the available Circom templates.
+
+#### Done (moved to item (i) above)
+- **Blake2b-224 Hash Pre-image** — unblocked by Implementation 6 (sparse-matrix prover).
+- **Private Key → Public Key Ownership Proof (JubJub)** — implemented end-to-end in `circom/CardanoKeyOwnership/`.
+
+#### Blocked
+- **7. EdDSA Ed25519 signature verification** — verify a standard Ed25519 signature inside a Groth16 circuit. Ed25519 is widely used outside the BN254 ecosystem (SSH, TLS, many blockchains), so an in-circuit verifier would let a Cardano zk-proof attest to off-chain events signed by standard Ed25519 keys.  
+  **Status:** ❌ **Blocked — field incompatibility.** The `Ed25519Verify` circuit in `circom/Ed25519Verify/` was adapted from [Electron-Labs/ed25519-circom](https://github.com/Electron-Labs/ed25519-circom) (archived, MIT License). It compiles to ~4M non-linear + ~1.5M linear constraints on BLS12-381. However, **witness generation fails** because the upstream BN254-specific chunked-arithmetic templates (`ChunkedMul`, `ModulusWith25519Chunked51`, `BigModInv51`) contain hard-coded constants and `<--` witness hints tuned to BN254's scalar field. When compiled for BLS12-381, the hints produce values that do not satisfy the `===` constraints.  
+  **Important caveat:** Ed25519-on-BLS12-381 is **not** impossible. The [zeroj](https://github.com/bloxbean/zeroj) toolkit implements full Ed25519 point arithmetic, BIP-32 derivation, and CIP-1852 path derivation natively on BLS12-381 via a custom Java DSL (`Fe25519`, `Ed25519Point`, `Bip32Ed25519`, `Cip1852Derivation`), taking ~19M constraints for a full derivation path (see [`ZerojAudit.md`](../zeroj-assessment/ZerojAudit.md)). The blocker here is specific to the **Electron-Labs Circom templates**, which would require a complete rewrite of the chunked-arithmetic gadgets to work on BLS12-381.  
+  **Memory:** Even if the field arithmetic were fixed, the dense-matrix ceremony would require ~512 TB RAM. The sparse prover (Implementation 6) could theoretically unblock memory, but the field incompatibility must be resolved first.  
+  See [`circom/Ed25519Verify/README.md`](circom/Ed25519Verify/README.md) for full analysis and path forward.
 - **Reference:** [circomlib](https://github.com/iden3/circomlib) provides production-grade Poseidon, MiMC, Merkle, and EdDSA circuits for BN254. Porting to BLS12-381 requires updating the field constants. For Ed25519 in-circuit verification, see [Electron-Labs/ed25519-circom](https://github.com/Electron-Labs/ed25519-circom) and our adapted version in [`circom/Ed25519Verify/README.md`](circom/Ed25519Verify/README.md).
 - **Benefit:** Shows that the Rust prover + Aiken verifier pipeline works for real-world zk-SNARK applications. Ed25519 verification in particular unlocks cross-chain identity use cases (attesting to off-chain signed data, linking SSH/TLS identities to on-chain proofs, etc.).
 
