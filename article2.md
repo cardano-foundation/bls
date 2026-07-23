@@ -9,6 +9,7 @@
 ## Table of Contents
 
 - [The paradox](#the-paradox)
+- [The Groth16 workflow at a glance](#the-groth16-workflow-at-a-glance)
 - [Why Groth16 matters](#why-groth16-matters)
 - [From computation to gates](#from-computation-to-gates)
 - [A 4-constraint "hello world"](#a-4-constraint-hello-world)
@@ -38,6 +39,69 @@ This article focuses on **Groth16**, the fastest and most compact zk-SNARK const
 > **Why BLS12-381?** The entire pipeline in this article — the finite field `Fr`, the elliptic-curve groups `G1` and `G2`, and the bilinear pairing `e` — is built on the **BLS12-381 curve**. We chose it specifically because Cardano's Plutus V3 has native builtins for it. If you are new to BLS12-381 and want a gentle introduction to what it enables on Cardano — BLS signatures, VRFs, anonymous credentials, and more — the Cardano Foundation has published a dedicated blog post: [**"Aiken BLS12-381 primitives — wide possibilities available"**](https://cardanofoundation.org/blog/aiken-primitives-explained).
 
 But before we get to smart contracts, we need to understand what the proof actually *is*. We will build it from scratch, step by step, using the simplest possible circuit that is still non-trivial: a 4-constraint sum-of-products.
+
+---
+
+## The Groth16 workflow at a glance
+
+Groth16 splits the world into three roles: a **circuit designer** who defines what must be proven, a **prover** who knows the secret and builds the proof, and a **verifier** who checks the proof without learning the secret. The verifier can be anyone — including a smart contract running on Cardano.
+
+The diagram below shows the complete lifecycle: who does what, what stays off-chain, what goes on-chain, and where the secret randomness enters the picture.
+
+```mermaid
+flowchart TB
+    subgraph Ceremony["🔐 Trusted Setup Ceremony (once per circuit)"]
+        direction TB
+        Random["N participants contribute<br/>independent randomness"]
+        Destroy["Every participant destroys<br/>their secret after contributing"]
+        SRS["SRS = {τⁱ·G₁, τⁱ·G₂, ...}<br/>public parameters"]
+        PK["Proving Key (pk)"]
+        VK["Verifying Key (vk)"]
+    end
+
+    subgraph OffChain["🔒 Off-Chain"]
+        direction TB
+        Circuit["Arithmetic Circuit<br/>(e.g. multiplier.circom)"]
+        Witness["Witness<br/>(private + public inputs)"]
+        Prover["Prover<br/>computes proof π"]
+    end
+
+    subgraph OnChain["⛓️ On-Chain (Cardano)"]
+        direction TB
+        Contract["Smart Contract<br/>(Aiken verifier)"]
+        Public["Public Inputs<br/>(visible on-chain)"]
+        Check{"Pairing check<br/>e(A,B) = e(α·G₁,β·G₂)·e(C,δ·G₂)·e(V,γ·G₂)"}
+        Accept["✅ Accept"]
+        Reject["❌ Reject"]
+    end
+
+    Random --> Destroy --> SRS
+    SRS --> PK
+    SRS --> VK
+    Circuit --> Prover
+    Witness --> Prover
+    PK --> Prover
+    Prover -->|"π (192 bytes)"| Contract
+    VK --> Contract
+    Public --> Contract
+    Contract --> Check
+    Check -->|Valid| Accept
+    Check -->|Invalid| Reject
+```
+
+**What each box means:**
+
+| Box | Role | What it does |
+|-----|------|--------------|
+| **Trusted Setup Ceremony** | Joint computation | `N` participants mix their randomness to produce public parameters. As long as **one** participant was honest and destroyed their secret, the system is secure. |
+| **SRS** | Public data | "Power table" `τⁱ·G₁`, `τⁱ·G₂` — lets the prover evaluate polynomials at the secret point `τ` without knowing `τ`. |
+| **Proving Key (pk)** | Off-chain | Everything the prover needs: SRS + circuit-specific points. Large (MBs), kept secret by the prover. |
+| **Verifying Key (vk)** | On-chain | Tiny (KBs), embedded into the smart contract. Only `α·G₁`, `β·G₂`, `γ·G₂`, `δ·G₂`, and a few per-variable points. |
+| **Prover** | Off-chain | Takes the witness (secret inputs + public inputs) and `pk`, runs FFTs, polynomial division, and elliptic-curve multiplications to produce `π`. |
+| **Smart Contract** | On-chain | Receives `π` + public inputs, reconstructs the public-input commitment `V`, and runs the pairing check. |
+| **Proof π** | Cross-layer | 192 bytes: three curve points `A, B, C`. Sent in the transaction redeemer. |
+
+**Key insight: the secret never crosses the boundary.** The prover knows the witness but never reveals it. The verifier never sees the witness but is mathematically certain the constraints were satisfied. The randomness that created the SRS was destroyed long before any proof was generated. This is the architecture that makes zero-knowledge possible.
 
 ---
 
