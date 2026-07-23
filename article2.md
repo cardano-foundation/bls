@@ -14,6 +14,7 @@
 - [A 4-constraint "hello world"](#a-4-constraint-hello-world)
 - [Why polynomials? (QAP)](#why-polynomials-qap)
 - [The trusted setup](#the-trusted-setup)
+- [Why the scalars must be secret and random](#why-the-scalars-must-be-secret-and-random)
 - [The proof: three curve points](#the-proof-three-curve-points)
 - [Verification: one equation](#verification-one-equation)
 - [Running it on Cardano](#running-it-on-cardano)
@@ -706,6 +707,53 @@ All five values are ordinary integers smaller than `q`, so they need no modular 
 - `7^(−1)`, `11^(−1)`, `13^(−1)` — all exist because `q` is prime and none of these divide `q`.
 
 The distinction between `γ` and `δ` is what separates public inputs from private inputs in the proof. Public wires (the constant `1` and the output `a`) are divided by `γ`; private wires (the secret multipliers `x1..x4` and intermediates `x5, x6`) are divided by `δ`. This separation is what lets the verifier reconstruct the public-input commitment `V` without knowing the witness.
+
+---
+
+### Why the scalars must be secret and random
+
+The five scalars `τ, α, β, γ, δ` are the *cryptographic heart* of Groth16. If any party knows them, the entire proof system collapses. This is not an exaggeration — it is a mathematical theorem. Let us see why.
+
+**The forgery attack if `τ` is known.**
+
+Suppose an attacker learns `τ = 3`. They can now compute `T(τ) = 6` directly. They can pick *any* fake witness they want — say, `x1 = 100, x2 = 100, x3 = 100, x4 = 100` — which gives `x5 = 10000, x6 = 10000, a = 100000000`. This witness does not need to satisfy the R1CS constraints in the polynomial sense; the attacker can simply compute `l(τ), r(τ), o(τ)` and then *choose* `h(τ)` to make the equation balance:
+
+```
+h(τ) = (l(τ)·r(τ) − o(τ)) / T(τ)
+```
+
+Because the attacker knows `τ`, they can compute this quotient even when the witness is garbage. They then build proof elements `A, B, C` using the *legitimate* SRS points (which are public) and their chosen `h(τ)`. The verifier's pairing check will pass — because the equation is algebraically satisfied at `τ` — even though the witness violates the actual circuit constraints at every other point.
+
+In other words, **knowledge of `τ` lets the attacker "cheat" the single-point check without ever satisfying the multiplicative constraints.** The same logic applies to `α, β, γ, δ`: if any of them are known, the attacker can separate the public and private parts of the proof arbitrarily, forging a valid-looking proof for any statement.
+
+**Why randomness matters.**
+
+You might ask: why not just hard-code `τ = 42` and publish it? Everyone would know it, but at least the system would be transparent.
+
+The problem is **precomputation attacks.** If `τ` is predictable, an attacker with enough resources could compute `τ^i · G1` and `τ^i · G2` for astronomically large `i` *before* the SRS is even published. They could then break the discrete logarithm problem in the exponent using pre-computed tables. Randomness ensures that no one can prepare for the setup in advance.
+
+Moreover, `α, β, γ, δ` must be *independent* random values. If `α = β`, the proof element `C` loses its binding to the left input, and an attacker can swap `l(τ)` and `r(τ)` without detection. If `γ = δ`, the public and private input commitments collapse into one, destroying the zero-knowledge property.
+
+**The ceremony intuition.**
+
+Groth16 solves this with a **trusted setup ceremony**: multiple participants jointly generate the scalars, each contributing their own randomness. The security guarantee is simple and powerful:
+
+> **As long as at least one participant was honest and truly destroyed their randomness, the final `τ` remains unknown forever.**
+
+Even if every other participant colluded and shared their secrets, they cannot reconstruct `τ` without the missing contribution. This is why the ceremony needs many independent participants — the probability that *everyone* is dishonest and keeps a backup decreases as the participant count grows.
+
+**Dev ceremony vs. production ceremony.**
+
+Our repository uses two different approaches for two different purposes:
+
+| Purpose | Scalars | Security | Why we use it |
+|---------|---------|----------|---------------|
+| **Learning & debugging** (`ceremony-dev`) | Fixed small primes (`τ=3, α=5, ...`) | **None** — anyone can forge | Every value is printable and reproducible. You can add a `println!` and see exactly what the code does. |
+| **Production** | Large random field elements, generated in a ceremony | Secure if at least one ceremony participant was honest | The scalars are never assembled in one place. Only the curve points `τ^i·G1`, `τ^i·G2`, etc. are published. |
+
+The dev ceremony is completely insecure for production — anyone who reads the source code knows `τ` and can forge proofs. But it is invaluable for learning, which is why every step in this article uses it. The production ceremony, which we will cover in detail in the next installment, is what makes Groth16 safe for real-world deployments.
+
+> **The bottom line.** Groth16's speed and compactness come from a *single* secret evaluation point `τ`. That point must remain secret forever, or the proof system becomes a forgery factory. The trusted setup ceremony is the mechanism that creates `τ`, embeds it into curve points, and then destroys it — provided at least one participant was honest. This is the fundamental trade-off of Groth16: you get the smallest and fastest proofs in cryptography, but you must trust the ceremony once.
 
 ---
 
