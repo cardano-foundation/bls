@@ -347,6 +347,108 @@ For the hard-coded 3-gate circuit, every printed scalar and every curve point ha
 
 ---
 
+## Implementation walkthrough: Step 1.1 — R1CS matrices and witness
+
+The binaries in our repository walk through every sub-step of the dense Groth16 pipeline. Each one corresponds to a numbered step in [`RustGroth16Correctness.md`](../../groth16-prover/RustGroth16Correctness.md). In this section we run them one by one, show the actual output, and derive the same numbers with pen and paper so you can see that nothing is hidden.
+
+> **The circuit we trace.** The hard-coded `Implementation 1` uses the 3-gate multiplication chain from `multiplier.circom`:
+> ```
+> x5 = x1 * x2
+> x6 = x3 * x4
+> a  = x5 * x6
+> ```
+> Witness ordering: `[1, a, x1, x2, x3, x4, x5, x6]`
+> With inputs `x1=2, x2=2, x3=3, x4=4` we get `x5=4, x6=12, a=48`.
+>
+> The witness vector is therefore **`[1, 48, 2, 2, 3, 4, 4, 12]`**.
+>
+> The 4-gate `SumOfProducts` circuit follows the exact same mathematics with one additional constraint; everything below generalises naturally.
+
+---
+
+### Step 1.1: R1CS matrices and witness
+
+**What this step does.** Before any cryptography happens, we must express the circuit as a system of rank-1 constraints. Each constraint says: "the dot product of the left matrix row with the witness, multiplied by the dot product of the right matrix row with the witness, equals the dot product of the output matrix row with the witness."
+
+**Paper and pencil.**
+
+There are 3 multiplication gates, so we need 3 constraints. The witness vector has 8 entries:
+
+```
+w = [1, a, x1, x2, x3, x4, x5, x6]
+    [0, 1,  2,  3,  4,  5,  6,  7]   <-- indices
+```
+
+**Constraint 0:** `x5 = x1 * x2`
+- Left side picks `x1`  → `L[0][2] = 1`
+- Right side picks `x2` → `R[0][3] = 1`
+- Output picks `x5`     → `O[0][6] = 1`
+
+**Constraint 1:** `x6 = x3 * x4`
+- Left side picks `x3`  → `L[1][4] = 1`
+- Right side picks `x4` → `R[1][5] = 1`
+- Output picks `x6`     → `O[1][7] = 1`
+
+**Constraint 2:** `a = x5 * x6`
+- Left side picks `x5`  → `L[2][6] = 1`
+- Right side picks `x6` → `R[2][7] = 1`
+- Output picks `a`      → `O[2][1] = 1`
+
+All other entries are zero.
+
+**Running the code:**
+
+```bash
+cd groth16-prover
+cargo run --bin print_r1cs
+```
+
+**Actual output:**
+
+```
+=== Step 1.1: R1CS Matrices and Witness ===
+
+Witness a = [1, 48, 2, 2, 3, 4, 4, 12]
+
+L matrix:
+  [0, 0, 1, 0, 0, 0, 0, 0]
+  [0, 0, 0, 0, 1, 0, 0, 0]
+  [0, 0, 0, 0, 0, 0, 1, 0]
+
+R matrix:
+  [0, 0, 0, 1, 0, 0, 0, 0]
+  [0, 0, 0, 0, 0, 1, 0, 0]
+  [0, 0, 0, 0, 0, 0, 0, 1]
+
+O matrix:
+  [0, 0, 0, 0, 0, 0, 1, 0]
+  [0, 0, 0, 0, 0, 0, 0, 1]
+  [0, 1, 0, 0, 0, 0, 0, 0]
+
+L · a = ["2", "3", "4"]
+R · a = ["2", "4", "12"]
+O · a = ["4", "12", "48"]
+
+Element-wise (L·a) * (R·a):
+  constraint 0: 2 * 2 = 4  (O·a = 4)   ✓
+  constraint 1: 3 * 4 = 12 (O·a = 12)  ✓
+  constraint 2: 4 * 12 = 48 (O·a = 48) ✓
+
+✓ R1CS relation verified.
+```
+
+**Checking by hand:**
+
+| Constraint | `L·a` | `R·a` | `(L·a)*(R·a)` | `O·a` | Match? |
+|------------|-------|-------|---------------|-------|--------|
+| 0 (`x5 = x1*x2`) | `x1 = 2` | `x2 = 2` | `4` | `x5 = 4` | ✓ |
+| 1 (`x6 = x3*x4`) | `x3 = 3` | `x4 = 4` | `12` | `x6 = 12` | ✓ |
+| 2 (`a = x5*x6`) | `x5 = 4` | `x6 = 12` | `48` | `a = 48` | ✓ |
+
+The relation `(L·a) ∘ (R·a) = O·a` holds element-wise. This is the only thing the circuit "knows" — everything else in Groth16 is cryptography built on top of this simple matrix equation.
+
+---
+
 ## What's next
 
 This installment deliberately stayed at the "dense monomial" level: polynomials stored as coefficient vectors, division performed by long division, and proof assembly done one scalar multiplication at a time. It is slow, but it is *transparent*. You can open any binary, add a `println!`, and see the exact value passing through the equation.
