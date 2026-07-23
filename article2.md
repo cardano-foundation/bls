@@ -9,6 +9,7 @@
 ## Table of Contents
 
 - [The paradox](#the-paradox)
+- [Why Groth16 matters](#why-groth16-matters)
 - [From computation to gates](#from-computation-to-gates)
 - [A 4-constraint "hello world"](#a-4-constraint-hello-world)
 - [Why polynomials? (QAP)](#why-polynomials-qap)
@@ -34,6 +35,49 @@ The most practical and widely deployed family of ZKPs today is called **zk-SNARK
 This article focuses on **Groth16**, the fastest and most compact zk-SNARK construction in production today. A Groth16 proof is 192 bytes. Verification requires only three elliptic-curve pairings. And since Cardano's Plutus V3 already exposes BLS12-381 pairing primitives natively, Groth16 verification can run inside an Aiken smart contract with no protocol changes.
 
 But before we get to smart contracts, we need to understand what the proof actually *is*. We will build it from scratch, step by step, using the simplest possible circuit that is still non-trivial: a 4-constraint sum-of-products.
+
+---
+
+## Why Groth16 matters
+
+The idea of a zero-knowledge proof is old — it dates back to Goldwasser, Micali, and Rackoff in the 1980s. But for decades ZKPs were theoretical curiosities: interactive, expensive, and impractical for real systems. The breakthrough came in 2012 when Rosario Gennaro, Craig Gentry, Bryan Parno, and Mariana Raykova showed how to compress an arbitrary computation into a **Quadratic Arithmetic Program** (QAP) and then prove its correct evaluation with a short, non-interactive argument built from elliptic-curve pairings. This was the birth of the zk-SNARK.
+
+Four years later, Jens Groth published the paper that distilled the idea to its absolute minimum:
+
+> **Jens Groth, "On the Size of Pairing-Based Non-interactive Arguments", *EUROCRYPT 2016*.**
+> [https://eprint.iacr.org/2016/260](https://eprint.iacr.org/2016/260)
+
+Groth's construction — now universally called **Groth16** — achieves something that no previous scheme had:
+
+- **Proof size:** exactly **3 curve points** (2 in G1, 1 in G2). Compressed: **192 bytes**.
+- **Verification cost:** **3 pairings** and a handful of multi-scalar multiplications in G1. On modern hardware: a few milliseconds.
+- **CRS size:** linear in the circuit size, but the *verifying key* is constant-size for a given circuit.
+- **Security:** perfect zero-knowledge and computationally sound knowledge extraction under the standard q-PKE and q-SDH assumptions on pairing-friendly curves.
+
+These numbers are not merely good — they are **optimal** for the pairing-based model. No scheme with the same trust assumptions can have asymptotically smaller proofs or faster verification. This is why Groth16 became the engine behind Zcash's shielded transactions, Filecoin's replication proofs, and dozens of other production systems.
+
+### Why Groth16 is the prerequisite
+
+If you want to understand modern zero-knowledge proof systems, you must understand Groth16 first. Every other construction is best understood as a deliberate trade-off *against* the Groth16 baseline:
+
+| System | What it keeps from Groth16 | What it changes | Cost of the change |
+|--------|---------------------------|---------------|-------------------|
+| **PLONK** | R1CS, QAP-style polynomial encoding, pairing-based verification | Universal trusted setup; custom gates; permutation argument | Slightly larger proofs, but one SRS serves all circuits |
+| **Bulletproofs** | R1CS, inner-product argument structure | No trusted setup at all; no pairings; proofs grow logarithmically | Proof size ~1–2 KB (10× larger); verification is O(n) |
+| **STARKs** | Polynomial commitment + FRI | Transparent setup (hashes only); post-quantum | Proof size ~50–200 KB; no elliptic curves needed |
+| **JOLT / zkVMs** | The *goal* (prove arbitrary computation) | Replace hand-written circuits with VM execution traces + lookup arguments | Massive proof overhead, but no circuit engineering |
+
+Groth16 teaches the fundamental pipeline that every other system either inherits or reacts against:
+
+1. **Computation → Constraints** (R1CS)
+2. **Constraints → Polynomials** (QAP)
+3. **Polynomials → Encrypted Evaluations** (trusted setup / SRS)
+4. **Witness + SRS → Proof** (prover algorithm)
+5. **Proof + Public Inputs + VK → Yes/No** (pairing or commitment check)
+
+Once you have walked through this pipeline by hand — as we do in this article with the dense monomial implementation — you possess the mental model necessary to evaluate *any* proof system. You will know what "removing the trusted setup" actually means, why "universal CRS" matters, and why "post-quantum" constructions pay the price they do.
+
+This is why our repository begins with `Implementation 1`: a hard-coded circuit, dense polynomials, naive scalar-by-scalar proof assembly, and deterministic toxic waste. It is the slowest possible path, but it is also the *most educational*. Every other system is a speedup or a trade-off applied to this same skeleton.
 
 ---
 
