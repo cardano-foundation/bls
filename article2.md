@@ -2,7 +2,7 @@
 
 > **Installment 1 of 3.** This article introduces the mathematical intuition behind zk-SNARKs, walks through the simplest possible non-trivial circuit, and shows how to generate and verify a Groth16 proof end-to-end on Cardano using nothing but first-principles code. No black boxes, no hand-waving — every intermediate value can be printed and inspected.
 >
-> In the next installment we will explore the engineering optimizations that turn this slow-but-transparent pipeline into a production prover (FFT, Pippenger MSM, sparse matrices, trusted-setup ceremonies), survey competing proof systems (PLONK, Bulletproofs, JOLT, STARKs, VM approaches), and map the trade-offs. In the third and final installment we will show how Groth16 enables selective disclosure of credentials without revealing identity, building on the [`aiken/selective-disclosure`](../../aiken/selective-disclosure/README.md) work.
+> In the next installment we will explore the engineering optimizations that turn this slow-but-transparent pipeline into a production prover (FFT, Pippenger MSM, sparse matrices, trusted-setup ceremonies), survey competing proof systems (PLONK, Bulletproofs, JOLT, STARKs, VM approaches), and map the trade-offs. In the third and final installment we will show how Groth16 enables one of the most compelling use cases in modern blockchain privacy: selective disclosure of credentials without revealing identity.
 
 ---
 
@@ -33,7 +33,9 @@ Zero-knowledge proofs (ZKPs) do exactly that. A ZKP is a mathematical object —
 
 The most practical and widely deployed family of ZKPs today is called **zk-SNARKs**: *Zero-Knowledge Succinct Non-Interactive Arguments of Knowledge*. "Succinct" means the proof is tiny (a few hundred bytes). "Non-interactive" means the prover sends a single message; no back-and-forth challenge protocol is needed. "Argument of knowledge" means the proof does not just show that a solution exists — it shows that the prover actually *knows* one.
 
-This article focuses on **Groth16**, the fastest and most compact zk-SNARK construction in production today. A Groth16 proof is 192 bytes. Verification requires only three elliptic-curve pairings. And since Cardano's Plutus V3 already exposes BLS12-381 pairing primitives natively, Groth16 verification can run inside an Aiken smart contract with no protocol changes.
+This article focuses on **Groth16**, the fastest and most compact zk-SNARK construction in production today. A Groth16 proof is 192 bytes. Verification requires only three elliptic-curve pairings. And since Cardano's Plutus V3 already exposes **BLS12-381** pairing primitives natively, Groth16 verification can run inside an Aiken smart contract with no protocol changes.
+
+> **Why BLS12-381?** The entire pipeline in this article — the finite field `Fr`, the elliptic-curve groups `G1` and `G2`, and the bilinear pairing `e` — is built on the **BLS12-381 curve**. We chose it specifically because Cardano's Plutus V3 has native builtins for it. If you are new to BLS12-381 and want a gentle introduction to what it enables on Cardano — BLS signatures, VRFs, anonymous credentials, and more — the Cardano Foundation has published a dedicated blog post: [**"Aiken BLS12-381 primitives — wide possibilities available"**](https://cardanofoundation.org/blog/aiken-primitives-explained).
 
 But before we get to smart contracts, we need to understand what the proof actually *is*. We will build it from scratch, step by step, using the simplest possible circuit that is still non-trivial: a 4-constraint sum-of-products.
 
@@ -110,7 +112,7 @@ t4 = g * h
 out = t1 + t2 + t3 + t4
 ```
 
-This circuit has 8 private inputs, 4 intermediate wires, and 1 public output. In R1CS form it yields exactly 4 constraints — one per multiplication. The source lives in [`groth16-prover/circom/SumOfProducts/sum_of_products.circom`](../../groth16-prover/circom/SumOfProducts/sum_of_products.circom):
+This circuit has 8 private inputs, 4 intermediate wires, and 1 public output. In R1CS form it yields exactly 4 constraints — one per multiplication. The source lives in [`groth16-prover/circom/SumOfProducts/sum_of_products.circom`](https://github.com/cardano-foundation/bls/blob/main/groth16-prover/circom/SumOfProducts/sum_of_products.circom):
 
 ```circom
 pragma circom 2.0.0;
@@ -134,7 +136,7 @@ template SumOfProducts() {
 component main = SumOfProducts();
 ```
 
-With the input [`input.json`](../../groth16-prover/circom/SumOfProducts/input.json):
+With the input [`input.json`](https://github.com/cardano-foundation/bls/blob/main/groth16-prover/circom/SumOfProducts/input.json):
 
 ```json
 { "a": "1", "b": "2", "c": "3", "d": "4",
@@ -204,7 +206,7 @@ G2, τ·G2, τ²·G2, ..., τ^N·G2
 
 where `G1` and `G2` are base points on the BLS12-381 curve. The scalar `τ` itself is called **toxic waste**: if anyone knows it, they can forge proofs. The security of the entire system rests on the fact that `τ` was generated honestly and then destroyed.
 
-In our pedagogical `Implementation 1` ([`groth16-prover/src/r1cs.rs`](../../groth16-prover/src/r1cs.rs) and [`src/bin/print_toxic_waste.rs`](../../groth16-prover/src/bin/print_toxic_waste.rs)), we use small deterministic scalars so that every intermediate value is reproducible:
+In our pedagogical `Implementation 1` ([`groth16-prover/src/r1cs.rs`](https://github.com/cardano-foundation/bls/blob/main/groth16-prover/src/r1cs.rs) and [`src/bin/print_toxic_waste.rs`](https://github.com/cardano-foundation/bls/blob/main/groth16-prover/src/bin/print_toxic_waste.rs)), we use small deterministic scalars so that every intermediate value is reproducible:
 
 | Parameter | Value | Role |
 |-----------|-------|------|
@@ -230,7 +232,7 @@ A Groth16 proof consists of exactly three elliptic-curve points:
 
 The `Ψ_P_G1` terms are *per-variable proving-key elements* pre-computed during the trusted setup. They encode the QAP polynomials evaluated at `τ`, scaled by `1/δ` and mixed with `α` and `β`. The prover computes `C` by taking a linear combination of these elements weighted by the witness values, then adding the quotient term `h(τ)·T(τ)/δ·G1`.
 
-In our `Implementation 1` ([`src/bin/print_proof_a.rs`](../../groth16-prover/src/bin/print_proof_a.rs), [`print_proof_b.rs`](../../groth16-prover/src/bin/print_proof_b.rs), [`print_proof_c.rs`](../../groth16-prover/src/bin/print_proof_c.rs)), each of these points is built by naive scalar-by-scalar multiplication so that you can print the exact scalar being multiplied at every step. For the 4-constraint `SumOfProducts` circuit the scalars are different, but the formulas are identical.
+In our `Implementation 1` ([`src/bin/print_proof_a.rs`](https://github.com/cardano-foundation/bls/blob/main/groth16-prover/src/bin/print_proof_a.rs), [`print_proof_b.rs`](https://github.com/cardano-foundation/bls/blob/main/groth16-prover/src/bin/print_proof_b.rs), [`print_proof_c.rs`](https://github.com/cardano-foundation/bls/blob/main/groth16-prover/src/bin/print_proof_c.rs)), each of these points is built by naive scalar-by-scalar multiplication so that you can print the exact scalar being multiplied at every step. For the 4-constraint `SumOfProducts` circuit the scalars are different, but the formulas are identical.
 
 Because the proof lives entirely on the BLS12-381 curve, it compresses to **192 bytes** (48 bytes for each G1 point, 96 bytes for the G2 point). This is the "succinct" in zk-SNARK.
 
@@ -259,13 +261,15 @@ where `e` is the bilinear pairing on BLS12-381. If the equation holds, the proof
 
 This is the entire verification algorithm. No witness reconstruction, no constraint evaluation, no polynomial division — just one multiplicative pairing equation. That is why Groth16 verification is so fast (milliseconds) and why it fits inside a Cardano transaction budget.
 
-In our repo, the pairing check is implemented in [`src/bin/print_pairing.rs`](../../groth16-prover/src/bin/print_pairing.rs) and cross-checked bit-for-bit against an independent [Sage](https://www.sagemath.org/) script ([`sage/groth16.sage`](../../sage/groth16.sage)).
+In our repo, the pairing check is implemented in [`src/bin/print_pairing.rs`](https://github.com/cardano-foundation/bls/blob/main/groth16-prover/src/bin/print_pairing.rs) and cross-checked bit-for-bit against an independent [Sage](https://www.sagemath.org/) script ([`sage/groth16.sage`](https://github.com/cardano-foundation/bls/blob/main/sage/groth16.sage)).
 
 ---
 
 ## Running it on Cardano
 
-Cardano's Plutus V3 ships with native BLS12-381 primitives:
+**Cardano's Plutus V3 ships with native BLS12-381 primitives.** This is not a future upgrade or a sidechain feature — it is live on mainnet today, available to every smart contract via Aiken's standard library. If you are unfamiliar with what BLS12-381 is or why it matters for Cardano, the Cardano Foundation blog post [**"Aiken BLS12-381 primitives — wide possibilities available"**](https://cardanofoundation.org/blog/aiken-primitives-explained) provides a complete introduction.
+
+The primitives we use for Groth16 verification are:
 
 - `bls12_381_g1_element` and `bls12_381_g2_element` types
 - `bls12_381_g1_scalar_mul`, `bls12_381_g2_scalar_mul`
@@ -274,7 +278,7 @@ Cardano's Plutus V3 ships with native BLS12-381 primitives:
 
 These are exactly the operations needed for the Groth16 pairing check. The Aiken standard library wraps them in a clean API under `aiken/crypto/bls12_381`.
 
-Our [`aiken/groth16`](../../aiken/groth16/README.md) package implements a fully parameterized Groth16 verifier in Aiken. It accepts any verification key, any list of public inputs, and any proof, then runs the standard pairing check. The verifier has been validated against proofs produced by our Rust prover for the 3-gate multiplier, the 4-gate `SumOfProducts`, the 1,107-gate privacy spend, and the 1,911-gate Poseidon Merkle circuits.
+Our [`aiken/groth16`](https://github.com/cardano-foundation/bls/blob/main/aiken/groth16/README.md) package implements a fully parameterized Groth16 verifier in Aiken. It accepts any verification key, any list of public inputs, and any proof, then runs the standard pairing check. The verifier has been validated against proofs produced by our Rust prover for the 3-gate multiplier, the 4-gate `SumOfProducts`, the 1,107-gate privacy spend, and the 1,911-gate Poseidon Merkle circuits.
 
 The on-chain cost of verifying a Groth16 proof with ~5 public inputs is well within Cardano's per-transaction execution budget. This means a smart contract can release funds, grant access, or mint tokens based solely on the validity of a ZK proof — without ever learning the user's identity, credentials, or secret inputs.
 
@@ -344,15 +348,15 @@ cargo run --release -- export-vk \
 #    into an Aiken test using aiken/groth16/lib/groth16/verifier.ak
 ```
 
-For the hard-coded 3-gate circuit, every printed scalar and every curve point has been cross-checked line-by-line against the independent Sage reference. The full bit-for-bit comparison is documented in [`RustGroth16Correctness.md`](../../groth16-prover/RustGroth16Correctness.md).
+For the hard-coded 3-gate circuit, every printed scalar and every curve point has been cross-checked line-by-line against the independent Sage reference. The full bit-for-bit comparison is documented in [`RustGroth16Correctness.md`](https://github.com/cardano-foundation/bls/blob/main/groth16-prover/RustGroth16Correctness.md).
 
 ---
 
 ## Implementation walkthrough: Step 1.1 — R1CS matrices and witness
 
-The binaries in our repository walk through every sub-step of the dense Groth16 pipeline. Each one corresponds to a numbered step in [`RustGroth16Correctness.md`](../../groth16-prover/RustGroth16Correctness.md). In this section we run them one by one, show the actual output, and derive the same numbers with pen and paper so you can see that nothing is hidden.
+The binaries in our repository walk through every sub-step of the dense Groth16 pipeline. Each one corresponds to a numbered step in [`RustGroth16Correctness.md`](https://github.com/cardano-foundation/bls/blob/main/groth16-prover/RustGroth16Correctness.md). In this section we run them one by one, show the actual output, and derive the same numbers with pen and paper so you can see that nothing is hidden.
 
-> **Independent cross-check.** Every scalar and every curve point printed below has also been generated by a standalone [Sage](https://www.sagemath.org/) script that implements the same 16 steps from scratch. The script lives at [`sage/groth16_dense_16steps.sage`](../../sage/groth16_dense_16steps.sage) and produces bit-for-bit identical coefficients and scalars (G2 coordinates differ only by field embedding, which is expected). Run it via Docker if you do not have Sage installed locally:
+> **Independent cross-check.** Every scalar and every curve point printed below has also been generated by a standalone [Sage](https://www.sagemath.org/) script that implements the same 16 steps from scratch. The script lives at [`sage/groth16_dense_16steps.sage`](https://github.com/cardano-foundation/bls/blob/main/sage/groth16_dense_16steps.sage) and produces bit-for-bit identical coefficients and scalars (G2 coordinates differ only by field embedding, which is expected). Run it via Docker if you do not have Sage installed locally:
 > ```bash
 > cd sage
 > docker run --rm -v "$(pwd):/mnt" sagemath/sagemath:latest \
