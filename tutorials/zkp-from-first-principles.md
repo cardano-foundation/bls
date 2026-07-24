@@ -9,10 +9,6 @@
 ## Table of Contents
 
 - [The paradox](#the-paradox)
-- [The Groth16 workflow at a glance](#the-groth16-workflow-at-a-glance)
-  - [Very insecure Groth16: no setup](#very-insecure-groth16-no-setup)
-  - [Still insecure Groth16: public setup](#still-insecure-groth16-public-setup)
-  - [Secure Groth16: trusted setup](#secure-groth16-trusted-setup)
 - [Why Groth16 matters](#why-groth16-matters)
 - [From computation to gates](#from-computation-to-gates)
 - [A 4-constraint "hello world"](#a-4-constraint-hello-world)
@@ -21,6 +17,10 @@
 - [Why the scalars must be secret and random](#why-the-scalars-must-be-secret-and-random)
 - [The proof: three curve points](#the-proof-three-curve-points)
 - [Verification: one equation](#verification-one-equation)
+- [The Groth16 workflow at a glance](#the-groth16-workflow-at-a-glance)
+  - [Very insecure Groth16: no setup](#very-insecure-groth16-no-setup)
+  - [Still insecure Groth16: public setup](#still-insecure-groth16-public-setup)
+  - [Secure Groth16: trusted setup](#secure-groth16-trusted-setup)
 - [Running it on Cardano](#running-it-on-cardano)
 - [The full pipeline in our repo](#the-full-pipeline-in-our-repo)
 - [What's next](#whats-next)
@@ -126,171 +126,6 @@ constraint 3:  7 * 8  = 56  ✓   (t4 = g·h)
 ```
 
 This R1CS is the starting point. Groth16 then converts these matrices into polynomials (the QAP transformation) so that checking all four constraints reduces to a single polynomial identity at a secret point. That conversion — and the cryptographic machinery built on top of it — is what the rest of this article explains.
-
----
-
-## The Groth16 workflow at a glance
-
-Groth16 splits the world into three roles: a **circuit designer** who defines what must be proven by producing an R1CS circuit, a **prover** who knows the secret and builds the proof, and a **verifier** who checks the proof without learning the secret. Both the prover and the verifier know the R1CS circuit (the constraint structure: how many constraints, which wires appear in each). The difference is that the prover also knows the *witness* — the full assignment of values to every wire, including both the secret inputs and the public outputs. The verifier knows only the public inputs (the output `100` and the constant `1`), not the secret inputs that produced them. The verifier can be anyone — including a smart contract running on Cardano.
-
-To understand why the trusted setup is essential, we build up from the simplest possible version of Groth16 — one with no setup at all — and show what goes wrong at each stage.
-
-### Very insecure Groth16: no setup
-
-The simplest version of Groth16 has **no setup whatsoever**. The prover takes the R1CS circuit, computes the QAP polynomials, evaluates everything at some point, and sends the proof. The verifier recomputes the same QAP polynomials from the public R1CS, evaluates them, and checks the pairing equation. There is no SRS, no proving key, no verifying key — just raw math.
-
-```mermaid
-flowchart TB
-    subgraph OffChain["🔒 Off-Chain"]
-        direction TB
-        Circuit["Arithmetic Circuit<br/>(R1CS matrices)"]
-        Witness["Witness<br/>(private + public inputs)"]
-        Prover["Prover<br/>computes QAP, evaluates<br/>at secret point, builds π"]
-    end
-
-    subgraph OnChain["⛓️ On-Chain (Cardano)"]
-        direction TB
-        Contract["Smart Contract<br/>(Aiken verifier)"]
-        Public["Public Inputs<br/>(visible on-chain)"]
-        Recompute["Verifier recomputes<br/>QAP from R1CS"]
-        Check{"Pairing check<br/>e(A,B) = e(C,δ·G₂)·e(V,γ·G₂)"}
-        Accept["✅ Accept"]
-        Reject["❌ Reject"]
-    end
-
-    Circuit --> Prover
-    Witness --> Prover
-    Prover -->|"π + QAP polynomials"| Contract
-    Circuit --> Recompute
-    Public --> Contract
-    Recompute --> Contract
-    Contract --> Check
-    Check -->|Valid| Accept
-    Check -->|Invalid| Reject
-```
-
-**This works — but it is useless.** Without an SRS, the prover cannot evaluate polynomials at a secret point efficiently (no power table). The prover must send the full QAP polynomials to the verifier, who must recompute everything from scratch. The proof is no longer succinct — it is as large as the circuit itself. And there is no zero-knowledge: the polynomials encode the witness. This is not a proof system; it is just a complex way of restating the problem.
-
-### Still insecure Groth16: public setup
-
-The next step introduces an SRS — but with `τ` public. Now the prover can use the power table `τⁱ·G₁, τⁱ·G₂` to evaluate polynomials efficiently, and the proof shrinks to 192 bytes. The verifier can check the pairing equation without recomputing the QAP. The workflow looks clean and efficient:
-
-```mermaid
-flowchart TB
-    subgraph Setup["⚙️ Public Setup (insecure)"]
-        direction TB
-        Tau["τ = 3 (public, known to everyone)"]
-        SRS["SRS = {3⁰·G₁, 3¹·G₁, 3²·G₁, ...}<br/>public parameters"]
-        PK["Proving Key (pk)"]
-        VK["Verifying Key (vk)"]
-    end
-
-    subgraph OffChain["🔒 Off-Chain"]
-        direction TB
-        Circuit["Arithmetic Circuit<br/>(e.g. sum_of_products.circom)"]
-        Witness["Witness<br/>(private + public inputs)"]
-        Prover["Prover<br/>computes proof π"]
-    end
-
-    subgraph OnChain["⛓️ On-Chain (Cardano)"]
-        direction TB
-        Contract["Smart Contract<br/>(Aiken verifier)"]
-        Public["Public Inputs<br/>(visible on-chain)"]
-        Check{"Pairing check<br/>e(A,B) = e(α·G₁,β·G₂)·e(C,δ·G₂)·e(V,γ·G₂)"}
-        Accept["✅ Accept"]
-        Reject["❌ Reject"]
-    end
-
-    Tau --> SRS
-    SRS --> PK
-    SRS --> VK
-    Circuit --> Prover
-    Witness --> Prover
-    PK --> Prover
-    Prover -->|"π (192 bytes)"| Contract
-    VK --> Contract
-    Public --> Contract
-    Contract --> Check
-    Check -->|Valid| Accept
-    Check -->|Invalid| Reject
-```
-
-**This looks great — but it is completely broken.** Because `τ = 3` is public, anyone can compute `T(τ) = 6` directly. An attacker can pick a *fake* witness — say, `a=100, b=100, c=100, d=100, e=100, f=100, g=100, h=100` — which does not satisfy the real constraints, and then choose `h(τ)` to make the equation balance:
-
-```
-h(τ) = (l(τ)·r(τ) − o(τ)) / T(τ)
-```
-
-The attacker builds proof elements `A, B, C` using the *legitimate* SRS points (which are public) and their chosen `h(τ)`. The verifier's pairing check will pass — because the equation is algebraically satisfied at `τ` — even though the witness violates the actual circuit constraints at every other point.
-
-**The secret evaluation point `τ` is the entire security foundation of Groth16.** If it is known, the proof system becomes a forgery factory. The trusted setup ceremony is the mechanism that creates `τ`, embeds it into curve points, and then destroys it.
-
-### Secure Groth16: trusted setup
-
-The real Groth16 workflow introduces a **trusted setup ceremony** that generates `τ` securely and destroys it forever. The diagram below shows the complete lifecycle: who does what, what stays off-chain, what goes on-chain, and where the secret randomness enters the picture.
-
-```mermaid
-flowchart TB
-    subgraph Ceremony["🔐 Trusted Setup Ceremony (once per circuit)"]
-        direction TB
-        Random["N participants contribute<br/>independent randomness"]
-        Destroy["Every participant destroys<br/>their secret after contributing"]
-        SRS["SRS = {τⁱ·G₁, τⁱ·G₂, ...}<br/>public parameters"]
-        PK["Proving Key (pk)"]
-        VK["Verifying Key (vk)"]
-    end
-
-    subgraph OffChain["🔒 Off-Chain"]
-        direction TB
-        Circuit["Arithmetic Circuit<br/>(e.g. multiplier.circom)"]
-        Witness["Witness<br/>(private + public inputs)"]
-        Prover["Prover<br/>computes proof π"]
-    end
-
-    subgraph OnChain["⛓️ On-Chain (Cardano)"]
-        direction TB
-        Contract["Smart Contract<br/>(Aiken verifier)"]
-        Public["Public Inputs<br/>(visible on-chain)"]
-        Check{"Pairing check<br/>e(A,B) = e(α·G₁,β·G₂)·e(C,δ·G₂)·e(V,γ·G₂)"}
-        Accept["✅ Accept"]
-        Reject["❌ Reject"]
-    end
-
-    Random --> Destroy --> SRS
-    SRS --> PK
-    SRS --> VK
-    Circuit --> Prover
-    Witness --> Prover
-    PK --> Prover
-    Prover -->|"π (192 bytes)"| Contract
-    VK --> Contract
-    Public --> Contract
-    Contract --> Check
-    Check -->|Valid| Accept
-    Check -->|Invalid| Reject
-```
-
-**What each box means:**
-
-| Box | Role | What it does |
-|-----|------|--------------|
-| **Trusted Setup Ceremony** | Joint computation | `N` participants mix their randomness to produce public parameters. As long as **one** participant was honest and destroyed their secret, the system is secure. |
-| **SRS** | Public data | "Power table" `τⁱ·G₁`, `τⁱ·G₂` — lets the prover evaluate polynomials at the secret point `τ` without knowing `τ`. |
-| **Proving Key (pk)** | Off-chain | Everything the prover needs: SRS + circuit-specific points. Large (MBs), kept secret by the prover. |
-| **Verifying Key (vk)** | On-chain | Tiny (KBs), embedded into the smart contract. Only `α·G₁`, `β·G₂`, `γ·G₂`, `δ·G₂`, and a few per-variable points. |
-| **Prover** | Off-chain | Takes the witness (secret inputs + public inputs) and `pk`, runs FFTs, polynomial division, and elliptic-curve multiplications to produce `π`. |
-| **Smart Contract** | On-chain | Receives `π` + public inputs, reconstructs the public-input commitment `V`, and runs the pairing check. |
-| **Proof π** | Cross-layer | 192 bytes: three curve points `A, B, C`. Sent in the transaction redeemer. |
-
-**Key insight: the secret never crosses the boundary.** The prover knows the witness but never reveals it. The verifier never sees the witness but is mathematically certain the constraints were satisfied. The randomness that created the SRS was destroyed long before any proof was generated. This is the architecture that makes zero-knowledge possible.
-
-### Summary: why each layer matters
-
-| Layer | Setup | Proof size | Secure? | Why |
-|-------|-------|-----------|---------|-----|
-| **No setup** | None | Full QAP polynomials (circuit-sized) | No | No SRS means no power table; prover must send everything; no succinctness, no zero-knowledge |
-| **Public setup** | `τ` known | 192 bytes | No | Sufficient for succinctness, but anyone with `τ` can forge proofs |
-| **Trusted setup** | `τ` secret | 192 bytes | Yes | Ceremony destroys `τ`; proof is succinct AND zero-knowledge AND sound |
 
 ---
 
@@ -515,6 +350,173 @@ where `e` is the bilinear pairing on BLS12-381. If the equation holds, the proof
 This is the entire verification algorithm. No witness reconstruction, no constraint evaluation, no polynomial division — just one multiplicative pairing equation. That is why Groth16 verification is so fast (milliseconds) and why it fits inside a Cardano transaction budget.
 
 In our repo, the pairing check is implemented in [`src/bin/print_pairing.rs`](https://github.com/cardano-foundation/bls/blob/main/groth16-prover/src/bin/print_pairing.rs) and cross-checked bit-for-bit against an independent [Sage](https://www.sagemath.org/) script ([`sage/groth16.sage`](https://github.com/cardano-foundation/bls/blob/main/sage/groth16.sage)).
+
+---
+
+## The Groth16 workflow at a glance
+
+Now that we have seen every step of the Groth16 pipeline — R1CS, QAP, trusted setup, proof generation, and the pairing check — let us zoom out and ask: *what happens if any of these pieces is missing?*
+
+Groth16 splits the world into three roles: a **circuit designer** who defines what must be proven by producing an R1CS circuit, a **prover** who knows the secret and builds the proof, and a **verifier** who checks the proof without learning the secret. Both the prover and the verifier know the R1CS circuit (the constraint structure: how many constraints, which wires appear in each). The difference is that the prover also knows the *witness* — the full assignment of values to every wire, including both the secret inputs and the public outputs. The verifier knows only the public inputs (the output `100` and the constant `1`), not the secret inputs that produced them. The verifier can be anyone — including a smart contract running on Cardano.
+
+To understand why the trusted setup is essential, we build up from the simplest possible version of Groth16 — one with no setup at all — and show what goes wrong at each stage.
+
+### Very insecure Groth16: no setup
+
+The simplest version of Groth16 has **no setup whatsoever**. The prover takes the R1CS circuit, computes the QAP polynomials, evaluates everything at some point, and sends the proof. The verifier recomputes the same QAP polynomials from the public R1CS, evaluates them, and checks the pairing equation. There is no SRS, no proving key, no verifying key — just raw math.
+
+```mermaid
+flowchart TB
+    subgraph OffChain["🔒 Off-Chain"]
+        direction TB
+        Circuit["Arithmetic Circuit<br/>(R1CS matrices)"]
+        Witness["Witness<br/>(private + public inputs)"]
+        Prover["Prover<br/>computes QAP, evaluates<br/>at secret point, builds π"]
+    end
+
+    subgraph OnChain["⛓️ On-Chain (Cardano)"]
+        direction TB
+        Contract["Smart Contract<br/>(Aiken verifier)"]
+        Public["Public Inputs<br/>(visible on-chain)"]
+        Recompute["Verifier recomputes<br/>QAP from R1CS"]
+        Check{"Pairing check<br/>e(A,B) = e(C,δ·G₂)·e(V,γ·G₂)"}
+        Accept["✅ Accept"]
+        Reject["❌ Reject"]
+    end
+
+    Circuit --> Prover
+    Witness --> Prover
+    Prover -->|"π + QAP polynomials"| Contract
+    Circuit --> Recompute
+    Public --> Contract
+    Recompute --> Contract
+    Contract --> Check
+    Check -->|Valid| Accept
+    Check -->|Invalid| Reject
+```
+
+**This works — but it is useless.** Without an SRS, the prover cannot evaluate polynomials at a secret point efficiently (no power table). The prover must send the full QAP polynomials to the verifier, who must recompute everything from scratch. The proof is no longer succinct — it is as large as the circuit itself. And there is no zero-knowledge: the polynomials encode the witness. This is not a proof system; it is just a complex way of restating the problem.
+
+### Still insecure Groth16: public setup
+
+The next step introduces an SRS — but with `τ` public. Now the prover can use the power table `τⁱ·G₁, τⁱ·G₂` to evaluate polynomials efficiently, and the proof shrinks to 192 bytes. The verifier can check the pairing equation without recomputing the QAP. The workflow looks clean and efficient:
+
+```mermaid
+flowchart TB
+    subgraph Setup["⚙️ Public Setup (insecure)"]
+        direction TB
+        Tau["τ = 3 (public, known to everyone)"]
+        SRS["SRS = {3⁰·G₁, 3¹·G₁, 3²·G₁, ...}<br/>public parameters"]
+        PK["Proving Key (pk)"]
+        VK["Verifying Key (vk)"]
+    end
+
+    subgraph OffChain["🔒 Off-Chain"]
+        direction TB
+        Circuit["Arithmetic Circuit<br/>(e.g. sum_of_products.circom)"]
+        Witness["Witness<br/>(private + public inputs)"]
+        Prover["Prover<br/>computes proof π"]
+    end
+
+    subgraph OnChain["⛓️ On-Chain (Cardano)"]
+        direction TB
+        Contract["Smart Contract<br/>(Aiken verifier)"]
+        Public["Public Inputs<br/>(visible on-chain)"]
+        Check{"Pairing check<br/>e(A,B) = e(α·G₁,β·G₂)·e(C,δ·G₂)·e(V,γ·G₂)"}
+        Accept["✅ Accept"]
+        Reject["❌ Reject"]
+    end
+
+    Tau --> SRS
+    SRS --> PK
+    SRS --> VK
+    Circuit --> Prover
+    Witness --> Prover
+    PK --> Prover
+    Prover -->|"π (192 bytes)"| Contract
+    VK --> Contract
+    Public --> Contract
+    Contract --> Check
+    Check -->|Valid| Accept
+    Check -->|Invalid| Reject
+```
+
+**This looks great — but it is completely broken.** Because `τ = 3` is public, anyone can compute `T(τ) = 6` directly. An attacker can pick a *fake* witness — say, `a=100, b=100, c=100, d=100, e=100, f=100, g=100, h=100` — which does not satisfy the real constraints, and then choose `h(τ)` to make the equation balance:
+
+```
+h(τ) = (l(τ)·r(τ) − o(τ)) / T(τ)
+```
+
+The attacker builds proof elements `A, B, C` using the *legitimate* SRS points (which are public) and their chosen `h(τ)`. The verifier's pairing check will pass — because the equation is algebraically satisfied at `τ` — even though the witness violates the actual circuit constraints at every other point.
+
+**The secret evaluation point `τ` is the entire security foundation of Groth16.** If it is known, the proof system becomes a forgery factory. The trusted setup ceremony is the mechanism that creates `τ`, embeds it into curve points, and then destroys it.
+
+### Secure Groth16: trusted setup
+
+The real Groth16 workflow introduces a **trusted setup ceremony** that generates `τ` securely and destroys it forever. The diagram below shows the complete lifecycle: who does what, what stays off-chain, what goes on-chain, and where the secret randomness enters the picture.
+
+```mermaid
+flowchart TB
+    subgraph Ceremony["🔐 Trusted Setup Ceremony (once per circuit)"]
+        direction TB
+        Random["N participants contribute<br/>independent randomness"]
+        Destroy["Every participant destroys<br/>their secret after contributing"]
+        SRS["SRS = {τⁱ·G₁, τⁱ·G₂, ...}<br/>public parameters"]
+        PK["Proving Key (pk)"]
+        VK["Verifying Key (vk)"]
+    end
+
+    subgraph OffChain["🔒 Off-Chain"]
+        direction TB
+        Circuit["Arithmetic Circuit<br/>(e.g. multiplier.circom)"]
+        Witness["Witness<br/>(private + public inputs)"]
+        Prover["Prover<br/>computes proof π"]
+    end
+
+    subgraph OnChain["⛓️ On-Chain (Cardano)"]
+        direction TB
+        Contract["Smart Contract<br/>(Aiken verifier)"]
+        Public["Public Inputs<br/>(visible on-chain)"]
+        Check{"Pairing check<br/>e(A,B) = e(α·G₁,β·G₂)·e(C,δ·G₂)·e(V,γ·G₂)"}
+        Accept["✅ Accept"]
+        Reject["❌ Reject"]
+    end
+
+    Random --> Destroy --> SRS
+    SRS --> PK
+    SRS --> VK
+    Circuit --> Prover
+    Witness --> Prover
+    PK --> Prover
+    Prover -->|"π (192 bytes)"| Contract
+    VK --> Contract
+    Public --> Contract
+    Contract --> Check
+    Check -->|Valid| Accept
+    Check -->|Invalid| Reject
+```
+
+**What each box means:**
+
+| Box | Role | What it does |
+|-----|------|--------------|
+| **Trusted Setup Ceremony** | Joint computation | `N` participants mix their randomness to produce public parameters. As long as **one** participant was honest and destroyed their secret, the system is secure. |
+| **SRS** | Public data | "Power table" `τⁱ·G₁`, `τⁱ·G₂` — lets the prover evaluate polynomials at the secret point `τ` without knowing `τ`. |
+| **Proving Key (pk)** | Off-chain | Everything the prover needs: SRS + circuit-specific points. Large (MBs), kept secret by the prover. |
+| **Verifying Key (vk)** | On-chain | Tiny (KBs), embedded into the smart contract. Only `α·G₁`, `β·G₂`, `γ·G₂`, `δ·G₂`, and a few per-variable points. |
+| **Prover** | Off-chain | Takes the witness (secret inputs + public inputs) and `pk`, runs FFTs, polynomial division, and elliptic-curve multiplications to produce `π`. |
+| **Smart Contract** | On-chain | Receives `π` + public inputs, reconstructs the public-input commitment `V`, and runs the pairing check. |
+| **Proof π** | Cross-layer | 192 bytes: three curve points `A, B, C`. Sent in the transaction redeemer. |
+
+**Key insight: the secret never crosses the boundary.** The prover knows the witness but never reveals it. The verifier never sees the witness but is mathematically certain the constraints were satisfied. The randomness that created the SRS was destroyed long before any proof was generated. This is the architecture that makes zero-knowledge possible.
+
+### Summary: why each layer matters
+
+| Layer | Setup | Proof size | Secure? | Why |
+|-------|-------|-----------|---------|-----|
+| **No setup** | None | Full QAP polynomials (circuit-sized) | No | No SRS means no power table; prover must send everything; no succinctness, no zero-knowledge |
+| **Public setup** | `τ` known | 192 bytes | No | Sufficient for succinctness, but anyone with `τ` can forge proofs |
+| **Trusted setup** | `τ` secret | 192 bytes | Yes | Ceremony destroys `τ`; proof is succinct AND zero-knowledge AND sound |
 
 ---
 
