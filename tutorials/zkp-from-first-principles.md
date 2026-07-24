@@ -48,9 +48,9 @@ Groth16 proves correct execution of an **arithmetic circuit**, which must first 
 a·b + c·d + e·f + g·h = 100
 ```
 
-**Who knows what.** The *prover* knows a solution — say, `a=1, b=2, c=3, d=4, e=5, f=6, g=7, h=8` (since `1·2 + 3·4 + 5·6 + 7·8 = 100`). The *verifier* knows only the equation and the output `100`. The verifier does **not** know the eight inputs. The question is: *can the prover convince the verifier that the equation holds, without revealing any of the eight numbers?*
+**Who knows what.** The *prover* knows a solution — say, `a=1, b=2, c=3, d=4, e=5, f=6, g=7, h=8` (since `1·2 + 3·4 + 5·6 + 7·8 = 100`). The *verifier* knows only the equation, and here `100` which is known as output. The verifier does not know the eight inputs that the prover come up with. The question is: *can the prover convince the verifier that he knows the solution to the equation, without revealing any of the eight numbers?*
 
-**Translating to R1CS.** Groth16 does not operate on equations directly — it requires a **Rank-1 Constraint System**: a set of multiplication constraints of the form `(A·w) * (B·w) = (C·w)`, where `w` is the *witness vector* containing every wire value. Our equation splits into four multiplication gates plus one addition (which is free in R1CS):
+**Translating to R1CS.** Groth16 does not operate on equations directly — it requires a **Rank-1 Constraint System**: a set of multiplication constraints of the form `(A·w) * (B·w) = (C·w)`, where `w` is the *witness vector* (the full assignment of values to every wire — secret inputs, public outputs, and intermediates). Our equation splits into four multiplication gates plus one addition gate:
 
 ```
 t1 = a · b        (constraint 0)
@@ -63,9 +63,14 @@ out = t1 + t2 + t3 + t4    (addition — no constraint needed)
 The witness vector is:
 
 ```
-w = [1, out, a, b, c, d, e, f, g, h, t1, t2, t3, t4]
-    [0,  1,  2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]   <-- indices
+w =  [  1,   100,  1, 2, 3, 4, 5, 6, 7, 8,  2, 12, 30, 56 ]
+       ^    ^    ^                           ^  ^   ^   ^
+       |    |    |                           |  |   |   |
+      const out  a   b  c  d  e  f  g  h   t1 t2  t3  t4
+     [  0,    1,  2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13 ]  <-- indices
 ```
+
+Note the first entry is the constant `1` (present in every R1CS witness), and `out = 100` is the public output that the verifier knows.
 
 Each constraint picks two wires on the left and right, and one on the output:
 
@@ -76,17 +81,39 @@ Constraint 2:  L[2] picks e (col 6),  R[2] picks f (col 7),  O[2] picks t3 (col 
 Constraint 3:  L[3] picks g (col 8),  R[3] picks h (col 9),  O[3] picks t4 (col 13)
 ```
 
-In matrix form (all unlisted entries are 0):
+In matrix form (all unlisted entries are 0), with the witness vector alongside for reference:
 
 ```
-L =                         R =                         O =
-        0  0  1  0  0  0  0  0  0  0  0  0  0  0          0  0  0  1  0  0  0  0  0  0  0  0  0  0          0  0  0  0  0  0  0  0  0  0  1  0  0  0
-        0  0  0  0  1  0  0  0  0  0  0  0  0  0          0  0  0  0  0  1  0  0  0  0  0  0  0  0          0  0  0  0  0  0  0  0  0  0  0  1  0  0
-        0  0  0  0  0  0  1  0  0  0  0  0  0  0          0  0  0  0  0  0  0  1  0  0  0  0  0  0          0  0  0  0  0  0  0  0  0  0  0  0  1  0
-        0  0  0  0  0  0  0  0  1  0  0  0  0  0          0  0  0  0  0  0  0  0  0  1  0  0  0  0          0  0  0  0  0  0  0  0  0  0  0  0  0  1
+w =    [  1  100  1  2  3  4  5  6  7  8  2  12  30  56 ]
+         const out  a  b  c  d  e  f  g  h  t1 t2 t3 t4
+         ----- ---  -  -  -  -  -  -  -  -  -- -- -- --
+L[0]  = [  0    0  1  0  0  0  0  0  0  0   0  0  0  0 ]    picks a
+L[1]  = [  0    0  0  0  1  0  0  0  0  0   0  0  0  0 ]    picks c
+L[2]  = [  0    0  0  0  0  0  1  0  0  0   0  0  0  0 ]    picks e
+L[3]  = [  0    0  0  0  0  0  0  0  1  0   0  0  0  0 ]    picks g
+
+R[0]  = [  0    0  0  1  0  0  0  0  0  0   0  0  0  0 ]    picks b
+R[1]  = [  0    0  0  0  0  1  0  0  0  0   0  0  0  0 ]    picks d
+R[2]  = [  0    0  0  0  0  0  0  1  0  0   0  0  0  0 ]    picks f
+R[3]  = [  0    0  0  0  0  0  0  0  0  1   0  0  0  0 ]    picks h
+
+O[0]  = [  0    0  0  0  0  0  0  0  0  0   1  0  0  0 ]    picks t1
+O[1]  = [  0    0  0  0  0  0  0  0  0  0   0  1  0  0 ]    picks t2
+O[2]  = [  0    0  0  0  0  0  0  0  0  0   0  0  1  0 ]    picks t3
+O[3]  = [  0    0  0  0  0  0  0  0  0  0   0  0  0  1 ]    picks t4
 ```
 
-You can verify element-wise: `(L·w) ∘ (R·w) = O·w`:
+Each R1CS constraint checks `(L[i]·w) * (R[i]·w) = O[i]·w`. Let us verify constraint 0 in detail:
+
+```
+L[0]·w = 0·1 + 0·100 + 1·1 + 0·2 + ... = 1     (picks a)
+R[0]·w = 0·1 + 0·100 + 0·1 + 1·2 + ... = 2     (picks b)
+O[0]·w = 0·1 + 0·100 + ... + 1·2 + ... = 2     (picks t1)
+
+(L[0]·w) * (R[0]·w) = 1 * 2 = 2  =  O[0]·w  ✓
+```
+
+All four constraints hold:
 
 ```
 constraint 0:  1 * 2  = 2   ✓   (t1 = a·b)
@@ -101,7 +128,7 @@ This R1CS is the starting point. Groth16 then converts these matrices into polyn
 
 ## The Groth16 workflow at a glance
 
-Groth16 splits the world into three roles: a **circuit designer** who defines what must be proven, a **prover** who knows the secret and builds the proof, and a **verifier** who checks the proof without learning the secret. The verifier can be anyone — including a smart contract running on Cardano.
+Groth16 splits the world into three roles: a **circuit designer** who defines what must be proven by producing an R1CS circuit, a **prover** who knows the secret and builds the proof, and a **verifier** who checks the proof without learning the secret. Both the prover and the verifier know the R1CS circuit (the constraint structure: how many constraints, which wires appear in each). The difference is that the prover also knows the *witness* — the full assignment of values to every wire, including both the secret inputs and the public outputs. The verifier knows only the public inputs (the output `100` and the constant `1`), not the secret inputs that produced them. The verifier can be anyone — including a smart contract running on Cardano.
 
 The diagram below shows the complete lifecycle: who does what, what stays off-chain, what goes on-chain, and where the secret randomness enters the picture.
 
