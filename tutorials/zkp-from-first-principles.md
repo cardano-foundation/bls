@@ -168,7 +168,7 @@ Groth16 teaches the fundamental pipeline that every other system either inherits
 
 Once you have walked through this pipeline by hand — as we do in this article with the dense monomial implementation — you possess the mental model necessary to evaluate *any* proof system. You will know what "removing the trusted setup" actually means, why "universal CRS" matters, and why "post-quantum" constructions pay the price they do.
 
-This is why our repository begins with `Implementation 1`: a hard-coded circuit, dense polynomials, naive scalar-by-scalar proof assembly, and deterministic toxic waste. It is the slowest possible path, but it is also the *most educational*. Every other system is a speedup or a trade-off applied to this same skeleton.
+This is why our [groth16-prover](https://github.com/cardano-foundation/bls/tree/main/groth16-prover) implementation begins with `Implementation 1`: a hard-coded circuit, dense polynomials, naive scalar-by-scalar proof assembly, and deterministic toxic waste. It is the slowest possible path, but it is also the *most educational*. Every other system is a speedup or a trade-off applied to this same skeleton.
 
 ---
 
@@ -186,11 +186,13 @@ where `w` is the *witness vector* (all wire values, both public and private) and
 
 This is the key insight: **multiplication costs a constraint; addition does not.** The art of circuit design is therefore minimizing multiplications.
 
+There is one more constraint: each R1CS row can express only a *quadratic* relationship — one multiplication of two linear combinations. Higher-degree terms must be decomposed. For example, the equation `x·y·z = 10` requires two constraints: introduce an intermediate wire `t = x·y`, then check `t·z = 10`. Similarly, `x³ = 8` becomes `t = x·x` and `t·x = 8`. This quadratic limitation is fundamental to R1CS and shapes how every circuit is designed.
+
 ---
 
 ## A 4-constraint "hello world"
 
-Our repository already contains a 3-gate multiplication chain (`multiplier.circom`) that proves `a = x1·x2·x3·x4`. To make the pedagogical step slightly richer, we introduce a new 4-gate circuit that proves a *sum of pairwise products*:
+Our repository already contains a 3-gate multiplication chain (`multiplier.circom`) that proves `a = x1·x2·x3·x4`. To make the pedagogical step slightly richer, we introduce a new 4-gate circuit that proves a *sum of pairwise products*. This is the same circuit we already saw when introducing the R1CS matrices — now we will trace it through every stage of the Groth16 pipeline, from R1CS to QAP to proof to verification:
 
 ```
 t1 = a * b
@@ -200,7 +202,7 @@ t4 = g * h
 out = t1 + t2 + t3 + t4
 ```
 
-This circuit has 8 private inputs, 4 intermediate wires, and 1 public output. In R1CS form it yields exactly 4 constraints — one per multiplication. The source lives in [`groth16-prover/circom/SumOfProducts/sum_of_products.circom`](https://github.com/cardano-foundation/bls/blob/main/groth16-prover/circom/SumOfProducts/sum_of_products.circom):
+We write circuits in **Circom** — think of it as the assembly language for R1CS: it compiles directly to constraint matrices with no hidden abstractions, which is why we use it throughout this tutorial. This circuit has 8 private inputs, 4 intermediate wires, and 1 public output. In R1CS form it yields exactly 4 constraints — one per multiplication. The source lives in [`groth16-prover/circom/SumOfProducts/sum_of_products.circom`](https://github.com/cardano-foundation/bls/blob/main/groth16-prover/circom/SumOfProducts/sum_of_products.circom):
 
 ```circom
 pragma circom 2.0.0;
@@ -224,7 +226,7 @@ template SumOfProducts() {
 component main = SumOfProducts();
 ```
 
-With the input [`input.json`](https://github.com/cardano-foundation/bls/blob/main/groth16-prover/circom/SumOfProducts/input.json):
+The prover's job is to come up with a solution to the equation. Here the prover chose [`input.json`](https://github.com/cardano-foundation/bls/blob/main/groth16-prover/circom/SumOfProducts/input.json) — the eight numbers that satisfy the circuit:
 
 ```json
 { "a": "1", "b": "2", "c": "3", "d": "4",
@@ -243,7 +245,9 @@ where `100 = 2 + 12 + 30 + 56` is the only public value besides the constant `1`
 
 ## Why polynomials? (QAP)
 
-R1CS is a matrix format — good for compilers, bad for cryptography. The breakthrough idea behind zk-SNARKs (originally due to Gennaro, Gentry, Parno, and Raykova, then refined by Groth) is to turn the matrix into **polynomials**.
+R1CS is a matrix format — good for compilers, bad for cryptography. Checking a matrix equation `(A·w) ∘ (B·w) = C·w` requires examining every row individually, which is O(n) work — and there is no way to compress it into something a verifier can check with a single, constant-size operation. Cryptography needs a representation where the *entire* system of constraints can be verified at a single point, and that is exactly what polynomials provide.
+
+Before we dive into the construction, recall a basic fact about polynomials: **a polynomial of degree d is uniquely determined by d+1 points**. Two points define exactly one line (degree 1). Three points define exactly one parabola (degree 2) — you cannot have two different parabolas passing through the same three points. This uniqueness is what makes polynomials a *commitment*: once we fix the values at constraint points, there is exactly one polynomial that fits, and any deviation is detectable. The breakthrough idea behind zk-SNARKs (originally due to Gennaro, Gentry, Parno, and Raykova, then refined by Groth) is to turn the matrix into **polynomials**.
 
 For each wire `i`, we build three polynomials `u_i(x)`, `v_i(x)`, `w_i(x)` such that at constraint point `j`:
 
@@ -261,7 +265,21 @@ r(x) = Σ a_i · v_i(x)
 o(x) = Σ a_i · w_i(x)
 ```
 
-If the witness is correct, then at every constraint point `j`:
+**Concrete example for constraint 1** (`t2 = c·d`, at point `x = 1`). The Lagrange basis polynomial `L_1(x) = −x² + 2x` equals `1` at `x = 1` and `0` at `x = 0` and `x = 2`. Because wire 4 (`c`) appears on the left side of constraint 1 only, `u_4(x) = L_1(x) = −x² + 2x`. Similarly, `v_5(x) = L_1(x) = −x² + 2x` for wire 5 (`d`), and `w_11(x) = L_1(x) = −x² + 2x` for wire 11 (`t2`). Evaluating at `x = 1`:
+
+```
+u_4(1) = −1 + 2 = 1
+v_5(1) = −1 + 2 = 1
+w_11(1) = −1 + 2 = 1
+
+l(1) = ... + a_4 · u_4(1) + ... = ... + 3 · 1 + ... = 3    (picks c = 3)
+r(1) = ... + a_5 · v_5(1) + ... = ... + 4 · 1 + ... = 4    (picks d = 4)
+o(1) = ... + a_11 · w_11(1) + ... = ... + 12 · 1 + ... = 12  (picks t2 = 12)
+
+l(1) · r(1) = 3 · 4 = 12 = o(1)  ✓
+```
+
+The same pattern holds at every constraint point. If the witness is correct, then at every constraint point `j`:
 
 ```
 l(j) · r(j) = o(j)
@@ -820,12 +838,28 @@ The simplest way to do this is **Lagrange interpolation**: we pick three distinc
 
 **Paper and pencil.**
 
-The Lagrange basis for points `{0, 1, 2}` is:
+The Lagrange basis for points `{0, 1, 2}`:
 
 ```
-L_0(x) = (x−1)(x−2) / 2       =  ½x² − ³⁄₂x + 1
-L_1(x) = x(x−2) / (−1)        = −x² + 2x
-L_2(x) = x(x−1) / 2           =  ½x² − ½x
+L_0(x) = (x−1)(x−2) / 2    =  ½x² − ³⁄₂x + 1
+L_1(x) = x(x−2) / (−1)     = −x² + 2x
+L_2(x) = x(x−1) / 2        =  ½x² − ½x
+```
+
+Verify by evaluating at each constraint point — each basis polynomial returns `1` at its own point and `0` at the others:
+
+```
+L_0(0) =  ½·0 − ³⁄₂·0 + 1 =  1   ✓
+L_0(1) =  ½·1 − ³⁄₂·1 + 1 =  0   ✓
+L_0(2) =  ½·4 − ³⁄₂·2 + 1 =  0   ✓
+
+L_1(0) = −0 + 2·0         =  0   ✓
+L_1(1) = −1 + 2·1          =  1   ✓
+L_1(2) = −4 + 4            =  0   ✓
+
+L_2(0) =  ½·0 − ½·0        =  0   ✓
+L_2(1) =  ½·1 − ½·1        =  0   ✓
+L_2(2) =  ½·4 − ½·2        =  1   ✓
 ```
 
 (All arithmetic is in Fr, so "½" means the modular inverse of `2`, which is `2^(−1) = (q+1)/2`.)
