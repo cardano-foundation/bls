@@ -38,32 +38,42 @@ This article focuses on **Groth16**, the fastest and most compact zk-SNARK const
 
 > **Why BLS12-381?** The entire pipeline in this article — the finite field `Fr`, the elliptic-curve groups `G1` and `G2`, and the bilinear pairing `e` — is built on the **BLS12-381 curve**. We chose it specifically because Cardano's Plutus V3 has native builtins for it. If you are new to BLS12-381 and want a gentle introduction to what it enables on Cardano — BLS signatures, VRFs, anonymous credentials, and more — the Cardano Foundation has published a dedicated blog post: [**"Aiken BLS12-381 primitives — wide possibilities available"**](https://cardanofoundation.org/blog/aiken-primitives-explained).
 
-But before we get to smart contracts, we need to understand what the proof actually *is*. We will build it from scratch, step by step, using the simplest possible circuit that is still non-trivial: a 4-constraint sum-of-products.
+But before we get to smart contracts, we need to understand what the proof actually *is*. We will build it from scratch, step by step, using a very simple circuit: a 4-constraint sum-of-products.
 
-Groth16 proves correct execution of an **arithmetic circuit**, which must first be expressed as a **Rank-1 Constraint System (R1CS)**. Our problem is concrete: given eight secret numbers, prove that they pairwise multiply and sum to a known output. Specifically, prove that:
+Groth16 proves correct execution of an **arithmetic circuit**, which must first be expressed as a **Rank-1 Constraint System (R1CS)**. Let us start with the concrete problem.
+
+**The equation.** We have eight secret numbers that must satisfy:
 
 ```
-inputs:  a=1, b=2, c=3, d=4, e=5, f=6, g=7, h=8
-wires:   t1 = a·b = 2,  t2 = c·d = 12,  t3 = e·f = 30,  t4 = g·h = 56
-output:  out = t1 + t2 + t3 + t4 = 100
+a·b + c·d + e·f + g·h = 100
 ```
 
-The prover knows all eight inputs. The verifier knows only the output (`100`) and the constant `1`. The question is: *can the prover convince the verifier that the output really is the sum of four pairwise products of secret numbers, without revealing any of those numbers?*
+**Who knows what.** The *prover* knows a solution — say, `a=1, b=2, c=3, d=4, e=5, f=6, g=7, h=8` (since `1·2 + 3·4 + 5·6 + 7·8 = 100`). The *verifier* knows only the equation and the output `100`. The verifier does **not** know the eight inputs. The question is: *can the prover convince the verifier that the equation holds, without revealing any of the eight numbers?*
 
-R1CS expresses this as four multiplication constraints of the form `(A·w) * (B·w) = (C·w)`, where `w` is the *witness vector* containing every wire value:
+**Translating to R1CS.** Groth16 does not operate on equations directly — it requires a **Rank-1 Constraint System**: a set of multiplication constraints of the form `(A·w) * (B·w) = (C·w)`, where `w` is the *witness vector* containing every wire value. Our equation splits into four multiplication gates plus one addition (which is free in R1CS):
+
+```
+t1 = a · b        (constraint 0)
+t2 = c · d        (constraint 1)
+t3 = e · f        (constraint 2)
+t4 = g · h        (constraint 3)
+out = t1 + t2 + t3 + t4    (addition — no constraint needed)
+```
+
+The witness vector is:
 
 ```
 w = [1, out, a, b, c, d, e, f, g, h, t1, t2, t3, t4]
     [0,  1,  2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]   <-- indices
 ```
 
-The four constraints and their R1CS matrices are:
+Each constraint picks two wires on the left and right, and one on the output:
 
 ```
-Constraint 0:  t1 = a · b       L[0] picks a (col 2),  R[0] picks b (col 3),  O[0] picks t1 (col 10)
-Constraint 1:  t2 = c · d       L[1] picks c (col 4),  R[1] picks d (col 5),  O[1] picks t2 (col 11)
-Constraint 2:  t3 = e · f       L[2] picks e (col 6),  R[2] picks f (col 7),  O[2] picks t3 (col 12)
-Constraint 3:  t4 = g · h       L[3] picks g (col 8),  R[3] picks h (col 9),  O[3] picks t4 (col 13)
+Constraint 0:  L[0] picks a (col 2),  R[0] picks b (col 3),  O[0] picks t1 (col 10)
+Constraint 1:  L[1] picks c (col 4),  R[1] picks d (col 5),  O[1] picks t2 (col 11)
+Constraint 2:  L[2] picks e (col 6),  R[2] picks f (col 7),  O[2] picks t3 (col 12)
+Constraint 3:  L[3] picks g (col 8),  R[3] picks h (col 9),  O[3] picks t4 (col 13)
 ```
 
 In matrix form (all unlisted entries are 0):
