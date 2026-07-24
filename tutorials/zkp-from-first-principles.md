@@ -2,7 +2,7 @@
 
 > **Installment 1 of 3.** This article introduces the mathematical intuition behind zk-SNARKs, walks through the simplest possible non-trivial circuit, and shows how to generate and verify a Groth16 proof end-to-end on Cardano using nothing but first-principles code. No black boxes, no hand-waving — every intermediate value can be printed and inspected.
 >
-> In the next installment we will explore the engineering optimizations that turn this slow-but-transparent pipeline into a production prover (FFT, Pippenger MSM, sparse matrices, trusted-setup ceremonies), survey competing proof systems (PLONK, Bulletproofs, JOLT, STARKs, VM approaches), and map the trade-offs. In the third and final installment we will show how Groth16 enables one of the most compelling use cases in modern blockchain privacy: selective disclosure of credentials without revealing identity.
+> In the next installment we will explore the engineering optimizations that turn this slow-but-transparent pipeline into a production prover (FFT, Pippenger MSM, sparse matrices, trusted-setup ceremonies), survey competing proof systems (PLONK, Bulletproofs++, JOLT, STARKs, VM approaches), and map the trade-offs. In the third and final installment we will show how Groth16 enables one of the most compelling use cases in modern blockchain privacy: selective disclosure of credentials without revealing identity.
 
 ---
 
@@ -154,7 +154,7 @@ If you want to understand modern zero-knowledge proof systems, you must understa
 | System | What it keeps from Groth16 | What it changes | Cost of the change |
 |--------|---------------------------|---------------|-------------------|
 | **PLONK** | R1CS, QAP-style polynomial encoding, pairing-based verification | Universal trusted setup; custom gates; permutation argument | Slightly larger proofs, but one SRS serves all circuits |
-| **Bulletproofs** | R1CS, inner-product argument structure | No trusted setup at all; no pairings; proofs grow logarithmically | Proof size ~1–2 KB (10× larger); verification is O(n) |
+| **Bulletproofs / Bulletproofs++** | R1CS, inner-product argument structure | No trusted setup at all; no pairings; proofs grow logarithmically. Bulletproofs++ (2022) is a transparent drop-in improvement: same security model, ~3–5× faster verification, ~38% smaller proofs ([ePrint 2022/510](https://eprint.iacr.org/2022/510)). | Bulletproofs: proof size ~1–2 KB (10× larger than Groth16), verification O(n). Bulletproofs++ reduces this gap significantly. |
 | **STARKs** | Polynomial commitment + FRI | Transparent setup (hashes only); post-quantum | Proof size ~50–200 KB; no elliptic curves needed |
 | **JOLT / zkVMs** | The *goal* (prove arbitrary computation) | Replace hand-written circuits with VM execution traces + lookup arguments | Massive proof overhead, but no circuit engineering |
 
@@ -1750,7 +1750,7 @@ The next installment will show how each bottleneck is removed:
 
 We will also survey the landscape beyond Groth16:
 - **PLONK** — universal trusted setup, custom gates, better recursion
-- **Bulletproofs** — no trusted setup at all, but larger proofs and slower verification
+- **Bulletproofs / Bulletproofs++** — no trusted setup at all; Bulletproofs++ (2022) is a transparent improvement with ~3–5× faster verification and ~38% smaller proofs, significantly closing the gap with Groth16
 - **STARKs / JOLT** — post-quantum, transparent setup, proof size trade-offs
 - **VM approaches (RISC Zero, zkVMs)** — prove arbitrary program execution without circuit design
 
