@@ -142,7 +142,7 @@ Groth's construction — now universally called **Groth16** — achieves somethi
 
 - **Proof size:** exactly **3 curve points** (2 in G1, 1 in G2). Compressed: **192 bytes**.
 - **Verification cost:** **3 pairings** and a handful of multi-scalar multiplications in G1. On modern hardware: a few milliseconds.
-- **CRS size:** linear in the circuit size, but the *verifying key* is constant-size for a given circuit.
+- **CRS size:** The *Common Reference String* is the complete set of public parameters that both prover and verifier share — it includes the SRS power tables (`τⁱ·G₁`, `τⁱ·G₂`) plus the circuit-specific fixed points (`α·G₁`, `β·G₂`, `γ·G₂`, `δ·G₂`). In Groth16, the CRS grows linearly with the circuit size, but the *verifying key* (the subset the verifier needs) is constant-size for a given circuit.
 - **Security:** perfect zero-knowledge and computationally sound knowledge extraction under the standard q-PKE and q-SDH assumptions on pairing-friendly curves.
 
 These numbers are not merely good — they are **optimal** for the pairing-based model. No scheme with the same trust assumptions can have asymptotically smaller proofs or faster verification. This is why Groth16 became the engine behind Zcash's shielded transactions, Filecoin's replication proofs, and dozens of other production systems.
