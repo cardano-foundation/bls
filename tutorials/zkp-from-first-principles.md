@@ -130,7 +130,65 @@ This R1CS is the starting point. Groth16 then converts these matrices into polyn
 
 Groth16 splits the world into three roles: a **circuit designer** who defines what must be proven by producing an R1CS circuit, a **prover** who knows the secret and builds the proof, and a **verifier** who checks the proof without learning the secret. Both the prover and the verifier know the R1CS circuit (the constraint structure: how many constraints, which wires appear in each). The difference is that the prover also knows the *witness* — the full assignment of values to every wire, including both the secret inputs and the public outputs. The verifier knows only the public inputs (the output `100` and the constant `1`), not the secret inputs that produced them. The verifier can be anyone — including a smart contract running on Cardano.
 
-The diagram below shows the complete lifecycle: who does what, what stays off-chain, what goes on-chain, and where the secret randomness enters the picture.
+Before we show the real Groth16 workflow, let us first see what happens **without** a trusted setup — this motivates why the trusted setup is necessary.
+
+### Not-secure Groth16: without trusted setup
+
+Without a trusted setup, there is no secret `τ` to protect. The prover could simply hard-code `τ = 3` (or any known value) and publish the SRS directly. Both prover and verifier use the same public parameters. The workflow looks simple and clean:
+
+```mermaid
+flowchart TB
+    subgraph Setup["⚙️ Hard-Coded Setup (insecure)"]
+        direction TB
+        Tau["τ = 3 (public, known to everyone)"]
+        SRS["SRS = {3⁰·G₁, 3¹·G₁, 3²·G₁, ...}<br/>public parameters"]
+        PK["Proving Key (pk)"]
+        VK["Verifying Key (vk)"]
+    end
+
+    subgraph OffChain["🔒 Off-Chain"]
+        direction TB
+        Circuit["Arithmetic Circuit<br/>(e.g. sum_of_products.circom)"]
+        Witness["Witness<br/>(private + public inputs)"]
+        Prover["Prover<br/>computes proof π"]
+    end
+
+    subgraph OnChain["⛓️ On-Chain (Cardano)"]
+        direction TB
+        Contract["Smart Contract<br/>(Aiken verifier)"]
+        Public["Public Inputs<br/>(visible on-chain)"]
+        Check{"Pairing check<br/>e(A,B) = e(α·G₁,β·G₂)·e(C,δ·G₂)·e(V,γ·G₂)"}
+        Accept["✅ Accept"]
+        Reject["❌ Reject"]
+    end
+
+    Tau --> SRS
+    SRS --> PK
+    SRS --> VK
+    Circuit --> Prover
+    Witness --> Prover
+    PK --> Prover
+    Prover -->|"π (192 bytes)"| Contract
+    VK --> Contract
+    Public --> Contract
+    Contract --> Check
+    Check -->|Valid| Accept
+    Check -->|Invalid| Reject
+```
+
+**This looks great — but it is completely broken.** Because `τ = 3` is public, anyone can compute `T(τ) = 6` directly. An attacker can pick a *fake* witness — say, `a=100, b=100, c=100, d=100, e=100, f=100, g=100, h=100` — which does not satisfy the real constraints, and then choose `h(τ)` to make the equation balance:
+
+```
+h(τ) = (l(τ)·r(τ) − o(τ)) / T(τ)
+```
+
+The attacker builds proof elements `A, B, C` using the *legitimate* SRS points (which are public) and their chosen `h(τ)`. The verifier's pairing check will pass — because the equation is algebraically satisfied at `τ` — even though the witness violates the actual circuit constraints at every other point.
+
+**The secret evaluation point `τ` is the entire security foundation of Groth16.** If it is known, the proof system becomes a forgery factory. The trusted setup ceremony is the mechanism that creates `τ`, embeds it into curve points, and then destroys it.
+
+### Secure Groth16: with trusted setup
+
+The real Groth16 workflow introduces a **trusted setup ceremony** that generates `τ` securely and destroys it forever. The diagram below shows the complete lifecycle: who does what, what stays off-chain, what goes on-chain, and where the secret randomness enters the picture.
 
 ```mermaid
 flowchart TB
