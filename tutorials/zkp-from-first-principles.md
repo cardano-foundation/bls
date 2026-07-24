@@ -40,6 +40,53 @@ This article focuses on **Groth16**, the fastest and most compact zk-SNARK const
 
 But before we get to smart contracts, we need to understand what the proof actually *is*. We will build it from scratch, step by step, using the simplest possible circuit that is still non-trivial: a 4-constraint sum-of-products.
 
+Groth16 proves correct execution of an **arithmetic circuit**, which must first be expressed as a **Rank-1 Constraint System (R1CS)**. Our problem is concrete: given eight secret numbers, prove that they pairwise multiply and sum to a known output. Specifically, prove that:
+
+```
+inputs:  a=1, b=2, c=3, d=4, e=5, f=6, g=7, h=8
+wires:   t1 = a·b = 2,  t2 = c·d = 12,  t3 = e·f = 30,  t4 = g·h = 56
+output:  out = t1 + t2 + t3 + t4 = 100
+```
+
+The prover knows all eight inputs. The verifier knows only the output (`100`) and the constant `1`. The question is: *can the prover convince the verifier that the output really is the sum of four pairwise products of secret numbers, without revealing any of those numbers?*
+
+R1CS expresses this as four multiplication constraints of the form `(A·w) * (B·w) = (C·w)`, where `w` is the *witness vector* containing every wire value:
+
+```
+w = [1, out, a, b, c, d, e, f, g, h, t1, t2, t3, t4]
+    [0,  1,  2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]   <-- indices
+```
+
+The four constraints and their R1CS matrices are:
+
+```
+Constraint 0:  t1 = a · b       L[0] picks a (col 2),  R[0] picks b (col 3),  O[0] picks t1 (col 10)
+Constraint 1:  t2 = c · d       L[1] picks c (col 4),  R[1] picks d (col 5),  O[1] picks t2 (col 11)
+Constraint 2:  t3 = e · f       L[2] picks e (col 6),  R[2] picks f (col 7),  O[2] picks t3 (col 12)
+Constraint 3:  t4 = g · h       L[3] picks g (col 8),  R[3] picks h (col 9),  O[3] picks t4 (col 13)
+```
+
+In matrix form (all unlisted entries are 0):
+
+```
+L =                         R =                         O =
+        0  0  1  0  0  0  0  0  0  0  0  0  0  0          0  0  0  1  0  0  0  0  0  0  0  0  0  0          0  0  0  0  0  0  0  0  0  0  1  0  0  0
+        0  0  0  0  1  0  0  0  0  0  0  0  0  0          0  0  0  0  0  1  0  0  0  0  0  0  0  0          0  0  0  0  0  0  0  0  0  0  0  1  0  0
+        0  0  0  0  0  0  1  0  0  0  0  0  0  0          0  0  0  0  0  0  0  1  0  0  0  0  0  0          0  0  0  0  0  0  0  0  0  0  0  0  1  0
+        0  0  0  0  0  0  0  0  1  0  0  0  0  0          0  0  0  0  0  0  0  0  0  1  0  0  0  0          0  0  0  0  0  0  0  0  0  0  0  0  0  1
+```
+
+You can verify element-wise: `(L·w) ∘ (R·w) = O·w`:
+
+```
+constraint 0:  1 * 2  = 2   ✓   (t1 = a·b)
+constraint 1:  3 * 4  = 12  ✓   (t2 = c·d)
+constraint 2:  5 * 6  = 30  ✓   (t3 = e·f)
+constraint 3:  7 * 8  = 56  ✓   (t4 = g·h)
+```
+
+This R1CS is the starting point. Groth16 then converts these matrices into polynomials (the QAP transformation) so that checking all four constraints reduces to a single polynomial identity at a secret point. That conversion — and the cryptographic machinery built on top of it — is what the rest of this article explains.
+
 ---
 
 ## The Groth16 workflow at a glance
