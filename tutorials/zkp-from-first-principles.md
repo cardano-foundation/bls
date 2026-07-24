@@ -10,6 +10,9 @@
 
 - [The paradox](#the-paradox)
 - [The Groth16 workflow at a glance](#the-groth16-workflow-at-a-glance)
+  - [Very insecure Groth16: no setup](#very-insecure-groth16-no-setup)
+  - [Still insecure Groth16: public setup](#still-insecure-groth16-public-setup)
+  - [Secure Groth16: trusted setup](#secure-groth16-trusted-setup)
 - [Why Groth16 matters](#why-groth16-matters)
 - [From computation to gates](#from-computation-to-gates)
 - [A 4-constraint "hello world"](#a-4-constraint-hello-world)
@@ -130,15 +133,51 @@ This R1CS is the starting point. Groth16 then converts these matrices into polyn
 
 Groth16 splits the world into three roles: a **circuit designer** who defines what must be proven by producing an R1CS circuit, a **prover** who knows the secret and builds the proof, and a **verifier** who checks the proof without learning the secret. Both the prover and the verifier know the R1CS circuit (the constraint structure: how many constraints, which wires appear in each). The difference is that the prover also knows the *witness* — the full assignment of values to every wire, including both the secret inputs and the public outputs. The verifier knows only the public inputs (the output `100` and the constant `1`), not the secret inputs that produced them. The verifier can be anyone — including a smart contract running on Cardano.
 
-Before we show the real Groth16 workflow, let us first see what happens **without** a trusted setup — this motivates why the trusted setup is necessary.
+To understand why the trusted setup is essential, we build up from the simplest possible version of Groth16 — one with no setup at all — and show what goes wrong at each stage.
 
-### Not-secure Groth16: without trusted setup
+### Very insecure Groth16: no setup
 
-Without a trusted setup, there is no secret `τ` to protect. The prover could simply hard-code `τ = 3` (or any known value) and publish the SRS directly. Both prover and verifier use the same public parameters. The workflow looks simple and clean:
+The simplest version of Groth16 has **no setup whatsoever**. The prover takes the R1CS circuit, computes the QAP polynomials, evaluates everything at some point, and sends the proof. The verifier recomputes the same QAP polynomials from the public R1CS, evaluates them, and checks the pairing equation. There is no SRS, no proving key, no verifying key — just raw math.
 
 ```mermaid
 flowchart TB
-    subgraph Setup["⚙️ Hard-Coded Setup (insecure)"]
+    subgraph OffChain["🔒 Off-Chain"]
+        direction TB
+        Circuit["Arithmetic Circuit<br/>(R1CS matrices)"]
+        Witness["Witness<br/>(private + public inputs)"]
+        Prover["Prover<br/>computes QAP, evaluates<br/>at secret point, builds π"]
+    end
+
+    subgraph OnChain["⛓️ On-Chain (Cardano)"]
+        direction TB
+        Contract["Smart Contract<br/>(Aiken verifier)"]
+        Public["Public Inputs<br/>(visible on-chain)"]
+        Recompute["Verifier recomputes<br/>QAP from R1CS"]
+        Check{"Pairing check<br/>e(A,B) = e(C,δ·G₂)·e(V,γ·G₂)"}
+        Accept["✅ Accept"]
+        Reject["❌ Reject"]
+    end
+
+    Circuit --> Prover
+    Witness --> Prover
+    Prover -->|"π + QAP polynomials"| Contract
+    Circuit --> Recompute
+    Public --> Contract
+    Recompute --> Contract
+    Contract --> Check
+    Check -->|Valid| Accept
+    Check -->|Invalid| Reject
+```
+
+**This works — but it is useless.** Without an SRS, the prover cannot evaluate polynomials at a secret point efficiently (no power table). The prover must send the full QAP polynomials to the verifier, who must recompute everything from scratch. The proof is no longer succinct — it is as large as the circuit itself. And there is no zero-knowledge: the polynomials encode the witness. This is not a proof system; it is just a complex way of restating the problem.
+
+### Still insecure Groth16: public setup
+
+The next step introduces an SRS — but with `τ` public. Now the prover can use the power table `τⁱ·G₁, τⁱ·G₂` to evaluate polynomials efficiently, and the proof shrinks to 192 bytes. The verifier can check the pairing equation without recomputing the QAP. The workflow looks clean and efficient:
+
+```mermaid
+flowchart TB
+    subgraph Setup["⚙️ Public Setup (insecure)"]
         direction TB
         Tau["τ = 3 (public, known to everyone)"]
         SRS["SRS = {3⁰·G₁, 3¹·G₁, 3²·G₁, ...}<br/>public parameters"]
@@ -186,7 +225,7 @@ The attacker builds proof elements `A, B, C` using the *legitimate* SRS points (
 
 **The secret evaluation point `τ` is the entire security foundation of Groth16.** If it is known, the proof system becomes a forgery factory. The trusted setup ceremony is the mechanism that creates `τ`, embeds it into curve points, and then destroys it.
 
-### Secure Groth16: with trusted setup
+### Secure Groth16: trusted setup
 
 The real Groth16 workflow introduces a **trusted setup ceremony** that generates `τ` securely and destroys it forever. The diagram below shows the complete lifecycle: who does what, what stays off-chain, what goes on-chain, and where the secret randomness enters the picture.
 
@@ -244,6 +283,14 @@ flowchart TB
 | **Proof π** | Cross-layer | 192 bytes: three curve points `A, B, C`. Sent in the transaction redeemer. |
 
 **Key insight: the secret never crosses the boundary.** The prover knows the witness but never reveals it. The verifier never sees the witness but is mathematically certain the constraints were satisfied. The randomness that created the SRS was destroyed long before any proof was generated. This is the architecture that makes zero-knowledge possible.
+
+### Summary: why each layer matters
+
+| Layer | Setup | Proof size | Secure? | Why |
+|-------|-------|-----------|---------|-----|
+| **No setup** | None | Full QAP polynomials (circuit-sized) | No | No SRS means no power table; prover must send everything; no succinctness, no zero-knowledge |
+| **Public setup** | `τ` known | 192 bytes | No | Sufficient for succinctness, but anyone with `τ` can forge proofs |
+| **Trusted setup** | `τ` secret | 192 bytes | Yes | Ceremony destroys `τ`; proof is succinct AND zero-knowledge AND sound |
 
 ---
 
