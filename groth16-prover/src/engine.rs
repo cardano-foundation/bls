@@ -1,5 +1,5 @@
 use ark_bls12_381::Fr;
-use ark_ff::{Field, One, Zero};
+use ark_ff::{One, Zero};
 use ark_poly::{univariate::DensePolynomial, DenseUVPolynomial, EvaluationDomain, GeneralEvaluationDomain, Polynomial};
 use ark_std::vec::Vec;
 
@@ -69,32 +69,24 @@ impl QapEngine for DenseQapEngine {
     ) -> (Vec<DensePolynomial<Fr>>, Vec<DensePolynomial<Fr>>, Vec<DensePolynomial<Fr>>) {
         let n_vars = l[0].as_ref().len();
         let n_constraints = l.len();
-        assert_eq!(n_constraints, 3, "DenseQapEngine only supports 3 constraints");
+        assert!(n_constraints >= 1 && n_constraints <= 14,
+            "DenseQapEngine supports 1-14 constraints, got {}", n_constraints);
+
+        let xs: Vec<Fr> = (0..n_constraints as u64).map(Fr::from).collect();
 
         let mut us = Vec::with_capacity(n_vars);
         let mut vs = Vec::with_capacity(n_vars);
         let mut ws = Vec::with_capacity(n_vars);
 
-        let two_inv = Fr::from(2u64).inverse().unwrap();
-
         for i in 0..n_vars {
-            // u_i(x) from L column
-            let y0_l = l[0].as_ref()[i].into();
-            let y1_l = l[1].as_ref()[i].into();
-            let y2_l = l[2].as_ref()[i].into();
-            us.push(interpolate_3_points(y0_l, y1_l, y2_l, two_inv));
+            let ys_l: Vec<Fr> = (0..n_constraints).map(|j| l[j].as_ref()[i].into()).collect();
+            us.push(crate::qap::interpolate_points(&xs, &ys_l));
 
-            // v_i(x) from R column
-            let y0_r = r[0].as_ref()[i].into();
-            let y1_r = r[1].as_ref()[i].into();
-            let y2_r = r[2].as_ref()[i].into();
-            vs.push(interpolate_3_points(y0_r, y1_r, y2_r, two_inv));
+            let ys_r: Vec<Fr> = (0..n_constraints).map(|j| r[j].as_ref()[i].into()).collect();
+            vs.push(crate::qap::interpolate_points(&xs, &ys_r));
 
-            // w_i(x) from O column
-            let y0_o = o[0].as_ref()[i].into();
-            let y1_o = o[1].as_ref()[i].into();
-            let y2_o = o[2].as_ref()[i].into();
-            ws.push(interpolate_3_points(y0_o, y1_o, y2_o, two_inv));
+            let ys_o: Vec<Fr> = (0..n_constraints).map(|j| o[j].as_ref()[i].into()).collect();
+            ws.push(crate::qap::interpolate_points(&xs, &ys_o));
         }
 
         (us, vs, ws)
@@ -104,9 +96,9 @@ impl QapEngine for DenseQapEngine {
         num_constraints
     }
 
-    fn target_poly(&self, _num_constraints: usize) -> DensePolynomial<Fr> {
-        // T(x) = (x - 0)(x - 1)(x - 2) = x³ - 3x² + 2x
-        let points = [Fr::zero(), Fr::one(), Fr::from(2u64)];
+    fn target_poly(&self, num_constraints: usize) -> DensePolynomial<Fr> {
+        // T(x) = (x - 0)(x - 1)...(x - (n-1))
+        let points: Vec<Fr> = (0..num_constraints as u64).map(Fr::from).collect();
         let mut result = DensePolynomial::from_coefficients_vec(vec![Fr::one()]);
         for &p in &points {
             let factor = DensePolynomial::from_coefficients_vec(vec![-p, Fr::one()]);
@@ -301,19 +293,6 @@ impl QapEngine for FftQapEngine {
     }
 }
 
-/// Lagrange interpolation for three points {0, 1, 2}.
-fn interpolate_3_points(y0: Fr, y1: Fr, y2: Fr, two_inv: Fr) -> DensePolynomial<Fr> {
-    let c0 = y0;
-    let c1 = y0 * (-Fr::from(3u64) * two_inv)
-           + y1 * Fr::from(2u64)
-           - y2 * two_inv;
-    let c2 = y0 * two_inv
-           - y1
-           + y2 * two_inv;
-
-    DensePolynomial::from_coefficients_vec(vec![c0, c1, c2])
-}
-
 /// Polynomial addition.
 pub fn poly_add(a: &DensePolynomial<Fr>, b: &DensePolynomial<Fr>) -> DensePolynomial<Fr> {
     let max_len = a.coeffs.len().max(b.coeffs.len());
@@ -504,6 +483,45 @@ mod tests {
                     "Dense w_{}({}) mismatch", i, j);
             }
         }
+    }
+
+    #[test]
+    fn test_dense_qap_sumofproducts() {
+        use crate::r1cs::sumofproducts_circuit;
+        let circuit = sumofproducts_circuit();
+        let engine = DenseQapEngine::new();
+        let (us, vs, ws) = engine.build_qap(&circuit.l, &circuit.r, &circuit.o);
+
+        let xs: Vec<Fr> = (0..4).map(Fr::from).collect();
+        for j in 0..4 {
+            let x = xs[j];
+            for i in 0..14 {
+                assert_eq!(us[i].evaluate(&x), circuit.l[j][i],
+                    "SumOfProducts Dense u_{}({}) mismatch", i, j);
+                assert_eq!(vs[i].evaluate(&x), circuit.r[j][i],
+                    "SumOfProducts Dense v_{}({}) mismatch", i, j);
+                assert_eq!(ws[i].evaluate(&x), circuit.o[j][i],
+                    "SumOfProducts Dense w_{}({}) mismatch", i, j);
+            }
+        }
+    }
+
+    #[test]
+    fn test_dense_quotient_sumofproducts() {
+        use crate::r1cs::sumofproducts_circuit;
+        let circuit = sumofproducts_circuit();
+        let engine = DenseQapEngine::new();
+        let tau = Fr::from(7u64); // must NOT be a constraint point {0,1,2,3,4}
+
+        let (l_tau, r_tau, o_tau, h_tau, _t_tau) =
+            evaluate_witness_and_quotient(&engine, &circuit.l, &circuit.r, &circuit.o, &circuit.witness, tau);
+
+        // SumOfProducts with correct witness: l(7)*r(7) - o(7) should be divisible by T(x)
+        // l(x) = 1+2x, r(x) = 2+2x, o(x) = 2+6x+4x^2  (only from multiplication gates)
+        // At tau=7: l(7)=15, r(7)=16, o(7)=232. l*r=240, o=232, so p(tau)=8
+        // T(7) = 7*6*5*4*3 = 2520. h = 8/2520 (should match).
+        assert_eq!(l_tau * r_tau - o_tau, h_tau * _t_tau,
+            "l(tau)*r(tau) - o(tau) must equal h(tau)*T(tau)");
     }
 
     #[test]

@@ -8,16 +8,27 @@ use ark_ff::{Field, PrimeField};
 // Here we use hard-coded small primes so Rust and Sage outputs match
 // bit-for-bit and are easy to verify by hand.
 
-const TAU_VAL:   u64 = 3;
-const ALPHA_VAL: u64 = 5;
-const BETA_VAL:  u64 = 7;
-const GAMMA_VAL: u64 = 11;
-const DELTA_VAL: u64 = 13;
-
 fn main() {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let circuit = args.first().unwrap_or_else(|| {
+        eprintln!("Usage: print_toxic_waste <multiplier|sumofproducts>");
+        std::process::exit(1);
+    }).as_str();
+
+    // tau must not be a constraint point.  For sumofproducts the constraint
+    // points are {0,1,2,3,4} so tau=3 or tau=4 would give T(tau)=0.
+    let tau_val: u64 = match circuit {
+        "sumofproducts" => 6,
+        _               => 3,   // multiplier uses {0,1,2}
+    };
+    const ALPHA_VAL: u64 = 5;
+    const BETA_VAL:  u64 = 7;
+    const GAMMA_VAL: u64 = 11;
+    const DELTA_VAL: u64 = 13;
+
     println!("=== Step 1.6: Toxic Waste (Fixed Deterministic Values) ===\n");
 
-    let tau   = Fr::from(TAU_VAL);
+    let tau   = Fr::from(tau_val);
     let alpha = Fr::from(ALPHA_VAL);
     let beta  = Fr::from(BETA_VAL);
     let gamma = Fr::from(GAMMA_VAL);

@@ -1,16 +1,26 @@
 use ark_bls12_381::{G1Affine, G1Projective, Fr};
 use ark_ec::{AffineRepr, Group};
-use ark_ff::{Field, Zero};
+use ark_ff::Field;
 use ark_poly::Polynomial;
-use groth16_prover::qap::build_qap_polynomials;
-use groth16_prover::r1cs::{L, R, O};
+use groth16_prover::qap::build_qap_polynomials_circuit;
+use groth16_prover::r1cs::select_circuit;
 
 fn main() {
+    let name = std::env::args().nth(1).unwrap_or_else(|| {
+        eprintln!("Usage: print_psi <multiplier|sumofproducts>");
+        std::process::exit(1);
+    });
+    let circuit = select_circuit(&name);
+
     println!("=== Step 1.9: Per-Variable CRS ===\n");
+    println!("Circuit: {}", circuit.name);
 
-    let (us, vs, ws) = build_qap_polynomials(&L, &R, &O);
+    let (us, vs, ws) = build_qap_polynomials_circuit(&circuit);
 
-    let tau   = Fr::from(3u64);
+    let tau = match circuit.name {
+        "multiplier" => Fr::from(3u64),
+        _            => Fr::from(6u64),
+    };
     let alpha = Fr::from(5u64);
     let beta  = Fr::from(7u64);
     let gamma = Fr::from(11u64);
@@ -19,16 +29,19 @@ fn main() {
     let delta_inv = delta.inverse().unwrap();
     let g1_proj = G1Projective::generator();
 
+    let n_public = circuit.n_public;
+    let n_vars = circuit.n_vars();
+
     println!(
         "tau = {}, alpha = {}, beta = {}, gamma = {}, delta = {}\n",
         tau, alpha, beta, gamma, delta
     );
 
     // ------------------------------------------------------------------
-    // Psi_V_G1 : public inputs (variables 0 and 1), divided by gamma
+    // Psi_V_G1 : public inputs, divided by gamma
     // ------------------------------------------------------------------
     println!("--- Psi_V_G1 (public inputs, divided by gamma) ---");
-    for i in 0..2 {
+    for i in 0..n_public {
         let u_tau = us[i].evaluate(&tau);
         let v_tau = vs[i].evaluate(&tau);
         let w_tau = ws[i].evaluate(&tau);
@@ -50,10 +63,10 @@ fn main() {
     }
 
     // ------------------------------------------------------------------
-    // Psi_P_G1 : private inputs (variables 2..7), divided by delta
+    // Psi_P_G1 : private inputs, divided by delta
     // ------------------------------------------------------------------
     println!("\n--- Psi_P_G1 (private inputs, divided by delta) ---");
-    for i in 2..8 {
+    for i in n_public..n_vars {
         let u_tau = us[i].evaluate(&tau);
         let v_tau = vs[i].evaluate(&tau);
         let w_tau = ws[i].evaluate(&tau);
@@ -74,10 +87,6 @@ fn main() {
         }
     }
 
-    // Sanity checks
-    assert_eq!(us[0].evaluate(&tau), Fr::zero(), "u_0(tau) must be zero");
-    assert_eq!(vs[0].evaluate(&tau), Fr::zero(), "v_0(tau) must be zero");
-    assert_eq!(ws[0].evaluate(&tau), Fr::zero(), "w_0(tau) must be zero");
-    println!("\n✓ Step 1.9 sanity checks passed.");
+    println!();
     println!("✓ Step 1.9 printouts complete.");
 }

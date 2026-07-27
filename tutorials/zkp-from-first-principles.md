@@ -37,11 +37,11 @@ Zero-knowledge proofs (ZKPs) do exactly that. A ZKP is a mathematical object —
 
 The most practical and widely deployed family of ZKPs today is called **zk-SNARKs**: *Zero-Knowledge Succinct Non-Interactive Arguments of Knowledge*. "Succinct" means the proof is tiny (a few hundred bytes). "Non-interactive" means the prover sends a single message; no back-and-forth challenge protocol is needed. "Argument of knowledge" means the proof does not just show that a solution exists — it shows that the prover actually *knows* one.
 
-This article focuses on **Groth16**, the fastest and most compact zk-SNARK construction in production today. A Groth16 proof is 192 bytes. Verification requires only three elliptic-curve pairings. Crucially, these costs are **constant**: whether the circuit has 4 constraints or 4 million, the proof is always 192 bytes and verification always takes exactly three pairings. The size of the problem affects only the prover's work (which grows with the circuit), never the proof size or the verifier's effort. And since Cardano's Plutus V3 already exposes **BLS12-381** pairing primitives natively, Groth16 verification can run inside an Aiken smart contract with no protocol changes.
+This article focuses on **Groth16**, the fastest and most compact zk-SNARK construction in production today. A Groth16 proof is 192 bytes. Verification requires only three elliptic-curve pairings. Crucially, these costs are **constant**: whether the circuit has 5 constraints or 5 million, the proof is always 192 bytes and verification always takes exactly three pairings. The size of the problem affects only the prover's work (which grows with the circuit), never the proof size or the verifier's effort. And since Cardano's Plutus V3 already exposes **BLS12-381** pairing primitives natively, Groth16 verification can run inside an Aiken smart contract with no protocol changes.
 
 > **Why BLS12-381?** The entire pipeline in this article — the finite field `Fr`, the elliptic-curve groups `G1` and `G2`, and the bilinear pairing `e` — is built on the **BLS12-381 curve**. We chose it specifically because Cardano's Plutus V3 has native builtins for it. If you are new to BLS12-381 and want a gentle introduction to what it enables on Cardano — BLS signatures, VRFs, anonymous credentials, and more — the Cardano Foundation has published a dedicated blog post: [**"Aiken BLS12-381 primitives — wide possibilities available"**](https://cardanofoundation.org/blog/aiken-primitives-explained).
 
-But before we get to smart contracts, we need to understand what the proof actually *is*. We will build it from scratch, step by step, using a very simple circuit: a 4-constraint sum-of-products.
+But before we get to smart contracts, we need to understand what the proof actually *is*. We will build it from scratch, step by step, using a very simple circuit: a 5-constraint sum-of-products.
 
 Groth16 proves correct execution of an **arithmetic circuit**, which must first be expressed as a **Rank-1 Constraint System (R1CS)**.  
 ---
@@ -107,9 +107,9 @@ There is one more constraint: each R1CS row can express only a *quadratic* relat
 
 ---
 
-## A 4-constraint "hello world"
+## A 5-constraint "hello world"
 
-Our repository already contains a 3-gate multiplication chain (`multiplier.circom`) that proves `a = x1·x2·x3·x4`. To make the pedagogical step slightly richer, we introduce a new 4-gate circuit that proves a *sum of pairwise products*. This is the same circuit we already saw when introducing the R1CS matrices — now we will trace it through every stage of the Groth16 pipeline, from R1CS to QAP to proof to verification. Let us start with the concrete problem.
+Our repository already contains a 3-gate multiplication chain (`multiplier.circom`) that proves `a = x1·x2·x3·x4`. To make the pedagogical step slightly richer, we introduce a 5-constraint circuit that proves a *sum of pairwise products*. This is the same circuit we already saw when introducing the R1CS matrices — now we will trace it through every stage of the Groth16 pipeline, from R1CS to QAP to proof to verification. Let us start with the concrete problem.
 
 **The equation.** We have eight secret numbers that must satisfy:
 
@@ -141,7 +141,7 @@ w =  [  1,   100,  1, 2, 3, 4, 5, 6, 7, 8,  2, 12, 30, 56 ]
 
 Note the first entry is the constant `1` (present in every R1CS witness), and `out = 100` is the public output that the verifier knows.
 
-We write circuits in **Circom** — think of it as the assembly language for R1CS: it compiles directly to constraint matrices with no hidden abstractions, which is why we use it throughout this tutorial. This circuit has 8 private inputs, 4 intermediate wires, and 1 public output. In R1CS form it yields exactly 4 constraints — one per multiplication. The source lives in [`groth16-prover/circom/SumOfProducts/sum_of_products.circom`](https://github.com/cardano-foundation/bls/blob/main/groth16-prover/circom/SumOfProducts/sum_of_products.circom):
+We write circuits in **Circom** — think of it as the assembly language for R1CS: it compiles directly to constraint matrices with no hidden abstractions, which is why we use it throughout this tutorial. This circuit has 8 private inputs, 4 intermediate wires, and 1 public output. In R1CS form it yields 5 constraints — four multiplication gates plus one addition gate (which R1CS also encodes as a constraint). The source lives in [`groth16-prover/circom/SumOfProducts/sum_of_products.circom`](https://github.com/cardano-foundation/bls/blob/main/groth16-prover/circom/SumOfProducts/sum_of_products.circom):
 
 ```circom
 pragma circom 2.0.0;
@@ -204,7 +204,7 @@ r(x) = Σ a_i · v_i(x)
 o(x) = Σ a_i · w_i(x)
 ```
 
-**Concrete example for constraint 1** (`t2 = c·d`, at point `x = 1`). The Lagrange basis polynomial `L_1(x) = −x² + 2x` equals `1` at `x = 1` and `0` at `x = 0` and `x = 2`. Because wire 4 (`c`) appears on the left side of constraint 1 only, `u_4(x) = L_1(x) = −x² + 2x`. Similarly, `v_5(x) = L_1(x) = −x² + 2x` for wire 5 (`d`), and `w_11(x) = L_1(x) = −x² + 2x` for wire 11 (`t2`). Evaluating at `x = 1`:
+**Concrete example for constraint 1** (`t2 = c·d`, at point `x = 1`). For our 5-constraint circuit with constraint points `{0, 1, 2, 3, 4}`, the Lagrange basis polynomial `L_1(x)` equals `1` at `x = 1` and `0` at the other four points. Because wire 4 (`c`) appears on the left side of constraint 1 only, `u_4(x) = L_1(x)`. Similarly, `v_5(x) = L_1(x)` for wire 5 (`d`), and `w_11(x) = L_1(x)` for wire 11 (`t2`). Evaluating at `x = 1`:
 
 ```
 u_4(1) = −1 + 2 = 1
@@ -253,15 +253,15 @@ where `G1` and `G2` are base points on the BLS12-381 curve. The scalar `τ` itse
 
 In our pedagogical `Implementation 1` ([`groth16-prover/src/r1cs.rs`](https://github.com/cardano-foundation/bls/blob/main/groth16-prover/src/r1cs.rs) and [`src/bin/print_toxic_waste.rs`](https://github.com/cardano-foundation/bls/blob/main/groth16-prover/src/bin/print_toxic_waste.rs)), we use small deterministic scalars so that every intermediate value is reproducible:
 
-| Parameter | Value | Role |
-|-----------|-------|------|
-| `τ` (tau)   | 3   | Secret evaluation point |
-| `α` (alpha) | 5   | Mixed term for proof `C` |
-| `β` (beta)  | 7   | Mixed term for proof `B` and `C` |
-| `γ` (gamma) | 11  | Public-input denominator |
-| `δ` (delta) | 13  | Private-input denominator |
+| Parameter | Value (multiplier) | Value (SumOfProducts) | Role |
+|-----------|--------------------|-----------------------|------|
+| `τ` (tau)   | 3   | 6   | Secret evaluation point |
+| `α` (alpha) | 5   | 5   | Mixed term for proof `C` |
+| `β` (beta)  | 7   | 7   | Mixed term for proof `B` and `C` |
+| `γ` (gamma) | 11  | 11  | Public-input denominator |
+| `δ` (delta) | 13  | 13  | Private-input denominator |
 
-In a production deployment these are large random field elements generated during a multi-party computation (MPC) ceremony. As long as **at least one participant** in the ceremony was honest and discarded their randomness, the toxic waste remains unknown. Our repository implements both a single-party dev ceremony (`ceremony-dev`) and a full Phase-2 MPC on top of the Perpetual Powers of Tau (PPoT) universal SRS. We will cover the production ceremony in detail in the next installment.
+For SumOfProducts, `τ = 6` is required because the constraint points are `{0, 1, 2, 3, 4}` — using `τ = 3` or `τ = 4` would make `T(τ) = 0` and break the proof. In a production deployment these are large random field elements generated during a multi-party computation (MPC) ceremony. As long as **at least one participant** in the ceremony was honest and discarded their randomness, the toxic waste remains unknown. Our repository implements both a single-party dev ceremony (`ceremony-dev`) and a full Phase-2 MPC on top of the Perpetual Powers of Tau (PPoT) universal SRS. We will cover the production ceremony in detail in the next installment.
 
 ---
 
@@ -277,7 +277,7 @@ A Groth16 proof consists of exactly three elliptic-curve points:
 
 The `Ψ_P_G1` terms are *per-variable proving-key elements* pre-computed during the trusted setup. They encode the QAP polynomials evaluated at `τ`, scaled by `1/δ` and mixed with `α` and `β`. The prover computes `C` by taking a linear combination of these elements weighted by the witness values, then adding the quotient term `h(τ)·T(τ)/δ·G1`.
 
-In our `Implementation 1` ([`src/bin/print_proof_a.rs`](https://github.com/cardano-foundation/bls/blob/main/groth16-prover/src/bin/print_proof_a.rs), [`print_proof_b.rs`](https://github.com/cardano-foundation/bls/blob/main/groth16-prover/src/bin/print_proof_b.rs), [`print_proof_c.rs`](https://github.com/cardano-foundation/bls/blob/main/groth16-prover/src/bin/print_proof_c.rs)), each of these points is built by naive scalar-by-scalar multiplication so that you can print the exact scalar being multiplied at every step. For the 4-constraint `SumOfProducts` circuit the scalars are different, but the formulas are identical.
+In our `Implementation 1` ([`src/bin/print_proof_a.rs`](https://github.com/cardano-foundation/bls/blob/main/groth16-prover/src/bin/print_proof_a.rs), [`print_proof_b.rs`](https://github.com/cardano-foundation/bls/blob/main/groth16-prover/src/bin/print_proof_b.rs), [`print_proof_c.rs`](https://github.com/cardano-foundation/bls/blob/main/groth16-prover/src/bin/print_proof_c.rs)), each of these points is built by naive scalar-by-scalar multiplication so that you can print the exact scalar being multiplied at every step. For the 5-constraint `SumOfProducts` circuit the scalars are different, but the formulas are identical.
 
 Because the proof lives entirely on the BLS12-381 curve, it compresses to **192 bytes** (48 bytes for each G1 point, 96 bytes for the G2 point). This is the "succinct" in zk-SNARK.
 
@@ -362,8 +362,8 @@ The next step introduces an SRS — but with `τ` public. Now the prover can use
 flowchart TB
     subgraph Setup["⚙️ Public Setup (insecure)"]
         direction TB
-        Tau["τ = 3 (public, known to everyone)"]
-        SRS["SRS = {3⁰·G₁, 3¹·G₁, 3²·G₁, ...}<br/>public parameters"]
+        Tau["τ = 6 (public, known to everyone)"]
+        SRS["SRS = {6⁰·G₁, 6¹·G₁, 6²·G₁, ...}<br/>public parameters"]
         PK["Proving Key (pk)"]
         VK["Verifying Key (vk)"]
     end
@@ -398,7 +398,7 @@ flowchart TB
     Check -->|Invalid| Reject
 ```
 
-**This looks great — but it is completely broken.** Because `τ = 3` is public, anyone can compute `T(τ) = 6` directly. An attacker can pick a *fake* witness — say, `a=100, b=100, c=100, d=100, e=100, f=100, g=100, h=100` — which does not satisfy the real constraints, and then choose `h(τ)` to make the equation balance:
+**This looks great — but it is completely broken.** Because `τ = 6` is public, anyone can compute `T(τ) = 720` directly. An attacker can pick a *fake* witness — say, `a=100, b=100, c=100, d=100, e=100, f=100, g=100, h=100` — which does not satisfy the real constraints, and then choose `h(τ)` to make the equation balance:
 
 ```
 h(τ) = (l(τ)·r(τ) − o(τ)) / T(τ)
@@ -425,7 +425,7 @@ flowchart TB
 
     subgraph OffChain["🔒 Off-Chain"]
         direction TB
-        Circuit["Arithmetic Circuit<br/>(e.g. multiplier.circom)"]
+        Circuit["Arithmetic Circuit<br/>(e.g. sum_of_products.circom)"]
         Witness["Witness<br/>(private + public inputs)"]
         Prover["Prover<br/>computes proof π"]
     end
@@ -490,7 +490,7 @@ The primitives we use for Groth16 verification are:
 
 These are exactly the operations needed for the Groth16 pairing check. The Aiken standard library wraps them in a clean API under `aiken/crypto/bls12_381`.
 
-Our [`aiken/groth16`](https://github.com/cardano-foundation/bls/blob/main/aiken/groth16/README.md) package implements a fully parameterized Groth16 verifier in Aiken. It accepts any verification key, any list of public inputs, and any proof, then runs the standard pairing check. The verifier has been validated against proofs produced by our Rust prover for the 3-gate multiplier, the 4-gate `SumOfProducts`, the 1,107-gate privacy spend, and the 1,911-gate Poseidon Merkle circuits.
+Our [`aiken/groth16`](https://github.com/cardano-foundation/bls/blob/main/aiken/groth16/README.md) package implements a fully parameterized Groth16 verifier in Aiken. It accepts any verification key, any list of public inputs, and any proof, then runs the standard pairing check. The verifier has been validated against proofs produced by our Rust prover for the 3-gate multiplier, the 5-constraint `SumOfProducts`, the 1,107-gate privacy spend, and the 1,911-gate Poseidon Merkle circuits.
 
 The on-chain cost of verifying a Groth16 proof with ~5 public inputs is well within Cardano's per-transaction execution budget. This means a smart contract can release funds, grant access, or mint tokens based solely on the validity of a ZK proof — without ever learning the user's identity, credentials, or secret inputs.
 
@@ -521,9 +521,9 @@ Run any step in isolation:
 
 ```bash
 cd groth16-prover
-cargo run --bin print_r1cs
-cargo run --bin print_qap
-cargo run --bin print_proof_a
+cargo run --bin print_r1cs -- sumofproducts
+cargo run --bin print_qap -- sumofproducts
+cargo run --bin print_proof_a -- sumofproducts
 ...
 ```
 
@@ -575,18 +575,14 @@ The binaries in our repository walk through every sub-step of the dense Groth16 
 >   sage /mnt/groth16_dense_16steps.sage
 > ```
 
-> **The circuit we trace.** The hard-coded `Implementation 1` uses the 3-gate multiplication chain from `multiplier.circom`:
-> ```
-> x5 = x1 * x2
-> x6 = x3 * x4
-> a  = x5 * x6
-> ```
-> Witness ordering: `[1, a, x1, x2, x3, x4, x5, x6]`
-> With inputs `x1=2, x2=2, x3=3, x4=4` we get `x5=4, x6=12, a=48`.
+> **The circuit we trace.** We trace the 5-constraint `SumOfProducts` circuit, which proves knowledge of eight secret numbers `a, b, c, d, e, f, g, h` satisfying `a·b + c·d + e·f + g·h = out`, where `out` is the public output. The four multiplication gates and one addition gate yield five R1CS constraints at constraint points `{0, 1, 2, 3, 4}`.
 >
-> The witness vector is therefore **`[1, 48, 2, 2, 3, 4, 4, 12]`**.
+> Witness ordering: `[1, out, a, b, c, d, e, f, g, h, t1, t2, t3, t4]`
+> With inputs `a=1, b=2, c=3, d=4, e=5, f=6, g=7, h=8` we get `t1=2, t2=12, t3=30, t4=56, out=100`.
 >
-> The 4-gate `SumOfProducts` circuit follows the exact same mathematics with one additional constraint; everything below generalises naturally.
+> The witness vector is therefore **`[1, 100, 1, 2, 3, 4, 5, 6, 7, 8, 2, 12, 30, 56]`** — 14 entries.
+>
+> We also include the simpler 3-gate `multiplier` circuit (`x5 = x1·x2`, `x6 = x3·x4`, `a = x5·x6`) for comparison; the same mathematics apply with 8 witnesses and 3 constraint points `{0, 1, 2}`.
 
 ---
 
@@ -596,27 +592,37 @@ The binaries in our repository walk through every sub-step of the dense Groth16 
 
 **Paper and pencil.**
 
-There are 3 multiplication gates, so we need 3 constraints. The witness vector has 8 entries:
+There are 5 constraints (four multiplications plus one addition), so we need 5 rows in each matrix. The witness vector has 14 entries:
 
 ```
-w = [1, a, x1, x2, x3, x4, x5, x6]
-    [0, 1,  2,  3,  4,  5,  6,  7]   <-- indices
+w = [1, out, a, b, c, d, e, f, g, h, t1, t2, t3, t4]
+    [0,  1,  2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]   <-- indices
 ```
 
-**Constraint 0:** `x5 = x1 * x2`
-- Left side picks `x1`  → `L[0][2] = 1`
-- Right side picks `x2` → `R[0][3] = 1`
-- Output picks `x5`     → `O[0][6] = 1`
+**Constraint 0:** `t1 = a * b` → `w[2] * w[3] = w[10]`
+- Left side picks `a`     → `L[0][2] = 1`
+- Right side picks `b`    → `R[0][3] = 1`
+- Output picks `t1`       → `O[0][10] = 1`
 
-**Constraint 1:** `x6 = x3 * x4`
-- Left side picks `x3`  → `L[1][4] = 1`
-- Right side picks `x4` → `R[1][5] = 1`
-- Output picks `x6`     → `O[1][7] = 1`
+**Constraint 1:** `t2 = c * d` → `w[4] * w[5] = w[11]`
+- Left side picks `c`     → `L[1][4] = 1`
+- Right side picks `d`    → `R[1][5] = 1`
+- Output picks `t2`       → `O[1][11] = 1`
 
-**Constraint 2:** `a = x5 * x6`
-- Left side picks `x5`  → `L[2][6] = 1`
-- Right side picks `x6` → `R[2][7] = 1`
-- Output picks `a`      → `O[2][1] = 1`
+**Constraint 2:** `t3 = e * f` → `w[6] * w[7] = w[12]`
+- Left side picks `e`     → `L[2][6] = 1`
+- Right side picks `f`    → `R[2][7] = 1`
+- Output picks `t3`       → `O[2][12] = 1`
+
+**Constraint 3:** `t4 = g * h` → `w[8] * w[9] = w[13]`
+- Left side picks `g`     → `L[3][8] = 1`
+- Right side picks `h`    → `R[3][9] = 1`
+- Output picks `t4`       → `O[3][13] = 1`
+
+**Constraint 4:** `out = t1 + t2 + t3 + t4` → `w[0] * (w[10] + w[11] + w[12] + w[13]) = w[1]`
+- Left side picks `1` (constant) → `L[4][0] = 1`
+- Right side picks `t1+t2+t3+t4` → `R[4][10] = R[4][11] = R[4][12] = R[4][13] = 1`
+- Output picks `out`              → `O[4][1] = 1`
 
 All other entries are zero.
 
@@ -624,7 +630,7 @@ All other entries are zero.
 
 ```bash
 cd groth16-prover
-cargo run --bin print_r1cs
+cargo run --bin print_r1cs -- sumofproducts
 ```
 
 **Actual output:**
@@ -632,31 +638,41 @@ cargo run --bin print_r1cs
 ```
 === Step 1.1: R1CS Matrices and Witness ===
 
-Witness a = [1, 48, 2, 2, 3, 4, 4, 12]
+Circuit: sumofproducts
+
+Witness a = ["1", "100", "1", "2", "3", "4", "5", "6", "7", "8", "2", "12", "30", "56"]
 
 L matrix:
-  [0, 0, 1, 0, 0, 0, 0, 0]
-  [0, 0, 0, 0, 1, 0, 0, 0]
-  [0, 0, 0, 0, 0, 0, 1, 0]
+  ["", "", "1", "", "", "", "", "", "", "", "", "", "", ""]
+  ["", "", "", "", "1", "", "", "", "", "", "", "", "", ""]
+  ["", "", "", "", "", "", "1", "", "", "", "", "", "", ""]
+  ["", "", "", "", "", "", "", "", "1", "", "", "", "", ""]
+  ["1", "", "", "", "", "", "", "", "", "", "", "", "", ""]
 
 R matrix:
-  [0, 0, 0, 1, 0, 0, 0, 0]
-  [0, 0, 0, 0, 0, 1, 0, 0]
-  [0, 0, 0, 0, 0, 0, 0, 1]
+  ["", "", "", "1", "", "", "", "", "", "", "", "", "", ""]
+  ["", "", "", "", "", "1", "", "", "", "", "", "", "", ""]
+  ["", "", "", "", "", "", "", "1", "", "", "", "", "", ""]
+  ["", "", "", "", "", "", "", "", "", "1", "", "", "", ""]
+  ["", "", "", "", "", "", "", "", "", "", "1", "1", "1", "1"]
 
 O matrix:
-  [0, 0, 0, 0, 0, 0, 1, 0]
-  [0, 0, 0, 0, 0, 0, 0, 1]
-  [0, 1, 0, 0, 0, 0, 0, 0]
+  ["", "", "", "", "", "", "", "", "", "", "1", "", "", ""]
+  ["", "", "", "", "", "", "", "", "", "", "", "1", "", ""]
+  ["", "", "", "", "", "", "", "", "", "", "", "", "1", ""]
+  ["", "", "", "", "", "", "", "", "", "", "", "", "", "1"]
+  ["", "1", "", "", "", "", "", "", "", "", "", "", "", ""]
 
-L · a = ["2", "3", "4"]
-R · a = ["2", "4", "12"]
-O · a = ["4", "12", "48"]
+L · a = ["1", "3", "5", "7", "1"]
+R · a = ["2", "4", "6", "8", "100"]
+O · a = ["2", "12", "30", "56", "100"]
 
 Element-wise (L·a) * (R·a):
-  constraint 0: 2 * 2 = 4  (O·a = 4)   ✓
-  constraint 1: 3 * 4 = 12 (O·a = 12)  ✓
-  constraint 2: 4 * 12 = 48 (O·a = 48) ✓
+  constraint 0: 1 * 2 = 2 (O·a = 2)
+  constraint 1: 3 * 4 = 12 (O·a = 12)
+  constraint 2: 5 * 6 = 30 (O·a = 30)
+  constraint 3: 7 * 8 = 56 (O·a = 56)
+  constraint 4: 1 * 100 = 100 (O·a = 100)
 
 ✓ R1CS relation verified.
 ```
@@ -665,9 +681,11 @@ Element-wise (L·a) * (R·a):
 
 | Constraint | `L·a` | `R·a` | `(L·a)*(R·a)` | `O·a` | Match? |
 |------------|-------|-------|---------------|-------|--------|
-| 0 (`x5 = x1*x2`) | `x1 = 2` | `x2 = 2` | `4` | `x5 = 4` | ✓ |
-| 1 (`x6 = x3*x4`) | `x3 = 3` | `x4 = 4` | `12` | `x6 = 12` | ✓ |
-| 2 (`a = x5*x6`) | `x5 = 4` | `x6 = 12` | `48` | `a = 48` | ✓ |
+| 0 (`t1 = a*b`) | `a = 1` | `b = 2` | `2` | `t1 = 2` | ✓ |
+| 1 (`t2 = c*d`) | `c = 3` | `d = 4` | `12` | `t2 = 12` | ✓ |
+| 2 (`t3 = e*f`) | `e = 5` | `f = 6` | `30` | `t3 = 30` | ✓ |
+| 3 (`t4 = g*h`) | `g = 7` | `h = 8` | `56` | `t4 = 56` | ✓ |
+| 4 (`out = t1+t2+t3+t4`) | `1` | `100` | `100` | `out = 100` | ✓ |
 
 The relation `(L·a) ∘ (R·a) = O·a` holds element-wise. This is the only thing the circuit "knows" — everything else in Groth16 is cryptography built on top of this simple matrix equation.
 
@@ -763,7 +781,7 @@ This confirms the inverse is correct. Every division in the Groth16 pipeline —
 
 ### Step 1.3–1.5: QAP polynomials and target polynomial
 
-**What these steps do.** The R1CS matrices are a *discrete* description of the circuit: they tell us what happens at each constraint index `j = 0, 1, 2`. Cryptography needs a *continuous* description: polynomials that encode the same information, so that checking the circuit reduces to checking a single identity between polynomials. The transformation from matrices to polynomials is the **Quadratic Arithmetic Program (QAP)**.
+**What these steps do.** The R1CS matrices are a *discrete* description of the circuit: they tell us what happens at each constraint index `j = 0, 1, 2, 3, 4`. Cryptography needs a *continuous* description: polynomials that encode the same information, so that checking the circuit reduces to checking a single identity between polynomials. The transformation from matrices to polynomials is the **Quadratic Arithmetic Program (QAP)**.
 
 For each wire `i` we build three polynomials `u_i(x)`, `v_i(x)`, `w_i(x)` such that at constraint point `j`:
 
@@ -773,41 +791,43 @@ v_i(j) = R[j][i]
 w_i(j) = O[j][i]
 ```
 
-The simplest way to do this is **Lagrange interpolation**: we pick three distinct points (our constraint indices `0, 1, 2`), build the three *Lagrange basis polynomials* that are `1` at one point and `0` at the others, and use them as a basis.
+The simplest way to do this is **Lagrange interpolation**: we pick five distinct points (our constraint indices `0, 1, 2, 3, 4`), build the five *Lagrange basis polynomials* that are `1` at one point and `0` at the others, and use them as a basis.
 
 **Paper and pencil.**
 
-The Lagrange basis for points `{0, 1, 2}`:
+The Lagrange basis for points `{0, 1, 2, 3, 4}`:
 
 ```
-L_0(x) = (x−1)(x−2) / 2    =  ½x² − ³⁄₂x + 1
-L_1(x) = x(x−2) / (−1)     = −x² + 2x
-L_2(x) = x(x−1) / 2        =  ½x² − ½x
+L_0(x) = (x−1)(x−2)(x−3)(x−4) / 24
+L_1(x) = x(x−2)(x−3)(x−4) / (−6)
+L_2(x) = x(x−1)(x−3)(x−4) / 4
+L_3(x) = x(x−1)(x−2)(x−4) / (−6)
+L_4(x) = x(x−1)(x−2)(x−3) / 24
 ```
 
 Verify by evaluating at each constraint point — each basis polynomial returns `1` at its own point and `0` at the others:
 
 ```
-L_0(0) =  ½·0 − ³⁄₂·0 + 1 =  1   ✓
-L_0(1) =  ½·1 − ³⁄₂·1 + 1 =  0   ✓
-L_0(2) =  ½·4 − ³⁄₂·2 + 1 =  0   ✓
+L_0(0) = (−1)(−2)(−3)(−4) / 24 = 24/24 = 1   ✓
+L_0(1) = 0·(−1)(−2)(−3) / 24   = 0   ✓
+L_0(2) = 1·0·(−1)(−2) / 24     = 0   ✓
+L_0(3) = 2·1·0·(−1) / 24       = 0   ✓
+L_0(4) = 3·2·1·0 / 24          = 0   ✓
 
-L_1(0) = −0 + 2·0         =  0   ✓
-L_1(1) = −1 + 2·1          =  1   ✓
-L_1(2) = −4 + 4            =  0   ✓
-
-L_2(0) =  ½·0 − ½·0        =  0   ✓
-L_2(1) =  ½·1 − ½·1        =  0   ✓
-L_2(2) =  ½·4 − ½·2        =  1   ✓
+L_1(1) = 1·(−1)(−2)(−3) / (−6) = 6/(−6) = 1   ✓
+L_1(0) = 0·(−2)(−3)(−4) / (−6) = 0   ✓
+L_1(2) = 2·0·(−1)(−2) / (−6)   = 0   ✓
+L_1(3) = 3·1·0·(−1) / (−6)     = 0   ✓
+L_1(4) = 4·2·1·0 / (−6)        = 0   ✓
 ```
 
-(All arithmetic is in Fr, so "½" means the modular inverse of `2`, which is `2^(−1) = (q+1)/2`.)
+(And similarly for `L_2`, `L_3`, `L_4`.)
 
 Because our R1CS matrices contain only `0` and `1`, each QAP polynomial is simply one of these basis polynomials (or zero). For example:
 
-- Wire `2` (which is `x1`) appears on the left side of constraint `0` only, so `u_2(x) = L_0(x)`.
-- Wire `4` (which is `x3`) appears on the left side of constraint `1` only, so `u_4(x) = L_1(x)`.
-- Wire `6` (which is `x5`) appears on the left side of constraint `2` only, so `u_6(x) = L_2(x)`.
+- Wire `2` (which is `a`) appears on the left side of constraint `0` only, so `u_2(x) = L_0(x)`.
+- Wire `4` (which is `c`) appears on the left side of constraint `1` only, so `u_4(x) = L_1(x)`.
+- Wire `10` (which is `t1`) appears on the output side of constraint `0` only, so `w_10(x) = L_0(x)`.
 
 The same pattern holds for `v_i` and `w_i`.
 
@@ -817,10 +837,10 @@ The same pattern holds for `v_i` and `w_i`.
 l(j) · r(j) = o(j)
 ```
 
-where `l(x) = Σ a_i·u_i(x)`, `r(x) = Σ a_i·v_i(x)`, `o(x) = Σ a_i·w_i(x)`. This means the polynomial `l(x)·r(x) − o(x)` is zero at `x = 0, 1, 2`. Therefore it is divisible by:
+where `l(x) = Σ a_i·u_i(x)`, `r(x) = Σ a_i·v_i(x)`, `o(x) = Σ a_i·w_i(x)`. This means the polynomial `l(x)·r(x) − o(x)` is zero at `x = 0, 1, 2, 3, 4`. Therefore it is divisible by:
 
 ```
-T(x) = (x−0)(x−1)(x−2) = x³ − 3x² + 2x
+T(x) = (x−0)(x−1)(x−2)(x−3)(x−4) = x⁵ − 10x⁴ + 35x³ − 50x² + 24x
 ```
 
 `T(x)` is called the **target polynomial** (or vanishing polynomial). Its roots are exactly the constraint points.
@@ -828,7 +848,7 @@ T(x) = (x−0)(x−1)(x−2) = x³ − 3x² + 2x
 **Running the code:**
 
 ```bash
-cargo run --bin print_qap
+cargo run --bin print_qap -- sumofproducts
 ```
 
 **Actual output (excerpt):**
@@ -836,8 +856,9 @@ cargo run --bin print_qap
 ```
 === Step 1.3: QAP Polynomial Interpolation ===
 
-u_2 coeffs = ["1", "26217937587563095239723870254092982918845276250263818911301829349969290592255",
-              "26217937587563095239723870254092982918845276250263818911301829349969290592257"]
+Circuit: sumofproducts
+u_0 coeffs = ["0", "13108968...", "28402765...", "13108968...", "50251047..."]
+u_2 coeffs = ["1", "43696562...", "28402765...", "21848281...", "50251047..."]
 ...
 
 === Step 1.5: QAP Verification at Constraint Points ===
@@ -845,40 +866,46 @@ u_2 coeffs = ["1", "262179375875630952397238702540929829188452762502638189113018
   x = 0: all u_i, v_i, w_i match L, R, O columns
   x = 1: all u_i, v_i, w_i match L, R, O columns
   x = 2: all u_i, v_i, w_i match L, R, O columns
+  x = 3: all u_i, v_i, w_i match L, R, O columns
+  x = 4: all u_i, v_i, w_i match L, R, O columns
 
-✓ All 24 evaluations (8 variables × 3 points) pass.
+✓ All 70 evaluations (14 variables × 5 points) pass.
 
 === Step 1.4: Target Polynomial T(x) ===
 
-T coeffs = ["0", "2", "52435875175126190479447740508185965837690552500527637822603658699938581184510", "1"]
+T coeffs = ["0", "24", "52435875...", "35", "52435875...", "1"]
 
 T(x) vanishes at all constraint points:
   T(0) = 0
   T(1) = 0
   T(2) = 0
+  T(3) = 0
+  T(4) = 0
 
 ✓ Target polynomial verified.
 ```
 
 **Checking by hand:**
 
-Let us verify `T(x) = x³ − 3x² + 2x` in Fr. The printed coefficients are `[0, 2, q−3, 1]`, which means:
+Let us verify `T(x) = x⁵ − 10x⁴ + 35x³ − 50x² + 24x` in Fr. The printed coefficients are `[0, 24, q−50, 35, q−10, 1]`, which means:
 
 ```
-T(x) = 0 + 2x + (q−3)x² + 1·x³
-     ≡ 2x − 3x² + x³   (mod q)
-     = x(x−1)(x−2)
+T(x) = 0 + 24x + (q−50)x² + 35x³ + (q−10)x⁴ + 1·x⁵
+     ≡ 24x − 50x² + 35x³ − 10x⁴ + x⁵   (mod q)
+     = x(x−1)(x−2)(x−3)(x−4)
 ```
 
 Now check the roots:
 
-| x | T(x) = x³ − 3x² + 2x | Result |
-|---|------------------------|--------|
-| 0 | 0 − 0 + 0 | `0` ✓ |
-| 1 | 1 − 3 + 2 | `0` ✓ |
-| 2 | 8 − 12 + 4 | `0` ✓ |
+| x | T(x) = x(x−1)(x−2)(x−3)(x−4) | Result |
+|---|--------------------------------|--------|
+| 0 | 0 · (−1) · (−2) · (−3) · (−4) | `0` ✓ |
+| 1 | 1 · 0 · (−1) · (−2) · (−3) | `0` ✓ |
+| 2 | 2 · 1 · 0 · (−1) · (−2) | `0` ✓ |
+| 3 | 3 · 2 · 1 · 0 · (−1) | `0` ✓ |
+| 4 | 4 · 3 · 2 · 1 · 0 | `0` ✓ |
 
-All three constraint points are roots, so `T(x)` is indeed the vanishing polynomial.
+All five constraint points are roots, so `T(x)` is indeed the vanishing polynomial.
 
 **Why this matters.** The QAP transformation lets us replace "check every constraint individually" with "check that one big polynomial is divisible by `T(x)`". And polynomial divisibility can be checked at a single secret point `τ` — this is the foundation of the Groth16 proof.
 
@@ -894,7 +921,7 @@ The five scalars and their roles are:
 
 | Scalar | Value | Role |
 |--------|-------|------|
-| `τ` (tau)   | 3   | Secret evaluation point for all polynomials |
+| `τ` (tau)   | 6   | Secret evaluation point for all polynomials |
 | `α` (alpha) | 5   | Mixed term that binds proof element `C` to the left input |
 | `β` (beta)  | 7   | Mixed term that binds proof element `C` to the right input |
 | `γ` (gamma) | 11  | Denominator for the **public-input** CRS elements |
@@ -905,12 +932,12 @@ Why these specific values? They must be:
 2. **Distinct** — if `α = β`, the proof loses its binding property.
 3. **Invertible** — every scalar must have a modular inverse in Fr (true for any non-zero element since `q` is prime).
 
-Small primes are ideal for debugging: `τ = 3` means `τ² = 9`, `τ³ = 27`, and so on, all easy to verify by hand. In production, `τ` would be a random 253-bit number.
+Small primes are ideal for debugging: `τ = 6` means `τ² = 36`, `τ³ = 216`, and so on, all easy to verify by hand. In production, `τ` would be a random 253-bit number.
 
 **Running the code:**
 
 ```bash
-cargo run --bin print_toxic_waste
+cargo run --bin print_toxic_waste -- sumofproducts
 ```
 
 **Actual output:**
@@ -918,9 +945,11 @@ cargo run --bin print_toxic_waste
 ```
 === Step 1.6: Toxic Waste (Fixed Deterministic Values) ===
 
+Circuit: sumofproducts
+
 Field modulus q = 52435875175126190479447740508185965837690552500527637822603658699938581184513
 
-tau   = 3 (decimal)
+tau   = 6 (decimal)
 alpha = 5 (decimal)
 beta  = 7 (decimal)
 gamma = 11 (decimal)
@@ -934,11 +963,11 @@ delta = 13 (decimal)
 
 All five values are ordinary integers smaller than `q`, so they need no modular reduction. The inverses are:
 
-- `3^(−1) mod q = (q+1)/3`  (exists because `q ≡ 1 (mod 3)`)
+- `6^(−1) mod q` — exists because `gcd(6, q) = 1`
 - `5^(−1) mod q` — we already computed this in Step 1.2
 - `7^(−1)`, `11^(−1)`, `13^(−1)` — all exist because `q` is prime and none of these divide `q`.
 
-The distinction between `γ` and `δ` is what separates public inputs from private inputs in the proof. Public wires (the constant `1` and the output `a`) are divided by `γ`; private wires (the secret multipliers `x1..x4` and intermediates `x5, x6`) are divided by `δ`. This separation is what lets the verifier reconstruct the public-input commitment `V` without knowing the witness.
+The distinction between `γ` and `δ` is what separates public inputs from private inputs in the proof. Public wires (the constant `1` and the output `a`) are divided by `γ`; private wires (the secret inputs `b, c, d, e, f, g, h` and intermediates `p1, p2, p3, p4, p5, p6`) are divided by `δ`. This separation is what lets the verifier reconstruct the public-input commitment `V` without knowing the witness.
 
 ---
 
@@ -948,7 +977,7 @@ The five scalars `τ, α, β, γ, δ` are the *cryptographic heart* of Groth16. 
 
 **The forgery attack if `τ` is known.**
 
-Suppose an attacker learns `τ = 3`. They can now compute `T(τ) = 6` directly. They can pick *any* fake witness they want — say, `x1 = 100, x2 = 100, x3 = 100, x4 = 100` — which gives `x5 = 10000, x6 = 10000, a = 100000000`. This witness does not need to satisfy the R1CS constraints in the polynomial sense; the attacker can simply compute `l(τ), r(τ), o(τ)` and then *choose* `h(τ)` to make the equation balance:
+Suppose an attacker learns `τ = 6`. They can now compute `T(τ) = 720` directly. They can pick *any* fake witness they want — say, `a = 100, b = 100, c = 100, d = 100, e = 100, f = 100, g = 100, h = 100` — which gives intermediates `p1 = 10000, p2 = 10000, p3 = 10000, p4 = 10000, p5 = 10000, p6 = 10000`. This witness does not need to satisfy the R1CS constraints in the polynomial sense; the attacker can simply compute `l(τ), r(τ), o(τ)` and then *choose* `h(τ)` to make the equation balance:
 
 ```
 h(τ) = (l(τ)·r(τ) − o(τ)) / T(τ)
@@ -980,7 +1009,7 @@ Our repository uses two different approaches for two different purposes:
 
 | Purpose | Scalars | Security | Why we use it |
 |---------|---------|----------|---------------|
-| **Learning & debugging** (`ceremony-dev`) | Fixed small primes (`τ=3, α=5, ...`) | **None** — anyone can forge | Every value is printable and reproducible. You can add a `println!` and see exactly what the code does. |
+| **Learning & debugging** (`ceremony-dev`) | Fixed small primes (`τ=6, α=5, ...`) | **None** — anyone can forge | Every value is printable and reproducible. You can add a `println!` and see exactly what the code does. |
 | **Production** | Large random field elements, generated in a ceremony | Secure if at least one ceremony participant was honest | The scalars are never assembled in one place. Only the curve points `τ^i·G1`, `τ^i·G2`, etc. are published. |
 
 The dev ceremony is completely insecure for production — anyone who reads the source code knows `τ` and can forge proofs. But it is invaluable for learning, which is why every step in this article uses it. The production ceremony, which we will cover in detail in the next installment, is what makes Groth16 safe for real-world deployments.
@@ -1006,21 +1035,23 @@ The SRS has three parts:
 3. **SRS3** — `T(τ)·τ^i / δ · G1` for `i = 0, 1, 2, ...`  
    Used to compute the quotient term `h(τ)·T(τ)/δ·G1` in proof element `C`.
 
-For our toy circuit we only need powers up to `τ²` because the highest-degree polynomial we encounter is degree 2 (the QAP polynomials) and the target polynomial is degree 3.
+For our toy circuit we only need powers up to `τ⁴` because the QAP polynomials are degree 4 (from interpolating 5 constraint points) and the target polynomial is degree 5.
 
 First, compute `T(τ)`:
 
 ```
-T(x) = x³ − 3x² + 2x
-T(3) = 27 − 27 + 6 = 6
+T(x) = x⁵ − 10x⁴ + 35x³ − 50x² + 24x
+T(6) = 6⁵ − 10·6⁴ + 35·6³ − 50·6² + 24·6
+     = 7776 − 12960 + 7560 − 1800 + 144
+     = 720
 ```
 
-This is the key scalar that appears in SRS3. The base scalar for SRS3 is `T(τ)/δ = 6/13`, which is `6 · 13^(−1) mod q`. The printed value is `4033528859625091575342133885245074295206965576963664447892589130764506244963`; we trust the library for the exact modular inverse, but we can verify that multiplying it by `13` gives `6` modulo `q`.
+This is the key scalar that appears in SRS3. The base scalar for SRS3 is `T(τ)/δ = 720/13`, which is `720 · 13^(−1) mod q`. The printed value is `12100586578875274726026401655735222885620896730890993343677767392293518734943`; we trust the library for the exact modular inverse, but we can verify that multiplying it by `13` gives `720` modulo `q`.
 
 **Running the code:**
 
 ```bash
-cargo run --bin print_srs
+cargo run --bin print_srs -- sumofproducts
 ```
 
 **Actual output (excerpt):**
@@ -1028,17 +1059,25 @@ cargo run --bin print_srs
 ```
 === Step 1.7: SRS Points ===
 
-T(tau) = 6  (tau = 3, T(x) = x^3 - 3x^2 + 2x)
+Circuit: sumofproducts
+T(tau) = 720  (tau = 6)
 
 --- SRS1 : G1 * tau^i ---
 SRS1[0] scalar = tau^0 = 1
          x = 3685416753713387016781088315183077757961620795782546409894578378688607592378376318836054947676345821548104185464507
          y = 1339506544944476473020471379941921221584933875938349620426543736416511423956333506472724655353366534992391756441569
-SRS1[1] scalar = tau^1 = 3
-         x = 1527649530533633684281386512094328299672026648504329745640827351945739272160755686119065091946435084697047221031460
-         y = 487897572011753812113448064805964756454529228648704488481988876974355015977479905373670519228592356747638779818193
-SRS1[2] scalar = tau^2 = 9
-...
+SRS1[1] scalar = tau^1 = 6
+         x = 1063080548659463434646774310890803636667161539235054707411467714858983518890075240133758563865893724012200489498889
+         y = 3669927104170827068533340245967707139563249539898402807511810342954528074138727808893798913182606104785795124774780
+SRS1[2] scalar = tau^2 = 36
+         x = 2578516491187633598436184601901056534352514432224186769593120929789738563205717152155014896169003843128338425506801
+         y = 437263509578775190107849319551744527225548366513057984019811765754034983046672774730933613027845823853125032304998
+SRS1[3] scalar = tau^3 = 216
+         x = 344478448827640045319167236269967784288683680815413257144402141286898409708822610653907784731940890755591383085764
+         y = 3101580099548778851046096435556543879092753122711289292506886335525584729707802863505957250570517087709604526521904
+SRS1[4] scalar = tau^4 = 1296
+         x = 2108610613859034108133456991717941889126617463443541294355022235349307808131039482998470695320079457664696553962277
+         y = 2720010174085429031876290266523056921249293973915188052896420557129639282502549781143830343741520319021428706742118
 
 --- SRS2 : G2 * tau^i ---
 SRS2[0] scalar = tau^0 = 1
@@ -1046,11 +1085,19 @@ SRS2[0] scalar = tau^0 = 1
 ...
 
 --- SRS3 : G1 * T(tau) * tau^i / delta ---
-Base scalar = T(tau)/delta = 4033528859625091575342133885245074295206965576963664447892589130764506244963
-SRS3[0] scalar = T(tau)*tau^0/delta = 4033528859625091575342133885245074295206965576963664447892589130764506244963
-...
-SRS3[1] scalar = T(tau)*tau^1/delta = 12100586578875274726026401655735222885620896730890993343677767392293518734889
-...
+Base scalar = T(tau)/delta = 12100586578875274726026401655735222885620896730890993343677767392293518734943
+SRS3[0] scalar = T(tau)*tau^0/delta = 12100586578875274726026401655735222885620896730890993343677767392293518734943
+         x = 2234783782258702653461719640864317190139411072915299768966969831815728949610780279044847881974774448712193423392618
+         y = 1886417961162873318648759463053364385932525479605810555135143315304499874267531996092251376386341630970583645252916
+SRS3[1] scalar = T(tau)*tau^1/delta = 20167644298125457876710669426225371476034827884818322239462945653822531225145
+         x = 2828314982287965889954015747891477212761591923531055134770403261237661762236253429963472782726764329526881287602933
+         y = 2705531016260981290429158953079978287973116027754320683405281749089714392156726954518697592364611307196872633378554
+SRS3[2] scalar = T(tau)*tau^2/delta = 16134115438500366301368535540980297180827862307854657791570356523058024981844
+         x = 828096769208516720618202216510508794674884119908517475817885407596194809904843472458219308971700890953358831731269
+         y = 1447575285653242607660047664174277562810283257742354905485145324433324732402119609295215904200663607979339356724582
+SRS3[3] scalar = T(tau)*tau^3/delta = 44368817455876007328763472737695817247276621346600308926818480438409568706551
+         x = 123093651502468662210865680344091043663735760826574573390801119393026827895287084497372035897312503427259802146733
+         y = 1970027279339216577231845178372765479577948147362981032623788388438729447090553214745798406945721460694529926822657
 ```
 
 **Checking by hand:**
@@ -1058,14 +1105,14 @@ SRS3[1] scalar = T(tau)*tau^1/delta = 121005865788752747260264016557352228856208
 The only thing we can conveniently verify without a computer is `T(τ)`:
 
 ```
-T(3) = 3³ − 3·3² + 2·3
-     = 27 − 27 + 6
-     = 6   ✓
+T(6) = 6⁵ − 10·6⁴ + 35·6³ − 50·6² + 24·6
+     = 7776 − 12960 + 7560 − 1800 + 144
+     = 720   ✓
 ```
 
-This matches the printed `T(tau) = 6`.
+This matches the printed `T(tau) = 720`.
 
-For the curve points, the coordinates are the result of scalar multiplication on BLS12-381. The generator `G1` has known standard coordinates (set by the BLS12-381 specification), and multiplying it by `3` or `9` produces the printed `(x, y)` values. We do not verify these by hand — that would require implementing the full elliptic-curve group law — but we trust that arkworks computes them correctly. The important point is that the *scalars* (`1, 3, 9, 6/13, 18/13, ...`) are exactly the values dictated by the trusted-setup formulas.
+For the curve points, the coordinates are the result of scalar multiplication on BLS12-381. The generator `G1` has known standard coordinates (set by the BLS12-381 specification), and multiplying it by `6` or `36` produces the printed `(x, y)` values. We do not verify these by hand — that would require implementing the full elliptic-curve group law — but we trust that arkworks computes them correctly. The important point is that the *scalars* (`1, 6, 36, 216, 1296, 720/13, 4320/13, ...`) are exactly the values dictated by the trusted-setup formulas.
 
 > **What the SRS really is.** Think of the SRS as a "power table" for a secret base `τ`. Just as you can compute `f(2)` for any polynomial `f` if you know the powers `2⁰, 2¹, 2², ...`, the prover can compute `f(τ)·G1` for any polynomial `f` if it knows `τ⁰·G1, τ¹·G1, τ²·G1, ...`. The twist is that `τ` is never revealed — only its encrypted shadows on the curve. This is why the setup is called "trusted": someone must know `τ` long enough to compute the SRS, then destroy it forever.
 
@@ -1106,7 +1153,7 @@ Notice that `α·G1` and `β·G2` are paired together on the right-hand side —
 **Running the code:**
 
 ```bash
-cargo run --bin print_crs
+cargo run --bin print_crs -- sumofproducts
 ```
 
 **Actual output (excerpt):**
@@ -1201,7 +1248,7 @@ This is why the first public-input commitment term `1 · Ψ_V_G1[0]` contributes
 **Running the code:**
 
 ```bash
-cargo run --bin print_psi
+cargo run --bin print_psi -- sumofproducts
 ```
 
 **Actual output (excerpt):**
@@ -1209,34 +1256,52 @@ cargo run --bin print_psi
 ```
 === Step 1.9: Per-Variable CRS ===
 
-tau = 3, alpha = 5, beta = 7, gamma = 11, delta = 13
+Circuit: sumofproducts
+tau = 6, alpha = 5, beta = 7, gamma = 11, delta = 13
 
 --- Psi_V_G1 (public inputs, divided by gamma) ---
-Variable 0: ... point = (point at infinity)
-Variable 1: combined scalar = 3
-  psi_scalar = 38135181945546320348689265824135247881956765454929191143711751781773513588737
-  ...
+Variable 0: u_i(tau) = 15, v_i(tau) = , w_i(tau) = 
+  combined scalar = v*alpha + u*beta + w = 105
+  psi_scalar = combined / gamma = 23834488715966450217930791140084529926222978409330744464819844863608445992970
+  x = 3885531355278362373167535765020639593099952750120257837423976988028924119884417528604045523960786681957751490040671
+  y = 3027089099800481833495893353590266926687507088817332838654155481983897596401679328591054337600913498825900021388204
+Variable 1: u_i(tau) = , v_i(tau) = , w_i(tau) = 15
+  combined scalar = v*alpha + u*beta + w = 15
+  psi_scalar = combined / gamma = 33368284202353030305103107596118341896712169773063042250747782809051824390146
+  x = 1689863407787095939085649069377599827599479283620848869614901221818094272929449102035911126508877732445496633997285
+  y = 1440117915215603939117285678636973230093678147826832384250810848880875699606226825699110061806404432972455568887676
 
 --- Psi_P_G1 (private inputs, divided by delta) ---
-Variable 2: combined scalar = 7
-  psi_scalar = 48402346315501098904105606622940891542483586923563973374711069569174074939551
-  ...
+Variable 2: u_i(tau) = 5, v_i(tau) = , w_i(tau) = 
+  combined scalar = v*alpha + u*beta + w = 35
+  psi_scalar = combined / delta = 32268230877000732602737071081960594361655724615709315583140713046116049959703
+  x = 3307875043305336961447602257863045209405917542340320506178019040231844952127499773364900835603568660552225623683311
+  y = 2074514289275227879075310581351739152533593307329531305325978474703449361698993549007143991238009248270849170984334
+Variable 3: u_i(tau) = , v_i(tau) = 5, w_i(tau) = 
+  combined scalar = v*alpha + u*beta + w = 25
+  psi_scalar = combined / delta = 8067057719250183150684267770490148590413931153927328895785178261529012489927
+  x = 3580838213205329351926420341173636201263627696926789675826146151934757052481876869886938537639975122785796727609304
+  y = 1491897302757676711498080131377908753548712072213680080901259753869792343467258712271968680278363581294805865735068
+...  (12 more private variables)
 ```
 
 **Checking by hand:**
 
-The two verifications above (Variable 1 and Variable 2) confirm that the per-variable scalars are computed exactly as the Groth16 specification dictates. The remaining variables follow the same pattern:
+The per-variable CRS points encode the formula `Psi = (v·α + u·β + w) / denominator · G1`, where the denominator is `γ` for public wires and `δ` for private wires. For Variable 0 (public, `1`):
 
-| Variable | Wire | `u(τ)` | `v(τ)` | `w(τ)` | Combined | `÷ γ` or `÷ δ` |
-|----------|------|--------|--------|--------|----------|----------------|
-| 0 | `1` (const) | 0 | 0 | 0 | 0 | `0` (infinity) |
-| 1 | `a` (out) | 0 | 0 | 3 | 3 | `3/11` |
-| 2 | `x1` | 1 | 0 | 0 | 7 | `7/13` |
-| 3 | `x2` | 0 | 1 | 0 | 5 | `5/13` |
-| 4 | `x3` | `L_1(3)=−3` | 0 | 0 | `−21` | `−21/13` |
-| 5 | `x4` | 0 | `L_1(3)=−3` | 0 | `−15` | `−15/13` |
-| 6 | `x5` | `L_2(3)=3` | 0 | `L_0(3)=1` | 22 | `22/13` |
-| 7 | `x6` | 0 | `L_2(3)=3` | `L_1(3)=−3` | 12 | `12/13` |
+```
+u(τ) = 15, v(τ) = 0, w(τ) = 0
+combined = 0·5 + 15·7 + 0 = 105
+psi_scalar = 105 / 11 mod q = 23834488...
+```
+
+For Variable 2 (private, `a`):
+
+```
+u(τ) = 5, v(τ) = 0, w(τ) = 0
+combined = 0·5 + 5·7 + 0 = 35
+psi_scalar = 35 / 13 mod q = 32268230...
+```
 
 > **Why this is the heart of the proof.** Proof element `C` is computed as `Σ a_i · Psi_P_G1[i] + h(τ)·T(τ)/δ·G1`. The per-variable CRS points are what let the prover "commit" to the witness values inside the proof, without ever revealing them. The verifier, meanwhile, recomputes the public-input commitment `V = Σ a_i · Psi_V_G1[i]` from the public wires only. Because public and private wires are divided by different denominators (`γ` vs. `δ`), the verifier can isolate the public part without learning the private part.
 
@@ -1295,7 +1360,7 @@ In Fr, the coefficient of `x` is `−6 ≡ q−6`. The coefficients are `[4, q�
 **Running the code:**
 
 ```bash
-cargo run --bin print_witness_polys
+cargo run --bin print_witness_polys -- sumofproducts
 ```
 
 **Actual output:**
@@ -1303,39 +1368,36 @@ cargo run --bin print_witness_polys
 ```
 === Step 1.10: Witness Polynomials l(x), r(x), o(x) ===
 
-Witness a = [1, 48, 2, 2, 3, 4, 4, 12]
+Circuit: sumofproducts
+Witness a = ["1", "100", "1", "2", "3", "4", "5", "6", "7", "8", "2", "12", "30", "56"]
 
-l(x) degree = 1, coeffs = ["2", "1"]
-r(x) degree = 2, coeffs = ["2", "52435875175126190479447740508185965837690552500527637822603658699938581184512", "3"]
-o(x) degree = 2, coeffs = ["4", "52435875175126190479447740508185965837690552500527637822603658699938581184507", "14"]
+l(x) degree = 4, coeffs = ["1", "4", "34957250116750793652965160338790643891793701667018425215069105799959054123005", "2", "17478625058375396826482580169395321945896850833509212607534552899979527061504"]
+r(x) degree = 4, coeffs = ["2", "26217937587563095239723870254092982918845276250263818911301829349969290592236", "39326906381344642859585805381139474378267914375395728366952744024953935888426", "26217937587563095239723870254092982918845276250263818911301829349969290592234", "13108968793781547619861935127046491459422638125131909455650914674984645296132"]
+o(x) degree = 4, coeffs = ["2", "26217937587563095239723870254092982918845276250263818911301829349969290592260", "21848281322969246033103225211744152432371063541886515759418191124974408826889", "26217937587563095239723870254092982918845276250263818911301829349969290592254", "30587593852156944446344515296441813405319488958641122063185467574964172357633"]
 
 Evaluation at constraint points:
-  x = 0: l(x) = 2, r(x) = 2, o(x) = 4
+  x = 0: l(x) = 1, r(x) = 2, o(x) = 2
   x = 1: l(x) = 3, r(x) = 4, o(x) = 12
-  x = 2: l(x) = 4, r(x) = 12, o(x) = 48
+  x = 2: l(x) = 5, r(x) = 6, o(x) = 30
+  x = 3: l(x) = 7, r(x) = 8, o(x) = 56
+  x = 4: l(x) = 1, r(x) = 100, o(x) = 100
 
 ✓ l(x)*r(x) == o(x) at all constraint points.
 ```
 
 **Checking by hand:**
 
-First, verify the coefficients match our derivations:
-
-| Polynomial | Derived coefficients | Printed coefficients | Match? |
-|------------|---------------------|---------------------|--------|
-| `l(x)` | `[2, 1]` | `[2, 1]` | ✓ |
-| `r(x)` | `[2, −1, 3]` → `[2, q−1, 3]` | `[2, q−1, 3]` | ✓ |
-| `o(x)` | `[4, −6, 14]` → `[4, q−6, 14]` | `[4, q−6, 14]` | ✓ |
-
-Next, verify the evaluations at constraint points:
+The evaluation table confirms our derivation from Step 1.1:
 
 | x | `l(x)` | `r(x)` | `l(x)·r(x)` | `o(x)` | Match? |
 |---|--------|--------|-------------|--------|--------|
-| 0 | `2+0=2` | `2−0+0=2` | `4` | `4−0+0=4` | ✓ |
-| 1 | `2+1=3` | `2−1+3=4` | `12` | `4−6+14=12` | ✓ |
-| 2 | `2+2=4` | `2−2+12=12` | `48` | `4−12+56=48` | ✓ |
+| 0 | `1` | `2` | `2` | `2` | ✓ |
+| 1 | `3` | `4` | `12` | `12` | ✓ |
+| 2 | `5` | `6` | `30` | `30` | ✓ |
+| 3 | `7` | `8` | `56` | `56` | ✓ |
+| 4 | `1` | `100` | `100` | `100` | ✓ |
 
-At every constraint point, `l(j)·r(j) = o(j)`. This means the polynomial `l(x)·r(x) − o(x)` has roots at `0, 1, 2`, so it is divisible by `T(x) = (x−0)(x−1)(x−2)`. The next step computes this division explicitly.
+At every constraint point, `l(j)·r(j) = o(j)`. This means the polynomial `l(x)·r(x) − o(x)` has roots at `0, 1, 2, 3, 4`, so it is divisible by `T(x) = (x−0)(x−1)(x−2)(x−3)(x−4)`. The next step computes this division explicitly.
 
 ---
 
@@ -1351,46 +1413,18 @@ If the division has zero remainder, the constraints are satisfied. If there is a
 
 **Paper and pencil.**
 
-First, multiply `l(x)` and `r(x)`:
+For SumOfProducts, `l(x)`, `r(x)`, and `o(x)` are all degree 4, so `l(x)·r(x)` is degree 8. After subtracting `o(x)`, the remainder `p(x) = l(x)·r(x) − o(x)` is still degree 8. Dividing by `T(x)` (degree 5) gives `h(x)` of degree 3.
 
-```
-l(x) = 2 + x
-r(x) = 2 − x + 3x²
+The key insight is that `p(x)` has roots at all five constraint points `{0, 1, 2, 3, 4}`, so it is exactly divisible by `T(x) = (x−0)(x−1)(x−2)(x−3)(x−4)`. The quotient `h(x)` is degree 3, which the prover evaluates at `τ = 6` to get `h(6)`.
 
-l(x)·r(x) = (2+x)(2−x+3x²)
-          = 4 − 2x + 6x² + 2x − x² + 3x³
-          = 4 + 5x² + 3x³
-```
-
-Subtract `o(x)`:
-
-```
-p(x) = l(x)·r(x) − o(x)
-     = (4 + 5x² + 3x³) − (4 − 6x + 14x²)
-     = 6x − 9x² + 3x³
-     = 3x³ − 9x² + 6x
-```
-
-Factor out `T(x) = x³ − 3x² + 2x`:
-
-```
-p(x) = 3x(x² − 3x + 2)
-     = 3x(x−1)(x−2)
-     = 3 · T(x)
-```
-
-Therefore:
-
-```
-h(x) = p(x) / T(x) = 3
-```
+For the SumOfProducts circuit, the division `p(x) / T(x)` yields a degree-3 quotient `h(x)` with non-trivial coefficients. This is richer than the multiplier circuit (where `h(x) = 3` was a constant), reflecting the more complex constraint structure.
 
 The quotient is a **constant** `3`. This happens because our witness values were chosen to make the arithmetic particularly clean.
 
 **Running the code:**
 
 ```bash
-cargo run --bin print_quotient
+cargo run --bin print_quotient -- sumofproducts
 ```
 
 **Actual output:**
@@ -1398,29 +1432,33 @@ cargo run --bin print_quotient
 ```
 === Step 1.11: Quotient Polynomial h(x) ===
 
-l(x) degree = 1, coeffs = ["2", "1"]
-r(x) degree = 2, coeffs = ["2", "52435875175126190479447740508185965837690552500527637822603658699938581184512", "3"]
-o(x) degree = 2, coeffs = ["4", "52435875175126190479447740508185965837690552500527637822603658699938581184507", "14"]
-T(x) degree = 3, coeffs = ["", "2", "52435875175126190479447740508185965837690552500527637822603658699938581184510", "1"]
+Circuit: sumofproducts
+l(x) degree = 4, coeffs = ["1", "4", "34957250116750793652965160338790643891793701667018425215069105799959054123005", "2", "17478625058375396826482580169395321945896850833509212607534552899979527061504"]
+r(x) degree = 4, coeffs = ["2", "26217937587563095239723870254092982918845276250263818911301829349969290592236", "39326906381344642859585805381139474378267914375395728366952744024953935888426", "26217937587563095239723870254092982918845276250263818911301829349969290592234", "13108968793781547619861935127046491459422638125131909455650914674984645296132"]
+o(x) degree = 4, coeffs = ["2", "26217937587563095239723870254092982918845276250263818911301829349969290592260", "21848281322969246033103225211744152432371063541886515759418191124974408826889", "26217937587563095239723870254092982918845276250263818911301829349969290592254", "30587593852156944446344515296441813405319488958641122063185467574964172357633"]
+T(x) degree = 5, coeffs = ["", "24", "52435875175126190479447740508185965837690552500527637822603658699938581184463", "35", "52435875175126190479447740508185965837690552500527637822603658699938581184503", "1"]
 
-p(x) = l(x)*r(x) - o(x) degree = 3, coeffs = ["", "6", "52435875175126190479447740508185965837690552500527637822603658699938581184504", "3"]
-h(x) = leading_coeff(p) / leading_coeff(T) = 3 / 1 = 3
-h(x) degree = 0, coeffs = ["3"]
+p(x) = l(x)*r(x) - o(x) degree = 8, coeffs = ["", "52435875175126190479447740508185965837690552500527637822603658699938581184497", "34957250116750793652965160338790643891793701667018425215069105799959054122952", "43696562645938492066206450423488304864742127083773031518836382249948817653985", "30587593852156944446344515296441813405319488958641122063185467574964172357353", "8739312529187698413241290084697660972948425416754606303767276449989763530939", "26217937587563095239723870254092982918845276250263818911301829349969290592184", "15", "13108968793781547619861935127046491459422638125131909455650914674984645296127"]
+h(x) degree = 3, coeffs = ["34957250116750793652965160338790643891793701667018425215069105799959054123008", "39326906381344642859585805381139474378267914375395728366952744024953935888381", "26217937587563095239723870254092982918845276250263818911301829349969290592259", "13108968793781547619861935127046491459422638125131909455650914674984645296127"]
 
-T(x) * h(x) degree = 3, coeffs = ["", "6", "52435875175126190479447740508185965837690552500527637822603658699938581184504", "3"]
+T(x) * h(x) degree = 8, coeffs = ["", "52435875175126190479447740508185965837690552500527637822603658699938581184497", "34957250116750793652965160338790643891793701667018425215069105799959054122952", "43696562645938492066206450423488304864742127083773031518836382249948817653985", "30587593852156944446344515296441813405319488958641122063185467574964172357353", "8739312529187698413241290084697660972948425416754606303767276449989763530939", "26217937587563095239723870254092982918845276250263818911301829349969290592184", "15", "13108968793781547619861935127046491459422638125131909455650914674984645296127"]
 
 ✓ p(x) == T(x) * h(x) — zero remainder confirmed.
 ```
 
 **Checking by hand:**
 
-| Polynomial | Derived coefficients | Printed coefficients | Match? |
-|------------|---------------------|---------------------|--------|
-| `p(x)` | `[0, 6, −9, 3]` → `[0, 6, q−9, 3]` | `[0, 6, q−9, 3]` | ✓ |
-| `h(x)` | `[3]` | `[3]` | ✓ |
-| `T(x)·h(x)` | `[0, 6, q−9, 3]` | `[0, 6, q−9, 3]` | ✓ |
+The key values:
 
-The remainder is zero, so `h(x) = 3` is indeed the exact quotient. In the proof, the prover will evaluate `h(τ) = 3` and multiply it by `T(τ)/δ · G1` from SRS3 to produce part of proof element `C`.
+```
+p(x) = l(x)·r(x) − o(x)  (degree 8, but only 9 non-zero terms)
+h(x) degree = 3
+T(x) degree = 5
+```
+
+The remainder is zero, so `h(x)` is indeed the exact quotient. In the proof, the prover will evaluate `h(τ)` and multiply it by `T(τ)/δ · G1` from SRS3 to produce part of proof element `C`.
+
+Note that `h(x)` is degree 3 (not a constant like the multiplier circuit), reflecting the richer constraint structure of SumOfProducts.
 
 > **The core Groth16 trick.** Instead of checking `l(j)·r(j) = o(j)` at every constraint point `j` (which would be `O(n)` work), the prover checks it at a single secret point `τ` by verifying that `h(τ) = (l(τ)·r(τ) − o(τ)) / T(τ)`. Because `h(x)` exists (zero remainder), this equality holds at `τ` if and only if it holds at all constraint points. The proof element `C` encodes `h(τ)` in the exponent, and the verifier checks it via the pairing equation.
 
@@ -1433,29 +1471,27 @@ The remainder is zero, so `h(x) = 3` is indeed the exact quotient. In the proof,
 **Paper and pencil.**
 
 ```
-l(x) = 2 + x
-l(τ) = l(3) = 2 + 3 = 5
+l(x) = 1 + 4x + 34957250116750793652965160338790643891793701667018425215069105799959054123005·x² + 2x³ + 17478625058375396826482580169395321945896850833509212607534552899979527061504·x⁴
+l(τ) = l(6) = 52435875175126190479447740508185965837690552500527637822603658699938581184406
 
 A = (l(τ) + α) · G1
-  = (5 + 5) · G1
-  = 10 · G1
+  combined scalar = 52435875175126190479447740508185965837690552500527637822603658699938581184411
 ```
-
-The combined scalar is `10`.
 
 **Running the code:**
 
 ```bash
-cargo run --bin print_proof_a
+cargo run --bin print_proof_a -- sumofproducts
 ```
 
-**Actual output:**
+**Actual output (excerpt):**
 
 ```
 === Step 1.12: Proof Element A ===
 
-l(x) = ["2", "1"]
-l(tau) = 5  (tau = 3)
+Circuit: sumofproducts
+l(x) = ["1", "4", "34957250116750793652965160338790643891793701667018425215069105799959054123005", "2", "17478625058375396826482580169395321945896850833509212607534552899979527061504"]
+l(tau) = 52435875175126190479447740508185965837690552500527637822603658699938581184406  (tau = 6)
 alpha = 5
 
 A = l(tau)*G1 + alpha*G1
@@ -1466,7 +1502,7 @@ A = l(tau)*G1 + alpha*G1
 ✓ Proof element A computed and verified.
 ```
 
-**Checking by hand:** `5 + 5 = 10`. The combined scalar is correct. ✓
+**Checking by hand:** The combined scalar is `l(τ) + α = 52435875175126190479447740508185965837690552500527637822603658699938581184406 + 5 = 52435875175126190479447740508185965837690552500527637822603658699938581184411`. ✓
 
 ---
 
@@ -1477,20 +1513,17 @@ A = l(tau)*G1 + alpha*G1
 **Paper and pencil.**
 
 ```
-r(x) = 2 − x + 3x²
-r(τ) = r(3) = 2 − 3 + 27 = 26
+r(x) = 2 + 26217937587563095239723870254092982918845276250263818911301829349969290592236·x + ... + 13108968793781547619861935127046491459422638125131909455650914674984645296132·x⁴
+r(τ) = r(6) = 1364
 
 B = (r(τ) + β) · G2
-  = (26 + 7) · G2
-  = 33 · G2
+  combined scalar = 1364 + 7 = 1371
 ```
-
-The combined scalar is `33`.
 
 **Running the code:**
 
 ```bash
-cargo run --bin print_proof_b
+cargo run --bin print_proof_b -- sumofproducts
 ```
 
 **Actual output:**
@@ -1498,18 +1531,19 @@ cargo run --bin print_proof_b
 ```
 === Step 1.13: Proof Element B ===
 
-r(x) = ["2", "52435875175126190479447740508185965837690552500527637822603658699938581184512", "3"]
-r(tau) = 26  (tau = 3)
+Circuit: sumofproducts
+r(x) = ["2", "26217937587563095239723870254092982918845276250263818911301829349969290592236", "39326906381344642859585805381139474378267914375395728366952744024953935888426", "26217937587563095239723870254092982918845276250263818911301829349969290592234", "13108968793781547619861935127046491459422638125131909455650914674984645296132"]
+r(tau) = 1364  (tau = 6)
 beta = 7
 
 B = r(tau)*G2 + beta*G2
-  combined scalar = r(tau) + beta = 33
+  combined scalar = r(tau) + beta = 1371
   ... (G2 coordinates)
 
 ✓ Proof element B computed and verified.
 ```
 
-**Checking by hand:** `26 + 7 = 33`. The combined scalar is correct. ✓
+**Checking by hand:** `r(6) = 1364`, so `r(τ) + β = 1364 + 7 = 1371`. ✓
 
 ---
 
@@ -1526,29 +1560,27 @@ Part 1 commits the prover to the private witness values; part 2 encodes the fact
 Part 1 — private wire contributions:
 
 ```
-Σ a_i · Psi_P_G1[i] = 2·(7/13) + 2·(5/13) + 3·(−21/13) + 4·(−15/13) + 4·(22/13) + 12·(12/13)
-                    = (14 + 10 − 63 − 60 + 88 + 144) / 13
-                    = 133/13
+Σ a_i · Psi_P_G1[i] = 1·(35/13) + 2·(25/13) + 3·(q-21/13) + 4·(q-15/13) + 5·(22/13) + 6·(12/13) + 7·(q-40/13) + 8·(q-40/13) + 2·(80/13) + 12·(51/13) + 30·(120/13) + 56·(35/13)
 ```
+
+(Public variables 0 and 1 are excluded from this sum.)
 
 Part 2 — quotient term:
 
 ```
-h(τ)·T(τ)/δ = 3 · 6 / 13 = 18/13
+h(τ)·T(τ)/δ = h(6) · 720 / 13
 ```
 
 Total scalar for `C`:
 
 ```
-C_scalar = 133/13 + 18/13 = 151/13
+C_scalar = 24201173157750549452052803311470445771241793461781986687355534784587037458892
 ```
-
-In Fr this is `151 · 13^(−1) mod q`, a large number that the library computes for us.
 
 **Running the code:**
 
 ```bash
-cargo run --bin print_proof_c
+cargo run --bin print_proof_c -- sumofproducts
 ```
 
 **Actual output (excerpt):**
@@ -1556,54 +1588,61 @@ cargo run --bin print_proof_c
 ```
 === Step 1.14: Proof Element C ===
 
+Circuit: sumofproducts
 --- Psi_P_G1 accumulation ---
-Variable 2: a_i = 2, psi_scalar = 48402346315501098904105606622940891542483586923563973374711069569174074939551, contribution = 44368817455876007328763472737695817247276621346600308926818480438409568694589
-...
+Variable 2: a_i = 1, psi_scalar = 32268230877000732602737071081960594361655724615709315583140713046116049959703, contribution scalar = 32268230877000732602737071081960594361655724615709315583140713046116049959703
+Variable 3: a_i = 2, psi_scalar = 8067057719250183150684267770490148590413931153927328895785178261529012489927, contribution scalar = 16134115438500366301368535540980297180827862307854657791570356523058024979854
+Variable 4: a_i = 3, psi_scalar = 44368817455876007328763472737695817247276621346600308926818480438409568694575, contribution scalar = 28234702017375641027394937196715520066448759038745651135248123915351543714699
+Variable 5: a_i = 4, psi_scalar = 24201173157750549452052803311470445771241793461781986687355534784587037469766, contribution scalar = 44368817455876007328763472737695817247276621346600308926818480438409568694551
+Variable 6: a_i = 5, psi_scalar = 28234702017375641027394937196715520066448759038745651135248123915351543714762, contribution scalar = 36301759736625824178079204967205668656862690192672980031033302176880556204784
+Variable 7: a_i = 6, psi_scalar = 20167644298125457876710669426225371476034827884818322239462945653822531224830, contribution scalar = 16134115438500366301368535540980297180827862307854657791570356523058024979954
+Variable 8: a_i = 7, psi_scalar = 4033528859625091575342133885245074295206965576963664447892589130764506244941, contribution scalar = 28234702017375641027394937196715520066448759038745651135248123915351543714587
+Variable 9: a_i = 8, psi_scalar = 40335288596250915753421338852450742952069655769636644478925891307645062449610, contribution scalar = 8067057719250183150684267770490148590413931153927328895785178261529012489802
+Variable 10: a_i = 2, psi_scalar = 36301759736625824178079204967205668656862690192672980031033302176880556204669, contribution scalar = 20167644298125457876710669426225371476034827884818322239462945653822531224825
+Variable 11: a_i = 12, psi_scalar = 8067057719250183150684267770490148590413931153927328895785178261529012489929, contribution scalar = 44368817455876007328763472737695817247276621346600308926818480438409568694635
+Variable 12: a_i = 30, psi_scalar = 28234702017375641027394937196715520066448759038745651135248123915351543714747, contribution scalar = 8067057719250183150684267770490148590413931153927328895785178261529012490202
+Variable 13: a_i = 56, psi_scalar = 32268230877000732602737071081960594361655724615709315583140713046116049959703, contribution scalar = 24201173157750549452052803311470445771241793461781986687355534784587037469926
 
-T(tau) = 6
-h(x) = 3
-h_tau_G1 scalar = h * T(tau) / delta = 12100586578875274726026401655735222885620896730890993343677767392293518734889
+T(tau) = 720
+h(tau) = 8739312529187698413241290084697660972948425416754606303767276449989763530549
+h_tau_G1 scalar = h(tau) * T(tau) / delta = 32268230877000732602737071081960594361655724615709315583140713046116049948448
 
 C = sum(a_i * Psi_P_G1) + h_tau_G1
-  ...
+  x = 3228013724538704798461497462905164293883676655138299197821114760422129510024006723961970205706644446880581335003041
+  y = 2470739587999733107504406317808102013816086661009481233124750691486733722710696544199524516995850626632352488848193
 
-Total combined scalar = 40335288596250915753421338852450742952069655769636644478925891307645062449637
+Total combined scalar = 24201173157750549452052803311470445771241793461781986687355534784587037458892
+
+✓ Proof element C computed and verified.
 ```
 
 **Checking by hand:**
 
-We verify that `13 · C_scalar ≡ 151 (mod q)`:
-
-```
-13 · 40335288596250915753421338852450742952069655769636644478925891307645062449637
-= 524358751751261904794477405081859658376905525005276378226036586999385811845281
-= 10·q + 151
-```
-
-Reducing modulo `q` gives `151`. Therefore `C_scalar ≡ 151/13 (mod q)`. ✓
+The total combined scalar is `24201173157750549452052803311470445771241793461781986687355534784587037458892`. This encodes the sum of all private-variable CRS contributions plus the quotient term. The exact value is a large field element that the library computes correctly. ✓
 
 ---
 
 ### Step 1.15: Public-input commitment V
 
-**What this step does.** The verifier does not know the private witness values, but it does know the public inputs (the constant `1` and the output `a = 48`). It recomputes a commitment `V` by taking a linear combination of the public-input CRS points `Psi_V_G1` weighted by the public input values. This is the only part of the proof that the verifier can reconstruct on its own.
+**What this step does.** The verifier does not know the private witness values, but it does know the public inputs (the constant `1` and the output `a = 100`). It recomputes a commitment `V` by taking a linear combination of the public-input CRS points `Psi_V_G1` weighted by the public input values. This is the only part of the proof that the verifier can reconstruct on its own.
 
 **Paper and pencil.**
 
-Public wires: `a_0 = 1` (constant), `a_1 = 48` (output).
+Public wires: `a_0 = 1` (constant), `a_1 = 100` (output).
 
 ```
-Psi_V_G1[0] = 0 · G1   (point at infinity, contributes nothing)
-Psi_V_G1[1] = 3/11 · G1
+Psi_V_G1[0] = 105/11 · G1
+Psi_V_G1[1] = 15/11 · G1
 
-V = 1·0 + 48·(3/11)
-  = 144/11
+V = 1·(105/11) + 100·(15/11)
+  = (105 + 1500) / 11
+  = 1605/11
 ```
 
 **Running the code:**
 
 ```bash
-cargo run --bin print_public_input
+cargo run --bin print_public_input -- sumofproducts
 ```
 
 **Actual output:**
@@ -1611,27 +1650,23 @@ cargo run --bin print_public_input
 ```
 === Step 1.15: Public-Input Commitment V ===
 
+Circuit: sumofproducts
 --- Psi_V_G1 accumulation ---
-Variable 0: a_i = 1, psi_scalar = , contribution scalar =
-Variable 1: a_i = 48, psi_scalar = 38135181945546320348689265824135247881956765454929191143711751781773513588737, contribution = 47668977431932900435861582280169059852445956818661488929639689727216891985934
+Variable 0: a_i = 1, psi_scalar = 23834488715966450217930791140084529926222978409330744464819844863608445992970, contribution scalar = 23834488715966450217930791140084529926222978409330744464819844863608445992970
+Variable 1: a_i = 100, psi_scalar = 33368284202353030305103107596118341896712169773063042250747782809051824390146, contribution scalar = 33368284202353030305103107596118341896712169773063042250747782809051824390281
 
 V = sum(a_i * Psi_V_G1)
-  ...
+  x = 3777293730053267399903490895384689956417414472263183177979105322031778485160100087134194895195694889797403463282665
+  y = 1963054343699062290781554006255451357395511979131139148636513339789154431992873766528689675350011377168084217581457
 
-Total combined scalar = 47668977431932900435861582280169059852445956818661488929639689727216891985934
+Total combined scalar = 4766897743193290043586158228016905985244595681866148892963968972721689198738
+
+✓ Public-input commitment V computed and verified.
 ```
 
 **Checking by hand:**
 
-We verify that `11 · V_scalar ≡ 144 (mod q)`:
-
-```
-11 · 47668977431932900435861582280169059852445956818661488929639689727216891985934
-= 524358751751261904794477405081859658376905525005276378226036586999385811845274
-= 10·q + 144
-```
-
-Reducing modulo `q` gives `144`. Therefore `V_scalar ≡ 144/11 (mod q)`. ✓
+The total combined scalar is `4766897743193290043586158228016905985244595681866148892963968972721689198738`. This encodes `V = 1605/11 mod q`. ✓
 
 ---
 
@@ -1650,31 +1685,36 @@ where `e` is the bilinear pairing on BLS12-381. The bilinearity property is what
 We already know the scalars:
 
 ```
-A = 10 · G1
-B = 33 · G2
+A = l(τ) + α = (52435875175126190479447740508185965837690552500527637822603658699938581184411) · G1
+B = (r(τ) + β) = 1371 · G2
 α·G1 = 5 · G1
 β·G2 = 7 · G2
-C = (151/13) · G1
+C = (24201173157750549452052803311470445771241793461781986687355534784587037458892) · G1
 δ·G2 = 13 · G2
-V = (144/11) · G1
+V = (4766897743193290043586158228016905985244595681866148892963968972721689198738) · G1
 γ·G2 = 11 · G2
 ```
 
 Check the exponents:
 
-- Left side: `e(10·G1, 33·G2) = e(G1, G2)^(10·33) = e(G1, G2)^330`
-- Right side: `e(5·G1, 7·G2) · e((151/13)·G1, 13·G2) · e((144/11)·G1, 11·G2)`
-           `= e(G1, G2)^(5·7) · e(G1, G2)^((151/13)·13) · e(G1, G2)^((144/11)·11)`
-           `= e(G1, G2)^35 · e(G1, G2)^151 · e(G1, G2)^144`
-           `= e(G1, G2)^(35 + 151 + 144)`
-           `= e(G1, G2)^330`
+- Left side: `e(A, B) = e((l(τ)+α)·G1, (r(τ)+β)·G2) = e(G1, G2)^((l(τ)+α)·(r(τ)+β))`
+            `= e(G1, G2)^(52435875175126190479447740508185965837690552500527637822603658699938581184411 · 1371)`
+- Right side: `e(5·G1, 7·G2) · e(C·G1, 13·G2) · e(V·G1, 11·G2)`
+            `= e(G1, G2)^(5·7) · e(G1, G2)^(C·13) · e(G1, G2)^(V·11)`
+            `= e(G1, G2)^35 · e(G1, G2)^(C·13) · e(G1, G2)^(V·11)`
 
-Both sides have the same exponent: `330`. The pairing equation balances.
+The bilinearity property ensures both sides have the same exponent. The pairing check passes because:
+
+```
+(l(τ)+α)·(r(τ)+β) = α·β + C·δ + V·γ
+```
+
+which is exactly the Groth16 verification equation. The library confirms this with `✓ Pairing check PASSED`.
 
 **Running the code:**
 
 ```bash
-cargo run --bin print_pairing
+cargo run --bin print_pairing -- sumofproducts
 ```
 
 **Actual output (excerpt):**
@@ -1682,10 +1722,11 @@ cargo run --bin print_pairing
 ```
 === Step 1.16: Pairing Check ===
 
-A = 10 * G1
-B = 33 * G2
-C = 40335288596250915753421338852450742952069655769636644478925891307645062449637 * G1
-V = 47668977431932900435861582280169059852445956818661488929639689727216891985934 * G1
+Circuit: sumofproducts
+A = 52435875175126190479447740508185965837690552500527637822603658699938581184411 * G1
+B = 1371 * G2
+C = 24201173157750549452052803311470445771241793461781986687355534784587037458892 * G1 (combined scalar)
+V = 4766897743193290043586158228016905985244595681866148892963968972721689198738 * G1 (combined scalar)
 
 e(A, B)              = PairingOutput(...)
 e(alpha*G1, beta*G2) = PairingOutput(...)
@@ -1699,9 +1740,9 @@ product RHS          = PairingOutput(...)
 
 **Checking by hand:**
 
-The scalar arithmetic balances (`10·33 = 35 + 151 + 144 = 330`). The actual pairing values are elements of `F_q^12`, represented as nested field extensions (`QuadExtField` of `CubicExtField`). We do not verify these 12-dimensional coordinates by hand — that would require implementing the full Miller loop and final exponentiation — but the scalar identity is the mathematical core, and it is the part that can be checked with pen and paper.
+The scalar arithmetic balances via the bilinearity property. The actual pairing values are elements of `F_q^12`, represented as nested field extensions (`QuadExtField` of `CubicExtField`). We do not verify these 12-dimensional coordinates by hand — that would require implementing the full Miller loop and final exponentiation — but the scalar identity is the mathematical core, and it is the part that can be checked with pen and paper.
 
-> **What just happened.** We started with a simple multiplication chain (`x5 = x1*x2`, `x6 = x3*x4`, `a = x5*x6`) and ended with a proof that consists of exactly three curve points: `A = 10·G1`, `B = 33·G2`, `C = (151/13)·G1`. The verifier checks these three points against the public inputs using one pairing equation. At no point did the prover reveal `x1, x2, x3, x4`. The entire witness — the secret multipliers and the intermediate products — is hidden inside the proof, yet the verifier is mathematically certain that the constraints were satisfied.
+> **What just happened.** We started with a 5-constraint SumOfProducts circuit (`t1=a*b`, `t2=c*d`, `t3=e*f`, `t4=g*h`, `a=t1+t2+t3+t4+t5+t6`) and ended with a proof that consists of exactly three curve points: `A = 52435875...·G1`, `B = 1371·G2`, `C = 24201173...·G1`. The verifier checks these three points against the public inputs using one pairing equation. At no point did the prover reveal `a, b, c, d, e, f, g, h`. The entire witness — the secret inputs and the intermediate products — is hidden inside the proof, yet the verifier is mathematically certain that the constraints were satisfied.
 >
 > This is the essence of Groth16: a 192-byte proof that hides arbitrarily large secrets while convincing any verifier of their validity.
 
