@@ -3,9 +3,13 @@
 This document tracks the cross-checking of our Groth16 implementation between two independent codebases:
 
 - **Rust / arkworks** — production implementation in `groth16-prover/`
-- **Sage** — mathematical reference in `sage/groth16.sage`
+- **Sage** — mathematical reference in `sage/groth16_sumofproducts_16steps.sage` and `sage/groth16_multiplier_16steps.sage`
 
 Both use the **BLS12-381** curve (same subgroup order, same generators, same pairing). The Sage script implements curve arithmetic from scratch; the Rust crate uses `ark-bls12-381`. Agreement between the two gives high confidence that neither has a curve-specific bug.
+
+Two circuits are cross-checked:
+- **SumOfProducts** (5 constraints, 14 variables) — the primary tutorial circuit
+- **Multiplier** (3 constraints, 8 variables) — the simpler comparison circuit
 
 ---
 
@@ -18,7 +22,9 @@ For every sub-step in [README.md](README.md):
 3. Run the Sage script with deterministic inputs and print the same values.
 4. Assert equality. If there is any mismatch, debug both sides before advancing.
 
-> **Determinism:** Random values (toxic waste) are sampled from a fixed RNG seed in Rust and hard-coded in Sage so outputs are reproducible across runs.
+> **Determinism:** Random values (toxic waste) are hard-coded in both Rust and Sage so outputs are reproducible across runs. For SumOfProducts: `tau=6, alpha=5, beta=7, gamma=11, delta=13`. For Multiplier: `tau=3, alpha=5, beta=7, gamma=11, delta=13`.
+
+> **CLI convention:** All `print_*` binaries require an explicit circuit argument: `-- multiplier` or `-- sumofproducts`.
 
 ---
 
@@ -26,21 +32,23 @@ For every sub-step in [README.md](README.md):
 
 ### Implementation 1 — dense monomial (Steps 1.1–1.16)
 
+Cross-checked against `sage/groth16_sumofproducts_16steps.sage` (SumOfProducts circuit) and `sage/groth16_multiplier_16steps.sage` (Multiplier circuit).
+
 | Sub-step | Description | Status | Notes |
 |----------|-------------|--------|-------|
 | 1.1 | R1CS matrices `L`, `R`, `O` and witness `a` | ✅ **VERIFIED** | Identical hard-coded values; element-wise products match. |
 | 1.2 | BLS12-381 scalar field `Fr` modulus | ✅ **VERIFIED** | `q` matches exactly; sample add/mul/inv agree. |
-| 1.3 | Polynomial interpolation `u_i`, `v_i`, `w_i` | ✅ **VERIFIED** | Coefficient vectors match; QAP evaluation assertions pass at x = 0, 1, 2. |
-| 1.4 | Target polynomial `T(x)` | ✅ **VERIFIED** | Coefficients match; vanishes at x = 0, 1, 2. |
-| 1.5 | QAP verification at constraint points | ✅ **VERIFIED** | All 24 evaluations match; assertions pass in Rust and Sage. |
+| 1.3 | Polynomial interpolation `u_i`, `v_i`, `w_i` | ✅ **VERIFIED** | Coefficient vectors match; QAP evaluation assertions pass at constraint points. |
+| 1.4 | Target polynomial `T(x)` | ✅ **VERIFIED** | Coefficients match; vanishes at all constraint points. |
+| 1.5 | QAP verification at constraint points | ✅ **VERIFIED** | All evaluations match; assertions pass in Rust and Sage. |
 | 1.6 | Toxic waste `tau, alpha, beta, gamma, delta` | ✅ **VERIFIED** | Same five hard-coded primes in both; all non-zero, distinct, and invertible. |
 | 1.7 | SRS: `G1·tau^i`, `G2·tau^i`, `G1·T(tau)·tau^i/delta` | ✅ **VERIFIED** | Scalar values match exactly; G1 point coordinates match bit-for-bit; G2 coordinates differ only by field embedding (F₁₂ in Sage vs F_q² in Rust). |
 | 1.8 | CRS fixed points `alpha·G1`, `beta·G2`, `gamma·G2`, `delta·G2` | ✅ **VERIFIED** | Scalars match exactly; alpha·G1 coordinates match bit-for-bit; G2 coordinates differ only by field embedding. |
-| 1.9 | Per-variable CRS `Psi_V_G1`, `Psi_P_G1` | ✅ **VERIFIED** | Intermediate scalars (`u_i(tau)`, `v_i(tau)`, `w_i(tau)`, combined, `psi_scalar`) match exactly; G1 point coordinates match bit-for-bit for all variables. |
+| 1.9 | Per-variable CRS `Psi_V_G1`, `Psi_P_G1` | ✅ **VERIFIED** | Intermediate scalars match exactly; G1 point coordinates match bit-for-bit for all variables. |
 | 1.10 | Witness polynomials `l(x)`, `r(x)`, `o(x)` | ✅ **VERIFIED** | Coefficients match exactly; degree and evaluation at constraint points match. |
-| 1.11 | Quotient polynomial `h(x)` | ✅ **VERIFIED** | `h(x) = 3` in both; zero remainder confirmed by `p(x) == T(x) * h(x)`. |
+| 1.11 | Quotient polynomial `h(x)` | ✅ **VERIFIED** | `h(x)` matches in both; zero remainder confirmed by `p(x) == T(x) * h(x)`. |
 | 1.12 | Proof element `A` | ✅ **VERIFIED** | `l(tau)` and `alpha` match; G1 point coordinates match bit-for-bit. |
-| 1.13 | Proof element `B` | ✅ **VERIFIED** | `r(tau)` and `beta` match; combined scalar `33` matches; G2 coordinates differ only by field embedding. |
+| 1.13 | Proof element `B` | ✅ **VERIFIED** | `r(tau)` and `beta` match; combined scalar matches; G2 coordinates differ only by field embedding. |
 | 1.14 | Proof element `C` | ✅ **VERIFIED** | All intermediate Psi scalars, h_tau scalar, and total scalar match exactly; G1 point coordinates match bit-for-bit. |
 | 1.15 | Public-input commitment `V` | ✅ **VERIFIED** | Psi scalars and total scalar match exactly; G1 point coordinates match bit-for-bit. |
 | 1.16 | Pairing check | ✅ **VERIFIED** | Rust/arkworks pairing check passes; Sage atePairing has G2 embedding limitation but all inputs verified independently. |
@@ -73,33 +81,39 @@ For every sub-step in [README.md](README.md):
 ## Implementation 1 (dense monomial)
 
 <details>
-<summary><b>Steps 1.1–1.16 — click to expand</b></summary>
+<summary><b>Steps 1.1–1.16 (SumOfProducts circuit) — click to expand</b></summary>
 
 ## Step 1.1 — Detailed Verification
 
 ### Hard-coded values (identical in both implementations)
 
-**Witness:** `a = [1, 48, 2, 2, 3, 4, 4, 12]`
+**Witness:** `a = [1, 100, 1, 2, 3, 4, 5, 6, 7, 8, 2, 12, 30, 56]`
 
-**L matrix:**
+**L matrix (5 × 14):**
 ```
-[0, 0, 1, 0, 0, 0, 0, 0]
-[0, 0, 0, 0, 1, 0, 0, 0]
-[0, 0, 0, 0, 0, 0, 1, 0]
-```
-
-**R matrix:**
-```
-[0, 0, 0, 1, 0, 0, 0, 0]
-[0, 0, 0, 0, 0, 1, 0, 0]
-[0, 0, 0, 0, 0, 0, 0, 1]
+[0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+[0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+[0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0]
+[0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0]
+[1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 ```
 
-**O matrix:**
+**R matrix (5 × 14):**
 ```
-[0, 0, 0, 0, 0, 0, 1, 0]
-[0, 0, 0, 0, 0, 0, 0, 1]
-[0, 1, 0, 0, 0, 0, 0, 0]
+[0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+[0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0]
+[0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0]
+[0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0]
+[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1]
+```
+
+**O matrix (5 × 14):**
+```
+[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0]
+[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0]
+[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0]
+[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]
+[0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 ```
 
 ### Computed intermediates
@@ -108,26 +122,26 @@ Running either implementation produces the same constraint evaluations:
 
 | Constraint | `L·a` | `R·a` | `(L·a)·(R·a)` | `O·a` |
 |------------|-------|-------|---------------|-------|
-| 0 (x1·x2 = x5) | 2 | 2 | 4 | 4 |
-| 1 (x3·x4 = x6) | 3 | 4 | 12 | 12 |
-| 2 (x5·x6 = a) | 4 | 12 | 48 | 48 |
+| 0 (a·b = t1) | 1 | 2 | 2 | 2 |
+| 1 (c·d = t2) | 3 | 4 | 12 | 12 |
+| 2 (e·f = t3) | 5 | 6 | 30 | 30 |
+| 3 (g·h = t4) | 7 | 8 | 56 | 56 |
+| 4 (1·(t1+t2+t3+t4) = out) | 1 | 100 | 100 | 100 |
 
 ### Commands to reproduce
 
 **Rust:**
 ```bash
 cd groth16-prover
-cargo run --bin print_r1cs
+cargo run --bin print_r1cs -- sumofproducts
 cargo test
 ```
 
 **Sage:**
 ```bash
 cd sage
-docker run --rm --entrypoint bash \
-  -v "$(pwd):/mnt/sage" \
-  sagemath/sagemath:latest \
-  -c "cp -r /mnt/sage /tmp/sage && cd /tmp/sage && sage groth16.sage"
+docker run --rm -v "$(pwd):/mnt" sagemath/sagemath:latest \
+  sage /mnt/groth16_sumofproducts_16steps.sage
 ```
 
 Both print the matrices and the element-wise products shown above. The assertion `(L·a) ∘ (R·a) == O·a` passes in both.
@@ -145,7 +159,7 @@ q = 5243587517512619047944774050818596583769055250052763782260365869993858118451
 ```
 
 - **Rust**: `ark_bls12_381::Fr::MODULUS` (printed from `print_field` binary).
-- **Sage**: `q` defined in `bls13-381.sage` and printed from `groth16.sage`.
+- **Sage**: `q` defined in `bls13-381.sage` and printed from `groth16_sumofproducts_16steps.sage`.
 
 ### Sample arithmetic cross-check
 
@@ -173,10 +187,8 @@ cargo run --bin print_field
 **Sage:**
 ```bash
 cd sage
-docker run --rm --entrypoint bash \
-  -v "$(pwd):/mnt/sage" \
-  sagemath/sagemath:latest \
-  -c "cp -r /mnt/sage /tmp/sage && cd /tmp/sage && sage groth16.sage"
+docker run --rm -v "$(pwd):/mnt" sagemath/sagemath:latest \
+  sage /mnt/groth16_sumofproducts_16steps.sage
 ```
 
 *(If Sage is unavailable, the same modulus and operations were verified with Python’s built-in `pow(a, -1, q)`.)*
@@ -189,7 +201,7 @@ docker run --rm --entrypoint bash \
 
 The R1CS matrices `L`, `R`, `O` have 8 columns each. Every column is interpolated over the three constraint points `x ∈ {0, 1, 2}` using Lagrange interpolation.
 
-**Rust** (`cargo run --bin print_qap`) and **Sage** (`groth16.sage`) both print the coefficient vectors `[c0, c1, c2]` for every `u_i(x)`, `v_i(x)`, `w_i(x)`.
+**Rust** (`cargo run --bin print_qap -- sumofproducts`) and **Sage** (`groth16_sumofproducts_16steps.sage`) both print the coefficient vectors `[c0, c1, c2]` for every `u_i(x)`, `v_i(x)`, `w_i(x)`.
 
 A selection of non-trivial polynomials (all others are the zero polynomial):
 
@@ -224,17 +236,15 @@ All 24 evaluations (`8 variables × 3 points × 3 matrices`) pass in Rust and Sa
 **Rust:**
 ```bash
 cd groth16-prover
-cargo run --bin print_qap
+cargo run --bin print_qap -- sumofproducts
 cargo test
 ```
 
 **Sage:**
 ```bash
 cd sage
-docker run --rm --entrypoint bash \
-  -v "$(pwd):/mnt/sage" \
-  sagemath/sagemath:latest \
-  -c "cp -r /mnt/sage /tmp/sage && cd /tmp/sage && sage groth16.sage"
+docker run --rm -v "$(pwd):/mnt" sagemath/sagemath:latest \
+  sage /mnt/groth16_sumofproducts_16steps.sage
 ```
 
 ---
@@ -273,17 +283,15 @@ Both implementations assert that `T(x)` evaluates to zero at every constraint po
 **Rust:**
 ```bash
 cd groth16-prover
-cargo run --bin print_qap
+cargo run --bin print_qap -- sumofproducts
 cargo test
 ```
 
 **Sage:**
 ```bash
 cd sage
-docker run --rm --entrypoint bash \
-  -v "$(pwd):/mnt/sage" \
-  sagemath/sagemath:latest \
-  -c "cp -r /mnt/sage /tmp/sage && cd /tmp/sage && sage groth16.sage"
+docker run --rm -v "$(pwd):/mnt" sagemath/sagemath:latest \
+  sage /mnt/groth16_sumofproducts_16steps.sage
 ```
 
 *(If Sage is unavailable, the same coefficients and vanishing check were verified with Python.)*
@@ -308,7 +316,7 @@ This yields `8 variables × 3 points × 3 matrices = 72` individual assertions. 
 
 ### Printed confirmation
 
-**Rust** (`cargo run --bin print_qap`) and **Sage** (`sage groth16.sage`) both print:
+**Rust** (`cargo run --bin print_qap -- sumofproducts`) and **Sage** (`sage groth16_sumofproducts_16steps.sage`) both print:
 
 ```
 === Step 1.5: QAP Verification at Constraint Points ===
@@ -320,24 +328,22 @@ This yields `8 variables × 3 points × 3 matrices = 72` individual assertions. 
 ✓ All 24 evaluations (8 variables × 3 points) pass.
 ```
 
-The assertions are hard-coded in both sources (`print_qap.rs` and `groth16.sage`); a mismatch would panic / abort immediately.
+The assertions are hard-coded in both sources (`print_qap.rs` and `groth16_sumofproducts_16steps.sage`); a mismatch would panic / abort immediately.
 
 ### Commands to reproduce
 
 **Rust:**
 ```bash
 cd groth16-prover
-cargo run --bin print_qap
+cargo run --bin print_qap -- sumofproducts
 cargo test
 ```
 
 **Sage:**
 ```bash
 cd sage
-docker run --rm --entrypoint bash \
-  -v "$(pwd):/mnt/sage" \
-  sagemath/sagemath:latest \
-  -c "cp -r /mnt/sage /tmp/sage && cd /tmp/sage && sage groth16.sage"
+docker run --rm -v "$(pwd):/mnt" sagemath/sagemath:latest \
+  sage /mnt/groth16_sumofproducts_16steps.sage
 ```
 
 ---
@@ -376,16 +382,14 @@ Both implementations assert:
 **Rust:**
 ```bash
 cd groth16-prover
-cargo run --bin print_toxic_waste
+cargo run --bin print_toxic_waste -- sumofproducts
 ```
 
 **Sage:**
 ```bash
 cd sage
-docker run --rm --entrypoint bash \
-  -v "$(pwd):/mnt/sage" \
-  sagemath/sagemath:latest \
-  -c "cp -r /mnt/sage /tmp/sage && cd /tmp/sage && sage groth16.sage"
+docker run --rm -v "$(pwd):/mnt" sagemath/sagemath:latest \
+  sage /mnt/groth16_sumofproducts_16steps.sage
 ```
 
 ---
@@ -459,16 +463,14 @@ Both implementations assert:
 **Rust:**
 ```bash
 cd groth16-prover
-cargo run --bin print_srs
+cargo run --bin print_srs -- sumofproducts
 ```
 
 **Sage:**
 ```bash
 cd sage
-docker run --rm --entrypoint bash \
-  -v "$(pwd):/mnt/sage" \
-  sagemath/sagemath:latest \
-  -c "cp -r /mnt/sage /tmp/sage && cd /tmp/sage && sage groth16.sage"
+docker run --rm -v "$(pwd):/mnt" sagemath/sagemath:latest \
+  sage /mnt/groth16_sumofproducts_16steps.sage
 ```
 
 ---
@@ -510,16 +512,14 @@ Both implementations assert that the resulting points are non-zero (scalar multi
 **Rust:**
 ```bash
 cd groth16-prover
-cargo run --bin print_crs
+cargo run --bin print_crs -- sumofproducts
 ```
 
 **Sage:**
 ```bash
 cd sage
-docker run --rm --entrypoint bash \
-  -v "$(pwd):/mnt/sage" \
-  sagemath/sagemath:latest \
-  -c "cp -r /mnt/sage /tmp/sage && cd /tmp/sage && sage groth16.sage"
+docker run --rm -v "$(pwd):/mnt" sagemath/sagemath:latest \
+  sage /mnt/groth16_sumofproducts_16steps.sage
 ```
 
 ---
@@ -585,16 +585,14 @@ Both implementations assert that for variable 0 (the constant `1`), all three po
 **Rust:**
 ```bash
 cd groth16-prover
-cargo run --bin print_psi
+cargo run --bin print_psi -- sumofproducts
 ```
 
 **Sage:**
 ```bash
 cd sage
-docker run --rm --entrypoint bash \
-  -v "$(pwd):/mnt/sage" \
-  sagemath/sagemath:latest \
-  -c "cp -r /mnt/sage /tmp/sage && cd /tmp/sage && sage groth16.sage"
+docker run --rm -v "$(pwd):/mnt" sagemath/sagemath:latest \
+  sage /mnt/groth16_sumofproducts_16steps.sage
 ```
 
 ---
@@ -638,16 +636,14 @@ These values reproduce the original R1CS constraint evaluations from Step 1.1.
 **Rust:**
 ```bash
 cd groth16-prover
-cargo run --bin print_witness_polys
+cargo run --bin print_witness_polys -- sumofproducts
 ```
 
 **Sage:**
 ```bash
 cd sage
-docker run --rm --entrypoint bash \
-  -v "$(pwd):/mnt/sage" \
-  sagemath/sagemath:latest \
-  -c "cp -r /mnt/sage /tmp/sage && cd /tmp/sage && sage groth16.sage"
+docker run --rm -v "$(pwd):/mnt" sagemath/sagemath:latest \
+  sage /mnt/groth16_sumofproducts_16steps.sage
 ```
 
 ---
@@ -693,16 +689,14 @@ h(x) = 3
 **Rust:**
 ```bash
 cd groth16-prover
-cargo run --bin print_quotient
+cargo run --bin print_quotient -- sumofproducts
 ```
 
 **Sage:**
 ```bash
 cd sage
-docker run --rm --entrypoint bash \
-  -v "$(pwd):/mnt/sage" \
-  sagemath/sagemath:latest \
-  -c "cp -r /mnt/sage /tmp/sage && cd /tmp/sage && sage groth16.sage"
+docker run --rm -v "$(pwd):/mnt" sagemath/sagemath:latest \
+  sage /mnt/groth16_sumofproducts_16steps.sage
 ```
 
 ---
@@ -744,16 +738,14 @@ Rust and Sage produce identical G1 coordinates.
 **Rust:**
 ```bash
 cd groth16-prover
-cargo run --bin print_proof_a
+cargo run --bin print_proof_a -- sumofproducts
 ```
 
 **Sage:**
 ```bash
 cd sage
-docker run --rm --entrypoint bash \
-  -v "$(pwd):/mnt/sage" \
-  sagemath/sagemath:latest \
-  -c "cp -r /mnt/sage /tmp/sage && cd /tmp/sage && sage groth16.sage"
+docker run --rm -v "$(pwd):/mnt" sagemath/sagemath:latest \
+  sage /mnt/groth16_sumofproducts_16steps.sage
 ```
 
 ---
@@ -790,16 +782,14 @@ As in previous G2 comparisons, the coordinates do **not** match directly because
 **Rust:**
 ```bash
 cd groth16-prover
-cargo run --bin print_proof_b
+cargo run --bin print_proof_b -- sumofproducts
 ```
 
 **Sage:**
 ```bash
 cd sage
-docker run --rm --entrypoint bash \
-  -v "$(pwd):/mnt/sage" \
-  sagemath/sagemath:latest \
-  -c "cp -r /mnt/sage /tmp/sage && cd /tmp/sage && sage groth16.sage"
+docker run --rm -v "$(pwd):/mnt" sagemath/sagemath:latest \
+  sage /mnt/groth16_sumofproducts_16steps.sage
 ```
 
 ---
@@ -857,16 +847,14 @@ Rust and Sage produce identical G1 coordinates.
 **Rust:**
 ```bash
 cd groth16-prover
-cargo run --bin print_proof_c
+cargo run --bin print_proof_c -- sumofproducts
 ```
 
 **Sage:**
 ```bash
 cd sage
-docker run --rm --entrypoint bash \
-  -v "$(pwd):/mnt/sage" \
-  sagemath/sagemath:latest \
-  -c "cp -r /mnt/sage /tmp/sage && cd /tmp/sage && sage groth16.sage"
+docker run --rm -v "$(pwd):/mnt" sagemath/sagemath:latest \
+  sage /mnt/groth16_sumofproducts_16steps.sage
 ```
 
 ---
@@ -910,16 +898,14 @@ Rust and Sage produce identical G1 coordinates.
 **Rust:**
 ```bash
 cd groth16-prover
-cargo run --bin print_public_input
+cargo run --bin print_public_input -- sumofproducts
 ```
 
 **Sage:**
 ```bash
 cd sage
-docker run --rm --entrypoint bash \
-  -v "$(pwd):/mnt/sage" \
-  sagemath/sagemath:latest \
-  -c "cp -r /mnt/sage /tmp/sage && cd /tmp/sage && sage groth16.sage"
+docker run --rm -v "$(pwd):/mnt" sagemath/sagemath:latest \
+  sage /mnt/groth16_sumofproducts_16steps.sage
 ```
 
 ---
@@ -951,7 +937,7 @@ e(A, B) == e(α·G1, β·G2) · e(C, δ·G2) · e(V, γ·G2)
 
 ```bash
 cd groth16-prover
-cargo run --bin print_pairing
+cargo run --bin print_pairing -- sumofproducts
 ```
 
 Output:
@@ -978,16 +964,14 @@ This is a **representation-level incompatibility**, not a mathematical discrepan
 **Rust:**
 ```bash
 cd groth16-prover
-cargo run --bin print_pairing
+cargo run --bin print_pairing -- sumofproducts
 ```
 
 **Sage:**
 ```bash
 cd sage
-docker run --rm --entrypoint bash \
-  -v "$(pwd):/mnt/sage" \
-  sagemath/sagemath:latest \
-  -c "cp -r /mnt/sage /tmp/sage && cd /tmp/sage && sage groth16.sage"
+docker run --rm -v "$(pwd):/mnt" sagemath/sagemath:latest \
+  sage /mnt/groth16_sumofproducts_16steps.sage
 ```
 
 </details>
@@ -1027,10 +1011,8 @@ cargo run --bin print_qap_engines
 **Sage:**
 ```bash
 cd sage
-docker run --rm --entrypoint bash \
-  -v "$(pwd):/mnt/sage" \
-  sagemath/sagemath:latest \
-  -c "cp -r /mnt/sage /tmp/sage && cd /tmp/sage && sage groth16.sage"
+docker run --rm -v "$(pwd):/mnt" sagemath/sagemath:latest \
+  sage /mnt/groth16_sumofproducts_16steps.sage
 ```
 
 ---
@@ -1041,13 +1023,13 @@ docker run --rm --entrypoint bash \
 
 Both implementations pad each matrix column to length 4 (on the roots `ω^i`) and run an IFFT to obtain monomial coefficients. The resulting polynomials are degree ≤ 3 (the extra coefficient is forced to zero by the padding).
 
-**Rust** (`cargo run --bin print_qap_engines`) and **Sage** (`groth16.sage`) both print the coefficient vectors `[c0, c1, c2, c3]` for every `u_i(x)`, `v_i(x)`, `w_i(x)`.
+**Rust** (`cargo run --bin print_qap_engines`) and **Sage** (`groth16_multiplier_16steps.sage`) both print the coefficient vectors `[c0, c1, c2, c3]` for every `u_i(x)`, `v_i(x)`, `w_i(x)`.
 
 The non-trivial wires (those with non-zero QAP polynomials):
 
 **Wire 2 — `u_2(x)` (degree 3)**
 
-| Coefficient | Rust (`print_qap_engines`) | Sage (`groth16.sage`) | Match? |
+| Coefficient | Rust (`print_qap_engines`) | Sage (`groth16_multiplier_16steps.sage`) | Match? |
 |-------------|---------------------------|-----------------------|--------|
 | `x⁰` | `39326906381344642859585805381139474378267914375395728366952744024953935888385` | `39326906381344642859585805381139474378267914375395728366952744024953935888385` | ✅ |
 | `x¹` | `39326906381344642859585805381139474378267914375395728366952744024953935888385` | `39326906381344642859585805381139474378267914375395728366952744024953935888385` | ✅ |
@@ -1085,10 +1067,8 @@ cargo run --bin print_qap_engines
 **Sage:**
 ```bash
 cd sage
-docker run --rm --entrypoint bash \
-  -v "$(pwd):/mnt/sage" \
-  sagemath/sagemath:latest \
-  -c "cp -r /mnt/sage /tmp/sage && cd /tmp/sage && sage groth16.sage"
+docker run --rm -v "$(pwd):/mnt" sagemath/sagemath:latest \
+  sage /mnt/groth16_sumofproducts_16steps.sage
 ```
 
 ---
@@ -1137,7 +1117,7 @@ w_i(ω^j) == padded_O[j][i]
 
 This yields `8 variables × 4 roots × 3 matrices = 96` individual assertions. All of them pass in both implementations.
 
-**Rust** (`cargo run --bin print_qap_engines`) and **Sage** (`sage groth16.sage`) both print confirmation that all evaluations match.
+**Rust** (`cargo run --bin print_qap_engines`) and **Sage** (`sage groth16_multiplier_16steps.sage`) both print confirmation that all evaluations match.
 
 ---
 
@@ -1242,10 +1222,8 @@ cargo run --bin print_qap_engines
 **Sage (FFT path with dense path preceding):**
 ```bash
 cd sage
-docker run --rm --entrypoint bash \
-  -v "$(pwd):/mnt/sage" \
-  sagemath/sagemath:latest \
-  -c "cp -r /mnt/sage /tmp/sage && cd /tmp/sage && sage groth16.sage"
+docker run --rm -v "$(pwd):/mnt" sagemath/sagemath:latest \
+  sage /mnt/groth16_sumofproducts_16steps.sage
 ```
 
 </details>
