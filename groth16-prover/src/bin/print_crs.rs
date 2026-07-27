@@ -2,7 +2,13 @@ use ark_bls12_381::{G1Affine, G2Affine, G1Projective, G2Projective, Fr};
 use ark_ec::Group;
 
 fn main() {
+    let name = std::env::args().nth(1).unwrap_or_else(|| {
+        eprintln!("Usage: print_crs <multiplier|sumofproducts>");
+        std::process::exit(1);
+    });
+
     println!("=== Step 1.8: CRS Fixed Points ===\n");
+    println!("Circuit: {}", name);
 
     // Fixed deterministic toxic waste (same as Step 1.6)
     let alpha = Fr::from(5u64);
