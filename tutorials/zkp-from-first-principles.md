@@ -43,90 +43,7 @@ This article focuses on **Groth16**, the fastest and most compact zk-SNARK const
 
 But before we get to smart contracts, we need to understand what the proof actually *is*. We will build it from scratch, step by step, using a very simple circuit: a 4-constraint sum-of-products.
 
-Groth16 proves correct execution of an **arithmetic circuit**, which must first be expressed as a **Rank-1 Constraint System (R1CS)**. Let us start with the concrete problem.
-
-**The equation.** We have eight secret numbers that must satisfy:
-
-```
-a·b + c·d + e·f + g·h = 100
-```
-
-**Who knows what.** The *prover* knows a solution — say, `a=1, b=2, c=3, d=4, e=5, f=6, g=7, h=8` (since `1·2 + 3·4 + 5·6 + 7·8 = 100`). The *verifier* knows only the equation, and here `100` which is known as output. The verifier does not know the eight inputs that the prover come up with. The question is: *can the prover convince the verifier that he knows the solution to the equation, without revealing any of the eight numbers?*
-
-**Translating to R1CS.** Groth16 does not operate on equations directly — it requires a **Rank-1 Constraint System**: a set of multiplication constraints of the form `(A·w) * (B·w) = (C·w)`, where `w` is the *witness vector* (the full assignment of values to every wire — secret inputs, public outputs, and intermediates). Our equation splits into four multiplication gates plus one addition gate:
-
-```
-t1 = a · b        (constraint 0)
-t2 = c · d        (constraint 1)
-t3 = e · f        (constraint 2)
-t4 = g · h        (constraint 3)
-out = t1 + t2 + t3 + t4    (addition — no constraint needed)
-```
-
-The witness vector is:
-
-```
-w =  [  1,   100,  1, 2, 3, 4, 5, 6, 7, 8,  2, 12, 30, 56 ]
-       ^    ^    ^                           ^  ^   ^   ^
-       |    |    |                           |  |   |   |
-      const out  a   b  c  d  e  f  g  h   t1 t2  t3  t4
-     [  0,    1,  2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13 ]  <-- indices
-```
-
-Note the first entry is the constant `1` (present in every R1CS witness), and `out = 100` is the public output that the verifier knows.
-
-Each constraint picks two wires on the left and right, and one on the output:
-
-```
-Constraint 0:  L[0] picks a (col 2),  R[0] picks b (col 3),  O[0] picks t1 (col 10)
-Constraint 1:  L[1] picks c (col 4),  R[1] picks d (col 5),  O[1] picks t2 (col 11)
-Constraint 2:  L[2] picks e (col 6),  R[2] picks f (col 7),  O[2] picks t3 (col 12)
-Constraint 3:  L[3] picks g (col 8),  R[3] picks h (col 9),  O[3] picks t4 (col 13)
-```
-
-In matrix form (all unlisted entries are 0), with the witness vector alongside for reference:
-
-```
-w =    [  1  100  1  2  3  4  5  6  7  8  2  12  30  56 ]
-         const out  a  b  c  d  e  f  g  h  t1 t2 t3 t4
-         ----- ---  -  -  -  -  -  -  -  -  -- -- -- --
-L[0]  = [  0    0  1  0  0  0  0  0  0  0   0  0  0  0 ]    picks a
-L[1]  = [  0    0  0  0  1  0  0  0  0  0   0  0  0  0 ]    picks c
-L[2]  = [  0    0  0  0  0  0  1  0  0  0   0  0  0  0 ]    picks e
-L[3]  = [  0    0  0  0  0  0  0  0  1  0   0  0  0  0 ]    picks g
-
-R[0]  = [  0    0  0  1  0  0  0  0  0  0   0  0  0  0 ]    picks b
-R[1]  = [  0    0  0  0  0  1  0  0  0  0   0  0  0  0 ]    picks d
-R[2]  = [  0    0  0  0  0  0  0  1  0  0   0  0  0  0 ]    picks f
-R[3]  = [  0    0  0  0  0  0  0  0  0  1   0  0  0  0 ]    picks h
-
-O[0]  = [  0    0  0  0  0  0  0  0  0  0   1  0  0  0 ]    picks t1
-O[1]  = [  0    0  0  0  0  0  0  0  0  0   0  1  0  0 ]    picks t2
-O[2]  = [  0    0  0  0  0  0  0  0  0  0   0  0  1  0 ]    picks t3
-O[3]  = [  0    0  0  0  0  0  0  0  0  0   0  0  0  1 ]    picks t4
-```
-
-Each R1CS constraint checks `(L[i]·w) * (R[i]·w) = O[i]·w`. Let us verify constraint 0 in detail:
-
-```
-L[0]·w = 0·1 + 0·100 + 1·1 + 0·2 + ... = 1     (picks a)
-R[0]·w = 0·1 + 0·100 + 0·1 + 1·2 + ... = 2     (picks b)
-O[0]·w = 0·1 + 0·100 + ... + 1·2 + ... = 2     (picks t1)
-
-(L[0]·w) * (R[0]·w) = 1 * 2 = 2  =  O[0]·w  ✓
-```
-
-All four constraints hold:
-
-```
-constraint 0:  1 * 2  = 2   ✓   (t1 = a·b)
-constraint 1:  3 * 4  = 12  ✓   (t2 = c·d)
-constraint 2:  5 * 6  = 30  ✓   (t3 = e·f)
-constraint 3:  7 * 8  = 56  ✓   (t4 = g·h)
-```
-
-This R1CS is the starting point. Groth16 then converts these matrices into polynomials (the QAP transformation) so that checking all four constraints reduces to a single polynomial identity at a secret point. That conversion — and the cryptographic machinery built on top of it — is what the rest of this article explains.
-
+Groth16 proves correct execution of an **arithmetic circuit**, which must first be expressed as a **Rank-1 Constraint System (R1CS)**.  
 ---
 
 ## Why Groth16 matters
@@ -192,15 +109,37 @@ There is one more constraint: each R1CS row can express only a *quadratic* relat
 
 ## A 4-constraint "hello world"
 
-Our repository already contains a 3-gate multiplication chain (`multiplier.circom`) that proves `a = x1·x2·x3·x4`. To make the pedagogical step slightly richer, we introduce a new 4-gate circuit that proves a *sum of pairwise products*. This is the same circuit we already saw when introducing the R1CS matrices — now we will trace it through every stage of the Groth16 pipeline, from R1CS to QAP to proof to verification:
+Our repository already contains a 3-gate multiplication chain (`multiplier.circom`) that proves `a = x1·x2·x3·x4`. To make the pedagogical step slightly richer, we introduce a new 4-gate circuit that proves a *sum of pairwise products*. This is the same circuit we already saw when introducing the R1CS matrices — now we will trace it through every stage of the Groth16 pipeline, from R1CS to QAP to proof to verification. Let us start with the concrete problem.
+
+**The equation.** We have eight secret numbers that must satisfy:
 
 ```
-t1 = a * b
-t2 = c * d
-t3 = e * f
-t4 = g * h
-out = t1 + t2 + t3 + t4
+a·b + c·d + e·f + g·h = 100
 ```
+
+**Who knows what.** The *prover* knows a solution — say, `a=1, b=2, c=3, d=4, e=5, f=6, g=7, h=8` (since `1·2 + 3·4 + 5·6 + 7·8 = 100`). The *verifier* knows only the equation, and here `100` which is known as output. The verifier does not know the eight inputs that the prover come up with. The question is: *can the prover convince the verifier that he knows the solution to the equation, without revealing any of the eight numbers?*
+
+**Translating to R1CS.** Groth16 does not operate on equations directly — it requires a **Rank-1 Constraint System**: a set of multiplication constraints of the form `(A·w) * (B·w) = (C·w)`, where `w` is the *witness vector* (the full assignment of values to every wire — secret inputs, public outputs, and intermediates). Our equation splits into four multiplication gates plus one addition gate:
+
+```
+t1 = a · b        (constraint 0)
+t2 = c · d        (constraint 1)
+t3 = e · f        (constraint 2)
+t4 = g · h        (constraint 3)
+out = t1 + t2 + t3 + t4    (addition — no constraint needed)
+```
+
+The witness vector is:
+
+```
+w =  [  1,   100,  1, 2, 3, 4, 5, 6, 7, 8,  2, 12, 30, 56 ]
+       ^    ^    ^                           ^  ^   ^   ^
+       |    |    |                           |  |   |   |
+      const out  a   b  c  d  e  f  g  h   t1 t2  t3  t4
+     [  0,    1,  2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13 ]  <-- indices
+```
+
+Note the first entry is the constant `1` (present in every R1CS witness), and `out = 100` is the public output that the verifier knows.
 
 We write circuits in **Circom** — think of it as the assembly language for R1CS: it compiles directly to constraint matrices with no hidden abstractions, which is why we use it throughout this tutorial. This circuit has 8 private inputs, 4 intermediate wires, and 1 public output. In R1CS form it yields exactly 4 constraints — one per multiplication. The source lives in [`groth16-prover/circom/SumOfProducts/sum_of_products.circom`](https://github.com/cardano-foundation/bls/blob/main/groth16-prover/circom/SumOfProducts/sum_of_products.circom):
 
@@ -233,7 +172,7 @@ The prover's job is to come up with a solution to the equation. Here the prover 
   "e": "5", "f": "6", "g": "7", "h": "8" }
 ```
 
-the witness vector is:
+the witness vector is as we shown above:
 
 ```
 [1, 100, 1, 2, 3, 4, 5, 6, 7, 8, 2, 12, 30, 56]
