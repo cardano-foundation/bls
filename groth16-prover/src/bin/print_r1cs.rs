@@ -1,34 +1,40 @@
-use groth16_prover::r1cs::*;
+use groth16_prover::r1cs::{select_circuit, matrix_mul_vec_dyn, verify_r1cs_circuit};
 
 fn main() {
-    println!("=== Step 1.1: R1CS Matrices and Witness ===\n");
+    let name = std::env::args().nth(1).unwrap_or_else(|| {
+        eprintln!("Usage: print_r1cs <multiplier|sumofproducts>");
+        std::process::exit(1);
+    });
+    let circuit = select_circuit(&name);
 
-    println!("Witness a = {:?}", WITNESS);
+    println!("=== Step 1.1: R1CS Matrices and Witness ===\n");
+    println!("Circuit: {}", circuit.name);
+
+    println!("\nWitness a = {:?}", circuit.witness.iter().map(|f| f.to_string()).collect::<Vec<_>>());
 
     println!("\nL matrix:");
-    for row in &L {
-        println!("  {:?}", row);
+    for row in &circuit.l {
+        println!("  {:?}", row.iter().map(|f| f.to_string()).collect::<Vec<_>>());
     }
 
     println!("\nR matrix:");
-    for row in &R {
-        println!("  {:?}", row);
+    for row in &circuit.r {
+        println!("  {:?}", row.iter().map(|f| f.to_string()).collect::<Vec<_>>());
     }
 
     println!("\nO matrix:");
-    for row in &O {
-        println!("  {:?}", row);
+    for row in &circuit.o {
+        println!("  {:?}", row.iter().map(|f| f.to_string()).collect::<Vec<_>>());
     }
 
-    let witness = witness_to_fr(&WITNESS);
     println!("\nWitness as Fr elements:");
-    for (i, w) in witness.iter().enumerate() {
+    for (i, w) in circuit.witness.iter().enumerate() {
         println!("  a[{}] = {}", i, w);
     }
 
-    let la = matrix_mul_vec(&L, &witness);
-    let ra = matrix_mul_vec(&R, &witness);
-    let oa = matrix_mul_vec(&O, &witness);
+    let la = matrix_mul_vec_dyn(&circuit.l, &circuit.witness);
+    let ra = matrix_mul_vec_dyn(&circuit.r, &circuit.witness);
+    let oa = matrix_mul_vec_dyn(&circuit.o, &circuit.witness);
 
     println!("\nL · a = {:?}", la.iter().map(|f| f.to_string()).collect::<Vec<_>>());
     println!("R · a = {:?}", ra.iter().map(|f| f.to_string()).collect::<Vec<_>>());
@@ -42,7 +48,7 @@ fn main() {
         );
     }
 
-    match verify_r1cs(&witness) {
+    match verify_r1cs_circuit(&circuit) {
         Ok(()) => println!("\n✓ R1CS relation verified."),
         Err(e) => println!("\n✗ R1CS relation failed: {}", e),
     }

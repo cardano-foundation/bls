@@ -1,8 +1,9 @@
 use ark_bls12_381::Fr;
 use ark_ff::{One, Zero};
 use ark_poly::{univariate::DensePolynomial, DenseUVPolynomial, Polynomial};
-use groth16_prover::qap::{build_qap_polynomials, build_target_polynomial};
-use groth16_prover::r1cs::{L, R, O, WITNESS};
+use groth16_prover::engine::{DenseQapEngine, QapEngine};
+use groth16_prover::qap::build_qap_polynomials_circuit;
+use groth16_prover::r1cs::select_circuit;
 
 /// Multiply a polynomial by a scalar.
 fn poly_scalar_mul(poly: &DensePolynomial<Fr>, scalar: Fr) -> DensePolynomial<Fr> {
@@ -36,24 +37,31 @@ fn normalize(poly: &mut DensePolynomial<Fr>) {
 }
 
 fn main() {
-    println!("=== Step 1.11: Quotient Polynomial h(x) ===\n");
+    let name = std::env::args().nth(1).unwrap_or_else(|| {
+        eprintln!("Usage: print_quotient <multiplier|sumofproducts>");
+        std::process::exit(1);
+    });
+    let circuit = select_circuit(&name);
 
-    let (us, vs, ws) = build_qap_polynomials(&L, &R, &O);
-    let witness: Vec<Fr> = WITNESS.iter().map(|&v| Fr::from(v)).collect();
+    println!("=== Step 1.11: Quotient Polynomial h(x) ===\n");
+    println!("Circuit: {}", circuit.name);
+
+    let (us, vs, ws) = build_qap_polynomials_circuit(&circuit);
 
     // Build l(x), r(x), o(x)
     let mut l = DensePolynomial::from_coefficients_vec(vec![Fr::zero()]);
     let mut r = DensePolynomial::from_coefficients_vec(vec![Fr::zero()]);
     let mut o = DensePolynomial::from_coefficients_vec(vec![Fr::zero()]);
-    for i in 0..witness.len() {
-        l = poly_add(&l, &poly_scalar_mul(&us[i], witness[i]));
-        r = poly_add(&r, &poly_scalar_mul(&vs[i], witness[i]));
-        o = poly_add(&o, &poly_scalar_mul(&ws[i], witness[i]));
+    for i in 0..circuit.n_vars() {
+        l = poly_add(&l, &poly_scalar_mul(&us[i], circuit.witness[i]));
+        r = poly_add(&r, &poly_scalar_mul(&vs[i], circuit.witness[i]));
+        o = poly_add(&o, &poly_scalar_mul(&ws[i], circuit.witness[i]));
     }
 
-    // Build T(x)
-    let points = [Fr::zero(), Fr::one(), Fr::from(2u64)];
-    let t = build_target_polynomial(&points);
+    // Build T(x) using the engine
+    let engine = DenseQapEngine::new();
+    let n_constraints = circuit.n_constraints();
+    let t = engine.target_poly(n_constraints);
 
     // Compute p(x) = l(x)*r(x) - o(x)
     let prod = l.naive_mul(&r);
@@ -71,11 +79,8 @@ fn main() {
     println!("p(x) = l(x)*r(x) - o(x) degree = {}, coeffs = {:?}", p.degree(),
              p.coeffs.iter().map(|c| c.to_string()).collect::<Vec<_>>());
 
-    // Quotient: since deg(p) == deg(T) == 3, h(x) is the constant leading_coeff(p) / leading_coeff(T)
-    let h_scalar = p.coeffs[p.degree()] / t.coeffs[t.degree()];
-    let h = DensePolynomial::from_coefficients_vec(vec![h_scalar]);
-    println!("h(x) = leading_coeff(p) / leading_coeff(T) = {} / {} = {}",
-             p.coeffs[p.degree()], t.coeffs[t.degree()], h_scalar);
+    // Compute quotient via the engine
+    let h = engine.compute_quotient(&l, &r, &o, &t);
     println!("h(x) degree = {}, coeffs = {:?}", h.degree(),
              h.coeffs.iter().map(|c| c.to_string()).collect::<Vec<_>>());
 

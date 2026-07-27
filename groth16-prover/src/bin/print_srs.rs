@@ -1,23 +1,33 @@
 use ark_bls12_381::{G1Affine, G2Affine, G1Projective, G2Projective, Fr};
 use ark_ec::{AffineRepr, Group};
-use ark_ff::{Field, One, Zero};
+use ark_ff::{Field, One};
 use ark_poly::Polynomial;
-use groth16_prover::qap::build_target_polynomial;
+use groth16_prover::engine::{DenseQapEngine, QapEngine};
+use groth16_prover::r1cs::select_circuit;
 
 fn main() {
-    println!("=== Step 1.7: SRS Points ===\n");
+    let name = std::env::args().nth(1).unwrap_or_else(|| {
+        eprintln!("Usage: print_srs <multiplier|sumofproducts>");
+        std::process::exit(1);
+    });
+    let circuit = select_circuit(&name);
 
-    // Fixed deterministic toxic waste (same as Step 1.6)
-    let tau   = Fr::from(3u64);
+    println!("=== Step 1.7: SRS Points ===\n");
+    println!("Circuit: {}", circuit.name);
+
+    let tau   = match circuit.name {
+        "multiplier" => Fr::from(3u64),
+        _            => Fr::from(6u64),
+    };
     let delta = Fr::from(13u64);
 
-    // Evaluate target polynomial T(x) = x^3 - 3x^2 + 2x at tau
-    let points = [Fr::zero(), Fr::one(), Fr::from(2u64)];
-    let t_poly = build_target_polynomial(&points);
+    let engine = DenseQapEngine::new();
+    let n_constraints = circuit.n_constraints();
+    let t_poly = engine.target_poly(n_constraints);
     let t_tau = t_poly.evaluate(&tau);
-    println!("T(tau) = {}  (tau = {}, T(x) = x^3 - 3x^2 + 2x)", t_tau, tau);
+    println!("T(tau) = {}  (tau = {})", t_tau, tau);
 
-    let n: usize = 3; // number of constraints
+    let n = n_constraints;
 
     // Use projective generators so scalar mul returns Projective
     let g1_proj = G1Projective::generator();

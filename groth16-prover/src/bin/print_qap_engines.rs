@@ -10,8 +10,8 @@ fn main() {
     let fft = FftQapEngine::new();
 
     println!("--- Building QAP polynomials ---");
-    let (dense_us, dense_vs, dense_ws) = dense.build_qap(&L, &R, &O);
-    let (fft_us, fft_vs, fft_ws) = fft.build_qap(&L, &R, &O);
+    let (dense_us, _dense_vs, _dense_ws) = dense.build_qap(&L, &R, &O);
+    let (fft_us, _fft_vs, _fft_ws) = fft.build_qap(&L, &R, &O);
 
     println!("Dense QAP (degree ≤ 2):");
     for i in 0..8 {
@@ -52,8 +52,8 @@ fn main() {
 
     println!("\n--- Per-variable QAP at τ = 3 ---");
     let tau = Fr::from(3u64);
-    let (dense_u_tau, dense_v_tau, dense_w_tau) = dense.evaluate_qap_at_tau(&L, &R, &O, tau);
-    let (fft_u_tau, fft_v_tau, fft_w_tau) = fft.evaluate_qap_at_tau(&L, &R, &O, tau);
+    let (dense_u_tau, _dense_v_tau, _dense_w_tau) = dense.evaluate_qap_at_tau(&L, &R, &O, tau);
+    let (fft_u_tau, _fft_v_tau, _fft_w_tau) = fft.evaluate_qap_at_tau(&L, &R, &O, tau);
 
     println!("Wire | Dense u_s(τ) | FFT u_s(τ) | Match?");
     for i in 0..8 {

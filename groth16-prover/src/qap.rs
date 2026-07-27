@@ -1,7 +1,7 @@
 use ark_bls12_381::Fr;
 use ark_ff::Field;
 use ark_poly::{univariate::DensePolynomial, DenseUVPolynomial};
-use ark_std::{One, vec::Vec};
+use ark_std::{One, Zero, vec::Vec};
 
 /// Lagrange interpolation for three fixed evaluation points x ∈ {0, 1, 2}.
 /// Given values y0, y1, y2 returns the unique degree ≤ 2 polynomial p(x)
@@ -24,8 +24,44 @@ pub fn interpolate_3_points(y0: Fr, y1: Fr, y2: Fr) -> DensePolynomial<Fr> {
     DensePolynomial::from_coefficients_vec(vec![c0, c1, c2])
 }
 
+/// General Lagrange interpolation over arbitrary evaluation points.
+/// Given points xs and values ys, returns the unique polynomial of degree ≤ len(xs)-1
+/// such that p(xs[i]) = ys[i] for all i.
+pub fn interpolate_points(xs: &[Fr], ys: &[Fr]) -> DensePolynomial<Fr> {
+    let n = xs.len();
+    assert_eq!(xs.len(), ys.len(), "xs and ys must have the same length");
+    assert!(n > 0, "need at least one point");
+
+    // Result polynomial, accumulated as a sum of Lagrange basis terms
+    let mut result = DensePolynomial::from_coefficients_vec(vec![Fr::zero()]);
+
+    for i in 0..n {
+        // Build the i-th Lagrange basis polynomial L_i(x) = ∏_{j≠i} (x - xs[j]) / (xs[i] - xs[j])
+        let mut basis = DensePolynomial::from_coefficients_vec(vec![Fr::one()]);
+        let mut denom = Fr::one();
+
+        for j in 0..n {
+            if i == j {
+                continue;
+            }
+            // Multiply basis by (x - xs[j])
+            let factor = DensePolynomial::from_coefficients_vec(vec![-xs[j], Fr::one()]);
+            basis = basis.naive_mul(&factor);
+            // Multiply denominator by (xs[i] - xs[j])
+            denom *= xs[i] - xs[j];
+        }
+
+        // Multiply basis by ys[i] / denom
+        let coeff = ys[i] * denom.inverse().unwrap();
+        let term: Vec<Fr> = basis.coeffs.iter().map(|&c| c * coeff).collect();
+        result = result + DensePolynomial::from_coefficients_vec(term);
+    }
+
+    result
+}
+
 /// Build the QAP polynomials u_i(x), v_i(x), w_i(x) by interpolating each
-/// column of L, R, O over the evaluation points {0, 1, 2}.
+/// column of L, R, O over the evaluation points {0, 1, ..., n_constraints-1}.
 pub fn build_qap_polynomials(
     l: &[[u64; 8]],
     r: &[[u64; 8]],
@@ -33,27 +69,49 @@ pub fn build_qap_polynomials(
 ) -> (Vec<DensePolynomial<Fr>>, Vec<DensePolynomial<Fr>>, Vec<DensePolynomial<Fr>>) {
     let n_vars = l[0].len();
     let n_constraints = l.len();
-    assert_eq!(n_constraints, 3, "only 3-point interpolation is supported");
+    assert!(n_constraints >= 1 && n_constraints <= 8, "only 1-8 constraints supported");
+
+    let xs: Vec<Fr> = (0..n_constraints as u64).map(Fr::from).collect();
 
     let mut us = Vec::with_capacity(n_vars);
     let mut vs = Vec::with_capacity(n_vars);
     let mut ws = Vec::with_capacity(n_vars);
 
     for i in 0..n_vars {
-        let y0_l = Fr::from(l[0][i]);
-        let y1_l = Fr::from(l[1][i]);
-        let y2_l = Fr::from(l[2][i]);
-        us.push(interpolate_3_points(y0_l, y1_l, y2_l));
+        let ys_l: Vec<Fr> = (0..n_constraints).map(|j| Fr::from(l[j][i])).collect();
+        us.push(interpolate_points(&xs, &ys_l));
 
-        let y0_r = Fr::from(r[0][i]);
-        let y1_r = Fr::from(r[1][i]);
-        let y2_r = Fr::from(r[2][i]);
-        vs.push(interpolate_3_points(y0_r, y1_r, y2_r));
+        let ys_r: Vec<Fr> = (0..n_constraints).map(|j| Fr::from(r[j][i])).collect();
+        vs.push(interpolate_points(&xs, &ys_r));
 
-        let y0_o = Fr::from(o[0][i]);
-        let y1_o = Fr::from(o[1][i]);
-        let y2_o = Fr::from(o[2][i]);
-        ws.push(interpolate_3_points(y0_o, y1_o, y2_o));
+        let ys_o: Vec<Fr> = (0..n_constraints).map(|j| Fr::from(o[j][i])).collect();
+        ws.push(interpolate_points(&xs, &ys_o));
+    }
+
+    (us, vs, ws)
+}
+
+/// Build the QAP polynomials from a `Circuit` descriptor (dynamic matrices).
+pub fn build_qap_polynomials_circuit(
+    circuit: &crate::r1cs::Circuit,
+) -> (Vec<DensePolynomial<Fr>>, Vec<DensePolynomial<Fr>>, Vec<DensePolynomial<Fr>>) {
+    let n_vars = circuit.n_vars();
+    let n_constraints = circuit.n_constraints();
+    let xs: Vec<Fr> = (0..n_constraints as u64).map(Fr::from).collect();
+
+    let mut us = Vec::with_capacity(n_vars);
+    let mut vs = Vec::with_capacity(n_vars);
+    let mut ws = Vec::with_capacity(n_vars);
+
+    for i in 0..n_vars {
+        let ys_l: Vec<Fr> = (0..n_constraints).map(|j| circuit.l[j][i]).collect();
+        us.push(interpolate_points(&xs, &ys_l));
+
+        let ys_r: Vec<Fr> = (0..n_constraints).map(|j| circuit.r[j][i]).collect();
+        vs.push(interpolate_points(&xs, &ys_r));
+
+        let ys_o: Vec<Fr> = (0..n_constraints).map(|j| circuit.o[j][i]).collect();
+        ws.push(interpolate_points(&xs, &ys_o));
     }
 
     (us, vs, ws)

@@ -2,22 +2,31 @@ use ark_bls12_381::{G2Affine, G2Projective, Fr};
 use ark_ec::Group;
 use ark_ff::Zero;
 use ark_poly::{univariate::DensePolynomial, DenseUVPolynomial, Polynomial};
-use groth16_prover::qap::build_qap_polynomials;
-use groth16_prover::r1cs::{L, R, O, WITNESS};
+use groth16_prover::qap::build_qap_polynomials_circuit;
+use groth16_prover::r1cs::select_circuit;
 
 fn main() {
-    println!("=== Step 1.13: Proof Element B ===\n");
+    let name = std::env::args().nth(1).unwrap_or_else(|| {
+        eprintln!("Usage: print_proof_b <multiplier|sumofproducts>");
+        std::process::exit(1);
+    });
+    let circuit = select_circuit(&name);
 
-    let (_us, vs, _ws) = build_qap_polynomials(&L, &R, &O);
-    let witness: Vec<Fr> = WITNESS.iter().map(|&v| Fr::from(v)).collect();
-    let tau  = Fr::from(3u64);
+    println!("=== Step 1.13: Proof Element B ===\n");
+    println!("Circuit: {}", circuit.name);
+
+    let (_us, vs, _ws) = build_qap_polynomials_circuit(&circuit);
+    let tau = match circuit.name {
+        "multiplier" => Fr::from(3u64),
+        _            => Fr::from(6u64),
+    };
     let beta = Fr::from(7u64);
     let g2_proj = G2Projective::generator();
 
     // Build r(x) = sum a_i * v_i(x)
     let mut r = DensePolynomial::from_coefficients_vec(vec![Fr::zero()]);
-    for i in 0..witness.len() {
-        let term_coeffs: Vec<Fr> = vs[i].coeffs.iter().map(|c| *c * witness[i]).collect();
+    for i in 0..circuit.n_vars() {
+        let term_coeffs: Vec<Fr> = vs[i].coeffs.iter().map(|c| *c * circuit.witness[i]).collect();
         let term = DensePolynomial::from_coefficients_vec(term_coeffs);
         r += &term;
     }

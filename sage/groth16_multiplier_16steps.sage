@@ -1,19 +1,19 @@
-# sage/groth16_dense_16steps.sage
+# sage/groth16_multiplier_16steps.sage
 # ---------------------------------------------------------------------------
 # Dense-monomial Groth16 walkthrough — Steps 1.1–1.16
 #
 # This script replicates the dense pedagogical path from the article
 # "Zero Knowledge Proof from first principles" (article2.md) step by step.
-# It uses the same 3-gate multiplier circuit and the same deterministic
-# toxic-waste scalars (tau=3, alpha=5, beta=7, gamma=11, delta=13) so
-# that every intermediate value can be cross-checked against the Rust
-# print_* binaries in groth16-prover.
+# It uses the 3-gate multiplier circuit (x5 = x1*x2, x6 = x3*x4, a = x5*x6)
+# and the same deterministic toxic-waste scalars (tau=3, alpha=5, beta=7,
+# gamma=11, delta=13) so that every intermediate value can be cross-checked
+# against the Rust print_* binaries in groth16-prover.
 #
 # Run with:
-#   sage groth16_dense_16steps.sage
+#   sage groth16_multiplier_16steps.sage
 # or via Docker:
 #   docker run --rm -v "$(pwd):/mnt" sagemath/sagemath:latest \
-#     sage /mnt/sage/groth16_dense_16steps.sage
+#     sage /mnt/sage/groth16_multiplier_16steps.sage
 # ---------------------------------------------------------------------------
 
 load("bls13-381.sage")
@@ -492,7 +492,7 @@ print("\u2713 Step 1.16 printouts complete.")
 # ============================================================================
 
 print("\n" + "="*70)
-print("Dense Groth16 walkthrough complete.")
+print("Multiplier circuit Groth16 walkthrough complete.")
 print("="*70)
 print()
 print("Proof elements:")
