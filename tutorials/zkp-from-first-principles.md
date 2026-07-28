@@ -542,7 +542,7 @@ The primitives we use for Groth16 verification are:
 
 These are exactly the operations needed for the Groth16 pairing check. The Aiken standard library wraps them in a clean API under `aiken/crypto/bls12_381`.
 
-Our [`aiken/groth16`](https://github.com/cardano-foundation/bls/blob/main/aiken/groth16/README.md) package implements a fully parameterized Groth16 verifier in Aiken. It accepts any verification key, any list of public inputs, and any proof, then runs the standard pairing check. The verifier has been validated against proofs produced by our Rust prover for the 3-gate multiplier, the 5-constraint `SumOfProducts`, the 1,107-gate privacy spend, and the 1,911-gate Poseidon Merkle circuits.
+Our [`aiken/groth16`](https://github.com/cardano-foundation/bls/blob/main/aiken/groth16/README.md) package implements a fully parameterized Groth16 verifier in Aiken. It accepts any verification key, any list of public inputs, and any proof, then runs the standard pairing check. The verifier has been validated against proofs produced by our Rust prover for the 3-gate multiplier, the 5-constraint `SumOfProducts`, the 1,107-gate privacy spend, and the 1,911-gate Poseidon Merkle circuits, to name a few.
 
 The on-chain cost of verifying a Groth16 proof with ~5 public inputs is well within Cardano's per-transaction execution budget. This means a smart contract can release funds, grant access, or mint tokens based solely on the validity of a ZK proof — without ever learning the user's identity, credentials, or secret inputs.
 
@@ -550,7 +550,7 @@ The on-chain cost of verifying a Groth16 proof with ~5 public inputs is well wit
 
 ## The full pipeline in our repo
 
-Our `groth16-prover` crate implements the entire Groth16 lifecycle, with six progressively more optimized implementations. For this first-principles article we focus on **Implementation 1** (`DenseQapEngine` + `NaiveProver`), where every sub-step is explicit and printable:
+Our `groth16-prover` crate implements the entire Groth16 lifecycle, with six progressively more optimized implementations (and counting). For this first-principles article we focus on **Implementation 1** (`DenseQapEngine` + `NaiveProver`), where every sub-step is explicit and printable:
 
 | Step | Binary | What it prints |
 |------|--------|---------------|
@@ -568,6 +568,13 @@ Our `groth16-prover` crate implements the entire Groth16 lifecycle, with six pro
 | 1.14 | `print_proof_c` | Proof point `C` |
 | 1.15 | `print_public_input` | Public-input commitment `V` |
 | 1.16 | `print_pairing` | Final pairing check |
+
+First you need to clone the bls repo:
+
+```bash
+git clone https://github.com/cardano-foundation/bls.git
+cd bls
+```
 
 Run any step in isolation:
 
@@ -1823,3 +1830,5 @@ We will also survey the landscape beyond Groth16:
 Finally, in the third installment, we will apply the production Groth16 pipeline to **selective disclosure** — the pattern where a credential holder proves they satisfy a predicate (`age ≥ 21`, `country ∈ approved set`) without revealing any field values or their blockchain address. The proof becomes the authorization, and the on-chain script verifies nothing but the mathematics.
 
 The code for all three installments is available in the [cardano-foundation/bls](https://github.com/cardano-foundation/bls) repository.
+
+Stay tuned for the next ZKP installment!
