@@ -293,6 +293,8 @@ G1, τ·G1, τ²·G1, ..., τ^N·G1
 G2, τ·G2, τ²·G2, ..., τ^N·G2
 ```
 
+For our 5-constraint SumOfProducts circuit, `N = 4`: the QAP polynomials are degree 4 (from interpolating 5 constraint points), so the prover needs powers `τ⁰` through `τ⁴` to evaluate `l(τ)`, `r(τ)`, and `o(τ)` from the SRS. In a production circuit with thousands of constraints, `N` grows accordingly — typically to the number of constraints minus one.
+
 where `G1` and `G2` are base points on the BLS12-381 curve. The scalar `τ` itself is called **toxic waste**: if anyone knows it, they can forge proofs. `τ` is generated jointly by a dedicated group of **ceremony organizers** who are independent of both the prover and the verifier, and must be destroyed immediately afterward — it must never be known to the prover, the verifier, or any other party after the ceremony concludes. The security of the entire system rests on this destruction.
 
 **Why is this necessary?** The SRS lets the prover evaluate polynomials at the secret point `τ` without learning `τ` itself — it works "in the exponent" on the curve. Without the SRS, the prover would have to send the full QAP polynomials to the verifier (destroying succinctness) and the polynomials would leak the witness (destroying zero-knowledge). And if `τ` were known — even if the SRS were otherwise correct — an attacker could pick any fake witness and compute a `h(τ)` that makes the pairing equation balance, forging a valid-looking proof for a false statement. We walk through both failure modes in detail in [The Groth16 workflow at a glance](#the-groth16-workflow-at-a-glance).
@@ -337,6 +339,8 @@ The verifier does not know the witness. It knows only:
 - the proof `(A, B, C)`
 - the public inputs (in our case: `1` and `100`)
 - the verifying key `(α·G1, β·G2, γ·G2, δ·G2, Ψ_V_G1)`
+
+Note that the verifying key contains no `τ` — only curve points derived from `α`, `β`, `γ`, `δ` and from the QAP polynomials evaluated at `τ` (the `Ψ_V_G1` elements). Because these are all curve points, the scalars are hidden "in the exponent": the verifier can use them without ever learning any of the five secret values. This is why the verifying key is safe to publish — it is typically embedded directly into a smart contract on-chain.
 
 The verifier first computes a **public-input commitment** `V` by taking a linear combination of the per-variable verification elements `Ψ_V_G1` weighted by the public input values. For our toy circuit with public inputs `[1, 100]`:
 
