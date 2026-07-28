@@ -293,6 +293,8 @@ G2, τ·G2, τ²·G2, ..., τ^N·G2
 
 where `G1` and `G2` are base points on the BLS12-381 curve. The scalar `τ` itself is called **toxic waste**: if anyone knows it, they can forge proofs. The security of the entire system rests on the fact that `τ` was generated honestly and then destroyed.
 
+**Why is this necessary?** The SRS lets the prover evaluate polynomials at the secret point `τ` without learning `τ` itself — it works "in the exponent" on the curve. Without the SRS, the prover would have to send the full QAP polynomials to the verifier (destroying succinctness) and the polynomials would leak the witness (destroying zero-knowledge). And if `τ` were known — even if the SRS were otherwise correct — an attacker could pick any fake witness and compute a `h(τ)` that makes the pairing equation balance, forging a valid-looking proof for a false statement. We walk through both failure modes in detail in [The Groth16 workflow at a glance](#the-groth16-workflow-at-a-glance).
+
 In our pedagogical `Implementation 1` ([`groth16-prover/src/r1cs.rs`](https://github.com/cardano-foundation/bls/blob/main/groth16-prover/src/r1cs.rs) and [`src/bin/print_toxic_waste.rs`](https://github.com/cardano-foundation/bls/blob/main/groth16-prover/src/bin/print_toxic_waste.rs)), we use small deterministic scalars so that every intermediate value is reproducible:
 
 | Parameter | Value (multiplier) | Value (SumOfProducts) | Role |
