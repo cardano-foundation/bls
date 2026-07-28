@@ -264,6 +264,16 @@ The prover computes the **quotient polynomial**:
 h(x) = (l(x)·r(x) − o(x)) / T(x)
 ```
 
+where `T(x) = (x−0)(x−1)(x−2)(x−3)(x−4)` is the target (vanishing) polynomial — it is zero at every constraint point, which is exactly what guarantees the division has zero remainder when the witness is correct.
+
+For our SumOfProducts circuit, `l(x)`, `r(x)`, and `o(x)` are all degree 4, so `l(x)·r(x)` is degree 8. After subtracting `o(x)`, the result `p(x) = l(x)·r(x) − o(x)` is still degree 8. Dividing by `T(x)` (degree 5) gives `h(x)` of degree 3:
+
+```
+h(x) = c₀ + c₁·x + c₂·x² + c₃·x³
+```
+
+where the coefficients `c₀, c₁, c₂, c₃` are elements of the scalar field Fr (large 253-bit numbers). The prover evaluates this polynomial at the secret point `τ` to obtain the scalar `h(τ)` that appears in proof element `C`. We will see the exact numerical coefficients in Step 1.11.
+
 If `h(x)` exists (i.e., the division has zero remainder), the constraints are satisfied. This is the core mathematical check that Groth16 performs — not by evaluating at every point, but by evaluating at a single secret point `τ`.
 
 This transformation from matrices to polynomials is called the **Quadratic Arithmetic Program (QAP)**. It is the bridge between computer science and cryptography.
