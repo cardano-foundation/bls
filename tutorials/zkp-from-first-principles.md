@@ -274,6 +274,8 @@ h(x) = c₀ + c₁·x + c₂·x² + c₃·x³
 
 where the coefficients `c₀, c₁, c₂, c₃` are elements of the scalar field Fr (large 253-bit numbers). The prover evaluates this polynomial at the secret point `τ` to obtain the scalar `h(τ)` that appears in proof element `C`. We will see the exact numerical coefficients in Step 1.11.
 
+This is also what makes Groth16 an *argument of knowledge* rather than a mere proof of existence: to produce the correct `h(τ)`, the prover must have actually computed the correct quotient polynomial, which in turn requires knowing the actual witness values. A prover who does not know a valid witness cannot fabricate a convincing `h(τ)` — the pairing check will fail. Moreover, the quotient `h(x)` is derived from the circuit's own QAP polynomials, so computing the correct `h(τ)` requires satisfying the exact constraint structure that both parties agreed on. In other words, the inclusion of `h(τ)` in the proof is what convinces the verifier that the prover genuinely *knows* a solution to *this specific circuit*, not merely that some solution to some problem exists.
+
 If `h(x)` exists (i.e., the division has zero remainder), the constraints are satisfied. This is the core mathematical check that Groth16 performs — not by evaluating at every point, but by evaluating at a single secret point `τ`.
 
 This transformation from matrices to polynomials is called the **Quadratic Arithmetic Program (QAP)**. It is the bridge between computer science and cryptography.
@@ -291,19 +293,21 @@ G1, τ·G1, τ²·G1, ..., τ^N·G1
 G2, τ·G2, τ²·G2, ..., τ^N·G2
 ```
 
-where `G1` and `G2` are base points on the BLS12-381 curve. The scalar `τ` itself is called **toxic waste**: if anyone knows it, they can forge proofs. The security of the entire system rests on the fact that `τ` was generated honestly and then destroyed.
+where `G1` and `G2` are base points on the BLS12-381 curve. The scalar `τ` itself is called **toxic waste**: if anyone knows it, they can forge proofs. `τ` is generated jointly by the participants of a trusted setup ceremony and must be destroyed immediately afterward — it must never be known to the prover, the verifier, or any other party after the ceremony concludes. The security of the entire system rests on this destruction.
 
 **Why is this necessary?** The SRS lets the prover evaluate polynomials at the secret point `τ` without learning `τ` itself — it works "in the exponent" on the curve. Without the SRS, the prover would have to send the full QAP polynomials to the verifier (destroying succinctness) and the polynomials would leak the witness (destroying zero-knowledge). And if `τ` were known — even if the SRS were otherwise correct — an attacker could pick any fake witness and compute a `h(τ)` that makes the pairing equation balance, forging a valid-looking proof for a false statement. We walk through both failure modes in detail in [The Groth16 workflow at a glance](#the-groth16-workflow-at-a-glance).
 
 In our pedagogical `Implementation 1` ([`groth16-prover/src/r1cs.rs`](https://github.com/cardano-foundation/bls/blob/main/groth16-prover/src/r1cs.rs) and [`src/bin/print_toxic_waste.rs`](https://github.com/cardano-foundation/bls/blob/main/groth16-prover/src/bin/print_toxic_waste.rs)), we use small deterministic scalars so that every intermediate value is reproducible:
 
-| Parameter | Value (multiplier) | Value (SumOfProducts) | Role |
-|-----------|--------------------|-----------------------|------|
-| `τ` (tau)   | 3   | 6   | Secret evaluation point |
-| `α` (alpha) | 5   | 5   | Mixed term for proof `C` |
-| `β` (beta)  | 7   | 7   | Mixed term for proof `B` and `C` |
-| `γ` (gamma) | 11  | 11  | Public-input denominator |
-| `δ` (delta) | 13  | 13  | Private-input denominator |
+| Parameter | Value | Role | Knowledge | Risk if leaked |
+|-----------|-------|------|-----------|----------------|
+| `τ` (tau)   | 6   | Secret evaluation point — encodes the SRS power tables `τⁱ·G1`, `τⁱ·G2` | **Nobody** after ceremony | Attacker computes `h(τ)` for any fake witness, forging proofs for false statements |
+| `α` (alpha) | 5   | Binds proof element `A` to proof element `C` — prevents the prover from decoupling the left and right witness polynomials | **Nobody** after ceremony | Attacker can swap `l(τ)` and `r(τ)` without detection, breaking the binding between proof elements |
+| `β` (beta)  | 7   | Binds proof element `B` to proof element `C` — ties the right witness polynomial into the same commitment as the quotient | **Nobody** after ceremony | Same as `α`: attacker can separate `B` from `C`, breaking soundness |
+| `γ` (gamma) | 11  | Denominator for **public-input** CRS elements — separates the public-input commitment `V` from the private-input part of `C` | **Nobody** after ceremony | Public and private input commitments collapse; attacker can forge proofs by manipulating the public-input split |
+| `δ` (delta) | 13  | Denominator for **private-input** CRS elements — ensures the prover cannot tamper with the private-input commitment in `C` without `δ`'s knowledge | **Nobody** after ceremony | Attacker can fabricate the private-input part of `C`, forging proofs without a valid witness |
+
+**Summary.** All five scalars must be unknown to every party after the ceremony — the prover, the verifier, and any third party. The ceremony participants generate them jointly, embed them into curve points (the SRS), and destroy the raw scalars. The prover uses only the curve points (never the scalars directly), and the verifier uses only a small subset of the curve points (the verifying key). This is why the setup is "trusted": the security guarantee is that at least one participant honestly destroyed their contribution, making it impossible to reconstruct any of the five scalars.
 
 For SumOfProducts, `τ = 6` is required because the constraint points are `{0, 1, 2, 3, 4}` — using `τ = 3` or `τ = 4` would make `T(τ) = 0` and break the proof. In a production deployment these are large random field elements generated during a multi-party computation (MPC) ceremony. As long as **at least one participant** in the ceremony was honest and discarded their randomness, the toxic waste remains unknown. Our repository implements both a single-party dev ceremony (`ceremony-dev`) and a full Phase-2 MPC on top of the Perpetual Powers of Tau (PPoT) universal SRS. We will cover the production ceremony in detail in the next installment.
 
