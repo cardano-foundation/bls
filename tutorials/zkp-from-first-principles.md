@@ -43,9 +43,6 @@ This article focuses on **Groth16**, the fastest and most compact zk-SNARK const
 
 But before we get to smart contracts, we need to understand what the proof actually *is*. We will build it from scratch, step by step, using a very simple circuit: a 5-constraint sum-of-products.
 
-Groth16 proves correct execution of an **arithmetic circuit**, which must first be expressed as a **Rank-1 Constraint System (R1CS)**.  
----
-
 ## Why Groth16 matters
 
 The idea of a zero-knowledge proof is old — it dates back to Goldwasser, Micali, and Rackoff in the 1980s. But for decades ZKPs were theoretical curiosities: interactive, expensive, and impractical for real systems. The breakthrough came in 2012 when Rosario Gennaro, Craig Gentry, Bryan Parno, and Mariana Raykova showed how to compress an arbitrary computation into a **Quadratic Arithmetic Program** (QAP) and then prove its correct evaluation with a short, non-interactive argument built from elliptic-curve pairings. This was the birth of the zk-SNARK.
@@ -91,7 +88,7 @@ This is why our [groth16-prover](https://github.com/cardano-foundation/bls/tree/
 
 ## From computation to gates
 
-A zk-SNARK does not prove arbitrary Python or C code. It proves the correct execution of an **arithmetic circuit**: a directed acyclic graph where every node is either an addition or a multiplication, and the edges are *wires* carrying numbers from a finite field.
+A zk-SNARK does not prove arbitrary Python or C code. It proves the correct execution of an **arithmetic circuit**: a directed acyclic graph where every node is either an addition or a multiplication, and the edges are *wires* carrying numbers from a finite field. Each multiplication node takes exactly two inputs — no more, no less. This binary-input restriction is fundamental: a multiplication of three or more variables must be decomposed into a chain of binary multiplications using intermediate wires.
 
 In practice, we write circuits in a domain-specific language like **Circom**, which compiles to a format called **R1CS** (Rank-1 Constraint System). An R1CS constraint has the shape:
 
@@ -204,7 +201,42 @@ r(x) = Σ a_i · v_i(x)
 o(x) = Σ a_i · w_i(x)
 ```
 
-**Concrete example for constraint 1** (`t2 = c·d`, at point `x = 1`). For our 5-constraint circuit with constraint points `{0, 1, 2, 3, 4}`, the Lagrange basis polynomial `L_1(x)` equals `1` at `x = 1` and `0` at the other four points. Because wire 4 (`c`) appears on the left side of constraint 1 only, `u_4(x) = L_1(x)`. Similarly, `v_5(x) = L_1(x)` for wire 5 (`d`), and `w_11(x) = L_1(x)` for wire 11 (`t2`). Evaluating at `x = 1`:
+**Concrete example for constraint 1** (`t2 = c·d`, at point `x = 1`). To see how this works, let us first recall the R1CS matrices from the hello-world section. Each constraint picks two wires on the left and right, and one on the output:
+
+```
+Constraint 0:  L[0] picks a (col 2),  R[0] picks b (col 3),  O[0] picks t1 (col 10)
+Constraint 1:  L[1] picks c (col 4),  R[1] picks d (col 5),  O[1] picks t2 (col 11)
+Constraint 2:  L[2] picks e (col 6),  R[2] picks f (col 7),  O[2] picks t3 (col 12)
+Constraint 3:  L[3] picks g (col 8),  R[3] picks h (col 9),  O[3] picks t4 (col 13)
+Constraint 4:  L[4] picks 1 (col 0),  R[4] picks t1+t2+t3+t4 (cols 10-13),  O[4] picks out (col 1)
+```
+
+In matrix form (all unlisted entries are 0), with the witness vector alongside for reference:
+
+```
+-w =    [  1  100  1  2  3  4  5  6  7  8  2  12  30  56 ]
+         const out  a  b  c  d  e  f  g  h  t1 t2 t3 t4
+         ----- ---  -  -  -  -  -  -  -  -  -- -- -- --
+L[0]  = [  0    0  1  0  0  0  0  0  0  0   0  0  0  0 ]    picks a
+L[1]  = [  0    0  0  0  1  0  0  0  0  0   0  0  0  0 ]    picks c
+L[2]  = [  0    0  0  0  0  0  1  0  0  0   0  0  0  0 ]    picks e
+L[3]  = [  0    0  0  0  0  0  0  0  1  0   0  0  0  0 ]    picks g
+L[4]  = [  1    0  0  0  0  0  0  0  0  0   0  0  0  0 ]    picks 1 (constant)
+
+R[0]  = [  0    0  0  1  0  0  0  0  0  0   0  0  0  0 ]    picks b
+R[1]  = [  0    0  0  0  0  1  0  0  0  0   0  0  0  0 ]    picks d
+R[2]  = [  0    0  0  0  0  0  0  1  0  0   0  0  0  0 ]    picks f
+R[3]  = [  0    0  0  0  0  0  0  0  0  1   0  0  0  0 ]    picks h
+R[4]  = [  0    0  0  0  0  0  0  0  0  0   1  1  1  1 ]    picks t1+t2+t3+t4
+
+O[0]  = [  0    0  0  0  0  0  0  0  0  0   1  0  0  0 ]    picks t1
+O[1]  = [  0    0  0  0  0  0  0  0  0  0   0  1  0  0 ]    picks t2
+O[2]  = [  0    0  0  0  0  0  0  0  0  0   0  0  1  0 ]    picks t3
+O[3]  = [  0    0  0  0  0  0  0  0  0  0   0  0  0  1 ]    picks t4
+O[4]  = [  0    1  0  0  0  0  0  0  0  0   0  0  0  0 ]    picks out
+```
+
+The QAP transformation builds, for each wire `i`, three polynomials `u_i(x)`, `v_i(x)`, `w_i(x)` that reproduce these matrix columns at the constraint points. For our 5-constraint circuit with constraint points `{0, 1, 2, 3, 4}`, the Lagrange basis polynomial `L_1(x)` equals `1` at `x = 1` and `0` at the other four points. Because wire 4 (`c`) appears on the left side of constraint 1 only, `u_4(x) = L_1(x)`. Similarly, `v_5(x) = L_1(x)` for wire 5 (`d`), and `w_11(x) = L_1(x)` for wire 11 (`t2`). Evaluating at `x = 1`:
 
 ```
 u_4(1) = −1 + 2 = 1
