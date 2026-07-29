@@ -1268,6 +1268,84 @@ Approximately **40 lines** of code:
 
 ---
 
+### What comes after Implementation 7 — ceremony and architecture research
+
+> **Status:** ⏳ **Under investigation.** These are open research directions, not yet committed to the roadmap.
+
+Implementation 7 fixes the **proving** bottleneck (h_MSM dominates at ~55 % of prove time). After it lands, the **ceremony** becomes the new e2e bottleneck: for Ed25519 it is ~16 min out of ~21 min total (~76 % of e2e time). Unlike proving, the ceremony cost is fundamentally tied to circuit size because it must produce `O(n_vars)` group elements. There is no algebraic shortcut analogous to `h_scalar` for the per-variable queries (`a_query`, `b_g1_query`, `c_query`, `ic`, `b_g2_query`).
+
+#### Short-term: parallelise ceremony MSMs with Rayon
+
+The current ceremony runs **6 MSMs sequentially**:
+
+| MSM | Group | Size | Currently |
+|-----|-------|------|-----------|
+| `a_query` | G1 | ~4M | Sequential |
+| `b_g1_query` | G1 | ~4M | Sequential |
+| `c_query` | G1 | ~4M | Sequential |
+| `ic` | G1 | ~4M | Sequential |
+| `b_g2_query` | G2 | ~4M | Sequential |
+| `h_query` | G1 | ~4M | Sequential |
+
+Each MSM already uses `FixedBase::msm` (windowed precomputation + Pippenger-like additions) with Rayon parallelism inside arkworks. However, the 6 MSMs themselves do not overlap. Wrapping the independent ones in `rayon::join` or `rayon::scope` could overlap CPU work and memory bandwidth:
+
+```rust
+let ((a_query, b_g1_query), ((c_query, ic), b_g2_query)) = rayon::join(
+    || rayon::join(|| compute_a_query(...), || compute_b_g1_query(...)),
+    || rayon::join(
+        || rayon::join(|| compute_c_query(...), || compute_ic(...)),
+        || compute_b_g2_query(...),
+    ),
+);
+```
+
+**Estimated gain:** 20–40 % ceremony speedup on a 16-core machine, taking Ed25519 ceremony from **~16 min → ~10–12 min**. This is low-risk (pure scheduling change) but not an order-of-magnitude improvement.
+
+#### Medium-term: universal SRS (PLONK-style)
+
+Groth16 requires a **circuit-specific trusted setup** because the CRS points `u_i(τ)·G1`, `v_i(τ)·G2`, etc. depend on the QAP polynomials, which depend on the circuit. An alternative is a proof system with a **universal** or **transparent** setup:
+
+| System | Setup | Proof size | Verifier | Trade-off |
+|--------|-------|------------|----------|-----------|
+| **PLONK + KZG** | One universal ceremony (size ~2²⁸), then ~1-2 s circuit-specific derivation | ~400-600 bytes | ~2-3 ms | Larger proof, slightly more gas than Groth16 |
+| **Halo2 (IPA)** | No trusted setup at all | ~500-1000 bytes | ~5-10 ms | Proof grows with circuit depth; no SRS |
+| **STARKs** | No trusted setup | ~10-50 KB | ~10-100 ms | Large proofs; not suitable for on-chain Cardano scripts |
+
+For Cardano, the on-chain verifier cost is critical: every byte of the redeemer and every millisecond of script execution consumes fees. Groth16's **192-byte proof** and **~2-3 ms verification** is the current standard for a reason. Moving to PLONK would roughly double proof size and verification cost — acceptable for some use cases, but a regression for fee-sensitive ones.
+
+#### Long-term: Nova / folding schemes
+
+A fundamentally different approach is **incrementally verifiable computation (IVC)** via Nova or successors (SuperNova, HyperNova, Sangria). Instead of one monolithic 4M-constraint Groth16 circuit, the computation is split into **N steps** of ~40K constraints each:
+
+1. **Step circuit** (~40K constraints): one round of SHA-512 + a chunk of scalar multiplication
+2. **IVC prover**: folds each step's witness into a running accumulator using a **Relaxed R1CS** scheme. No per-circuit ceremony; the folding scheme is transparent.
+3. **Compression SNARK**: at the end, prove the IVC accumulator is valid using a **small Groth16 circuit** (~100K constraints, verifying the Nova step verifier). Ceremony for this final circuit: **~10-20 seconds**.
+
+**Why this solves the ceremony problem:**
+- The folding step is transparent (no SRS needed)
+- The only ceremony is for the tiny compression circuit, which is circuit-agnostic
+- Proving is incremental — you prove step-by-step, not one 4M-constraint monster
+- Memory footprint per step drops to ~O(step_size) instead of ~O(circuit_size)
+
+**Why it is hard:**
+1. **Circuit rewrite.** The current Ed25519 Circom circuit is a flat R1CS. Nova requires an **explicit step circuit** with state passing: `state_{i+1} = f(step_i, state_i)`. This is a major redesign, not a parameter change.
+2. **On-chain verifier.** The Aiken / Cardano verifier would need to verify both the IVC accumulator and the compression SNARK. The current Groth16 verifier contract is insufficient.
+3. **Nova overhead.** Each step must include the Nova verifier logic (cross-term computation), adding ~10K-30K constraints per step. For 40K-constraint steps this is ~25 % overhead; for smaller steps the ratio worsens.
+4. **Ecosystem maturity.** Rust Nova crates exist (e.g., `nova-snark`), but integrating them with Circom-generated circuits is not a solved problem. Most Nova work uses hand-written step circuits in custom DSLs.
+
+#### Practical recommendation
+
+For **short-term production on Cardano**, the path is:
+1. ✅ Implementation 6 (sparse prover) — **done**
+2. ⏳ Implementation 7 (h_scalar + parallel proof assembly) — **next**
+3. ⏳ Ceremony MSM parallelization — **low-hanging follow-up**
+
+For **long-term research / larger circuits**, evaluate Nova only when the use case demands it (e.g., full transaction validation, recursive proof aggregation, or multi-sig schemes that would exceed 10M constraints in a single Groth16 circuit).
+
+> **Note on the ownership circuit.** The Cardano Ed25519 key ownership circuit (~1.97M constraints) already has a ceremony of only **~5 min** and proving of **~1.7 min** — a total of ~7 min e2e. This is already acceptable for dev/testnet workflows. The ~16 min Ed25519 full-signature ceremony is the outlier because SHA-512 in-circuit is expensive. If the use case is "prove I own this key" rather than "verify a signature", the bottleneck is already manageable.
+
+---
+
 ## Production innovations
 
 ### Completed
