@@ -3,16 +3,25 @@
 > **In one sentence:** Prove knowledge of the private scalar that generates a given public key — without revealing the private key.
 >
 > **Business angle:** This is the zk primitive behind wallet ownership proofs. A user can prove "I own this key" without exposing their private key, enabling trustless airdrops, KYC-gated DeFi, and proof-of-ownership for off-chain identity binding — all verified on-chain via a Groth16 proof.
->
-> **Important caveat:** This circuit proves ownership of a **JubJub** key (a SNARK-friendly curve embedded in BLS12-381), NOT a standard Cardano **Ed25519** key. Curve25519 arithmetic is incompatible with BLS12-381's scalar field. The JubJub key can be linked to a Cardano identity via an off-chain commitment, but the ownership proof itself is for the JubJub key.
+
+Two variants are provided:
+
+| Variant | Curve | Constraints | Status | Use case |
+|---------|-------|-------------|--------|----------|
+| **JubJub ownership** | JubJub (BLS12-381-native) | ~4K | ✅ Working e2e | Fast proof, but NOT a real Cardano key |
+| **Ed25519 ownership** | Curve25519 (Ed25519) | ~1.97M | ✅ Working e2e | Proves real Cardano wallet key ownership |
+
+---
+
+## Variant A: JubJub Key Ownership (fast, ~4K constraints)
+
+> **Caveat:** This proves ownership of a **JubJub** key (a SNARK-friendly curve embedded in BLS12-381), NOT a standard Cardano **Ed25519** key. Curve25519 arithmetic is incompatible with BLS12-381's scalar field. The JubJub key can be linked to a Cardano identity via an off-chain commitment, but the ownership proof itself is for the JubJub key.
 
 Prove that the prover knows a private scalar `sk` such that `pk = [sk] · G_JubJub`, where `G_JubJub` is the standard JubJub base point and `pk` is the corresponding public key.
 
 **Status:** ✅ **Working end-to-end.** Circuit compiles, witness generates, ceremony runs, proof produces, and verification passes via the Rust `groth16-prover` CLI.
 
----
-
-## System overview
+### System overview
 
 ```mermaid
 flowchart LR
@@ -23,7 +32,7 @@ flowchart LR
         wit["Witness Generator"]
     end
 
-    subgraph Circuit["⚡ Circom Circuit"]
+    subgraph Circuit["⚡ Circom Circuit (~4K constraints)"]
         direction TB
         check["Scalar Mul Check<br/>[sk]·G == pk"]
         zk["Groth16 Proof"]
@@ -49,9 +58,7 @@ flowchart LR
 2. **Circuit** computes `[sk] · G_JubJub` (fixed-base scalar multiplication on JubJub) and asserts equality with `(pk_x, pk_y)`.
 3. **Verifier** (Aiken smart contract) confirms the pairing check — the private scalar `sk` is never revealed.
 
----
-
-## Why JubJub instead of Ed25519
+### Why JubJub instead of Ed25519
 
 Cardano uses **Ed25519 / Curve25519** keys natively:
 - **Private key:** a 256-bit scalar
@@ -68,170 +75,249 @@ To prove ownership inside a Groth16 circuit on **BLS12-381**, we must perform sc
 
 ---
 
-## Files
+## Variant B: Ed25519 Key Ownership (~1.97M constraints)
+
+> **New:** Now that Ed25519 signature verification works end-to-end on BLS12-381 (see [`Ed25519Verify/README.md`](../Ed25519Verify/README.md)), we can reuse the same `ScalarMul` and `PointCompress` templates to prove ownership of a **real Cardano Ed25519 key**.
+
+Prove that the prover knows the clamped Ed25519 scalar `a` (derived from the private key seed via SHA-512 and clamping) such that the public key `A` is the compression of `[a]·G` on Curve25519.
+
+**Status:** ✅ **Working end-to-end.** Circuit compiles, witness generates, sparse ceremony completes, proof generates, and verification passes.
+
+### What it proves
+
+```
+Public:   A[256]               — compressed Ed25519 public key bits
+Private:  sk[255]              — clamped Ed25519 scalar bits
+           PointA[4][3]         — decompressed public key in extended coordinates
+
+Constraint: ScalarMul(sk, G) == PointA  &&  PointCompress(PointA) == A
+```
+
+This is a minimal subset of the full `Ed25519Verify` circuit: only one scalar multiplication on the base point `G`, plus point compression check. No SHA-512, no signature components, no second scalar multiplication.
+
+### Files
 
 ```
 CardanoKeyOwnership/
-├── cardano_key_ownership.circom   # Main circuit: scalar mul + equality assertion
-├── input.json                       # Example witness input (sk, pk_x, pk_y)
-├── witness.wtns                     # Generated witness (binary)
-├── cardano_key_ownership.r1cs       # Compiled constraint system
-├── cardano_key_ownership.sym        # Symbol file (debug)
+├── cardano_key_ownership.circom      # JubJub ownership (original, ~4K constraints)
+├── cardano_ed25519_ownership.circom  # Ed25519 ownership (new, ~1.97M constraints)
+├── gen_ownership_input.py            # Python script to generate test inputs
+├── test_ownership_input.json         # Example witness input
+├── witness_ownership.wtns           # Generated witness (binary)
+├── cardano_ed25519_ownership.r1cs    # Compiled constraint system
+├── cardano_ed25519_ownership_js/
+│   └── cardano_ed25519_ownership.wasm # Witness calculator
+├── input.json                        # JubJub example input
+├── witness.wtns                      # JubJub witness
+├── cardano_key_ownership.r1cs        # JubJub R1CS
 ├── cardano_key_ownership_js/
-│   └── cardano_key_ownership.wasm   # Witness calculator (WebAssembly)
-├── jubjub.circom                    # Copied from EdDSAJubJub (JubJubPbk template)
-├── escalarmulfix_jubjub.circom      # Copied from EdDSAJubJub (fixed-base scalar mul)
-├── jubjub_primitives.circom         # Copied from EdDSAJubJub (point addition, doubling)
-├── scalarmul_jubjub.circom          # Copied from EdDSAJubJub (variable-base scalar mul)
-├── pointbits_jubjub.circom         # Copied from EdDSAJubJub (point decompression)
-└── README.md                        # This file
+│   └── cardano_key_ownership.wasm    # JubJub witness calculator
+├── jubjub.circom                     # JubJub curve parameters
+├── escalarmulfix_jubjub.circom      # Fixed-base scalar mul (JubJub)
+├── jubjub_primitives.circom         # Point addition, doubling (JubJub)
+├── scalarmul_jubjub.circom          # Variable-base scalar mul (JubJub)
+├── pointbits_jubjub.circom         # Point decompression (JubJub)
+└── README.md                         # This file
 ```
 
-> **Why local copies?** The JubJub templates are copied from `../EdDSAJubJub/` so that `circom` resolves all includes locally without cross-directory path issues. The original files remain the source of truth; any edits should be made there and mirrored here.
+### Pipeline — Ed25519 ownership (step by step)
 
----
-
-## Pipeline — step by step
-
-### 1. Prerequisites
+#### 1. Prerequisites
 
 | Tool | Version | How to get it |
 |------|---------|---------------|
 | circom | 2.0.0+ | `cargo install circom` or [github.com/iden3/circom](https://github.com/iden3/circom) |
 | snarkjs | 0.7.x | `npm install -g snarkjs` |
 | Rust prover | latest | `cargo build --release` in `groth16-prover/cli/` |
+| pynacl | latest | `pip install pynacl` |
 
-### 2. Generate a test key pair (optional)
-
-The repo already includes `input.json` with a valid key pair. If you want to generate your own:
-
-```bash
-cd groth16-prover/circom/EdDSAJubJub
-python3 -c "
-from helpers_jubjub import SUBGROUP_GENERATOR, ed_mul
-import json
-
-sk = 12345  # or any scalar < JubJub subgroup order
-pk = ed_mul(sk, SUBGROUP_GENERATOR[0], SUBGROUP_GENERATOR[1])
-print(json.dumps({'sk': str(sk), 'pk_x': str(pk[0]), 'pk_y': str(pk[1])}))
-"
-```
-
-Write the output to `CardanoKeyOwnership/input.json`.
-
-### 3. Compile the circuit
+#### 2. Generate a test Ed25519 key pair
 
 ```bash
 cd groth16-prover/circom/CardanoKeyOwnership
-circom --prime bls12381 -l ../EdDSAJubJub/node_modules/circomlib/circuits \
-  cardano_key_ownership.circom --r1cs --wasm --sym
+python3 gen_ownership_input.py
 ```
 
-> **Critical flag:** `--prime bls12381` tells circom to compile for the BLS12-381 scalar field. Without it, circom defaults to BN128, and the witness will fail to satisfy constraints.
+This generates `test_ownership_input.json` with:
+- `A[256]`: compressed public key bits
+- `sk[255]`: clamped Ed25519 scalar bits (derived from SHA-512 of the raw private key)
+- `PointA[4][3]`: decompressed public key in extended coordinates (3 chunks of 85 bits)
 
-**Output:**
-- `cardano_key_ownership.r1cs` — constraint system
-- `cardano_key_ownership_js/cardano_key_ownership.wasm` — witness calculator
-- `cardano_key_ownership.sym` — debug symbols
+> **Note:** The scalar `sk` is the **clamped** Ed25519 scalar, not the raw private key bytes. Ed25519 key derivation: `a = clamp(SHA-512(private_key)[0:32])`. The circuit proves knowledge of `a`, which is the scalar that generates the public key.
 
-### 4. Generate the witness
+#### 3. Compile the circuit
+
+```bash
+cd groth16-prover/circom/CardanoKeyOwnership
+circom --prime bls12381 -l ../Ed25519Verify/node_modules/circomlib/circuits \
+  cardano_ed25519_ownership.circom --r1cs --wasm --sym
+```
+
+**Output metrics:**
+- Non-linear constraints: ~1,228,289
+- Linear constraints: ~738,639
+- Total constraints: ~1,966,928
+- Public inputs: 256 (`A[256]`)
+- Private inputs: 267 (`sk[255]`, `PointA[4][3]`)
+- Wires: ~1,944,221
+
+#### 4. Generate the witness
 
 ```bash
 cd groth16-prover/circom/CardanoKeyOwnership
 snarkjs wtns calculate \
-  cardano_key_ownership_js/cardano_key_ownership.wasm \
-  input.json \
-  witness.wtns
+  cardano_ed25519_ownership_js/cardano_ed25519_ownership.wasm \
+  test_ownership_input.json \
+  witness_ownership.wtns
 ```
 
-### 5. Run the dev ceremony
+#### 5. Run the sparse dev ceremony
+
+⚠️ **Use `--sparse` flag.** The dense-matrix ceremony would require ~15 TB RAM and will OOM.
 
 ```bash
 cd groth16-prover/cli
-cargo run --release -- ceremony-dev \
-  --circuit ../circom/CardanoKeyOwnership/cardano_key_ownership.r1cs \
-  --proving-key /tmp/cardano_key_ownership.pk \
-  --verifying-key /tmp/cardano_key_ownership.vk
+cargo run --release -- ceremony-dev --sparse \
+  --circuit ../circom/CardanoKeyOwnership/cardano_ed25519_ownership.r1cs \
+  --proving-key /tmp/cardano_ed25519_ownership.pk \
+  --verifying-key /tmp/cardano_ed25519_ownership.vk
 ```
 
-### 6. Generate a proof
+**Measured timings (16-core AMD Ryzen 9 7950X, 64 GiB RAM, `--release`):**
+
+| Step | Time | Memory (RSS) |
+|------|------|-------------|
+| Sparse dev ceremony | **~5 min** | ~2.5 GiB |
+| PK write (uncompressed) | ~4 s | — |
+| VK write (uncompressed) | ~1 s | — |
+
+#### 6. Generate a proof
 
 ```bash
 cd groth16-prover/cli
-cargo run --release -- prove \
-  --circuit ../circom/CardanoKeyOwnership/cardano_key_ownership.r1cs \
-  --witness ../circom/CardanoKeyOwnership/witness.wtns \
-  --proving-key /tmp/cardano_key_ownership.pk \
-  --out /tmp/cardano_key_ownership_proof.bin
+cargo run --release -- prove --sparse \
+  --circuit ../circom/CardanoKeyOwnership/cardano_ed25519_ownership.r1cs \
+  --witness ../circom/CardanoKeyOwnership/witness_ownership.wtns \
+  --proving-key /tmp/cardano_ed25519_ownership.pk \
+  --out /tmp/cardano_ed25519_ownership_proof.bin
 ```
 
-### 7. Verify the proof
+**Measured timings:**
+
+| Sub-step | Time |
+|----------|------|
+| Circuit + witness load | ~5.5 s |
+| PK read (uncompressed, unchecked) | ~7 s |
+| `build_witness_polys_sparse` | ~15 s |
+| `compute_quotient` (FFT `l * r`) | ~25 s |
+| A MSM (G1, ~1.9M scalars) | ~7 s |
+| B MSM (G2, ~1.9M scalars) | ~8 s |
+| C_private MSM (G1, ~1.9M scalars) | ~15 s |
+| h MSM (G1, ~2M scalars) | ~25 s |
+| V MSM (G1, 257 scalars) | ~1 ms |
+| **Total prove** | **~101 s (~1.7 min)** |
+
+#### 7. Verify the proof
 
 ```bash
 cd groth16-prover/cli
 cargo run --release -- verify \
-  --proof /tmp/cardano_key_ownership_proof.bin \
-  --public /tmp/cardano_key_ownership_proof.pub \
-  --verifying-key /tmp/cardano_key_ownership.vk
+  --proof /tmp/cardano_ed25519_ownership_proof.bin \
+  --public /tmp/cardano_ed25519_ownership_proof.pub \
+  --verifying-key /tmp/cardano_ed25519_ownership.vk
 ```
 
 **Expected output:** `Verification result: VALID`
 
+**Measured time:** ~2 s (VK loaded uncompressed, unchecked)
+
+#### 8. Export the VK to Aiken
+
+```bash
+cargo run --release -- export-vk \
+  --verifying-key /tmp/cardano_ed25519_ownership.vk \
+  --out /tmp/cardano_ed25519_ownership_vk.ak
+```
+
+#### 9. Total e2e time
+
+| Variant | Ceremony | Prove | Verify | Total |
+|---------|----------|-------|--------|-------|
+| **JubJub** | ~1 s | ~1 s | ~1 s | **~3 s** |
+| **Ed25519** | **~5 min** | **~1.7 min** | **~2 s** | **~7 min** |
+
 ---
 
-## Circuit details
+## Circuit details — Ed25519 ownership
 
 ```circom
-template CardanoKeyOwnership() {
-    signal input sk;
-    signal input pk_x;
-    signal input pk_y;
+template CardanoEd25519Ownership() {
+    signal input A[256];
+    signal input sk[255];
+    signal input PointA[4][3];
+    signal output out;
 
-    component derive = JubJubPbk();
-    derive.in <== sk;
+    // Curve25519 base point G in extended coordinates [X, Y, Z, T]
+    var G[4][3] = [[6836562328990639286768922, 21231440843933962135602345, 10097852978535018773096760],
+                   [7737125245533626718119512, 23211375736600880154358579, 30948500982134506872478105],
+                   [1, 0, 0],
+                   [20943500354259764865654179, 24722277920680796426601402, 31289658119428895172835987]
+                  ];
 
-    pk_x === derive.Ax;
-    pk_y === derive.Ay;
+    // 1. Compute [sk]·G
+    component pMul = ScalarMul();
+    pMul.s <== sk;
+    pMul.P <== G;
+
+    // 2. Assert [sk]·G == PointA using projective coordinate equality
+    component equal = PointEqual();
+    equal.p <== pMul.sP;    // X, Y, Z of computed point
+    equal.q <== PointA;      // X, Y, Z of provided point
+
+    // 3. Compress PointA and assert it equals A
+    component compressA = PointCompress();
+    compressA.P <== PointA;
+    compressA.out === A;
+
+    out <== equal.out;
 }
 ```
 
-- **Public inputs:** `pk_x`, `pk_y` (JubJub public key coordinates)
-- **Private input:** `sk` (scalar)
-- **Constraints:** ~4,122 (fixed-base scalar multiplication over 254 bits)
-- **Wires:** ~4,123
-- **Memory:** ~1.5 MiB dense matrix (trivial for the dense prover)
+- **Public inputs:** `A[256]` (compressed Ed25519 public key bits)
+- **Private inputs:** `sk[255]` (clamped scalar), `PointA[4][3]` (decompressed point)
+- **Constraints:** ~1.97M (~1.23M non-linear + ~739K linear)
+- **Wires:** ~1.94M
+- **Memory (sparse):** ~2.5 GiB
 
-The circuit uses `EscalarMulFixJubJub(254, BASE8)` — a fixed-base windowed scalar multiplication ported from circomlib with JubJub curve constants. The base point `BASE8` is the standard JubJub subgroup generator.
+The circuit uses `ScalarMul`, `PointEqual`, and `PointCompress` from `Ed25519Verify/` (Electron-Labs templates, adapted for BLS12-381). The `ScalarMul` template performs windowed scalar multiplication on Curve25519 using 85-bit chunked arithmetic. `PointEqual` checks projective coordinate equality via cross-multiplication (`X1*Z2 == X2*Z1`, `Y1*Z2 == Y2*Z1`).
 
 ---
 
 ## Comparison with other circuits in this repo
 
-| Circuit | Constraints | Wires | Dense matrix RAM | Status |
-|---------|-------------|-------|------------------|--------|
-| SimpleExample Multiplier | 3 | 8 | ~768 B | ✅ Working e2e |
-| RangeProofSimple(32) | 32 | 35 | ~1 KB | ✅ Working e2e |
-| RangeProofCommitted(32) | 275 | 669 | ~9 KB | ✅ Working e2e |
-| Poseidon Pre-image | ~300 | ~400 | ~5 MB | ✅ Working e2e |
-| Privacy / Spend(depth=2) | 1,107 | 1,110 | ~39 MB | ✅ Working e2e |
-| Blake2b-224 Pre-image | ~79K | ~78K | ~200 GB | ✅ Unblocked (sparse prover) |
-| Ed25519 Verify | ~4M | ~4M | ~512 TB (dense) / ~3 GiB (sparse) | ✅ Working e2e — ceremony ~16 min, prove ~5 min |
-| **CardanoKeyOwnership (JubJub)** | **~4K** | **~4K** | **~1.5 MiB** | **✅ Working e2e** |
-| CardanoKeyOwnership (Curve25519) | ~4M | ~4M | ~512 TB (dense) | Not implemented — could use same templates as Ed25519Verify |
+| Circuit | Constraints | Wires | Dense matrix RAM | Witness | Status |
+|---------|-------------|-------|------------------|---------|--------|
+| SimpleExample Multiplier | 3 | 8 | ~768 B | ✅ | ✅ Working e2e |
+| Privacy / Spend(depth=2) | 1,107 | 1,110 | ~39 MB | ✅ | ✅ Working e2e |
+| Poseidon Pre-image | ~300 | ~400 | ~5 MB | ✅ | ✅ Working e2e |
+| Blake2b-224 Pre-image | ~79K | ~78K | ~200 GB | ✅ | ✅ Unblocked (sparse) |
+| Ed25519 Verify | ~4M | ~4M | ~512 TB (dense) / ~3 GiB (sparse) | ✅ | ✅ Working e2e — ceremony ~16 min, prove ~5 min |
+| **CardanoKeyOwnership (JubJub)** | **~4K** | **~4K** | **~1.5 MiB** | ✅ | ✅ Working e2e |
+| **CardanoKeyOwnership (Ed25519)** | **~1.97M** | **~1.94M** | **~15 TB (dense) / ~2.5 GiB (sparse)** | ✅ | ✅ Working e2e — ceremony ~5 min, prove ~1.7 min |
 
 ---
 
 ## References
 
-- [Ed25519Verify/README.md](../Ed25519Verify/README.md) — Full Ed25519 signature verification circuit on BLS12-381 (working e2e with sparse prover)
-- [EdDSAJubJub/README.md](../EdDSAJubJub/README.md) — JubJub curve parameters and point operations
+- [`Ed25519Verify/README.md`](../Ed25519Verify/README.md) — Full Ed25519 signature verification circuit on BLS12-381 (working e2e with sparse prover)
+- [`EdDSAJubJub/README.md`](../EdDSAJubJub/README.md) — JubJub curve parameters and point operations
 - [RFC 8032](https://datatracker.ietf.org/doc/html/rfc8032) — EdDSA and Ed25519 specification
+- [Electron-Labs/ed25519-circom](https://github.com/Electron-Labs/ed25519-circom) — upstream Ed25519 Circom circuits (archived, MIT License)
 - [IntersectMBO/cardano-crypto](https://github.com/IntersectMBO/cardano-crypto) — Cardano key derivation logic
-- [JubJub](https://github.com/iden3/circomlib/blob/master/circuits/pedersen.circom) — JubJub curve operations in circomlib
 - [`circom/README.md`](../README.md) — Parent directory with all circuit documentation
 
 ---
 
 ## License
 
-MIT (same as upstream circomlib and EdDSAJubJub circuits).
+MIT (same as upstream circomlib and EdDSAJubJub/Ed25519Verify circuits).

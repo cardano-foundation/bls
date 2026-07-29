@@ -868,7 +868,7 @@ fn full_ceremony_dev_prove_verify_roundtrip() {
         .success()
         .stderr(predicate::str::contains("Dev ceremony complete"))
         .stderr(predicate::str::contains("Full proving key (uncompressed) written to"))
-        .stderr(predicate::str::contains("Verifying key written to"));
+        .stderr(predicate::str::contains("Verifying key (uncompressed) written to"));
 
     // 2. Prove with the FullProvingKey
     let mut cmd_prove = Command::cargo_bin("groth16-prover").unwrap();
@@ -1217,7 +1217,7 @@ fn ceremony_dev_sparse() {
         .stderr(predicate::str::contains("Loaded circuit (sparse)"))
         .stderr(predicate::str::contains("Dev ceremony complete"))
         .stderr(predicate::str::contains("Full proving key (uncompressed) written to"))
-        .stderr(predicate::str::contains("Verifying key written to"));
+        .stderr(predicate::str::contains("Verifying key (uncompressed) written to"));
 }
 
 #[test]
