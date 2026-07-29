@@ -14,8 +14,9 @@
 //! development, testing, and benchmarking.
 
 use ark_bls12_381::{Fr, G1Affine, G1Projective, G2Affine, G2Projective};
-use ark_ec::Group;
-use ark_ff::Field;
+use ark_ec::scalar_mul::fixed_base::FixedBase;
+use ark_ec::{CurveGroup, Group};
+use ark_ff::{Field, PrimeField};
 use ark_poly::Polynomial;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use ark_std::{vec::Vec, One, Zero};
@@ -297,38 +298,45 @@ pub fn single_party_ceremony_full_from_tw<E: QapEngine, T: Copy + Into<Fr>, L: A
     let gamma_inv = tw.gamma.inverse().unwrap();
     let delta_inv = tw.delta.inverse().unwrap();
 
-    // 5. Per-variable queries
-    let mut a_query = Vec::with_capacity(n_vars);
-    let mut b_g1_query = Vec::with_capacity(n_vars);
-    let mut b_g2_query = Vec::with_capacity(n_vars);
-    let mut c_query = Vec::with_capacity(n_vars);
-    let mut ic = Vec::with_capacity(n_vars);
+    // 5. Per-variable queries — use FixedBase batch MSM to avoid O(n_vars)
+    //    individual scalar multiplications.
+    let scalar_size = Fr::MODULUS_BIT_SIZE as usize;
 
+    // Pre-compute psi scalars for all variables
+    let mut psi_scalars = vec![Fr::zero(); n_vars];
     for i in 0..n_vars {
-        let u_i = us_tau[i];
-        let v_i = vs_tau[i];
-        let w_i = ws_tau[i];
-
-        // a_query[i] = u_i(tau) * G1
-        a_query.push(G1Affine::from(g1_proj * u_i));
-
-        // b_g1_query[i] = v_i(tau) * G1
-        b_g1_query.push(G1Affine::from(g1_proj * v_i));
-
-        // b_g2_query[i] = v_i(tau) * G2
-        b_g2_query.push(G2Affine::from(g2_proj * v_i));
-
-        // psi_scalar = beta*u_i(tau) + alpha*v_i(tau) + w_i(tau)
-        let psi_scalar = v_i * tw.alpha + u_i * tw.beta + w_i;
-
-        // c_query[i] = delta_inv * psi_scalar * G1  (for private variables)
-        c_query.push(G1Affine::from(g1_proj * (psi_scalar * delta_inv)));
-
-        // ic[i] = gamma_inv * psi_scalar * G1  (public-input commitment points)
-        ic.push(G1Affine::from(g1_proj * (psi_scalar * gamma_inv)));
+        psi_scalars[i] = vs_tau[i] * tw.alpha + us_tau[i] * tw.beta + ws_tau[i];
     }
 
-    // 6. l_query = public-input subset of c_query (same as ic, for arkworks parity)
+    // G1 table (reused for a_query, b_g1_query, c_query, ic, h_query)
+    let g1_window = FixedBase::get_mul_window_size(n_vars);
+    let g1_table = FixedBase::get_window_table::<G1Projective>(scalar_size, g1_window, g1_proj);
+
+    // a_query[i] = u_i(tau) * G1
+    let a_query_proj = FixedBase::msm::<G1Projective>(scalar_size, g1_window, &g1_table, &us_tau);
+    let a_query = G1Projective::normalize_batch(&a_query_proj);
+
+    // b_g1_query[i] = v_i(tau) * G1
+    let b_g1_query_proj = FixedBase::msm::<G1Projective>(scalar_size, g1_window, &g1_table, &vs_tau);
+    let b_g1_query = G1Projective::normalize_batch(&b_g1_query_proj);
+
+    // c_query[i] = delta_inv * psi_scalar * G1
+    let c_scalars: Vec<Fr> = psi_scalars.iter().map(|&psi| psi * delta_inv).collect();
+    let c_query_proj = FixedBase::msm::<G1Projective>(scalar_size, g1_window, &g1_table, &c_scalars);
+    let c_query = G1Projective::normalize_batch(&c_query_proj);
+
+    // ic[i] = gamma_inv * psi_scalar * G1
+    let ic_scalars: Vec<Fr> = psi_scalars.iter().map(|&psi| psi * gamma_inv).collect();
+    let ic_proj = FixedBase::msm::<G1Projective>(scalar_size, g1_window, &g1_table, &ic_scalars);
+    let ic = G1Projective::normalize_batch(&ic_proj);
+
+    // b_g2_query[i] = v_i(tau) * G2
+    let g2_window = FixedBase::get_mul_window_size(n_vars);
+    let g2_table = FixedBase::get_window_table::<G2Projective>(scalar_size, g2_window, g2_proj);
+    let b_g2_query_proj = FixedBase::msm::<G2Projective>(scalar_size, g2_window, &g2_table, &vs_tau);
+    let b_g2_query = G2Projective::normalize_batch(&b_g2_query_proj);
+
+    // 6. l_query = public-input subset of ic (same as ic, for arkworks parity)
     let l_query = ic[..n_public].to_vec();
 
     // 7. h_query[j] = delta_inv * tau^j * T(tau) * G1
@@ -336,12 +344,14 @@ pub fn single_party_ceremony_full_from_tw<E: QapEngine, T: Copy + Into<Fr>, L: A
     let t_tau = t.evaluate(&tw.tau);
     let h_scalar_base = t_tau * delta_inv;
     let h_query_len = t.degree(); // safe upper bound on deg(h) + 1
-    let mut h_query = Vec::with_capacity(h_query_len);
+    let mut h_scalars = vec![Fr::zero(); h_query_len];
     let mut tau_pow = Fr::one();
-    for _ in 0..h_query_len {
-        h_query.push(G1Affine::from(g1_proj * (tau_pow * h_scalar_base)));
+    for i in 0..h_query_len {
+        h_scalars[i] = tau_pow * h_scalar_base;
         tau_pow *= tw.tau;
     }
+    let h_query_proj = FixedBase::msm::<G1Projective>(scalar_size, g1_window, &g1_table, &h_scalars);
+    let h_query = G1Projective::normalize_batch(&h_query_proj);
 
     // 8. Build VK (same as old ceremony)
     let vk = VerifyingKey {
@@ -413,26 +423,35 @@ pub fn single_party_ceremony_full_from_tw_sparse(
     let gamma_inv = tw.gamma.inverse().unwrap();
     let delta_inv = tw.delta.inverse().unwrap();
 
-    // 4. Per-variable queries
-    let mut a_query = Vec::with_capacity(n_vars);
-    let mut b_g1_query = Vec::with_capacity(n_vars);
-    let mut b_g2_query = Vec::with_capacity(n_vars);
-    let mut c_query = Vec::with_capacity(n_vars);
-    let mut ic = Vec::with_capacity(n_vars);
+    // 4. Per-variable queries — use FixedBase batch MSM (same as dense path)
+    let scalar_size = Fr::MODULUS_BIT_SIZE as usize;
 
+    let mut psi_scalars = vec![Fr::zero(); n_vars];
     for i in 0..n_vars {
-        let u_i = us_tau[i];
-        let v_i = vs_tau[i];
-        let w_i = ws_tau[i];
-
-        a_query.push(G1Affine::from(g1_proj * u_i));
-        b_g1_query.push(G1Affine::from(g1_proj * v_i));
-        b_g2_query.push(G2Affine::from(g2_proj * v_i));
-
-        let psi_scalar = v_i * tw.alpha + u_i * tw.beta + w_i;
-        c_query.push(G1Affine::from(g1_proj * (psi_scalar * delta_inv)));
-        ic.push(G1Affine::from(g1_proj * (psi_scalar * gamma_inv)));
+        psi_scalars[i] = vs_tau[i] * tw.alpha + us_tau[i] * tw.beta + ws_tau[i];
     }
+
+    let g1_window = FixedBase::get_mul_window_size(n_vars);
+    let g1_table = FixedBase::get_window_table::<G1Projective>(scalar_size, g1_window, g1_proj);
+
+    let a_query_proj = FixedBase::msm::<G1Projective>(scalar_size, g1_window, &g1_table, &us_tau);
+    let a_query = G1Projective::normalize_batch(&a_query_proj);
+
+    let b_g1_query_proj = FixedBase::msm::<G1Projective>(scalar_size, g1_window, &g1_table, &vs_tau);
+    let b_g1_query = G1Projective::normalize_batch(&b_g1_query_proj);
+
+    let c_scalars: Vec<Fr> = psi_scalars.iter().map(|&psi| psi * delta_inv).collect();
+    let c_query_proj = FixedBase::msm::<G1Projective>(scalar_size, g1_window, &g1_table, &c_scalars);
+    let c_query = G1Projective::normalize_batch(&c_query_proj);
+
+    let ic_scalars: Vec<Fr> = psi_scalars.iter().map(|&psi| psi * gamma_inv).collect();
+    let ic_proj = FixedBase::msm::<G1Projective>(scalar_size, g1_window, &g1_table, &ic_scalars);
+    let ic = G1Projective::normalize_batch(&ic_proj);
+
+    let g2_window = FixedBase::get_mul_window_size(n_vars);
+    let g2_table = FixedBase::get_window_table::<G2Projective>(scalar_size, g2_window, g2_proj);
+    let b_g2_query_proj = FixedBase::msm::<G2Projective>(scalar_size, g2_window, &g2_table, &vs_tau);
+    let b_g2_query = G2Projective::normalize_batch(&b_g2_query_proj);
 
     // 5. l_query = public-input subset of ic
     let l_query = ic[..n_public].to_vec();
@@ -442,12 +461,14 @@ pub fn single_party_ceremony_full_from_tw_sparse(
     let t_tau = t.evaluate(&tw.tau);
     let h_scalar_base = t_tau * delta_inv;
     let h_query_len = t.degree();
-    let mut h_query = Vec::with_capacity(h_query_len);
+    let mut h_scalars = vec![Fr::zero(); h_query_len];
     let mut tau_pow = Fr::one();
-    for _ in 0..h_query_len {
-        h_query.push(G1Affine::from(g1_proj * (tau_pow * h_scalar_base)));
+    for i in 0..h_query_len {
+        h_scalars[i] = tau_pow * h_scalar_base;
         tau_pow *= tw.tau;
     }
+    let h_query_proj = FixedBase::msm::<G1Projective>(scalar_size, g1_window, &g1_table, &h_scalars);
+    let h_query = G1Projective::normalize_batch(&h_query_proj);
 
     // 7. Build VK
     let vk = VerifyingKey {

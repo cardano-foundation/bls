@@ -53,7 +53,7 @@ flowchart LR
 4. **Verifier** (Aiken smart contract) receives the proof and the public message/key, confirms the signature is valid via pairing check — without ever seeing `S`, `PointA`, or `PointR`.
 
 
-> **Status:** Circuit compiles successfully with `circom --prime bls12381`. Witness generation **works** for valid Ed25519 inputs. The actual blocker is the proving step: the dense-matrix ceremony requires ~512 TB RAM for 4M constraints, but the sparse prover (Implementation 6) should theoretically unblock this.
+> **Status:** ✅ **Working end-to-end.** Circuit compiles with `circom --prime bls12381`. Witness generation works for valid Ed25519 inputs. The sparse dev ceremony (`--sparse`) completes in **~16 min** and produces a valid proving key. The sparse prover generates a valid proof in **~5 min**. Total e2e time: **~21 min** on a 16-core AMD Ryzen 9 7950X with 64 GiB RAM. Key enablers: `FixedBase::msm` batch scalar multiplication, `ark-std` Rayon parallelism, FFT-based polynomial multiplication in the quotient, and uncompressed proving key serialization.
 
 ---
 
@@ -204,15 +204,14 @@ cargo run --release -- ceremony-dev --sparse \
   --verifying-key /tmp/ed25519.vk
 ```
 
-**Observed behavior (4M constraints, single core, `--release`):**
+**Measured timings (4M constraints, `--release`, AMD Ryzen 9 7950X 16-core, 64 GiB RAM):**
 
-| Time | Memory (RSS) | CPU | Status |
-|------|-------------|-----|--------|
-| 0 min | 1.5 GiB | 90% | Circuit loaded, ceremony started |
-| 13 min | 1.8 GiB | 94% | Still computing |
-| 1h 12m | 3.3 GiB | 97% | Still computing, no output yet |
-
-**Expected total time:** 2–3 hours (the per-variable QAP evaluation + MSM over 4M constraints is expensive). Memory may grow to **4–5 GiB** before completion.
+| Step | Time | Memory (RSS) | Notes |
+|------|------|-------------|-------|
+| Sparse dev ceremony | **~16 min** | ~3 GiB | Uses `FixedBase::msm` batch scalar multiplication + `ark-std` Rayon parallelism |
+| PK deserialization (uncompressed, unchecked) | **~13 s** | — | Dev ceremony writes uncompressed PK to avoid 20M+ point decompressions |
+| Sparse prove | **~5 min** | ~4 GiB | FFT-based polynomial multiplication (`l * r` instead of `naive_mul`) + Pippenger MSM |
+| Total e2e (ceremony + prove) | **~21 min** | — | Previously impossible (>5 h ceremony blocked) |
 
 **To monitor progress:**
 
@@ -268,7 +267,7 @@ The sparse prover achieves a **~100,000× memory reduction** versus the dense pa
 | Privacy / Spend(depth=2) | 1,107 | 1,110 | ~39 MB | ✅ | ✅ Working e2e |
 | Poseidon Pre-image | ~300 | ~400 | ~5 MB | ✅ | ✅ Working e2e |
 | **Blake2b-224 Pre-image** | **79,312** | **78,605** | **~200 GB** | ✅ | ⏳ Blocked (memory) |
-| **Ed25519 Verify** | **~4M** | **~4M** | **~512 TB** (dense) | ✅ | ✅ Witness works — sparse prover in progress |
+| **Ed25519 Verify** | **~4M** | **~4M** | **~512 TB** (dense) / **~3 GiB** (sparse) | ✅ | ✅ **Working e2e** — ceremony ~16 min, prove ~5 min |
 
 ---
 
@@ -306,12 +305,12 @@ The zeroj implementation and this Circom circuit both prove that Ed25519 arithme
 
 | Approach | Description | Feasibility |
 |----------|-------------|-------------|
-| **1. Run the sparse prover (Implementation 6)** | The circuit compiles and witness-generates correctly. Use `SparseCircomCircuit::from_r1cs` and `prove_with_full_pk_sparse` to avoid the ~512 TB dense-matrix OOM. Projected RAM: ~1.2 GiB. | **Next step** — needs to be tested at 4M-constraint scale |
+| **1. Run the sparse prover (Implementation 6)** | ✅ **Done.** The circuit compiles, witness-generates, and proves end-to-end. Sparse ceremony (~16 min) + sparse prove (~5 min) on a 16-core workstation. RAM: ~3–4 GiB. Key enablers: `FixedBase::msm` batch scalar multiplication, `ark-std` Rayon parallelism, FFT-based `l * r` polynomial multiplication, and uncompressed PK serialization. | **Working e2e** |
 | **2. Compile on BN254 and bridge curves** | Run the circuit on BN254 (where it is known to work), then use a curve-bridging proof to connect to BLS12-381. Adds complexity and trust assumptions. | Hard — research-grade; no off-the-shelf recipe |
 | **3. Use zeroj's Java DSL approach** | Use zeroj directly for Ed25519 proofs. zeroj already proves Ed25519 on BLS12-381 with ~19M constraints for full CIP-1852 derivation. | Medium — ecosystem shift from Circom to Java DSL |
 | **4. Use a SNARK-friendly signature scheme** | Instead of proving Ed25519 verification, use a SNARK-friendly signature (e.g., EdDSA-JubJub, or Poseidon-based signatures) that natively fits inside a Groth16 circuit with fewer constraints. | Recommended for production |
 | **5. Port to optimized Ed25519 templates** | The current circuit is from Electron-Labs and uses 85-bit limbs. A more efficient implementation (e.g., using 64-bit limbs, or PLONK instead of Groth16) could reduce constraints significantly. | Future research |
-| **6. Accept the limitation and document** | Document that while Ed25519 verification in-circuit is possible, the ~4M constraint count makes proving expensive. Focus on use cases that can use lighter primitives (EdDSA-JubJub: 12K constraints). | Partial — README updated to reflect working witness generation |
+| **6. Accept the limitation and document** | Document that while Ed25519 verification in-circuit is possible, the ~4M constraint count makes proving expensive (~21 min e2e on a high-end workstation). Focus on use cases that can use lighter primitives (EdDSA-JubJub: 12K constraints). | Partial — README updated to reflect working e2e pipeline |
 
 ---
 

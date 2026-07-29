@@ -102,9 +102,13 @@ pub fn run(args: Args) -> Result<(), Box<dyn Error>> {
     };
 
     eprintln!("Dev ceremony complete. Full proving key generated (group elements only, no scalars).");
-    eprintln!("  Proving key:  {}  ({} bytes)", args.proving_key.display(), {
+    eprintln!("  Proving key:  {}  ({} bytes compressed / {} bytes uncompressed)", args.proving_key.display(), {
         let mut buf = Vec::new();
         full_pk.serialize_compressed(&mut buf).unwrap();
+        buf.len()
+    }, {
+        let mut buf = Vec::new();
+        full_pk.serialize_uncompressed(&mut buf).unwrap();
         buf.len()
     });
     eprintln!("  Verifying key: {}  ({} bytes)", args.verifying_key.display(), {
@@ -116,12 +120,16 @@ pub fn run(args: Args) -> Result<(), Box<dyn Error>> {
     // ------------------------------------------------------------------
     // 5. Serialize keys
     // ------------------------------------------------------------------
+    // Proving key is written UNCOMPRESSED for large circuits (Ed25519, Blake2b-224).
+    // Compressed deserialization requires decompression (square roots) for every
+    // curve point, which takes 10+ minutes for 20M+ points. Uncompressed is
+    // raw bytes and deserializes in < 30 seconds.
     let mut pk_bytes = Vec::new();
-    full_pk.serialize_compressed(&mut pk_bytes)
+    full_pk.serialize_uncompressed(&mut pk_bytes)
         .map_err(|e| format!("failed to serialize proving key: {e:?}"))?;
     fs::write(&args.proving_key, &pk_bytes)
         .map_err(|e| format!("failed to write proving key: {e}"))?;
-    eprintln!("Full proving key written to {}", args.proving_key.display());
+    eprintln!("Full proving key (uncompressed) written to {}", args.proving_key.display());
 
     let mut vk_bytes = Vec::new();
     vk.serialize_compressed(&mut vk_bytes)

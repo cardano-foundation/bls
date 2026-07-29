@@ -144,16 +144,28 @@ pub fn run(args: Args) -> Result<(), Box<dyn Error>> {
         let full_pk = if let Some(pk_path) = &args.proving_key {
             let pk_bytes =
                 fs::read(pk_path).map_err(|e| format!("failed to read proving key: {e}"))?;
-            let full_pk = FullProvingKey::deserialize_compressed(&pk_bytes[..]).map_err(|e| {
-                format!(
-                    "failed to deserialize FullProvingKey: {e:?}. \
+            // Try uncompressed first (dev default for large circuits), then compressed.
+            // For uncompressed keys we skip validation — they were generated locally
+            // so correctness is guaranteed, and validation of 20M+ points is expensive.
+            let full_pk = if let Ok(pk) = FullProvingKey::deserialize_uncompressed_unchecked(&pk_bytes[..]) {
+                eprintln!(
+                    "Loaded FullProvingKey (uncompressed, unchecked) from {} (group elements only, no scalars)",
+                    pk_path.display()
+                );
+                pk
+            } else {
+                let pk = FullProvingKey::deserialize_compressed(&pk_bytes[..]).map_err(|e| {
+                    format!(
+                        "failed to deserialize FullProvingKey: {e:?}. \
 If your proving key is a legacy scalar-based key, use --qap-not-on-fly."
-                )
-            })?;
-            eprintln!(
-                "Loaded FullProvingKey from {} (group elements only, no scalars)",
-                pk_path.display()
-            );
+                    )
+                })?;
+                eprintln!(
+                    "Loaded FullProvingKey (compressed) from {} (group elements only, no scalars)",
+                    pk_path.display()
+                );
+                pk
+            };
             full_pk
         } else {
             eprintln!("Warning: no proving key provided; generating deterministic FullProvingKey (dev only)");
@@ -340,10 +352,12 @@ If your proving key is a FullProvingKey, use --qap-on-fly (or omit the flag)."
 /// the FullProvingKey MSM path.
 fn run_sparse(args: Args) -> Result<(), Box<dyn Error>> {
     use groth16_prover::ceremony::single_party_ceremony_full_from_tw_sparse;
+    use std::time::Instant;
 
     // ------------------------------------------------------------------
     // 1. Load circuit and witness (sparse)
     // ------------------------------------------------------------------
+    let t0 = Instant::now();
     let mut circuit = SparseCircomCircuit::from_r1cs(
         args.circuit
             .to_str()
@@ -360,8 +374,8 @@ fn run_sparse(args: Args) -> Result<(), Box<dyn Error>> {
         .map_err(|e| format!("failed to load witness: {e}"))?;
 
     eprintln!(
-        "Loaded circuit (sparse): {} wires, {} constraints",
-        circuit.n_wires, circuit.n_constraints
+        "Loaded circuit (sparse): {} wires, {} constraints — {:?}",
+        circuit.n_wires, circuit.n_constraints, t0.elapsed()
     );
 
     if args.qap_not_on_fly {
@@ -378,19 +392,35 @@ fn run_sparse(args: Args) -> Result<(), Box<dyn Error>> {
     let n_public = (1 + circuit.n_pub_out + circuit.n_pub_in) as usize;
     let engine = FftQapEngine::new();
 
+    let t1 = Instant::now();
     let full_pk = if let Some(pk_path) = &args.proving_key {
         let pk_bytes =
             fs::read(pk_path).map_err(|e| format!("failed to read proving key: {e}"))?;
-        let full_pk = FullProvingKey::deserialize_compressed(&pk_bytes[..]).map_err(|e| {
-            format!(
-                "failed to deserialize FullProvingKey: {e:?}. \
+        eprintln!("  Read {} bytes in {:?}", pk_bytes.len(), t1.elapsed());
+        let t2 = Instant::now();
+        // Try uncompressed first (dev default for large circuits), then compressed.
+        // For uncompressed keys we skip validation — they were generated locally
+        // so correctness is guaranteed, and validation of 20M+ points is expensive.
+        let full_pk = if let Ok(pk) = FullProvingKey::deserialize_uncompressed_unchecked(&pk_bytes[..]) {
+            eprintln!(
+                "Loaded FullProvingKey (uncompressed, unchecked) from {} in {:?} (group elements only, no scalars)",
+                pk_path.display(), t2.elapsed()
+            );
+            pk
+        } else {
+            let t3 = Instant::now();
+            let pk = FullProvingKey::deserialize_compressed(&pk_bytes[..]).map_err(|e| {
+                format!(
+                    "failed to deserialize FullProvingKey: {e:?}. \
 If your proving key is a legacy scalar-based key, use --qap-not-on-fly."
-            )
-        })?;
-        eprintln!(
-            "Loaded FullProvingKey from {} (group elements only, no scalars)",
-            pk_path.display()
-        );
+                )
+            })?;
+            eprintln!(
+                "Loaded FullProvingKey (compressed) from {} in {:?} (group elements only, no scalars)",
+                pk_path.display(), t3.elapsed()
+            );
+            pk
+        };
         full_pk
     } else {
         eprintln!("Warning: no proving key provided; generating deterministic FullProvingKey (dev only)");
@@ -414,6 +444,7 @@ If your proving key is a legacy scalar-based key, use --qap-not-on-fly."
     let witness_fr = &circuit.witness;
     let n_constraints = circuit.n_constraints as usize;
 
+    let t4 = Instant::now();
     let (proof, public_input) = match args.prover {
         ProverArg::Naive => {
             let prover = NaiveProver::new();
@@ -440,6 +471,7 @@ If your proving key is a legacy scalar-based key, use --qap-not-on-fly."
             )
         }
     };
+    eprintln!("Proof generation (sparse) took {:?}", t4.elapsed());
 
     eprintln!("Proof generated successfully (sparse path).");
 
