@@ -131,12 +131,16 @@ pub fn run(args: Args) -> Result<(), Box<dyn Error>> {
         .map_err(|e| format!("failed to write proving key: {e}"))?;
     eprintln!("Full proving key (uncompressed) written to {}", args.proving_key.display());
 
+    // Verifying key is also written UNCOMPRESSED for large circuits.
+    // The VK contains ic points for every variable (1M+ for large circuits).
+    // Compressed deserialization requires square-root decompression for each point,
+    // which dominates verification time.
     let mut vk_bytes = Vec::new();
-    vk.serialize_compressed(&mut vk_bytes)
+    vk.serialize_uncompressed(&mut vk_bytes)
         .map_err(|e| format!("failed to serialize verifying key: {e:?}"))?;
     fs::write(&args.verifying_key, &vk_bytes)
         .map_err(|e| format!("failed to write verifying key: {e}"))?;
-    eprintln!("Verifying key written to {}", args.verifying_key.display());
+    eprintln!("Verifying key (uncompressed) written to {}", args.verifying_key.display());
 
     Ok(())
 }

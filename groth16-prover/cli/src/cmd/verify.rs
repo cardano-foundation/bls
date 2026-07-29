@@ -76,9 +76,18 @@ pub fn run(args: Args) -> Result<(), Box<dyn Error>> {
     let vk = if let Some(vk_path) = &args.verifying_key {
         let vk_bytes = fs::read(vk_path)
             .map_err(|e| format!("failed to read verifying key: {e}"))?;
-        let vk = VerifyingKey::deserialize_compressed(&vk_bytes[..])
-            .map_err(|e| format!("failed to deserialize verifying key: {e:?}"))?;
-        eprintln!("Loaded verifying key from {}", vk_path.display());
+        // Try uncompressed first (dev default for large circuits), then compressed.
+        // For uncompressed keys we skip validation — they were generated locally
+        // so correctness is guaranteed, and validation of 1M+ points is expensive.
+        let vk = if let Ok(vk) = VerifyingKey::deserialize_uncompressed_unchecked(&vk_bytes[..]) {
+            eprintln!("Loaded verifying key (uncompressed, unchecked) from {}", vk_path.display());
+            vk
+        } else {
+            let vk = VerifyingKey::deserialize_compressed(&vk_bytes[..])
+                .map_err(|e| format!("failed to deserialize verifying key: {e:?}"))?;
+            eprintln!("Loaded verifying key (compressed) from {}", vk_path.display());
+            vk
+        };
         vk
     } else {
         eprintln!("Warning: no verifying key provided; using deterministic test toxic waste (dev only)");

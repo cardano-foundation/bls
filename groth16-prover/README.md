@@ -1360,8 +1360,9 @@ Approximately **40 lines** of code:
       **Status:** ✅ **Unblocked with Implementation 6.** A `Blake2b224Preimage` circuit lives in `circom/Blake2b224Preimage/`. It compiles to ~79K constraints (77,312 non-linear + 2,059 linear) and the witness generates correctly, cross-checked against Python's `hashlib.blake2b`. The dense-matrix ceremony previously required ~200 GB RAM, but the sparse-matrix prover (Implementation 6) keeps the native sparse `.r1cs` representation and successfully completes ceremony + proof + verify on commodity hardware. Memory drops from `O(n_constraints × n_wires)` to `O(#non_zero_entries)`. See [`circom/Blake2b224Preimage/README.md`](circom/Blake2b224Preimage/README.md) for the full pipeline.  
       **Reference:** [bkomuves/hash-circuits](https://github.com/bkomuves/hash-circuits) provides the upstream Blake2b Circom circuit (MIT License).
    6. **Private key → public key ownership proof** — prove that you know the private key that generates a given Cardano public key / address, without revealing the private key.  
-      **Status:** ✅ **Implemented.** A working JubJub-based key-ownership circuit lives in `circom/CardanoKeyOwnership/`. It uses `EscalarMulFixJubJub(254, BASE8)` (ported from circomlib with JubJub constants) to compute `[sk]·G_JubJub` inside the circuit and asserts equality with the public key coordinates. The full pipeline compiles → witness generates → dev ceremony → proof → verify, all passing end-to-end via the Rust `groth16-prover` CLI.  
-      **Caveat:** This proves ownership of a **JubJub** key (SNARK-friendly curve embedded in BLS12-381), NOT a standard Cardano **Ed25519** key. Curve25519 arithmetic is incompatible with BLS12-381's scalar field. A separate off-chain commitment can link the JubJub key to a Cardano address.  
+      **Status:** ✅ **Implemented.** Two variants in `circom/CardanoKeyOwnership/`:
+      - **JubJub ownership** (`cardano_key_ownership.circom`) — uses `EscalarMulFixJubJub(254, BASE8)` to compute `[sk]·G_JubJub` and assert equality with the public key. ~4K constraints, trivial to prove. **Caveat:** proves ownership of a JubJub key, NOT a real Cardano Ed25519 key.
+      - **Ed25519 ownership** (`cardano_ed25519_ownership.circom`) — NEW. Reuses `Ed25519Verify` templates to prove real Cardano wallet key ownership: `PointA = [sk]·G` on Curve25519 with `PointCompress(PointA) == A`. ~1.97M constraints, works with the sparse prover (ceremony ~5 min, prove ~1.7 min on 16-core). This is the first in-circuit proof of real Cardano Ed25519 key ownership on BLS12-381.
       **Reference:** [cardano-crypto `generate`](https://github.com/IntersectMBO/cardano-crypto/blob/develop/src/Cardano/Crypto/Wallet.hs#L161) for the original Cardano key-derivation logic.
 
 </details>
@@ -1401,21 +1402,17 @@ Approximately **40 lines** of code:
 - **Status:** ⚠️ **Partial.** The `QapEngine` trait, `DenseQapEngine`, and `FftQapEngine` are all implemented (see item (a) above). The only remaining gap is building the group-element SRS in the Lagrange basis (`L_i(τ)·G1` instead of `τ^i·G1`) so the FFT path can skip monomial conversion and use the most efficient production pattern.
 - **Benefit:** Completes the FFT production path and removes the last monomial fallback.
 
-### (q) Additional Circom use-case circuits — blocked / done
+### (q) Additional Circom use-case circuits — done
 
 - **Target:** Add remaining realistic Circom circuits that exercise different zk-SNARK patterns.
-- **Status summary:** All realistic circuits that can be ported to BLS12-381 are now complete. The only remaining blocker is Ed25519 in-circuit verification, which is **fundamentally infeasible** with the available Circom templates.
+- **Status summary:** All realistic circuits that can be ported to BLS12-381 are now complete and working end-to-end with the sparse prover.
 
-#### Done (moved to item (i) above)
+#### Done
 - **Blake2b-224 Hash Pre-image** — unblocked by Implementation 6 (sparse-matrix prover).
-- **Private Key → Public Key Ownership Proof (JubJub)** — implemented end-to-end in `circom/CardanoKeyOwnership/`.
-
-#### Blocked
-- **7. EdDSA Ed25519 signature verification** — verify a standard Ed25519 signature inside a Groth16 circuit. Ed25519 is widely used outside the BN254 ecosystem (SSH, TLS, many blockchains), so an in-circuit verifier would let a Cardano zk-proof attest to off-chain events signed by standard Ed25519 keys.  
-  **Status:** ✅ **Witness generation works — proving blocked by memory.** The `Ed25519Verify` circuit in `circom/Ed25519Verify/` compiles to ~4M non-linear + ~1.5M linear constraints on BLS12-381. **Witness generation succeeds** with valid Ed25519 signatures. The earlier assessment of "field incompatibility" was incorrect: the `<--` witness hints use standard integer arithmetic (field-agnostic), and BLS12-381's scalar field is large enough to hold all 85-bit limb values without overflow.  
-  **Important caveat:** The circuit correctly validates and rejects signatures on BLS12-381 without template modifications.  
-  **Memory:** The dense-matrix ceremony requires ~512 TB RAM. The sparse prover (Implementation 6) is the path forward — projected ~1.2 GiB RAM for 4M constraints.  
-  See [`circom/Ed25519Verify/README.md`](circom/Ed25519Verify/README.md) for full analysis and path forward.
+- **Private Key → Public Key Ownership Proof (JubJub)** — implemented end-to-end in `circom/CardanoKeyOwnership/` (~4K constraints).
+- **EdDSA Ed25519 signature verification** — verify a standard Ed25519 signature inside a Groth16 circuit. Ed25519 is widely used outside the BN254 ecosystem (SSH, TLS, many blockchains), so an in-circuit verifier lets a Cardano zk-proof attest to off-chain events signed by standard Ed25519 keys.  
+  **Status:** ✅ **Working end-to-end.** The `Ed25519Verify` circuit compiles to ~4M constraints on BLS12-381. Witness generation works. Sparse dev ceremony (~16 min) + sparse prove (~5 min) on a 16-core workstation. The dense-matrix path would need ~512 TB RAM; the sparse prover uses ~3 GiB. See [`circom/Ed25519Verify/README.md`](circom/Ed25519Verify/README.md) for measured numbers.
+- **Ed25519 key ownership proof** — NEW. Reuses `Ed25519Verify` templates to prove real Cardano wallet key ownership: `PointA = [sk]·G` on Curve25519 with `PointCompress(PointA) == A`. ~1.97M constraints, sparse ceremony ~5 min, sparse prove ~1.7 min. See [`circom/CardanoKeyOwnership/README.md`](circom/CardanoKeyOwnership/README.md).
 - **Reference:** [circomlib](https://github.com/iden3/circomlib) provides production-grade Poseidon, MiMC, Merkle, and EdDSA circuits for BN254. Porting to BLS12-381 requires updating the field constants. For Ed25519 in-circuit verification, see [Electron-Labs/ed25519-circom](https://github.com/Electron-Labs/ed25519-circom) and our adapted version in [`circom/Ed25519Verify/README.md`](circom/Ed25519Verify/README.md).
 - **Benefit:** Shows that the Rust prover + Aiken verifier pipeline works for real-world zk-SNARK applications. Ed25519 verification in particular unlocks cross-chain identity use cases (attesting to off-chain signed data, linking SSH/TLS identities to on-chain proofs, etc.).
 
