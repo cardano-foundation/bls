@@ -100,13 +100,13 @@ Full pipeline for each item: **Circom → groth16-prover (dev ceremony) → Aike
   2. **Ed25519 ownership** (`cardano_ed25519_ownership.circom`) — NEW. Reuses `Ed25519Verify` templates to prove real Cardano wallet key ownership: `PointA = [sk]·G` on Curve25519 with `PointCompress(PointA) == A`. ~1.97M constraints, works with the sparse prover (ceremony ~5 min, prove ~1.7 min on 16-core).
   **Reference:** [IntersectMBO/cardano-crypto `generate`](https://github.com/IntersectMBO/cardano-crypto/blob/develop/src/Cardano/Crypto/Wallet.hs#L161) for the derivation logic.
 
-### Circuit validated, proving blocked by memory
+### Unblocked by sparse prover (pending e2e run)
 
 - **4. Blake2b-224 Hash Pre-image (Cardano Key Hash)** — prove knowledge of a pre-image that hashes to a given Cardano key hash.  
   **Public input:** `blake2b_224_hash`  
   **Private input:** `pre_image`  
   **Use case:** Proving ownership / linking proofs to on-chain Cardano addresses.  
-  **Status:** Circuit compiles (79K constraints) and witness generates correctly, but the dense-matrix ceremony requires ~200 GB RAM — blocked on memory. Implementation 6 (sparse-matrix prover) theoretically unblocks this; see [`Blake2b224Preimage/README.md`](Blake2b224Preimage/README.md) for scaling analysis.  
+  **Status:** ✅ **Circuit and witness validated.** Compiles to ~79K constraints (77,312 non-linear + 2,059 linear). Witness generates correctly, cross-checked against Python's `hashlib.blake2b`. The dense-matrix ceremony would require ~200 GB RAM and OOMs, but Implementation 6 (sparse-matrix prover) keeps the native sparse `.r1cs` representation and is **projected to complete in ~45 s** with ~280 MiB RAM. Combined with the ceremony optimizations (`FixedBase::msm` batch scalar multiplication, uncompressed PK/VK serialization), the full e2e pipeline is now feasible on commodity hardware but has not yet been executed end-to-end. See [`Blake2b224Preimage/README.md`](Blake2b224Preimage/README.md) for scaling analysis.  
   **Reference repo:** [bkomuves/hash-circuits](https://github.com/bkomuves/hash-circuits) provides the upstream Blake2b Circom circuit (MIT License).
 
 ### Working e2e (sparse prover)

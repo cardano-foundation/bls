@@ -914,7 +914,7 @@ let (proof, public_input) = prover.prove_with_full_pk(
 Implementation 6 replaces the dense `Vec<Vec<Fr>>` matrix expansion with a **native sparse constraint representation** that flows through the entire prover. All production features from Implementation 5—Circom adapter, `FullProvingKey`, on-the-fly QAP construction, Pippenger MSM, FFT engine, and Phase 2 MPC ceremony—are retained. The only change is *how* the R1CS matrices are stored and traversed.
 
 > **Why sparse matrices are essential.**  
-> Circom's `.r1cs` format stores constraints as **sparse** vectors: each constraint only lists the wires that actually appear in it (usually 2–10 entries out of thousands). The dense adapter in Implementation 5 inflates this into `n_constraints × n_wires` matrices. For a circuit like Blake2b-224 (~79 K constraints × ~78 K wires) this is **~200 GiB** of zero-filled RAM before proving even begins. The Ed25519 circuit (~5.5 M constraints) would need **~512 TB**. By keeping the native sparse representation and accumulating witness polynomials directly from non-zero entries, memory drops to `O(#non_zero_entries)` — typically **~1–2 orders of magnitude smaller** — unlocking circuits that previously OOMed on commodity hardware. The proof is **bit-for-bit identical** to the dense path because the same Groth16 formulas are used; only the memory layout and accumulation order differ.
+> Circom's `.r1cs` format stores constraints as **sparse** vectors: each constraint only lists the wires that actually appear in it (usually 2–10 entries out of thousands). The dense adapter in Implementation 5 inflates this into `n_constraints × n_wires` matrices. For a circuit like Blake2b-224 (~79 K constraints × ~78 K wires) this is **~200 GiB** of zero-filled RAM before proving even begins. The Ed25519 circuit (~4 M constraints) would need **~512 TB**. By keeping the native sparse representation and accumulating witness polynomials directly from non-zero entries, memory drops to `O(#non_zero_entries)` — typically **~1–2 orders of magnitude smaller** — unlocking circuits that previously OOMed on commodity hardware. The proof is **bit-for-bit identical** to the dense path because the same Groth16 formulas are used; only the memory layout and accumulation order differ.
 
 ### What it adds
 
@@ -997,7 +997,7 @@ The dense-matrix bottleneck is the dominant cost for large circuits. The table b
 | Synthetic hash (40K) | 40 000 | 40 000 | 143.1 GiB (OOM) | 6 105.0 MiB | **24×** | — (blocked) | 371.69 s | **Unblocked** |
 | Synthetic hash (50K) | 50 000 | 50 000 | 223.5 GiB (OOM) | 5 724.0 MiB | **40×** | — (blocked) | 351.44 s | **Unblocked** |
 | Blake2b-224 | ~78 K | ~79 K | ~200 GiB (OOM) | ~280 MiB | **~730 000×** | — (blocked) | ~45 s | **Unblocked** |
-| Ed25519 | ~4 M | ~5.5 M | ~512 TB (OOM) | ~3 GiB | **~170 000 000×** | — (blocked) | **~5 min** | **Unblocked** |
+| Ed25519 | ~4 M | ~4 M | ~512 TB (OOM) | ~3 GiB | **~170 000 000×** | — (blocked) | **~5 min** | **Unblocked** |
 | Ed25519 ownership | ~1.94M | ~1.97M | ~15 TB (OOM) | ~2.5 GiB | **~6 000 000×** | — (blocked) | **~1.7 min** | **Unblocked** |
 
 > **How the numbers were measured.**  
@@ -1006,7 +1006,8 @@ The dense-matrix bottleneck is the dominant cost for large circuits. The table b
 > - **PoseidonMerkle depth-2:** 10 iterations, real 1 911-constraint circuit from `circom/PoseidonMerkle/`. Dense on-the-fly construction allocates and iterates over 1 914 × 2 048 zero-filled columns; sparse skips this entirely.  
 > - **EdDSAJubJub test_pbk_only:** 1 iteration, real 4 122-constraint circuit. Dense path takes 104 s because it must process 4 123 × 2 048 dense columns; sparse completes in 7.8 s.  
 > - **Synthetic hash (20K–50K):** Large circuits that would OOM on commodity hardware with the dense path. The sparse path successfully runs ceremony + prove + verify on the same machine.  
-> - **Blake2b-224 / Ed25519:** Dense paths OOM; sparse projections scale from the observed trend.  
+> - **Blake2b-224:** ~45 s is a **projection** from the sparse prover scaling trend (observed on 20K–50K synthetic circuits). The sparse prover + FixedBase batch ceremony + uncompressed serialization now make this feasible on commodity hardware (~280 MiB sparse memory), but the end-to-end pipeline has not yet been executed.  
+> - **Ed25519 / Ed25519 ownership:** These are **actual measured numbers** (not projections) after all ceremony and proving optimizations: `FixedBase::msm` batch scalar multiplication, `ark-std` Rayon parallelism, FFT-based `l * r` polynomial multiplication, and uncompressed PK/VK serialization.  
 > - **Memory formula:** Sparse memory = `#non_zero_entries × 40 B` (wire_id + coeff) + `domain_size × 3 × 32 B` (witness polynomials). Dense memory = `n_constraints × n_wires × 32 B × 3` (L, R, O matrices).
 >
 > **Measured Ed25519 numbers (~4M constraints, 4M wires, AMD Ryzen 9 7950X 16-core, 64 GiB RAM, `--release`):**

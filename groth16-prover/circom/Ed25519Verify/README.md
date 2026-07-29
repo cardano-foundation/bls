@@ -266,7 +266,7 @@ The sparse prover achieves a **~100,000× memory reduction** versus the dense pa
 | SimpleExample Multiplier | 3 | 8 | ~768 B | ✅ | ✅ Working e2e |
 | Privacy / Spend(depth=2) | 1,107 | 1,110 | ~39 MB | ✅ | ✅ Working e2e |
 | Poseidon Pre-image | ~300 | ~400 | ~5 MB | ✅ | ✅ Working e2e |
-| **Blake2b-224 Pre-image** | **79,312** | **78,605** | **~200 GB** | ✅ | ⏳ Blocked (memory) |
+| **Blake2b-224 Pre-image** | **79,312** | **78,605** | **~200 GB** (dense) / **~280 MiB** (sparse) | ✅ | ⏳ Unblocked by sparse prover — e2e pending |
 | **Ed25519 Verify** | **~4M** | **~4M** | **~512 TB** (dense) / **~3 GiB** (sparse) | ✅ | ✅ **Working e2e** — ceremony ~16 min, prove ~5 min |
 
 ---
