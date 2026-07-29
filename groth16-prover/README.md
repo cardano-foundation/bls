@@ -1008,6 +1008,23 @@ The dense-matrix bottleneck is the dominant cost for large circuits. The table b
 > - **Blake2b-224 / Ed25519:** Dense paths OOM; sparse projections scale from the observed trend.  
 > - **Memory formula:** Sparse memory = `#non_zero_entries × 40 B` (wire_id + coeff) + `domain_size × 3 × 32 B` (witness polynomials). Dense memory = `n_constraints × n_wires × 32 B × 3` (L, R, O matrices).
 >
+> **Measured Ed25519 numbers (~4M constraints, 4M wires, AMD Ryzen 9 7950X 16-core, 64 GiB RAM, `--release`):**
+> | Step | Before fixes | After fixes | Improvement |
+> |------|-----------|-------------|-------------|
+> | Sparse dev ceremony | >5 h (did not finish) | **~16 min** | **>19×** |
+> | Sparse prove | >60 min (did not finish) | **~5 min** | **>12×** |
+> | Total e2e | **impossible** | **~21 min** | **Unblocked** |
+>
+> The Ed25519 circuit was previously listed as "~12 min projected" for proving, but that projection assumed a smaller FFT domain. The actual 4M-constraint circuit uses a domain size of 2²² = 4 194 304, and the `h(x)` quotient polynomial MSM alone takes ~2.7 min.
+>
+> **What fixed the ceremony (>5 h → ~16 min):**
+> 1. **FixedBase batch scalar multiplication.** The ceremony originally did 20M individual `generator * scalar` operations in a single-threaded loop (`g1_proj * u_i`, `g1_proj * v_i`, etc.), each followed by a projective→affine conversion (field inversion). We replaced this with `ark_ec::scalar_mul::fixed_base::FixedBase::msm`, which builds a windowed precomputation table once and evaluates all scalars in batch using Pippenger-like windowed additions. Reused the same G1 table across `a_query`, `b_g1_query`, `c_query`, `ic`, and `h_query`. Same for G2 table across `b_g2_query`.
+> 2. **Parallelism via `ark-std` `parallel` feature.** Added `ark-std = { version = "0.4", features = ["parallel"] }` and `rayon = "1.7"` to `Cargo.toml`. This activates Rayon-based parallel iterators inside arkworks' `FixedBase::msm`, `normalize_batch`, and `cfg_iter_mut` loops. The gains appear in both ceremony (parallel table construction + point normalization) and proving (parallel FFT butterflies, polynomial coefficient iteration, and MSM bucket aggregation).
+>
+> **What fixed the proving (>60 min → ~5 min):**
+> 1. **FFT-based polynomial multiplication in `compute_quotient`.** `FftQapEngine::compute_quotient` was using `l.naive_mul(r)` — schoolbook O(n²) multiplication. For degree-4M polynomials this is ~16 trillion field ops. We replaced it with `l * r`, which ark-poly implements as FFT-based O(n log n) multiplication (evaluate at roots of unity, pointwise multiply, IFFT back). This dropped the quotient step from **>30 min to ~48 s**.
+> 2. **Uncompressed proving key serialization.** The dev ceremony wrote the proving key with `serialize_compressed`. Loading it back required `deserialize_compressed`, which for every BLS12-381 point must compute a **square root in the base field** to recover the y-coordinate. For 20M+ points this takes 10+ minutes. We changed the dev ceremony to write with `serialize_uncompressed` (raw x+y coordinates), and the prove CLI to load with `deserialize_uncompressed_unchecked` (skips all validation). PK loading dropped from **>10 min to ~13 s**.
+>
 > **Comparison with zeroj's pure-Java Groth16 prover.**  
 > The [zeroj](https://github.com/bloxbean/zeroj) toolkit (see [`ZerojAudit.md`](../zeroj-assessment/ZerojAudit.md)) provides a pure-Java Groth16 prover for BLS12-381 (`Groth16ProverBLS381`) that already operates on a **native sparse constraint representation** (`Map<Integer, BigInteger>` per constraint, via `R1CSImporter`). This means zeroj does **not** suffer from the dense-matrix OOM bottleneck — it is architecturally similar to our Implementation 6 in that regard.  
 > zeroj has a built-in scale benchmark (`Groth16ScaleBenchmark`) in `zeroj-crypto/src/test/java/...` that measures setup + prove time and peak heap on synthetic squaring-chain circuits (comparable to our `benchmark_large_circuit.rs`). Run it with `./gradlew :zeroj-crypto:benchmark -Dzeroj.bench=true` (requires **Java 25 / GraalVM**).  

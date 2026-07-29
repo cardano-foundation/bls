@@ -237,7 +237,9 @@ impl QapEngine for FftQapEngine {
         o: &DensePolynomial<Fr>,
         t: &DensePolynomial<Fr>,
     ) -> DensePolynomial<Fr> {
-        let prod = l.naive_mul(r);
+        // FFT-based multiplication (O(n log n)) — critical for large circuits.
+        // `naive_mul` is O(n²) and becomes infeasible above ~10K constraints.
+        let prod = l * r;
         let numerator = poly_sub(&prod, o);
 
         // T(x) = x^domain_size - 1, so its degree is the domain size
