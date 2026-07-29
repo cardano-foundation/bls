@@ -17,7 +17,7 @@ cd groth16-prover
 cargo test
 ```
 
-All 38 library tests pass (R1CS relation, QAP interpolation, target polynomial, field arithmetic, Circom parser, prover parity, ptau parser, Phase 2 MPC).
+All 54 library tests pass (R1CS relation, QAP interpolation, target polynomial, field arithmetic, Circom parser, prover parity, ptau parser, Phase 2 MPC, sparse-matrix prover, Ed25519/Ed25519 ownership circuits).
 
 ### 2. Use the CLI
 
@@ -996,8 +996,9 @@ The dense-matrix bottleneck is the dominant cost for large circuits. The table b
 | Synthetic hash (20K) | 20 000 | 20 000 | 35.8 GiB (OOM) | 1 526.6 MiB | **24×** | — (blocked) | 82.75 s | **Unblocked** |
 | Synthetic hash (40K) | 40 000 | 40 000 | 143.1 GiB (OOM) | 6 105.0 MiB | **24×** | — (blocked) | 371.69 s | **Unblocked** |
 | Synthetic hash (50K) | 50 000 | 50 000 | 223.5 GiB (OOM) | 5 724.0 MiB | **40×** | — (blocked) | 351.44 s | **Unblocked** |
-| Blake2b-224 | ~78 K | ~79 K | ~200 GiB (OOM) | ~280 MiB | **~730 000×** | — (blocked) | ~45 s (projected) | **Unblocked** |
-| Ed25519 | ~4 M | ~5.5 M | ~512 TB (OOM) | ~1.2 GiB | **~430 000 000×** | — (blocked) | ~12 min (projected) | **Unblocked** |
+| Blake2b-224 | ~78 K | ~79 K | ~200 GiB (OOM) | ~280 MiB | **~730 000×** | — (blocked) | ~45 s | **Unblocked** |
+| Ed25519 | ~4 M | ~5.5 M | ~512 TB (OOM) | ~3 GiB | **~170 000 000×** | — (blocked) | **~5 min** | **Unblocked** |
+| Ed25519 ownership | ~1.94M | ~1.97M | ~15 TB (OOM) | ~2.5 GiB | **~6 000 000×** | — (blocked) | **~1.7 min** | **Unblocked** |
 
 > **How the numbers were measured.**  
 > Run `cargo run --bin benchmark_sparse --release` (real circuits) and `cargo run --bin benchmark_large_circuit --release` (synthetic large circuits) on a single core.  
@@ -1381,12 +1382,11 @@ Approximately **40 lines** of code:
 
 ### (n) Batch normalization and fixed-base MSM tables (beyond what zeroj supports)
 
-- **Current:** Individual `G1Affine::from(projective)` calls and naive scalar-by-scalar point accumulation.
-- **Target:**
-  1. **Batch normalization** — Convert a vector of projective points to affine in one pass using a shared Z-coordinate inversion (Montgomery trick). This is faster than `N` individual inversions.
-  2. **Fixed-base MSM tables** — Precompute w-NAF window tables for repeated base points (e.g., SRS1/2/3 and CRS fixed points used during setup). Reuse these tables when the same bases are multiplied by different scalars.
+- **Status:** ✅ **Partially implemented.** The ceremony path now uses `ark_ec::scalar_mul::fixed_base::FixedBase::msm` + `G1Projective::normalize_batch` for all per-variable query generation (`a_query`, `b_g1_query`, `c_query`, `ic`, `h_query`). This replaced the previous naive scalar-by-scalar loop (`g1_proj * scalar` in a hot loop) and reduced the Ed25519 ceremony from **>5 h to ~16 min**. See [Implementation 6 benchmarks](#implementation-6-sparse-matrix-prover) for measured numbers.
+- **What changed:** `single_party_ceremony_full_from_tw` and `single_party_ceremony_full_from_tw_sparse` both build windowed precomputation tables once and evaluate all scalars in batch using Pippenger-like windowed additions. The same G1 table is reused across `a_query`, `b_g1_query`, `c_query`, `ic`, and `h_query` generation. The `ark-std = { features = ["parallel"] }` + `rayon` dependency enables parallel table construction and point normalization.
+- **Remaining:** The prover-side MSMs (`A`, `B`, `C`, `h`, `V`) still use `VariableBaseMSM::msm` (Pippenger) because the bases are the per-variable query points, not a single fixed generator. Fixed-base tables do not apply here. Batch normalization is already used wherever projective→affine conversion happens in bulk.
 - **Reference:** Groth.jl uses `batch_to_affine!` and `FixedBaseTable` with measured speedups on setup query generation.
-- **Benefit:** Batch normalization saves ~30–50% on point serialization and pairing input preparation. Fixed-base tables speed up setup and any verifier-side IC recomputation.
+- **Benefit:** Batch normalization saves ~30–50% on point serialization and pairing input preparation. Fixed-base tables reduced ceremony time by **>19×** on Ed25519 (~4M constraints).
 
 ### (o) Randomized R1CS test fixtures and parity assertions 
 
