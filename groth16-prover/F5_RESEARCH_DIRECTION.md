@@ -160,6 +160,92 @@ This circuit turns F5 from a "stealth address mixer" into a true **confidential 
 
 ---
 
+## Folding schemes (Nova family) — projection & fit
+
+> **Executive summary:** A common misconception is that Nova / folding schemes "slim down" circuits — i.e., reduce the total number of constraints. They do not. The total algebraic work (constraint count) stays essentially the same, and each folding step adds **~10K–30K overhead constraints** for the Nova verifier logic. The real gains are elsewhere: **elimination of the per-circuit trusted setup**, **per-step memory scaling**, and the ability to handle computations that exceed 10M+ constraints where monolithic Groth16 is infeasible. For our current circuits, the sparse prover (Implementation 6) already solved the memory problem; Nova is only compelling if we need circuits larger than ~4M constraints or want a fully transparent setup.
+
+### What Nova actually does
+
+**Incremental Verifiable Computation (IVC)** splits a computation into a sequence of **step circuits**:
+
+```
+state_{i+1} = f(step_i, state_i)
+```
+
+Each step is proven independently and **folded** into a running accumulator. The folding operation itself is cheap (a few elliptic-curve additions). At the end, a small **compression SNARK** (e.g., Groth16 over ~100K constraints) proves the accumulator is valid.
+
+| Property | Monolithic Groth16 | Nova IVC |
+|----------|-------------------|----------|
+| **Total constraints** | C (e.g., 4M) | N × (step_size + overhead) ≈ C + N·overhead |
+| **Per-step constraints** | C (all at once) | step_size + ~10K–30K overhead |
+| **Trusted setup** | Per-circuit ceremony (SRS size ∝ C) | **None** for folding; one tiny ceremony for compression SNARK |
+| **Memory peak** | O(C) — 3 GiB for 4M constraints | O(step_size) — ~50–100 MiB per step |
+| **Proving time** | O(C log C) in one batch | O(N · step_size · log step_size) incremental |
+| **Proof size** | 192 bytes (Groth16) | ~500 bytes (IVC) + 192 bytes (compression) |
+| **Verifier** | One pairing check | Pairing check + IVC accumulator check |
+
+### Why "circuit slimming" is the wrong framing
+
+The total number of field multiplications does not shrink. Consider our Ed25519 signature verification circuit (~4M constraints):
+
+| Component | Monolithic Groth16 | Nova decomposition |
+|-----------|-------------------|--------------------|
+| SHA-512 (12 rounds) | ~600K constraints | ~100 steps × ~6K constraints/round |
+| ScalarMul ·G (base point) | ~1.2M constraints | Hard to decompose incrementally |
+| ScalarMul h·A (variable point) | ~1.2M constraints | Hard to decompose incrementally |
+| PointAdd, PointCompress, equality | ~1M constraints | Could be folded into steps |
+| **Nova overhead per step** | — | ~10K–30K constraints |
+| **Total** | ~4M | ~4M + (N × overhead) ≈ **4.5M–5.5M** |
+
+**The constraint count grows, not shrinks.** The benefit is that no single step exceeds ~40K–60K constraints, so:
+- The trusted setup is for a tiny ~100K compression circuit (~10–20 seconds) instead of a 4M-constraint monster (~16 minutes).
+- Memory per step is ~50 MiB instead of ~3 GiB.
+- Proving can be streamed — you fold one SHA-512 round at a time without holding the full 4M witness in RAM.
+
+### Projected gains for our circuits
+
+| Circuit | Monolithic Groth16 | Nova fit | Projected change |
+|---------|-------------------|----------|-----------------|
+| **SimpleExample (3 constraints)** | 3 | ❌ No | Nova overhead (~10K) exceeds circuit by 3000× |
+| **Privacy / Spend (1,107 constraints)** | 1,107 | ❌ No | Sparse prover already handles it in <1s |
+| **Poseidon Merkle (737 constraints)** | 737 | ❌ No | Trivial for current stack |
+| **Blake2b-224 Preimage (~79K)** | ~79K | ⚠️ Marginal | Sparse prover: ceremony ~18s, prove ~5s. Nova would save setup time but add overhead. Not worth it. |
+| **EdDSAJubJub (12,601 constraints)** | 12,601 | ⚠️ Marginal | Ceremony is already ~1s with sparse path. Nova overhead would be ~80% of step size. |
+| **CardanoKeyOwnership — JubJub (~4K)** | ~4K | ❌ No | Trivial. |
+| **CardanoKeyOwnership — Ed25519 (~1.97M)** | ~1.97M | ⚠️ Hard | Main cost is one scalar multiplication (~1.2M). Not naturally decomposable into steps without redesigning the Montgomery ladder as an incremental state machine. |
+| **Ed25519Verify (~4M)** | ~4M | ✅ Yes | Main target. SHA-512 is sequentially foldable. Scalar multiplication could be chunked if rewritten. Ceremony drops from ~16 min to ~10–20 s. Memory drops from ~3 GiB to ~50 MiB/step. |
+| **F5a Privacy Pool (~65K)** | ~65K | ❌ No | Nova overhead (10–30K) would be 15–45% of each step. Sparse prover already handles this comfortably. |
+| **F5 full depth-32 (~600K)** | ~600K | ⚠️ Maybe | If we need to go deeper (depth 64 → ~1.2M) or add more inputs/outputs, Nova becomes relevant. Currently sparse prover handles ~600K in ~2–3 min. |
+
+### The real bottleneck Nova solves
+
+For our stack, the bottleneck after Implementation 6 (sparse prover) is **not** memory or proving time — it is the **trusted setup ceremony** for large circuits:
+
+| Circuit | Ceremony (monolithic) | Ceremony (Nova compression SNARK) |
+|---------|----------------------|-----------------------------------|
+| Ed25519Verify (~4M) | ~16 min | ~10–20 s |
+| CardanoKeyOwnership (~1.97M) | ~5 min | ~10–20 s |
+| Hypothetical 10M circuit | ~1+ hour / impossible | ~10–20 s |
+
+Nova makes the ceremony **circuit-agnostic**: you run the tiny compression SNARK setup once, then use it for any IVC computation. This is the operational gain — not constraint reduction.
+
+### Integration difficulty for Cardano
+
+| Challenge | Severity | Notes |
+|-----------|----------|-------|
+| **Circuit rewrite** | High | Current Circom circuits are flat R1CS. Nova requires explicit step circuits with state passing. No automatic compiler exists. |
+| **On-chain verifier** | High | Aiken would need to verify both the IVC accumulator and the compression SNARK. Our current `aiken/groth16` verifier only handles standard Groth16. |
+| **Ecosystem** | Medium | `nova-snark` exists in Rust but integration with Circom-generated R1CS is experimental. Most Nova work uses hand-written circuits. |
+| **Nova overhead** | Low–Medium | ~10K–30K per step is acceptable for 40K+ steps; painful for small steps. |
+
+### Verdict: when to adopt Nova
+
+- **Now:** Not needed. Implementation 6 (sparse prover) handles all current circuits. Ceremony times (~5 min for 1.97M, ~16 min for 4M) are acceptable for dev/testnet.
+- **Soon:** If we need **recursive proof aggregation** (batching N proofs into one) or **incremental computation** (e.g., streaming Merkle tree updates), Nova is the right tool.
+- **Later:** If we design circuits exceeding **10M constraints** (full transaction validation, multi-sig with many parties, rollup state transitions), monolithic Groth16 becomes infeasible and Nova becomes mandatory.
+
+---
+
 ## Risk / open questions
 
 1. **Circuit size.** Merkle membership (500K constraints at depth 32) + stealth derivation (~50K constraints) + bridge message validation (~20K constraints) ≈ **~600K constraints total**. This is within sparse-prover reach (~2–3 min prove time), but still large for dev iteration.
