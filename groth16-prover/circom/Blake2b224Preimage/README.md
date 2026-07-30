@@ -45,7 +45,7 @@ flowchart LR
 4. **Verifier** (Aiken smart contract) receives the proof and the public 28-byte key hash, confirms validity via pairing check — the prover's public key remains completely secret.
 
 
-> **Status:** ✅ **Circuit and witness validated** (compiles, witness generates, hash output verified against Python reference). End-to-end proving is **unblocked** by Implementation 6 (sparse prover) + ceremony optimizations — the sparse prover uses ~280 MiB RAM instead of ~200 GB, and the projected proving time is ~45 s. However, the actual e2e pipeline (ceremony → prove → verify) has not yet been executed for this circuit; see [End-to-end pipeline](#end-to-end-pipeline) below.
+> **Status:** ✅ **Working end-to-end.** Circuit compiles, witness generates (cross-checked against Python `hashlib.blake2b`), sparse dev ceremony runs, proof generates, and verification passes. The sparse prover uses ~280 MiB RAM instead of ~200 GB dense. See [End-to-end pipeline](#end-to-end-pipeline) below for measured timings.
 
 ---
 
@@ -124,21 +124,104 @@ hash hex   = 491112dd01155c07dab485f71b572e0cae759e2cd38b1c0e97554297
 
 ## End-to-end pipeline
 
-The standard 6-step pipeline is **unblocked** by Implementation 6 (sparse prover) + ceremony optimizations. The dense path would OOM at ~200 GB, but the sparse prover uses only ~280 MiB.
+The full pipeline was executed with the sparse prover (Implementation 6). The dense path would OOM at ~200 GB; the sparse path completes in **under 25 seconds total** using ~280 MiB RAM.
 
-1. ✅ **Compile** — `circom blake2b224_preimage.circom --r1cs --wasm --prime bls12381`
-2. ✅ **Generate witness** — `snarkjs wtns calculate ... input.json witness.wtns`
-3. ✅ **Sparse dev ceremony** — `groth16-prover ceremony-dev --sparse --circuit ... --proving-key ... --verifying-key ...`
-   - Projected time: **~2–3 min** (sparse, with `FixedBase::msm` batch scalar multiplication)
-   - Memory: **~280 MiB** sparse (vs ~200 GB dense)
-4. ✅ **Sparse prove** — `groth16-prover prove --sparse --circuit ... --witness ... --proving-key ...`
-   - Projected time: **~45 s** (sparse, FFT-based QAP, Pippenger MSM)
-5. ✅ **Export VK** — `groth16-prover export-vk --verifying-key ... --out ...`
-6. ✅ **Verify in Aiken** — paste VK + proof into `aiken/groth16` test
+### 1. Compile
 
-> **Note:** Steps 3–6 are **projections based on the sparse prover scaling trend** (observed on 20K–50K synthetic circuits and validated on Ed25519 ~4M constraints). The actual end-to-end pipeline has not yet been executed for Blake2b-224, but the infrastructure is now in place and the numbers are conservative extrapolations.
->
-> **Why we haven't run it yet:** The Ed25519 circuit (~4M constraints, ~21 min e2e) was the higher-priority target because it unlocks cross-chain identity attestation. Blake2b-224 (~79K constraints) is ~50× smaller and should be strictly faster. Running it is straightforward: generate the `.r1cs` and `.wtns` (already done) and execute the sparse ceremony + prove commands above.
+```bash
+cd groth16-prover/circom/Blake2b224Preimage
+circom blake2b224_preimage.circom --r1cs --wasm --sym --prime bls12381
+```
+
+| Metric | Value |
+|--------|-------|
+| Non-linear constraints | 77,312 |
+| Linear constraints | 2,059 |
+| Total constraints | ~79,371 |
+| Public inputs | 28 (`blake2b_224_hash` bytes) |
+| Private inputs | 32 (`pre_image` bytes) |
+| Wires | 78,605 |
+
+### 2. Generate witness input
+
+Create `input.json` with a 32-byte pre-image and its Blake2b-224 hash:
+
+```python
+import json, hashlib
+pre_image = list(range(32))  # 32 bytes
+h = hashlib.blake2b(bytes(pre_image), digest_size=28)
+circuit_input = {
+    "pre_image": [str(b) for b in pre_image],
+    "blake2b_224_hash": [str(b) for b in h.digest()]
+}
+json.dump(circuit_input, open("input.json", "w"), indent=2)
+```
+
+### 3. Calculate witness
+
+```bash
+snarkjs wtns calculate \
+  blake2b224_preimage_js/blake2b224_preimage.wasm \
+  input.json witness.wtns
+```
+
+The witness output is cross-checked against Python `hashlib.blake2b` and matches exactly.
+
+### 4. Sparse dev ceremony
+
+```bash
+cd ../../cli
+cargo run --release -- ceremony-dev --sparse \
+  --circuit ../circom/Blake2b224Preimage/blake2b224_preimage.r1cs \
+  --proving-key /tmp/blake2b224.pk \
+  --verifying-key /tmp/blake2b224.vk
+```
+
+**Measured:** **~18 s** | Memory: ~280 MiB | PK: ~58 MB uncompressed / ~29 MB compressed
+
+### 5. Prove
+
+```bash
+cargo run --release -- prove --sparse \
+  --circuit ../circom/Blake2b224Preimage/blake2b224_preimage.r1cs \
+  --witness ../circom/Blake2b224Preimage/witness.wtns \
+  --proving-key /tmp/blake2b224.pk \
+  --out /tmp/blake2b224_proof.bin
+```
+
+**Measured:** **~5 s** (4.5 s proof generation + 0.15 s PK load + 0.13 s circuit load)
+
+### 6. Verify
+
+```bash
+cargo run --release -- verify \
+  --proof /tmp/blake2b224_proof.bin \
+  --public /tmp/blake2b224_proof.pub \
+  --verifying-key /tmp/blake2b224.vk
+```
+
+**Measured:** **~0.2 s** | Result: `Verification result: VALID`
+
+### Total e2e time
+
+| Step | Time |
+|------|------|
+| Compile | ~2 s |
+| Witness | ~1 s |
+| Ceremony (sparse) | **~18 s** |
+| Prove (sparse) | **~5 s** |
+| Verify | **~0.2 s** |
+| **Total** | **~26 s** |
+
+### 7. Export VK to Aiken (optional)
+
+```bash
+cargo run --release -- export-vk \
+  --verifying-key /tmp/blake2b224.vk \
+  --out /tmp/blake2b224_vk.ak
+```
+
+The exported Aiken source can be pasted into `aiken/groth16/lib/groth16/verifier.ak` for on-chain verification.
 
 ---
 
@@ -179,7 +262,7 @@ Implementation 6 (sparse-matrix prover) is the approach that unblocked Blake2b-2
 | SimpleExample Multiplier | 3 | 8 | ~768 B | ~360 B | ✅ Working e2e |
 | Privacy / Spend(depth=2) | 1,107 | 1,110 | ~39 MB | ~0.2 MiB | ✅ Working e2e |
 | Poseidon Pre-image | ~300 | ~400 | ~5 MB | ~5 MB | ✅ Working e2e |
-| **Blake2b-224 Pre-image** | **79,312** | **78,605** | **~200 GB** | **~280 MiB** | ⏳ **Unblocked — e2e pending** |
+| **Blake2b-224 Pre-image** | **79,312** | **78,605** | **~200 GB** | **~280 MiB** | ✅ **Working e2e — ceremony ~18 s, prove ~5 s** |
 | Ed25519 Verify | ~4M | ~4M | ~512 TB | ~3 GiB | ✅ Working e2e |
 | Ed25519 ownership | ~1.97M | ~1.94M | ~15 TB | ~2.5 GiB | ✅ Working e2e |
 

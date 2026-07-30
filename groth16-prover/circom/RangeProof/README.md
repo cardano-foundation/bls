@@ -239,7 +239,7 @@ This is a common pitfall when using snarkjs with BLS12-381. Always use strings f
 | **RangeProofCommitted(32)** | **275** | **669** | **~9 KB** | ✅ Working e2e |
 | Poseidon Pre-image | ~300 | ~400 | ~5 MB | ✅ Working e2e |
 | Privacy / Spend(depth=2) | 1,107 | 1,110 | ~39 MB | ✅ Working e2e |
-| Blake2b-224 Pre-image | ~79K | ~78K | ~200 GB (dense) / ~280 MiB (sparse) | ⏳ Unblocked by sparse prover — e2e pending |
+| Blake2b-224 Pre-image | ~79K | ~78K | ~200 GB (dense) / ~280 MiB (sparse) | ✅ Working e2e — ceremony ~18 s, prove ~5 s |
 | Ed25519 Verify | ~4M | ~4M | ~512 TB (dense) / ~3 GiB (sparse) | ✅ Working e2e — ceremony ~16 min, prove ~5 min |
 | CardanoKeyOwnership (Ed25519) | ~1.97M | ~1.94M | ~15 TB (dense) / ~2.5 GiB (sparse) | ✅ Working e2e — ceremony ~5 min, prove ~1.7 min |
 

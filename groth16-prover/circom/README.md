@@ -11,7 +11,7 @@ This directory contains Circom circuits that can be loaded by the Rust prover vi
 | [`PoseidonPreimage/`](PoseidonPreimage/README.md) | Poseidon hash pre-image knowledge | ~300 | ✅ Complete |
 | [`PoseidonMerkle/`](PoseidonMerkle/README.md) | Merkle membership with PoseidonBLS12_381 hashing | 737 (depth 2) | ✅ Complete |
 | [`RangeProof/`](RangeProof/README.md) | Range proof + Poseidon commitment (`value ∈ [0, 2^n)`) | ~`n + 250` | ✅ Complete |
-| [`Blake2b224Preimage/`](Blake2b224Preimage/README.md) | Blake2b-224 hash pre-image (Cardano key hash) | ~79K | ⚠️ Circuit + witness validated; proving blocked by RAM |
+| [`Blake2b224Preimage/`](Blake2b224Preimage/README.md) | Blake2b-224 hash pre-image (Cardano key hash) | ~79K | ✅ Working e2e — ceremony ~18 s, prove ~5 s, verify ~0.2 s |
 | [`Ed25519Verify/`](Ed25519Verify/README.md) | Ed25519 signature verification in-circuit | ~4M | ✅ Working e2e — ceremony ~16 min, prove ~5 min |
 | [`CardanoKeyOwnership/`](CardanoKeyOwnership/README.md) | Ed25519 key ownership proof (real Cardano key) | ~1.97M | ✅ Working e2e — ceremony ~5 min, prove ~1.7 min |
 | [`EdDSAJubJub/`](EdDSAJubJub/README.md) | EdDSA-JubJub signature verification (deterministic nonce, Poseidon challenge) | 12 601 | ✅ Complete — full e2e pass |
@@ -106,7 +106,7 @@ Full pipeline for each item: **Circom → groth16-prover (dev ceremony) → Aike
   **Public input:** `blake2b_224_hash`  
   **Private input:** `pre_image`  
   **Use case:** Proving ownership / linking proofs to on-chain Cardano addresses.  
-  **Status:** ✅ **Circuit and witness validated.** Compiles to ~79K constraints (77,312 non-linear + 2,059 linear). Witness generates correctly, cross-checked against Python's `hashlib.blake2b`. The dense-matrix ceremony would require ~200 GB RAM and OOMs, but Implementation 6 (sparse-matrix prover) keeps the native sparse `.r1cs` representation and is **projected to complete in ~45 s** with ~280 MiB RAM. Combined with the ceremony optimizations (`FixedBase::msm` batch scalar multiplication, uncompressed PK/VK serialization), the full e2e pipeline is now feasible on commodity hardware but has not yet been executed end-to-end. See [`Blake2b224Preimage/README.md`](Blake2b224Preimage/README.md) for scaling analysis.  
+  **Status:** ✅ **Working end-to-end.** Compiles to ~79K constraints (77,312 non-linear + 2,059 linear). Witness generates correctly, cross-checked against Python's `hashlib.blake2b`. The dense-matrix ceremony would require ~200 GB RAM and OOMs, but Implementation 6 (sparse-matrix prover) keeps the native sparse `.r1cs` representation and completes ceremony (~18 s) + proof (~5 s) + verify (~0.2 s) on commodity hardware with ~280 MiB RAM. See [`Blake2b224Preimage/README.md`](Blake2b224Preimage/README.md) for the full step-by-step pipeline.  
   **Reference repo:** [bkomuves/hash-circuits](https://github.com/bkomuves/hash-circuits) provides the upstream Blake2b Circom circuit (MIT License).
 
 ### Working e2e (sparse prover)
