@@ -19,7 +19,7 @@ set -euo pipefail
 #
 # Requirements:
 #   - cardano-address  in $PATH
-#   - python3 + bech32 package  (pip install bech32)
+#   - bech32 CLI in $PATH  (install from https://github.com/IntersectMBO/bech32/releases)
 #   - gen_cardano_address_input.py  in the same directory
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -32,9 +32,10 @@ if ! command -v cardano-address &> /dev/null; then
     exit 1
 fi
 
-if ! python3 -c "import bech32" 2>/dev/null; then
-    echo "ERROR: python3 bech32 package not found."
-    echo "  Install with: pip install bech32"
+if ! command -v bech32 &> /dev/null; then
+    echo "ERROR: bech32 CLI not found in PATH."
+    echo "  Install from https://github.com/IntersectMBO/bech32/releases"
+    echo "  or build from source: cabal install bech32"
     exit 1
 fi
 

@@ -9,7 +9,7 @@ set -euo pipefail
 #
 # Requirements:
 #   - cardano-address  in $PATH
-#   - python3 + bech32 package
+#   - bech32 CLI in $PATH  (install from https://github.com/IntersectMBO/bech32/releases)
 #   - snarkjs  in $PATH
 #   - groth16-prover CLI built in release mode
 #
@@ -33,8 +33,10 @@ if ! command -v cardano-address &> /dev/null; then
     echo "ERROR: cardano-address not found in PATH"
     exit 1
 fi
-if ! python3 -c "import bech32" 2>/dev/null; then
-    echo "ERROR: python3 bech32 package not found. Run: pip install bech32"
+if ! command -v bech32 &> /dev/null; then
+    echo "ERROR: bech32 CLI not found in PATH."
+    echo "  Install from https://github.com/IntersectMBO/bech32/releases"
+    echo "  or build from source: cabal install bech32"
     exit 1
 fi
 if ! command -v snarkjs &> /dev/null; then

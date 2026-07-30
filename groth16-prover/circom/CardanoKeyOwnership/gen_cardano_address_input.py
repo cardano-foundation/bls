@@ -25,29 +25,42 @@ Usage:
 import argparse
 import json
 import hashlib
+import subprocess
 import sys
 
-try:
-    import bech32
-except ImportError:
-    print("ERROR: bech32 package not found. Install with: pip install bech32")
-    sys.exit(1)
+
+def decode_bech32_file(path):
+    """Decode a bech32-encoded file to raw bytes using the bech32 CLI."""
+    with open(path, "r") as f:
+        encoded = f.read().strip()
+    try:
+        result = subprocess.run(
+            ["bech32"],
+            input=encoded,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except subprocess.CalledProcessError as e:
+        raise ValueError(f"bech32 CLI failed for {path}: {e.stderr}") from e
+    except FileNotFoundError:
+        print(
+            "ERROR: 'bech32' CLI not found in PATH.\n"
+            "  Install from https://github.com/IntersectMBO/bech32/releases\n"
+            "  or build from source: cabal install bech32"
+        )
+        sys.exit(1)
+    hex_str = result.stdout.strip()
+    raw = bytes.fromhex(hex_str)
+    # HRP is the prefix before the '1' in the bech32 string
+    hrp = encoded.split("1")[0] if "1" in encoded else ""
+    return raw, hrp
+
 
 # Ed25519 prime
 p = 2**255 - 19
 # Curve constant d = -121665 / 121666  (mod p)
 d = -121665 * pow(121666, p - 2, p) % p
-
-
-def decode_bech32_file(path):
-    """Decode a bech32-encoded file to raw bytes."""
-    with open(path, "r") as f:
-        encoded = f.read().strip()
-    hrp, data = bech32.bech32_decode(encoded)
-    if data is None:
-        raise ValueError(f"Invalid bech32 in {path}")
-    raw = bech32.convertbits(data, 5, 8, False)
-    return bytes(raw), hrp
 
 
 def clamp_ed25519_scalar(kL):
