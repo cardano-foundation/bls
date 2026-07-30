@@ -97,6 +97,65 @@ Adapting F5 to Cardano / our stack requires:
 
 ---
 
+## F5a — Shielded Amounts: Range Proofs + Pedersen Commitments
+
+> **The missing circuit.** F5 as described hides *who* withdraws and *where* the funds go, but it still reveals the **amount** of each deposit and withdrawal on-chain (or forces users into a small set of fixed denominations). For meaningful financial privacy, the transaction value itself must be hidden.
+
+### What we would prove
+
+A **confidential transaction circuit** that extends the F5 spend proof with two additional constraints:
+
+1. **Amount commitment.** Each note commits to its value via a Poseidon hash: `commitment = Poseidon(amount, blinding_factor, nullifier, viewing_key)`. The commitment is what actually sits in the Merkle tree, not the plaintext amount.
+2. **Range proof.** When spending a note, the prover shows `amount ∈ [0, 2^n)` using a bitwise decomposition + carry-chain range proof. This prevents negative amounts (inflation) without revealing the exact value.
+3. **Conservation of value (in-circuit sum check).** For a transfer that consumes `m` input notes and creates `k` output notes, the circuit proves:
+   ```
+   sum(input_amounts) == sum(output_amounts) + fee
+   ```
+   The fee is a public input; the individual amounts remain private.
+
+### Why this is interesting for our stack
+
+| Building block | Already exists in repo | How it composes |
+|----------------|----------------------|-----------------|
+| **Poseidon hash commitment** | `circom/PoseidonPreimage/` (~300 constraints) | Each note's commitment is a Poseidon pre-image. The same gadget is reused for the Merkle leaf hash. |
+| **Merkle membership** | `circom/PoseidonMerkle/` (~250 constraints/level) | The commitment from step 1 is the leaf. Proving membership shows the note was legitimately deposited. |
+| **Range proof** | `circom/RangeProof/` (~`n + 250` constraints) | A 64-bit range proof adds only ~314 constraints per note. For two inputs + two outputs, that's <1.3K constraints — negligible compared to the Merkle path. |
+| **Field arithmetic sum check** | Native Circom `===` | The in-circuit addition `in1 + in2 == out1 + out2 + fee` is a single linear constraint. |
+
+### Constraint budget (realistic scenario)
+
+| Component | Constraints | Notes |
+|-----------|-------------|-------|
+| Merkle membership (depth 20) | ~5,000 | One per input note |
+| Poseidon commitment (per note) | ~300 | Reused for input + output notes |
+| Range proof (64-bit, per note) | ~314 | One per input and output note |
+| Conservation sum check | 1 | Linear constraint across 4 note amounts + fee |
+| Stealth key derivation | ~50,000 | From existing F5 analysis |
+| **Total (2-in / 2-out / depth 20)** | **~65K** | Entirely within dense-prover reach; sparse path handles it in seconds |
+
+### Public vs private inputs
+
+| Direction | Signal | Description |
+|-----------|--------|-------------|
+| **Public** | `merkle_root` | Current state of the L1 commitment tree |
+| **Public** | `output_commitments[k]` | New commitments created by this spend |
+| **Public** | `fee` | Network / protocol fee (prevents free withdrawals) |
+| **Public** | `nullifier_hash` | Unique identifier marking the input note as spent |
+| **Private** | `input_amounts[m]` | Values of the notes being consumed |
+| **Private** | `blinding_factors[m+k]` | Random nonces for input and output commitments |
+| **Private** | `merkle_paths[m]` | Sibling hashes and indices proving each input note exists |
+| **Private** | `stealth_scalar` | Private key used to derive the stealth output address |
+
+### Open question: 64-bit vs 128-bit ranges
+
+Cardano uses **lovelace** (1 ADA = 1,000,000 lovelace). A 64-bit range comfortably covers any plausible transaction (`2^64 lovelace ≈ 1.8 × 10^19 ADA`). A 32-bit range is too small (`≈ 4.3 ADA`). The existing `RangeProof` circuit is parameterised by `n`, so switching from 32 to 64 to 128 bits is only a template parameter change.
+
+### Bottom line for F5a
+
+This circuit turns F5 from a "stealth address mixer" into a true **confidential payment system** where neither the sender, recipient, amount, nor destination chain is visible. The entire proof (Merkle + range + conservation + stealth) is still under ~100K constraints for realistic note configurations — well within the capabilities of our sparse prover. It is the natural next step after proving "I own this key" (`CardanoKeyOwnership`) and "this note exists in a tree" (`PoseidonMerkle`).
+
+---
+
 ## Risk / open questions
 
 1. **Circuit size.** Merkle membership (500K constraints at depth 32) + stealth derivation (~50K constraints) + bridge message validation (~20K constraints) ≈ **~600K constraints total**. This is within sparse-prover reach (~2–3 min prove time), but still large for dev iteration.
