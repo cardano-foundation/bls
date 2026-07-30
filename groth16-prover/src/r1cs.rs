@@ -1,5 +1,4 @@
 use ark_bls12_381::Fr;
-use ark_ff::Field;
 use ark_std::vec::Vec;
 
 /// A circuit descriptor: R1CS matrices + witness + metadata.
@@ -130,39 +129,23 @@ pub fn witness_to_fr(witness: &[u64]) -> Vec<Fr> {
 }
 
 /// Multiply a matrix (constraints x variables) by a witness vector.
-/// Returns a vector with one element per constraint.
-pub fn matrix_mul_vec(matrix: &[[u64; 8]], witness: &[Fr]) -> Vec<Fr> {
+/// Works with the hard-coded 8-variable multiplier test matrices.
+#[cfg(test)]
+fn matrix_mul_vec(matrix: &[[u64; 8]], witness: &[Fr]) -> Vec<Fr> {
     matrix
         .iter()
         .map(|row| {
             row.iter()
                 .zip(witness.iter())
                 .map(|(&m, &w)| Fr::from(m) * w)
-                .fold(Fr::ZERO, |acc, x| acc + x)
+                .fold(Fr::from(0u64), |acc, x| acc + x)
         })
         .collect()
 }
 
-/// Verify that (L · a) ∘ (R · a) = O · a (element-wise multiplication).
-pub fn verify_r1cs(witness: &[Fr]) -> Result<(), String> {
-    let la = matrix_mul_vec(&L, witness);
-    let ra = matrix_mul_vec(&R, witness);
-    let oa = matrix_mul_vec(&O, witness);
-
-    for i in 0..la.len() {
-        let lhs = la[i] * ra[i];
-        if lhs != oa[i] {
-            return Err(format!(
-                "Constraint {} failed: L·a = {}, R·a = {}, (L·a)*(R·a) = {}, O·a = {}",
-                i, la[i], ra[i], lhs, oa[i]
-            ));
-        }
-    }
-    Ok(())
-}
-
 /// Multiply a matrix (constraints x variables) by a witness vector.
 /// Works with any `Vec<Vec<Fr>>` matrix (dynamic, arbitrary size).
+#[cfg(any(test, feature = "bins"))]
 pub fn matrix_mul_vec_dyn(matrix: &[Vec<Fr>], witness: &[Fr]) -> Vec<Fr> {
     matrix
         .iter()
@@ -170,12 +153,13 @@ pub fn matrix_mul_vec_dyn(matrix: &[Vec<Fr>], witness: &[Fr]) -> Vec<Fr> {
             row.iter()
                 .zip(witness.iter())
                 .map(|(&m, &w)| m * w)
-                .fold(Fr::ZERO, |acc, x| acc + x)
+                .fold(Fr::from(0u64), |acc, x| acc + x)
         })
         .collect()
 }
 
 /// Verify that (L · a) ∘ (R · a) = O · a for a `Circuit`.
+#[cfg(any(test, feature = "bins"))]
 pub fn verify_r1cs_circuit(circuit: &Circuit) -> Result<(), String> {
     let la = matrix_mul_vec_dyn(&circuit.l, &circuit.witness);
     let ra = matrix_mul_vec_dyn(&circuit.r, &circuit.witness);
@@ -192,12 +176,8 @@ pub fn verify_r1cs_circuit(circuit: &Circuit) -> Result<(), String> {
     Ok(())
 }
 
-/// Pretty-print a vector of field elements.
-pub fn print_fr_vec(name: &str, vec: &[Fr]) {
-    println!("{}: {:?}", name, vec.iter().map(|f| f.to_string()).collect::<Vec<_>>());
-}
-
 /// Select a circuit by name ("multiplier" or "sumofproducts").
+#[cfg(any(test, feature = "bins"))]
 pub fn select_circuit(name: &str) -> Circuit {
     match name {
         "multiplier" => multiplier_circuit(),

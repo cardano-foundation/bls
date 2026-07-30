@@ -7,6 +7,7 @@ use clap::{Parser, Subcommand};
 use std::error::Error;
 
 mod cmd;
+mod util;
 
 /// CLI commands available
 #[derive(Debug, Subcommand)]
