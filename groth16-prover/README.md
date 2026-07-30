@@ -996,7 +996,7 @@ The dense-matrix bottleneck is the dominant cost for large circuits. The table b
 | Synthetic hash (20K) | 20 000 | 20 000 | 35.8 GiB (OOM) | 1 526.6 MiB | **24×** | — (blocked) | 82.75 s | **Unblocked** |
 | Synthetic hash (40K) | 40 000 | 40 000 | 143.1 GiB (OOM) | 6 105.0 MiB | **24×** | — (blocked) | 371.69 s | **Unblocked** |
 | Synthetic hash (50K) | 50 000 | 50 000 | 223.5 GiB (OOM) | 5 724.0 MiB | **40×** | — (blocked) | 351.44 s | **Unblocked** |
-| Blake2b-224 | ~78 K | ~79 K | ~200 GiB (OOM) | ~280 MiB | **~730 000×** | — (blocked) | ~45 s | **Unblocked** |
+| Blake2b-224 | ~78 K | ~79 K | ~200 GiB (OOM) | ~280 MiB | **~730 000×** | ~18 s | ~5 s | **Working e2e** |
 | Ed25519 | ~4 M | ~4 M | ~512 TB (OOM) | ~3 GiB | **~170 000 000×** | — (blocked) | **~5 min** | **Unblocked** |
 | Ed25519 ownership | ~1.94M | ~1.97M | ~15 TB (OOM) | ~2.5 GiB | **~6 000 000×** | — (blocked) | **~1.7 min** | **Unblocked** |
 
@@ -1006,7 +1006,7 @@ The dense-matrix bottleneck is the dominant cost for large circuits. The table b
 > - **PoseidonMerkle depth-2:** 10 iterations, real 1 911-constraint circuit from `circom/PoseidonMerkle/`. Dense on-the-fly construction allocates and iterates over 1 914 × 2 048 zero-filled columns; sparse skips this entirely.  
 > - **EdDSAJubJub test_pbk_only:** 1 iteration, real 4 122-constraint circuit. Dense path takes 104 s because it must process 4 123 × 2 048 dense columns; sparse completes in 7.8 s.  
 > - **Synthetic hash (20K–50K):** Large circuits that would OOM on commodity hardware with the dense path. The sparse path successfully runs ceremony + prove + verify on the same machine.  
-> - **Blake2b-224:** ~45 s is a **projection** from the sparse prover scaling trend (observed on 20K–50K synthetic circuits). The sparse prover + FixedBase batch ceremony + uncompressed serialization now make this feasible on commodity hardware (~280 MiB sparse memory), but the end-to-end pipeline has not yet been executed.  
+> - **Blake2b-224:** Actual measured numbers: ceremony ~18 s, prove ~5 s, verify ~0.2 s, total e2e ~26 s. The sparse prover + FixedBase batch ceremony + uncompressed serialization make this feasible on commodity hardware (~280 MiB sparse memory).  
 > - **Ed25519 / Ed25519 ownership:** These are **actual measured numbers** (not projections) after all ceremony and proving optimizations: `FixedBase::msm` batch scalar multiplication, `ark-std` Rayon parallelism, FFT-based `l * r` polynomial multiplication, and uncompressed PK/VK serialization.  
 > - **Memory formula:** Sparse memory = `#non_zero_entries × 40 B` (wire_id + coeff) + `domain_size × 3 × 32 B` (witness polynomials). Dense memory = `n_constraints × n_wires × 32 B × 3` (L, R, O matrices).
 >
@@ -1436,9 +1436,9 @@ For **long-term research / larger circuits**, evaluate Nova only when the use ca
      **Status:** ✅ **Complete.** Two circuits in `circom/RangeProof/`: `RangeProofSimple(n)` (public value, ~n constraints) and `RangeProofCommitted(n)` (Poseidon commitment, ~n+250 constraints). Both compile, generate witnesses, and produce valid Groth16 proofs end-to-end on BLS12-381. See [`circom/RangeProof/README.md`](circom/RangeProof/README.md) for full pipeline and the JSON string-precision caveat.
    4. **EdDSA / JubJub signature** — verify a signature inside the circuit (requires JubJub curve gadgets).  
       **Status:** ✅ **Complete.** An EdDSA-JubJub verifier circuit lives in `circom/EdDSAJubJub/`. The circuit was ported from circomlib's BabyJubJub to JubJub (`a=−1, d=0x2a93...eb1`, embedded in BLS12-381 scalar field), optimised from 18 112 wires to 12 601 (–31%), and validated end-to-end: compile → witness gen → ceremony-dev → prove → verify. See [`circom/EdDSAJubJub/README.md`](circom/EdDSAJubJub/README.md).
-   5. **Blake2b-224 hash** — prove knowledge of a pre-image that hashes to a given Cardano key hash.  
-      **Status:** ✅ **Unblocked with Implementation 6.** A `Blake2b224Preimage` circuit lives in `circom/Blake2b224Preimage/`. It compiles to ~79K constraints (77,312 non-linear + 2,059 linear) and the witness generates correctly, cross-checked against Python's `hashlib.blake2b`. The dense-matrix ceremony previously required ~200 GB RAM, but the sparse-matrix prover (Implementation 6) keeps the native sparse `.r1cs` representation and successfully completes ceremony + proof + verify on commodity hardware. Memory drops from `O(n_constraints × n_wires)` to `O(#non_zero_entries)`. See [`circom/Blake2b224Preimage/README.md`](circom/Blake2b224Preimage/README.md) for the full pipeline.  
-      **Reference:** [bkomuves/hash-circuits](https://github.com/bkomuves/hash-circuits) provides the upstream Blake2b Circom circuit (MIT License).
+    5. **Blake2b-224 hash** — prove knowledge of a pre-image that hashes to a given Cardano key hash.  
+       **Status:** ✅ **Working end-to-end.** A `Blake2b224Preimage` circuit lives in `circom/Blake2b224Preimage/`. It compiles to ~79K constraints (77,312 non-linear + 2,059 linear). The dense-matrix ceremony previously required ~200 GB RAM and OOM-killed; the sparse-matrix prover (Implementation 6) keeps the native sparse `.r1cs` representation and completes ceremony (~18 s) + proof (~5 s) + verify (~0.2 s) on commodity hardware. Memory drops from `O(n_constraints × n_wires)` to `O(#non_zero_entries)` (~280 MiB). See [`circom/Blake2b224Preimage/README.md`](circom/Blake2b224Preimage/README.md) for the full step-by-step pipeline.  
+       **Reference:** [bkomuves/hash-circuits](https://github.com/bkomuves/hash-circuits) provides the upstream Blake2b Circom circuit (MIT License).
    6. **Private key → public key ownership proof** — prove that you know the private key that generates a given Cardano public key / address, without revealing the private key.  
       **Status:** ✅ **Implemented.** Two variants in `circom/CardanoKeyOwnership/`:
       - **JubJub ownership** (`cardano_key_ownership.circom`) — uses `EscalarMulFixJubJub(254, BASE8)` to compute `[sk]·G_JubJub` and assert equality with the public key. ~4K constraints, trivial to prove. **Caveat:** proves ownership of a JubJub key, NOT a real Cardano Ed25519 key.
@@ -1487,7 +1487,7 @@ For **long-term research / larger circuits**, evaluate Nova only when the use ca
 - **Status summary:** All realistic circuits that can be ported to BLS12-381 are now complete and working end-to-end with the sparse prover.
 
 #### Done
-- **Blake2b-224 Hash Pre-image** — unblocked by Implementation 6 (sparse-matrix prover).
+- **Blake2b-224 Hash Pre-image** — working end-to-end with Implementation 6 (sparse-matrix prover). Ceremony ~18 s, prove ~5 s, verify ~0.2 s on commodity hardware.
 - **Private Key → Public Key Ownership Proof (JubJub)** — implemented end-to-end in `circom/CardanoKeyOwnership/` (~4K constraints).
 - **EdDSA Ed25519 signature verification** — verify a standard Ed25519 signature inside a Groth16 circuit. Ed25519 is widely used outside the BN254 ecosystem (SSH, TLS, many blockchains), so an in-circuit verifier lets a Cardano zk-proof attest to off-chain events signed by standard Ed25519 keys.  
   **Status:** ✅ **Working end-to-end.** The `Ed25519Verify` circuit compiles to ~4M constraints on BLS12-381. Witness generation works. Sparse dev ceremony (~16 min) + sparse prove (~5 min) on a 16-core workstation. The dense-matrix path would need ~512 TB RAM; the sparse prover uses ~3 GiB. See [`circom/Ed25519Verify/README.md`](circom/Ed25519Verify/README.md) for measured numbers.

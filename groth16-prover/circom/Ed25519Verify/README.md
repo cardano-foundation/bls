@@ -266,7 +266,7 @@ The sparse prover achieves a **~100,000× memory reduction** versus the dense pa
 | SimpleExample Multiplier | 3 | 8 | ~768 B | ✅ | ✅ Working e2e |
 | Privacy / Spend(depth=2) | 1,107 | 1,110 | ~39 MB | ✅ | ✅ Working e2e |
 | Poseidon Pre-image | ~300 | ~400 | ~5 MB | ✅ | ✅ Working e2e |
-| **Blake2b-224 Pre-image** | **79,312** | **78,605** | **~200 GB** (dense) / **~280 MiB** (sparse) | ✅ | ⏳ Unblocked by sparse prover — e2e pending |
+| **Blake2b-224 Pre-image** | **79,312** | **78,605** | **~200 GB** (dense) / **~280 MiB** (sparse) | ✅ | ✅ Working e2e — ceremony ~18 s, prove ~5 s |
 | **Ed25519 Verify** | **~4M** | **~4M** | **~512 TB** (dense) / **~3 GiB** (sparse) | ✅ | ✅ **Working e2e** — ceremony ~16 min, prove ~5 min |
 
 ---
@@ -356,4 +356,4 @@ Ed25519Verify/
 - [circomlib](https://github.com/iden3/circomlib) — standard Circom gadgets (`comparators`, `gates`, `bitify`)
 - [@electron-labs/sha512](https://www.npmjs.com/package/@electron-labs/sha512) — SHA-512 Circom implementation
 - [`groth16-prover/circom/README.md`](../../circom/README.md) — Parent directory with full pipeline documentation
-- [`groth16-prover/circom/Blake2b224Preimage/README.md`](../Blake2b224Preimage/README.md) — Sister circuit with similar end-to-end blocking
+- [`groth16-prover/circom/Blake2b224Preimage/README.md`](../Blake2b224Preimage/README.md) — Sister circuit with similar constraint scale, now fully working e2e
