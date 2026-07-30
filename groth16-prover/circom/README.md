@@ -6,16 +6,17 @@ This directory contains Circom circuits that can be loaded by the Rust prover vi
 
 | Directory | What it proves | Constraints | Status |
 |-----------|---------------|-------------|--------|
-| [`SimpleExample/`](SimpleExample/README.md) | 3-gate multiplication chain (`a = x1·x2·x3·x4`) | 3 | ✅ Complete |
+| [`SimpleExample/`](SimpleExample/README.md) | 3-gate multiplication chain | 3 | ✅ Complete |
+| [`SumOfProducts/`](SumOfProducts/sum_of_products.circom) | 4-gate sum-of-products | 5 | ✅ Complete |
 | [`Privacy/`](Privacy/README.md) | Merkle membership — shielded spend with MiMC(x⁷) | 1,107 | ✅ Complete |
 | [`PoseidonPreimage/`](PoseidonPreimage/README.md) | Poseidon hash pre-image knowledge | ~300 | ✅ Complete |
 | [`PoseidonMerkle/`](PoseidonMerkle/README.md) | Merkle membership with PoseidonBLS12_381 hashing | 737 (depth 2) | ✅ Complete |
 | [`RangeProof/`](RangeProof/README.md) | Range proof + Poseidon commitment (`value ∈ [0, 2^n)`) | ~`n + 250` | ✅ Complete |
-| [`Blake2b224Preimage/`](Blake2b224Preimage/README.md) | Blake2b-224 hash pre-image (Cardano key hash) | ~79K | ✅ Working e2e — ceremony ~18 s, prove ~5 s, verify ~0.2 s |
-| [`Ed25519Verify/`](Ed25519Verify/README.md) | Ed25519 signature verification in-circuit | ~4M | ✅ Working e2e — ceremony ~16 min, prove ~5 min |
-| [`CardanoKeyOwnership/`](CardanoKeyOwnership/README.md) | Ed25519 key ownership proof (real Cardano key) | ~1.97M | ✅ Working e2e — ceremony ~5 min, prove ~1.7 min |
-| [`EdDSAJubJub/`](EdDSAJubJub/README.md) | EdDSA-JubJub signature verification (deterministic nonce, Poseidon challenge) | 12 601 | ✅ Complete — full e2e pass |
-| [`CardanoKeyOwnership/`](CardanoKeyOwnership/README.md) | Private key → public key ownership proof (JubJub) | ~4K | ✅ Complete — full e2e pass |
+| [`Blake2b224Preimage/`](Blake2b224Preimage/README.md) | Blake2b-224 hash pre-image (Cardano key hash) | ~79K | ✅ Working e2e |
+| [`EdDSAJubJub/`](EdDSAJubJub/README.md) | EdDSA-JubJub signature verification (deterministic nonce, Poseidon challenge) | 12 601 | ✅ Complete |
+| [`Ed25519Verify/`](Ed25519Verify/README.md) | Ed25519 signature verification in-circuit | ~4M | ✅ Working e2e |
+| [`CardanoKeyOwnership/`](CardanoKeyOwnership/README.md) | JubJub key ownership proof | ~4K | ✅ Complete |
+| [`CardanoKeyOwnership/`](CardanoKeyOwnership/README.md) | **Ed25519 key ownership proof** (real Cardano wallet key) | ~1.97M | ✅ Working e2e |
 
 ---
 
@@ -66,56 +67,18 @@ npm install -g snarkjs
 
 Full pipeline for each item: **Circom → groth16-prover (dev ceremony) → Aiken on-chain validator**.
 
-### Completed
+### Completed & working end-to-end
 
-- **0. SimpleExample Multiplier** (3 constraints, 2 public inputs) — validated the entire toolchain end-to-end.  
-  **Key insight:** A critical bug in the `.r1cs` parser was fixed where only the first byte of 32-byte field coefficients was read, causing `-1` (used by Circom for output wires) to be read as `255` instead of being mapped to `1`. This corrupted R1CS matrices and made public-input commitment points collapse to identity.
-
-- **1. Merkle Membership / Privacy Coin Spend** (1107 constraints, all-private inputs) — ZCash-style shielded UTXO spending on Cardano. See [`Privacy/README.md`](Privacy/README.md).  
-  **Key insight:** Because all user-facing inputs in the depth-2 wrapper are `private`, the only public variable is the constant wire (`1`). The on-chain verifier only needs **one** `ic` entry and the public-input list is just `[1]`. Verification cost is therefore identical to the 3-gate `SimpleExample` — roughly **20 % of the Cardano script CPU budget** — despite the circuit having 1107 constraints. This is the fundamental power of Groth16: verifier cost is constant regardless of circuit size.
-
-- **2. Poseidon Hash Pre-image** — prove knowledge of a secret whose Poseidon hash equals a public commitment.  
-  **Public input:** `hash_commitment`  
-  **Private input:** `secret`  
-  **Use case:** Sealed-bid auctions, passwordless authentication.  
-  See [`PoseidonPreimage/README.md`](PoseidonPreimage/README.md).
-
-- **3. Range Proof / Comparison** — prove a committed value lies in range `[0, 2^n)` without revealing the value.  
-  **Public input:** `value_commitment`  
-  **Private inputs:** `value`, `blinding_factor`  
-  **Use case:** Confidential transaction amounts.  
-  **Status:** ✅ **Complete.** Two circuits in `circom/RangeProof/`: `RangeProofSimple(n)` and `RangeProofCommitted(n)`. Both compile, generate witnesses, and produce valid Groth16 proofs end-to-end on BLS12-381. See [`RangeProof/README.md`](RangeProof/README.md).
-
-- **5. EdDSA-JubJub Signature Verification** (12 601 constraints, 7 public inputs) — deterministic EdDSA-JubJub signature proof over the JubJub curve embedded in BLS12-381's scalar field.  
-  Full e2e pipeline passes: compile → witness gen → ceremony-dev → prove → verify.  
-  See [`EdDSAJubJub/README.md`](EdDSAJubJub/README.md).  
-  **Optimisation applied:** Circuit reduced from 18 112 wires to 12 601 wires (31 % reduction) via two structural changes documented in [Optimisation measures](#optimisation-measures-eddsa-jubjub) below.
-
-- **6. Private Key → Public Key Ownership Proof** — prove knowledge of the private scalar that generates a given public key / address.  
-  **Public input:** `public_key`  
-  **Private input:** `private_scalar`  
-  **Use case:** Wallet ownership proof without revealing the private key. This is the core key-derivation step used in Cardano wallets: given a private scalar `x`, show that `pub = x · G`.  
-  **Status:** ✅ **Implemented end-to-end.** Two variants:
-  1. **JubJub ownership** (`cardano_key_ownership.circom`) — proves `[sk]·G_JubJub == pk` using fixed-base scalar multiplication over 254 bits (~4K constraints). Fast and working, but NOT a real Cardano Ed25519 key.
-  2. **Ed25519 ownership** (`cardano_ed25519_ownership.circom`) — NEW. Reuses `Ed25519Verify` templates to prove real Cardano wallet key ownership: `PointA = [sk]·G` on Curve25519 with `PointCompress(PointA) == A`. ~1.97M constraints, works with the sparse prover (ceremony ~5 min, prove ~1.7 min on 16-core).
-  **Reference:** [IntersectMBO/cardano-crypto `generate`](https://github.com/IntersectMBO/cardano-crypto/blob/develop/src/Cardano/Crypto/Wallet.hs#L161) for the derivation logic.
-
-### Unblocked by sparse prover (pending e2e run)
-
-- **4. Blake2b-224 Hash Pre-image (Cardano Key Hash)** — prove knowledge of a pre-image that hashes to a given Cardano key hash.  
-  **Public input:** `blake2b_224_hash`  
-  **Private input:** `pre_image`  
-  **Use case:** Proving ownership / linking proofs to on-chain Cardano addresses.  
-  **Status:** ✅ **Working end-to-end.** Compiles to ~79K constraints (77,312 non-linear + 2,059 linear). Witness generates correctly, cross-checked against Python's `hashlib.blake2b`. The dense-matrix ceremony would require ~200 GB RAM and OOMs, but Implementation 6 (sparse-matrix prover) keeps the native sparse `.r1cs` representation and completes ceremony (~18 s) + proof (~5 s) + verify (~0.2 s) on commodity hardware with ~280 MiB RAM. See [`Blake2b224Preimage/README.md`](Blake2b224Preimage/README.md) for the full step-by-step pipeline.  
-  **Reference repo:** [bkomuves/hash-circuits](https://github.com/bkomuves/hash-circuits) provides the upstream Blake2b Circom circuit (MIT License).
-
-### Working e2e (sparse prover)
-
-- **7. EdDSA / Ed25519 Signature Verification In-Circuit** — verify a standard Ed25519 signature inside a Groth16 circuit.  
-  **Public inputs:** `msg[n]`, `A[256]`, `R8[256]`  
-  **Private inputs:** `S[255]`, `PointA[4][3]`, `PointR[4][3]`  
-  **Use case:** Attest to off-chain events signed by standard Ed25519 keys (SSH, TLS, other blockchains, Cardano wallets).  
-  **Status:** ✅ **Working end-to-end.** The `Ed25519Verify` circuit compiles to ~4M constraints on BLS12-381. Witness generation works. Sparse dev ceremony completes in ~16 min, sparse prove in ~5 min on a 16-core workstation. The dense-matrix path would need ~512 TB RAM; the sparse prover uses ~3 GiB. See [`Ed25519Verify/README.md`](Ed25519Verify/README.md) for measured numbers and pipeline instructions.
+- **0. SimpleExample Multiplier** (3 constraints, 2 public inputs) — validated the entire toolchain end-to-end.
+- **1. Merkle Membership / Privacy Coin Spend** (1,107 constraints, all-private inputs) — ZCash-style shielded UTXO spending on Cardano. See [`Privacy/README.md`](Privacy/README.md).
+- **2. Poseidon Hash Pre-image** — prove knowledge of a secret whose Poseidon hash equals a public commitment. See [`PoseidonPreimage/README.md`](PoseidonPreimage/README.md).
+- **3. Range Proof / Comparison** — prove a committed value lies in range `[0, 2^n)` without revealing the value. See [`RangeProof/README.md`](RangeProof/README.md).
+- **4. Blake2b-224 Hash Pre-image** (~79K constraints) — prove knowledge of a pre-image that hashes to a given Cardano key hash. The sparse prover keeps RAM at ~280 MiB. See [`Blake2b224Preimage/README.md`](Blake2b224Preimage/README.md).
+- **5. EdDSA-JubJub Signature Verification** (12 601 constraints, 7 public inputs) — deterministic EdDSA-JubJub signature proof over the JubJub curve. See [`EdDSAJubJub/README.md`](EdDSAJubJub/README.md).
+- **6. Private Key → Public Key Ownership Proof** — two variants in [`CardanoKeyOwnership/`](CardanoKeyOwnership/README.md):
+  1. **JubJub ownership** (~4K constraints) — proves `[sk]·G_JubJub == pk`.
+  2. **Ed25519 ownership** (~1.97M constraints) — proves real Cardano Ed25519 wallet key ownership. The sparse prover keeps RAM at ~2.5 GiB.
+- **7. Ed25519 Signature Verification In-Circuit** (~4M constraints) — verify a standard Ed25519 signature inside a Groth16 circuit. The sparse prover keeps RAM at ~3 GiB. See [`Ed25519Verify/README.md`](Ed25519Verify/README.md).
 
 ---
 
@@ -153,83 +116,3 @@ circuit.load_witness("circom/SimpleExample/witness.wtns").unwrap();
 ```
 
 The parsed `L`, `R`, `O` matrices and witness vector are then fed into any `QapEngine` + `Prover` combination, producing a proof.
-
----
-
-## Optimisation measures — EdDSA-JubJub circuit
-
-The EdDSA-JubJub circuit was reduced from **18 112 wires** (original design)
-to **12 601 wires** (31 % reduction) via two structural changes. Both
-trade redundant computation for fewer constraints — acceptable because the
-prover runs offline.
-
-### Measure 1: Remove public key derivation (pkMul)
-
-**Original:** The circuit computed `pk = [sk]·G` internally via a second
-fixed-base scalar multiplication, then used the derived `pk` in both the
-challenge hash and the verification equation.
-
-**Problem:** `EscalarMulFixJubJub` at 253 bits costs ~4 119 wires per
-instantiation. Computing `pk` internally is redundant when `pk` is already
-a public input — the verifier binds it via the challenge hash `k`.
-
-**Fix:** Removed `JubJubPbk` / `EscalarMulFixJubJub` for pk computation.
-Instead, `pk = (pku, pkv)` is passed directly as a public input. The
-circuit now has two fixed-base muls (`[r]·G` and `[S]·G`) and one
-variable-base mul (`[k]·pk`), saving ~4 119 wires.
-
-**Cost:** The prover must supply the `pk` public input externally. This is
-not a security concern — `pk` is public — but the circuit no longer proves
-"this pk is derived from the same sk". Instead, knowledge of `sk` is
-implicit: the challenge `k` binds `pk`, and the verification equation
-`[S]·G = R + [k]·pk` is only satisfiable if the prover knows `sk`.
-
-### Measure 2: Single Poseidon T6 instead of 4× Poseidon T3
-
-**Original:** The challenge hash used four sequential Poseidon T3 invocations:
-`Poseidon(Poseidon(Poseidon(R.u, R.v), pk.u, pk.v), msg)`.
-
-**Problem:** Each Poseidon T3 adds ~276 constraints (5 rounds × ~55
-constraints per round). Four invocations cost ~1 104 constraints plus
-inter-component wiring.
-
-**Fix:** Replaced with a single `PoseidonBLS12_381_T6` invocation:
-`PoseidonT6(R.u, R.v, pk.u, pk.v, msg, 0)` — five inputs, one hash.
-The t=6 Poseidon with RF=8, RP=60 has ~1 632 constraints, but eliminates
-three intermediate hash outputs and their wiring overhead, yielding a net
-reduction.
-
-**Constants:** Poseidon T6 round constants (408 values) and the 6×6 MDS
-matrix were generated with `generate_parameters_grain.sage` and are
-inlined directly into `poseidon_bls12_381_t6.circom`. All three security
-algorithms (counting, interpolation, side-channel) pass.
-
-### Combined effect
-
-| Metric | Original | Optimised | Reduction |
-|--------|----------|-----------|-----------|
-| Wires | 18 112 | 12 601 | –31 % |
-| Constraints | ~12 600 | 12 600 | ~0 % (bottleneck is fixed-base muls) |
-| Dense matrix memory | ~20 GiB | ~14.2 GiB | –29 % |
-| Prover peak RAM | ~32 GiB (OOM) | ~14.2 GiB | –56 % |
-
-The constraint count did not drop proportionally because the two fixed-base
-scalar multiplications (`[r]·G` and `[S]·G`, each 254-bit) dominate: each
-instantiation contributes ~6 300 constraints regardless of the other
-circuit components. The memory reduction comes from fewer wires, which
-directly reduces the dense matrix dimensions (`n_wires × n_constraints ×
-32 bytes × 3 matrices`).
-
-### Prover-side memory fix
-
-Even with the optimised circuit, the original `prove_with_full_pk`
-implementation stored all 12 601 per-variable QAP polynomials (each
-16 384 × 32 bytes = 512 KiB) simultaneously alongside the dense matrices,
-peaking at ~32.7 GiB and OOM-killing at 12 601 wires.
-
-The fix (in `engine.rs` and `prover.rs`) builds each per-variable
-polynomial on-the-fly, accumulates it into the witness polynomial, and
-immediately drops it. The `domain_size()` method was added to the
-`QapEngine` trait so the prover knows the FFT domain size without
-materialising the full QAP. Peak RAM dropped to ~14.2 GiB (the dense
-matrices alone).
