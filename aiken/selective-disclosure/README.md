@@ -12,10 +12,11 @@
 4. [Step 0: Groth16 Implementation (Prerequisite)](#step-0-groth16-implementation-prerequisite)
 5. [Step 1: Predicate Proofs with Aiken](#step-1-predicate-proofs-with-aiken)
 6. [Step 2: Twisted ElGamal Extension](#step-2-twisted-elgamal-extension)
-7. [Step 3: Future Directions](#step-3-future-directions)
-8. [Compliance & Auditability](#compliance--auditability)
-9. [Threat Model & Deployment](#threat-model--deployment)
-10. [References](#references)
+7. [Step 3: Privacy Pools & Shielded Transactions](#step-3-privacy-pools--shielded-transactions)
+8. [Step 4: Future Directions](#step-4-future-directions)
+9. [Compliance & Auditability](#compliance--auditability)
+10. [Threat Model & Deployment](#threat-model--deployment)
+11. [References](#references)
 
 ---
 
@@ -890,9 +891,82 @@ If you go this route, the composition is: **predicate proof for identity + ElGam
 
 ---
 
-## Step 3: Future Directions
+## Step 3: Privacy Pools & Shielded Transactions
 
-**Executive summary:** The Groth16-based design in Steps 0–2 provides practical, production-ready privacy today, but it relies on elliptic-curve cryptography that is not quantum-resistant. A long-term research direction is to complement or replace the zk-SNARK layer with **fully homomorphic encryption (FHE)** schemes that can evaluate predicates and proofs under encryption and remain secure against quantum adversaries.
+**Executive summary:** Steps 1 and 2 solve two independent problems: (1) hiding identity via predicate proofs, and (2) hiding amounts via Twisted ElGamal. **Step 3 composes both into a single, usable system: a privacy pool where users can deposit, privately transfer, and withdraw funds without ever revealing their address, identity, or transaction value.** The circuit design for this step is described in detail in [`groth16-prover/F5_RESEARCH_DIRECTION.md`](../../groth16-prover/F5_RESEARCH_DIRECTION.md) under the **F5a — Shielded Amounts** section. This section explains how that circuit fits into the selective-disclosure architecture.
+
+> **Relationship to F5 research.** The `F5` document originally described an Ethereum-centric cross-chain privacy pool. The **F5a** circuit extension is the portable, chain-agnostic core: a Groth16 circuit that proves note ownership, amount range bounds, and value conservation — all using primitives we already have in `groth16-prover/circom/`. On Cardano, this becomes a natural Step 3 because it does not require bridges: a single-chain privacy pool (deposit → shielded transfer → withdraw) is already valuable, and cross-chain extensions can be added later.
+
+### What changes from Steps 1–2
+
+| Aspect | Step 1 (Predicate Only) | Step 2 (+ ElGamal) | Step 3 (Privacy Pool) |
+|--------|------------------------|-------------------|----------------------|
+| **What is hidden** | Identity + credential fields | + Amounts | + Transaction graph (who paid whom) |
+| **On-chain state** | Unit datum | G1 ciphertexts in datum | **Merkle root of note commitments** in datum |
+| **Circuit proves** | Signature + Merkle + comparison | + ElGamal + range constraints | **Merkle membership of spent note + range proofs + value conservation + nullifier uniqueness** |
+| **Script logic** | Verify proof → release funds | Verify proof → add ciphertexts | Verify proof → insert new commitments + mark nullifier spent |
+| **Redeemer** | Proof + public inputs | Proof + ciphertexts | Proof + nullifier + output commitments |
+| **Anonymity set** | All users of the same Gate | Same | **All users who ever deposited into the pool** |
+
+### Architecture: From Gate Script to Pool Script
+
+In Steps 1–2, each service deploys its own **Gate Script** parameterized by a verifying key. In Step 3, a single **Pool Script** manages the entire state of the privacy pool:
+
+```
+Pool Script (parameterized by vk)
+  └── datum: (merkle_root, nullifier_set_hash)
+
+Transactions against the pool script:
+  1. DEPOSIT   — anyone locks ADA; script inserts commitment into Merkle tree
+  2. TRANSFER  — holder spends old notes + creates new notes; script verifies proof + updates root
+  3. WITHDRAW  — holder burns notes; script verifies proof + releases ADA to fresh address
+```
+
+The critical difference: **the Pool Script is stateful.** It maintains a Merkle root that evolves as notes are spent and created. This is the same Merkle-tree pattern already validated in `circom/PoseidonMerkle/` and `circom/Privacy/`, but applied to a financial UTxO model.
+
+### Circuit composition (using existing primitives)
+
+The Step 3 circuit is a direct composition of five gadgets already working end-to-end in `groth16-prover/circom/`:
+
+```
+Public:  merkle_root, nullifier_hash, output_commitments[k], fee
+Secret:  input_amounts[m], blinding_factors[m+k], merkle_paths[m],
+          stealth_scalar, input_notes[m]
+
+1. For each input note i:
+   a. commitment_i = Poseidon(amount_i, blinding_i, nullifier_i, viewing_key_i)
+   b. MerkleVerify(commitment_i, merkle_root, merkle_path_i)
+   c. RangeProof(amount_i, n=64)
+
+2. For each output note j:
+   a. RangeProof(amount_j, n=64)
+
+3. Conservation: sum(input_amounts) == sum(output_amounts) + fee
+
+4. Nullifier uniqueness: nullifier_hash = Poseidon(nullifier_0, nullifier_1, ...)
+   (The script checks nullifier_hash against its spent set)
+
+5. Stealth derivation (optional): derive output viewing keys from stealth_scalar
+```
+
+See [`groth16-prover/F5_RESEARCH_DIRECTION.md`](../../groth16-prover/F5_RESEARCH_DIRECTION.md) for the full constraint budget (~65K for 2-in/2-out/depth-20) and Cardano-specific range considerations (lovelace vs ADA).
+
+### Why this is the natural next step
+
+- **It reuses everything.** No new primitives are needed beyond what already exists in Steps 0–3. The sparse prover handles the circuit size. The Aiken verifier checks the proof. The Poseidon, RangeProof, and Merkle gadgets are already validated.
+- **It solves a real problem.** A predicate proof (Step 1) lets Alice prove she is an adult. Twisted ElGamal (Step 2) lets her hide a salary amount. But neither lets her **send money privately**. Step 3 closes the loop: a complete confidential payment system on Cardano.
+- **It scales the anonymity set.** In Step 1, the anonymity set is "all users of the Healthcare Gate." In Step 3, it is "everyone who ever deposited into the Cardano privacy pool" — potentially thousands or millions of users.
+- **It is deployable today.** The Pool Script uses only existing Plutus V3 builtins. No hard fork. No new curves. The proof is 192 bytes. Verification is constant-time.
+
+### From single-chain to cross-chain (future)
+
+The F5 research direction extends this single-chain pool to **cross-chain** delivery via canonical bridges. That is out of scope for Step 3 — it requires ecosystem maturity (L2 bridges on Cardano) — but the circuit and proof format are identical. A single-chain privacy pool is the right immediate target; cross-chain is the long-term horizon.
+
+---
+
+## Step 4: Future Directions
+
+**Executive summary:** The Groth16-based design in Steps 0–3 provides practical, production-ready privacy today, but it relies on elliptic-curve cryptography that is not quantum-resistant. A long-term research direction is to complement or replace the zk-SNARK layer with **fully homomorphic encryption (FHE)** schemes that can evaluate predicates and proofs under encryption and remain secure against quantum adversaries.
 
 <details>
 <summary><b>Click to expand: FHE-Based, Quantum-Resistant Selective Disclosure</b></summary>
@@ -955,7 +1029,7 @@ A parallel proposal, [CIP-???? | Native Confidential Transfers](https://github.c
 
 ### The Core Disagreement: New Primitives vs. Existing Infrastructure
 
-| Aspect | CIP-???? (Ledger-Native) | Our Research (Steps 0–2, Smart-Contract ZK) |
+| Aspect | CIP-???? (Ledger-Native) | Our Research (Steps 0–3, Smart-Contract ZK) |
 |--------|--------------------------|---------------------------------------------|
 | **Amounts hidden?** | ✅ Yes (Pedersen commitments over ristretto255) | ✅ **Yes** (Twisted ElGamal / Pedersen over BLS12-381 G1) |
 | **Identity hidden?** | ❌ No — addresses public | ✅ Yes — predicate proofs in Gate Scripts |
