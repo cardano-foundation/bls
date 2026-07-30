@@ -4,6 +4,8 @@
 > **Status:** ⏳ Under investigation — not yet committed to implementation.  
 > **PoC:** [f5.primemodulus.com](https://f5.primemodulus.com/)  
 > **Repo:** [github.com/merkle-groot/f5](https://github.com/merkle-groot/f5)
+>
+> **Architecture context:** The **F5a — Shielded Amounts** section below maps directly to **Step 3** of the selective-disclosure architecture described in [`aiken/selective-disclosure/README.md`](../aiken/selective-disclosure/README.md). Step 3 explains how the F5a circuit composes identity privacy (Step 1) and amount hiding (Step 2) into a complete privacy-pool system on Cardano.
 
 ---
 
@@ -153,6 +155,8 @@ Cardano uses **lovelace** (1 ADA = 1,000,000 lovelace). A 64-bit range comfortab
 ### Bottom line for F5a
 
 This circuit turns F5 from a "stealth address mixer" into a true **confidential payment system** where neither the sender, recipient, amount, nor destination chain is visible. The entire proof (Merkle + range + conservation + stealth) is still under ~100K constraints for realistic note configurations — well within the capabilities of our sparse prover. It is the natural next step after proving "I own this key" (`CardanoKeyOwnership`) and "this note exists in a tree" (`PoseidonMerkle`).
+
+**Architecture placement:** In the [`aiken/selective-disclosure`](../aiken/selective-disclosure/README.md) roadmap, F5a is **Step 3** — the composition of identity privacy (Step 1, predicate proofs) and amount hiding (Step 2, Twisted ElGamal) into a single privacy-pool system. The circuit described here is the cryptographic engine; the selective-disclosure document explains the Cardano-specific script architecture (Pool Script, deposit/transfer/withdraw flow, and UTxO lifecycle).
 
 ---
 
