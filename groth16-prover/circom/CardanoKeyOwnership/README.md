@@ -71,7 +71,7 @@ In plain English: the prover demonstrates knowledge of the private key that gene
 | `circom` | `cargo install circom` or [github.com/iden3/circom](https://github.com/iden3/circom) | Compile `.circom` to `.r1cs` + `.wasm` |
 | `snarkjs` | `npm install -g snarkjs` | Generate `.wtns` from `.wasm` + `input.json` |
 | `cardano-address` | [IntersectMBO/cardano-addresses releases](https://github.com/IntersectMBO/cardano-addresses/releases) | Derive real Cardano keys from BIP-39 mnemonic (CIP-1852) |
-| `python3` + `bech32` | `pip install bech32` | Decode bech32 key files into circuit-ready bit arrays |
+| `bech32` (CLI) | [IntersectMBO/bech32 releases](https://github.com/IntersectMBO/bech32/releases) | Decode bech32 key files into hex for the Python helper |
 | `groth16-prover` CLI | `cd groth16-prover/cli && cargo build --release` | Ceremony, proof generation, and verification |
 
 > **Quick start.** If you already have the tools above installed, run `./setup_cardano_address.sh` in this directory. It generates a fresh mnemonic, derives the payment keys, and emits `input.json` in one command. You can then skip straight to [step 3 (compile)](#3-compile-the-circuit) below.

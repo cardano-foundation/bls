@@ -38,7 +38,7 @@ This walkthrough assumes two tools are installed:
 | Tool | How to get it | Why we need it |
 |------|---------------|----------------|
 | `cardano-address` | [IntersectMBO/cardano-addresses releases](https://github.com/IntersectMBO/cardano-addresses/releases) | Derives real Cardano keys from a mnemonic (CIP-1852) |
-| `bech32` (python3 package) | `pip install bech32` | Decodes the bech32 key files into raw bytes for the circuit |
+| `bech32` (CLI) | [IntersectMBO/bech32 releases](https://github.com/IntersectMBO/bech32/releases) | Decode bech32 key files into hex for the Python helper |
 
 The `groth16-prover` CLI is already built from the first-principles article (`cargo build --release` in `groth16-prover/cli/`), and `snarkjs` is assumed to be in `PATH`.
 
