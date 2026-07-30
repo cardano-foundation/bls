@@ -1,8 +1,8 @@
 # Zero Knowledge Proof from first principles
 
-> **Installment 1 of 3.** This article introduces the mathematical intuition behind zk-SNARKs, walks through the simplest possible non-trivial circuit, and shows how to generate and verify a Groth16 proof end-to-end on Cardano using nothing but first-principles code. No black boxes, no hand-waving — every intermediate value can be printed and inspected.
+> **Installment 1 of 5.** This article introduces the mathematical intuition behind zk-SNARKs, walks through the simplest possible non-trivial circuit, and shows how to generate and verify a Groth16 proof end-to-end on Cardano using nothing but first-principles code. No black boxes, no hand-waving — every intermediate value can be printed and inspected.
 >
-> In the next installment we will explore the engineering optimizations that turn this slow-but-transparent pipeline into a production prover (FFT, Pippenger MSM, sparse matrices, trusted-setup ceremonies), survey competing proof systems (PLONK, Bulletproofs++, JOLT, STARKs, VM approaches), and map the trade-offs. In the third and final installment we will show how Groth16 enables one of the most compelling use cases in modern blockchain privacy: selective disclosure of credentials without revealing identity.
+> In **Installment 2** we will explore the engineering optimizations that turn this slow-but-transparent pipeline into a production prover (FFT, Pippenger MSM, sparse matrices, trusted-setup ceremonies), survey competing proof systems (PLONK, Bulletproofs++, JOLT, STARKs, VM approaches), and map the trade-offs. In **Installment 3** we will show how the optimized prover can be used to prove ownership of cryptographic keys and how to marry this capability with Cardano addresses. In **Installment 4** we will apply the full production stack to **selective disclosure** — the pattern where a credential holder proves they satisfy a predicate (`age ≥ 21`, `country ∈ approved set`) without revealing any field values or their blockchain address. In the **fifth and final installment** we will look at what embracing a **zkVM** could gain us: the ability to prove arbitrary program execution without hand-writing circuits, and how that might reshape the developer experience for privacy-preserving applications on Cardano.
 
 ---
 
@@ -1833,6 +1833,8 @@ The scalar arithmetic balances via the bilinearity property. The actual pairing 
 
 This installment deliberately stayed at the "dense monomial" level: polynomials stored as coefficient vectors, division performed by long division, and proof assembly done one scalar multiplication at a time. It is slow, but it is *transparent*. You can open any binary, add a `println!`, and see the exact value passing through the equation.
 
+### Installment 2 — The optimizations game
+
 The next installment will show how each bottleneck is removed:
 
 | Bottleneck | First-principles fix (this article) | Production fix (next article) |
@@ -1849,8 +1851,18 @@ We will also survey the landscape beyond Groth16:
 - **STARKs / JOLT** — post-quantum, transparent setup, proof size trade-offs
 - **VM approaches (RISC Zero, zkVMs)** — prove arbitrary program execution without circuit design
 
-Finally, in the third installment, we will apply the production Groth16 pipeline to **selective disclosure** — the pattern where a credential holder proves they satisfy a predicate (`age ≥ 21`, `country ∈ approved set`) without revealing any field values or their blockchain address. The proof becomes the authorization, and the on-chain script verifies nothing but the mathematics.
+### Installment 3 — Proving key ownership and Cardano addresses
 
-The code for all three installments is available in the [cardano-foundation/bls](https://github.com/cardano-foundation/bls) repository.
+In the third installment we will show how the optimized prover can be used to prove ownership of cryptographic keys — without revealing the keys themselves — and how to marry this capability with Cardano addresses. A user will be able to demonstrate control of a private key via a Groth16 proof that the on-chain verifier checks, enabling new patterns of authentication and authorization that do not expose the underlying secrets.
+
+### Installment 4 — Selective disclosure
+
+In the fourth installment we will apply the full production Groth16 pipeline to **selective disclosure** — the pattern where a credential holder proves they satisfy a predicate (`age ≥ 21`, `country ∈ approved set`) without revealing any field values or their blockchain address. The proof becomes the authorization, and the on-chain script verifies nothing but the mathematics.
+
+### Installment 5 — Embracing zkVMs
+
+In the fifth and final installment we will look at what embracing a **zkVM** could gain us. Instead of hand-writing R1CS circuits in a domain-specific language, a zkVM lets developers prove the correct execution of arbitrary programs — written in familiar languages like Rust or C — by compiling them to a zero-knowledge virtual machine. We will explore the trade-offs (larger proof sizes, different security assumptions) and discuss how this paradigm might reshape the developer experience for privacy-preserving applications on Cardano.
+
+The code for all five installments is available in the [cardano-foundation/bls](https://github.com/cardano-foundation/bls) repository.
 
 Stay tuned for the next ZKP installment!
