@@ -1481,21 +1481,7 @@ For **long-term research / larger circuits**, evaluate Nova only when the use ca
 - **Status:** ⚠️ **Partial.** The `QapEngine` trait, `DenseQapEngine`, and `FftQapEngine` are all implemented (see item (a) above). The only remaining gap is building the group-element SRS in the Lagrange basis (`L_i(τ)·G1` instead of `τ^i·G1`) so the FFT path can skip monomial conversion and use the most efficient production pattern.
 - **Benefit:** Completes the FFT production path and removes the last monomial fallback.
 
-### (q) Additional Circom use-case circuits — done
-
-- **Target:** Add remaining realistic Circom circuits that exercise different zk-SNARK patterns.
-- **Status summary:** All realistic circuits that can be ported to BLS12-381 are now complete and working end-to-end with the sparse prover.
-
-#### Done
-- **Blake2b-224 Hash Pre-image** — working end-to-end with Implementation 6 (sparse-matrix prover). Ceremony ~18 s, prove ~5 s, verify ~0.2 s on commodity hardware.
-- **Private Key → Public Key Ownership Proof (JubJub)** — implemented end-to-end in `circom/CardanoKeyOwnership/` (~4K constraints).
-- **EdDSA Ed25519 signature verification** — verify a standard Ed25519 signature inside a Groth16 circuit. Ed25519 is widely used outside the BN254 ecosystem (SSH, TLS, many blockchains), so an in-circuit verifier lets a Cardano zk-proof attest to off-chain events signed by standard Ed25519 keys.  
-  **Status:** ✅ **Working end-to-end.** The `Ed25519Verify` circuit compiles to ~4M constraints on BLS12-381. Witness generation works. Sparse dev ceremony (~16 min) + sparse prove (~5 min) on a 16-core workstation. The dense-matrix path would need ~512 TB RAM; the sparse prover uses ~3 GiB. See [`circom/Ed25519Verify/README.md`](circom/Ed25519Verify/README.md) for measured numbers.
-- **Ed25519 key ownership proof** — NEW. Reuses `Ed25519Verify` templates to prove real Cardano wallet key ownership: `PointA = [sk]·G` on Curve25519 with `PointCompress(PointA) == A`. ~1.97M constraints, sparse ceremony ~5 min, sparse prove ~1.7 min. See [`circom/CardanoKeyOwnership/README.md`](circom/CardanoKeyOwnership/README.md).
-- **Reference:** [circomlib](https://github.com/iden3/circomlib) provides production-grade Poseidon, MiMC, Merkle, and EdDSA circuits for BN254. Porting to BLS12-381 requires updating the field constants. For Ed25519 in-circuit verification, see [Electron-Labs/ed25519-circom](https://github.com/Electron-Labs/ed25519-circom) and our adapted version in [`circom/Ed25519Verify/README.md`](circom/Ed25519Verify/README.md).
-- **Benefit:** Shows that the Rust prover + Aiken verifier pipeline works for real-world zk-SNARK applications. Ed25519 verification in particular unlocks cross-chain identity use cases (attesting to off-chain signed data, linking SSH/TLS identities to on-chain proofs, etc.).
-
-### (r) Proof aggregation (beyond what zeroj supports)
+### (q) Proof aggregation (beyond what zeroj supports)
 
 - **Current:** Each proof is verified individually.
 - **Target:** Support Groth16 proof aggregation (rolling multiple proofs into a single succinct proof that can be verified with one pairing check).
