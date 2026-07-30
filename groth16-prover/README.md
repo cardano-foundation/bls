@@ -1513,6 +1513,27 @@ For **long-term research / larger circuits**, evaluate Nova only when the use ca
 - **Benefit:** Amortises on-chain verification cost across N proofs — from O(N) pairing checks to O(1). Essential for rollup and batching use cases. Also enables incremental computation where each step's output feeds into the next.
 - **Reference:** [arkworks groth16::aggregate](https://docs.rs/ark-groth16/latest/ark_groth16/), [Nova](https://github.com/microsoft/Nova), [Zcash Halo2](https://github.com/zcash/halo2), [Pacifico](https://github.com/argumentcomputer/pacifico).
 
+### (t) Shielded cross-chain privacy pool (F5 research direction)
+
+- **Current:** Privacy pools (e.g., Tornado Cash, Privacy Pools proposal) operate on a single chain. Cross-chain privacy requires either N separate pools (fragmenting the anonymity set) or trusted third-party relayers.
+- **Target:** A **single privacy pool on Ethereum L1** whose only withdrawal path is **private cross-chain delivery** via canonical bridges. A user spends an L1 note; the value bridges canonically to a shielded pool on an L2; a stealth commitment lands there, so no public address touches the value on either side.
+- **Why this matters:**
+  1. **One pool, many destinations.** The destination chain is a property of the withdrawal proof, not the deposit. This concentrates liquidity and anonymity into a single large set instead of fragmenting it across N small pools.
+  2. **Canonical bridges only.** No new bridge trust surface — the protocol reuses existing canonical bridges (e.g., official L1→L2 message-passing) rather than introducing custom relayers or multisigs.
+  3. **Shielded cross-chain transfers.** A user publishes a shielded address; anyone can pay them on another chain with nothing public exposed. The stealth scheme (shaped like ERC-5564 but non-conformant) uses Baby Jubjub so the spend key opens a Poseidon constraint in-circuit rather than signing a transaction.
+  4. **ZK-native stealth.** Unlike ERC-5564 which relies on on-chain ECDSA signatures, the F5 approach computes the stealth public key entirely inside a Groth16 circuit. The recipient's viewing key never appears on-chain; only the proof does.
+- **Relation to our stack:**
+  - The Poseidon Merkle gadget (`circom/PoseidonMerkle/`) provides the membership proof for pool notes.
+  - The Ed25519 ownership circuit (`circom/CardanoKeyOwnership/`) demonstrates in-curve key derivation, a primitive needed for the stealth spend-key opening.
+  - The sparse prover (Implementation 6) is necessary because a full F5 circuit (Merkle membership + stealth key derivation + bridge message validation) would likely exceed 500K constraints.
+  - The Aiken on-chain verifier can validate the Groth16 proof inside a Cardano smart contract; the bridge logic would be handled by the canonical L1→L2 message pass.
+- **Status:** ⏳ **Research direction.** Not yet committed to the roadmap. The F5 PoC ([f5.primemodulus.com](https://f5.primemodulus.com/)) demonstrates the concept on Ethereum; adapting it to Cardano would require:
+  1. Porting the stealth scheme from Baby Jubjub to Jubjub (BLS12-381 native).
+  2. Building a Circom circuit that proves: (a) Merkle membership of the L1 note, (b) correct stealth key derivation, (c) valid bridge message hash.
+  3. Integrating with a canonical Cardano bridge (e.g., Milkomeda, Inter-Blockchain Communication, or future canonical L2s).
+- **Reference:** [F5 PoC](https://f5.primemodulus.com/), [merkle-groot/f5](https://github.com/merkle-groot/f5), [ERC-5564 Stealth Addresses](https://eips.ethereum.org/EIPS/eip-5564), [Privacy Pools (Buterin et al., 2023)](https://github.com/a16z/privacy-pools).
+- **Benefit:** If realised, this would be the first ZK-native cross-chain privacy protocol that does not fragment anonymity sets or introduce new bridge trust assumptions. A single large pool on L1 serves all L2s; users withdraw privately to any supported chain with the same anonymity guarantee.
+
 </details>
 
 ---
