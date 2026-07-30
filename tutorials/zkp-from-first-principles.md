@@ -1827,6 +1827,8 @@ The scalar arithmetic balances via the bilinearity property. The actual pairing 
 >
 > This is the essence of Groth16: a 192-byte proof that hides arbitrarily large secrets while convincing any verifier of their validity.
 
+> **From toy circuits to real keys.** The `SumOfProducts` circuit is intentionally tiny — it exists only to make every intermediate value printable. If you want to see the same pipeline applied to a production-grade use case, the companion article [**"Proving Cardano address ownership via ZKP"**](proving-cardano-address-ownership-via-zkp.md) walks through a ~1.97M-constraint Ed25519 ownership circuit. It derives a real Cardano payment key using the `cardano-address` CLI (mnemonic → root key → payment key), feeds it into the Groth16 prover, and includes automated positive/negative security tests showing that forged ownership proofs are rejected.
+
 ---
 
 ## What's next
