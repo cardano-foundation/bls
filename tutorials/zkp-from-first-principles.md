@@ -11,7 +11,7 @@
 - [The paradox](#the-paradox)
 - [Why Groth16 matters](#why-groth16-matters)
 - [From computation to gates](#from-computation-to-gates)
-- [A 4-constraint "hello world"](#a-4-constraint-hello-world)
+- [A 5-constraint "hello world"](#a-5-constraint-hello-world)
 - [Why polynomials? (QAP)](#why-polynomials-qap)
 - [The trusted setup](#the-trusted-setup)
 - [Why the scalars must be secret and random](#why-the-scalars-must-be-secret-and-random)
@@ -123,7 +123,7 @@ t1 = a · b        (constraint 0)
 t2 = c · d        (constraint 1)
 t3 = e · f        (constraint 2)
 t4 = g · h        (constraint 3)
-out = t1 + t2 + t3 + t4    (addition — no constraint needed)
+out = t1 + t2 + t3 + t4    (multiplication-by-1 — constraint 4)
 ```
 
 The witness vector is:
@@ -239,9 +239,9 @@ O[4]  = [  0    1  0  0  0  0  0  0  0  0   0  0  0  0 ]    picks out
 The QAP transformation builds, for each wire `i`, three polynomials `u_i(x)`, `v_i(x)`, `w_i(x)` that reproduce these matrix columns at the constraint points. For our 5-constraint circuit with constraint points `{0, 1, 2, 3, 4}`, the Lagrange basis polynomial `L_1(x)` equals `1` at `x = 1` and `0` at the other four points. Because wire 4 (`c`) appears on the left side of constraint 1 only, `u_4(x) = L_1(x)`. Similarly, `v_5(x) = L_1(x)` for wire 5 (`d`), and `w_11(x) = L_1(x)` for wire 11 (`t2`). Evaluating at `x = 1`:
 
 ```
-u_4(1) = −1 + 2 = 1
-v_5(1) = −1 + 2 = 1
-w_11(1) = −1 + 2 = 1
+u_4(1) = 1   (by definition of Lagrange basis L_1(x))
+v_5(1) = 1   (by definition of Lagrange basis L_1(x))
+w_11(1) = 1  (by definition of Lagrange basis L_1(x))
 
 l(1) = ... + a_4 · u_4(1) + ... = ... + 3 · 1 + ... = 3    (picks c = 3)
 r(1) = ... + a_5 · v_5(1) + ... = ... + 4 · 1 + ... = 4    (picks d = 4)
@@ -991,7 +991,7 @@ Why these specific values? They must be:
 2. **Distinct** — if `α = β`, the proof loses its binding property.
 3. **Invertible** — every scalar must have a modular inverse in Fr (true for any non-zero element since `q` is prime).
 
-Small primes are ideal for debugging: `τ = 6` means `τ² = 36`, `τ³ = 216`, and so on, all easy to verify by hand. In production, `τ` would be a random 253-bit number.
+Small integers are ideal for debugging: `τ = 6` means `τ² = 36`, `τ³ = 216`, and so on, all easy to verify by hand. In production, `τ` would be a random 253-bit number.
 
 **Running the code:**
 
@@ -1267,42 +1267,48 @@ The point is `psi_scalar_i · G1`.
 
 **Public wires** in our circuit: wire `0` (the constant `1`) and wire `1` (the output `a`).
 
-**Private wires**: everything else (`x1` through `x6`).
+**Private wires**: everything else (`a` through `h` and the intermediates `t1`, `t2`, `t3`, `t4`).
 
-Let us verify two examples.
+Let us verify three examples.
 
-**Variable 1 (output `a`, public):**
-- `u_1(τ) = 0` (wire 1 never appears on the left)
-- `v_1(τ) = 0` (wire 1 never appears on the right)
-- `w_1(τ) = 3` (wire 1 is the output of constraint 2; `w_1(x) = L_2(x)`, so `w_1(3) = 3`)
+**Variable 0 (constant `1`, public):**
+- `u_0(τ) = 15` (wire 0 appears on the left side of constraint 4; `u_0(x) = L_4(x)`, and `L_4(6) = 6·5·4·3 / 24 = 15`)
+- `v_0(τ) = 0` (wire 0 never appears on the right)
+- `w_0(τ) = 0` (wire 0 never appears on the output)
 
 ```
-combined_1 = 0·5 + 0·7 + 3 = 3
-psi_scalar_1 = 3 / 11 = 3 · 11^(−1) mod q
-             = 38135181945546320348689265824135247881956765454929191143711751781773513588737
+combined_0 = 0·5 + 15·7 + 0 = 105
+psi_scalar_0 = 105 / 11 = 105 · 11^(−1) mod q
+             = 23834488715966450217930791140084529926222978409330744464819844863608445992970
 ```
 
 This matches the printed value exactly. ✓
 
-**Variable 2 (input `x1`, private):**
-- `u_2(τ) = 1` (wire 2 is the left input of constraint 0; `u_2(x) = L_0(x)`, so `u_2(3) = 1`)
+**Variable 1 (output `out`, public):**
+- `u_1(τ) = 0` (wire 1 never appears on the left)
+- `v_1(τ) = 0` (wire 1 never appears on the right)
+- `w_1(τ) = 15` (wire 1 is the output of constraint 4; `w_1(x) = L_4(x)`, so `w_1(6) = 15`)
+
+```
+combined_1 = 0·5 + 0·7 + 15 = 15
+psi_scalar_1 = 15 / 11 = 15 · 11^(−1) mod q
+             = 33368284202353030305103107596118341896712169773063042250747782809051824390146
+```
+
+This matches the printed value exactly. ✓
+
+**Variable 2 (input `a`, private):**
+- `u_2(τ) = 5` (wire 2 is the left input of constraint 0; `u_2(x) = L_0(x)`, and `L_0(6) = 5·4·3·2 / 24 = 5`)
 - `v_2(τ) = 0`
 - `w_2(τ) = 0`
 
 ```
-combined_2 = 0·5 + 1·7 + 0 = 7
-psi_scalar_2 = 7 / 13 = 7 · 13^(−1) mod q
-             = 48402346315501098904105606622940891542483586923563973374711069569174074939551
+combined_2 = 0·5 + 5·7 + 0 = 35
+psi_scalar_2 = 35 / 13 = 35 · 13^(−1) mod q
+             = 32268230877000732602737071081960594361655724615709315583140713046116049959703
 ```
 
 This also matches exactly. ✓
-
-**Variable 0 (constant `1`, public):**
-- `u_0(τ) = v_0(τ) = w_0(τ) = 0` (the constant wire never appears in any constraint matrix)
-- `combined_0 = 0`, so `psi_scalar_0 = 0`
-- The point is the **point at infinity** (the identity element of the curve group).
-
-This is why the first public-input commitment term `1 · Ψ_V_G1[0]` contributes nothing — multiplying the identity by `1` still gives the identity.
 
 **Running the code:**
 
@@ -1378,43 +1384,61 @@ r(x) = Σ a_i · v_i(x)
 o(x) = Σ a_i · w_i(x)
 ```
 
-With our witness `a = [1, 48, 2, 2, 3, 4, 4, 12]` and the QAP polynomials from Step 1.3:
+With our witness `a = [1, 100, 1, 2, 3, 4, 5, 6, 7, 8, 2, 12, 30, 56]` and the QAP polynomials from Step 1.3:
 
-**`l(x)`** — only wires `2, 4, 6` have non-zero `u_i`:
-
-```
-l(x) = 2·u_2(x) + 3·u_4(x) + 4·u_6(x)
-     = 2·L_0(x) + 3·L_1(x) + 4·L_2(x)
-     = 2·(½x² − ³⁄₂x + 1) + 3·(−x² + 2x) + 4·(½x² − ½x)
-     = (x² − 3x + 2) + (−3x² + 6x) + (2x² − 2x)
-     = x + 2
-```
-
-So `l(x) = 2 + x`, a degree-1 polynomial. The coefficients are `[2, 1]`.
-
-**`r(x)`** — only wires `3, 5, 7` have non-zero `v_i`:
+**`l(x)`** — wires `0, 2, 4, 6, 8` have non-zero `u_i` (see the L matrix in Step 1.1):
 
 ```
-r(x) = 2·v_3(x) + 4·v_5(x) + 12·v_7(x)
-     = 2·L_0(x) + 4·L_1(x) + 12·L_2(x)
-     = 2·(½x² − ³⁄₂x + 1) + 4·(−x² + 2x) + 12·(½x² − ½x)
-     = (x² − 3x + 2) + (−4x² + 8x) + (6x² − 6x)
-     = 3x² − x + 2
+l(x) = 1·u_0(x) + 1·u_2(x) + 3·u_4(x) + 5·u_6(x) + 7·u_8(x)
+     = 1·L_4(x) + 1·L_0(x) + 3·L_1(x) + 5·L_2(x) + 7·L_3(x)
 ```
 
-In Fr, the coefficient of `x` is `−1 ≡ q−1`. The coefficients are `[2, q−1, 3]`.
+This is a degree-4 polynomial. Its coefficients in Fr are printed by the code; we do not expand them by hand because the Lagrange basis for five points is degree 4 and the algebra is tedious. What we *can* verify easily are the evaluations at the constraint points, because by construction each `L_k(j)` is `1` when `k = j` and `0` otherwise:
 
-**`o(x)`** — only wires `1, 6, 7` have non-zero `w_i`:
+| j | `L_0(j)` | `L_1(j)` | `L_2(j)` | `L_3(j)` | `L_4(j)` | `l(j)` |
+|---|----------|----------|----------|----------|----------|--------|
+| 0 | 1 | 0 | 0 | 0 | 0 | `1·1 = 1` |
+| 1 | 0 | 1 | 0 | 0 | 0 | `3·1 = 3` |
+| 2 | 0 | 0 | 1 | 0 | 0 | `5·1 = 5` |
+| 3 | 0 | 0 | 0 | 1 | 0 | `7·1 = 7` |
+| 4 | 0 | 0 | 0 | 0 | 1 | `1·1 = 1` |
+
+**`r(x)`** — wires `3, 5, 7, 9, 10, 11, 12, 13` have non-zero `v_i` (see the R matrix in Step 1.1):
 
 ```
-o(x) = 48·w_1(x) + 4·w_6(x) + 12·w_7(x)
-     = 48·L_2(x) + 4·L_0(x) + 12·L_1(x)
-     = 48·(½x² − ½x) + 4·(½x² − ³⁄₂x + 1) + 12·(−x² + 2x)
-     = (24x² − 24x) + (2x² − 6x + 4) + (−12x² + 24x)
-     = 14x² − 6x + 4
+r(x) = 2·v_3(x) + 4·v_5(x) + 6·v_7(x) + 8·v_9(x)
+     + 2·v_10(x) + 12·v_11(x) + 30·v_12(x) + 56·v_13(x)
+     = 2·L_0(x) + 4·L_1(x) + 6·L_2(x) + 8·L_3(x)
+     + (2+12+30+56)·L_4(x)
+     = 2·L_0(x) + 4·L_1(x) + 6·L_2(x) + 8·L_3(x) + 100·L_4(x)
 ```
 
-In Fr, the coefficient of `x` is `−6 ≡ q−6`. The coefficients are `[4, q−6, 14]`.
+Evaluating at the constraint points:
+
+| j | `L_0(j)` | `L_1(j)` | `L_2(j)` | `L_3(j)` | `L_4(j)` | `r(j)` |
+|---|----------|----------|----------|----------|----------|--------|
+| 0 | 1 | 0 | 0 | 0 | 0 | `2·1 = 2` |
+| 1 | 0 | 1 | 0 | 0 | 0 | `4·1 = 4` |
+| 2 | 0 | 0 | 1 | 0 | 0 | `6·1 = 6` |
+| 3 | 0 | 0 | 0 | 1 | 0 | `8·1 = 8` |
+| 4 | 0 | 0 | 0 | 0 | 1 | `100·1 = 100` |
+
+**`o(x)`** — wires `1, 10, 11, 12, 13` have non-zero `w_i` (see the O matrix in Step 1.1):
+
+```
+o(x) = 100·w_1(x) + 2·w_10(x) + 12·w_11(x) + 30·w_12(x) + 56·w_13(x)
+     = 100·L_4(x) + 2·L_0(x) + 12·L_1(x) + 30·L_2(x) + 56·L_3(x)
+```
+
+Evaluating at the constraint points:
+
+| j | `L_0(j)` | `L_1(j)` | `L_2(j)` | `L_3(j)` | `L_4(j)` | `o(j)` |
+|---|----------|----------|----------|----------|----------|--------|
+| 0 | 1 | 0 | 0 | 0 | 0 | `2·1 = 2` |
+| 1 | 0 | 1 | 0 | 0 | 0 | `12·1 = 12` |
+| 2 | 0 | 0 | 1 | 0 | 0 | `30·1 = 30` |
+| 3 | 0 | 0 | 0 | 1 | 0 | `56·1 = 56` |
+| 4 | 0 | 0 | 0 | 0 | 1 | `100·1 = 100` |
 
 **Running the code:**
 
@@ -1477,8 +1501,6 @@ For SumOfProducts, `l(x)`, `r(x)`, and `o(x)` are all degree 4, so `l(x)·r(x)` 
 The key insight is that `p(x)` has roots at all five constraint points `{0, 1, 2, 3, 4}`, so it is exactly divisible by `T(x) = (x−0)(x−1)(x−2)(x−3)(x−4)`. The quotient `h(x)` is degree 3, which the prover evaluates at `τ = 6` to get `h(6)`.
 
 For the SumOfProducts circuit, the division `p(x) / T(x)` yields a degree-3 quotient `h(x)` with non-trivial coefficients. This is richer than the multiplier circuit (where `h(x) = 3` was a constant), reflecting the more complex constraint structure.
-
-The quotient is a **constant** `3`. This happens because our witness values were chosen to make the arithmetic particularly clean.
 
 **Running the code:**
 
@@ -1554,9 +1576,9 @@ l(tau) = 52435875175126190479447740508185965837690552500527637822603658699938581
 alpha = 5
 
 A = l(tau)*G1 + alpha*G1
-  combined scalar = l(tau) + alpha = 10
-  x = 2386781901035473772144341182407687860118005925033428055218509614629770831545237878364312588177396809142590665502445
-  y = 2721985711015193199868848835229056819857651383925471979786755635273858421658233285328399263507021600622741844499993
+  combined scalar = l(tau) + alpha = 52435875175126190479447740508185965837690552500527637822603658699938581184411
+  x = 3839232850865530653432891265853980574950700052889105802882888241745912296791280457657198604753336013598646649191054
+  y = 346821647271907505270829837932210661207146014272662121270018469736099935583624762704683958610791985420225768154822
 
 ✓ Proof element A computed and verified.
 ```
@@ -1801,7 +1823,7 @@ product RHS          = PairingOutput(...)
 
 The scalar arithmetic balances via the bilinearity property. The actual pairing values are elements of `F_q^12`, represented as nested field extensions (`QuadExtField` of `CubicExtField`). We do not verify these 12-dimensional coordinates by hand — that would require implementing the full Miller loop and final exponentiation — but the scalar identity is the mathematical core, and it is the part that can be checked with pen and paper.
 
-> **What just happened.** We started with a 5-constraint SumOfProducts circuit (`t1=a*b`, `t2=c*d`, `t3=e*f`, `t4=g*h`, `a=t1+t2+t3+t4+t5+t6`) and ended with a proof that consists of exactly three curve points: `A = 52435875...·G1`, `B = 1371·G2`, `C = 24201173...·G1`. The verifier checks these three points against the public inputs using one pairing equation. At no point did the prover reveal `a, b, c, d, e, f, g, h`. The entire witness — the secret inputs and the intermediate products — is hidden inside the proof, yet the verifier is mathematically certain that the constraints were satisfied.
+> **What just happened.** We started with a 5-constraint SumOfProducts circuit (`t1=a*b`, `t2=c*d`, `t3=e*f`, `t4=g*h`, `out = t1+t2+t3+t4`) and ended with a proof that consists of exactly three curve points: `A = 52435875...·G1`, `B = 1371·G2`, `C = 24201173...·G1`. The verifier checks these three points against the public inputs using one pairing equation. At no point did the prover reveal `a, b, c, d, e, f, g, h`. The entire witness — the secret inputs and the intermediate products — is hidden inside the proof, yet the verifier is mathematically certain that the constraints were satisfied.
 >
 > This is the essence of Groth16: a 192-byte proof that hides arbitrarily large secrets while convincing any verifier of their validity.
 
