@@ -8,7 +8,7 @@ description = "CLI for Groth16 proof generation over BLS12-381"
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }
 hex = "0.4"
-groth16-prover = { path = ".." }
+groth16-prover = { path = "..", features = ["privacy"] }
 ark-bls12-381 = "0.4"
 ark-ff = "0.4"
 ark-serialize = "0.4"

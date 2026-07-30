@@ -8,6 +8,9 @@ pub mod ptau;
 pub mod phase2;
 
 // Witness-input helpers for the Privacy / Spend circuit (BLS12-381 only)
+#[cfg(feature = "privacy")]
 pub mod mimc;
+#[cfg(feature = "privacy")]
 pub mod sparse_merkle_tree;
+#[cfg(feature = "privacy")]
 pub mod privacy_inputs;

@@ -5,6 +5,11 @@ edition = "2021"
 license = "Apache-2.0"
 description = "Groth16 prover over BLS12-381 using arkworks"
 
+[features]
+default = []
+bins = []
+privacy = []
+
 [dependencies]
 ark-bls12-381 = "0.4"
 ark-ff = "0.4"
@@ -22,23 +27,29 @@ ark-std = { version = "0.4", features = ["std"] }
 [[bin]]
 name = "print_proof_pippenger"
 path = "src/bin/print_proof_pippenger.rs"
+required-features = ["bins"]
 
 [[bin]]
 name = "benchmark_provers"
 path = "src/bin/benchmark_provers.rs"
+required-features = ["bins"]
 
 [[bin]]
 name = "benchmark_circom"
 path = "src/bin/benchmark_circom.rs"
+required-features = ["bins"]
 
 [[bin]]
 name = "benchmark_privacy"
 path = "src/bin/benchmark_privacy.rs"
+required-features = ["bins"]
 
 [[bin]]
 name = "benchmark_circom_full_pk"
 path = "src/bin/benchmark_circom_full_pk.rs"
+required-features = ["bins"]
 
 [[bin]]
 name = "benchmark_poseidon_merkle"
 path = "src/bin/benchmark_poseidon_merkle.rs"
+required-features = ["bins"]

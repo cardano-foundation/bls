@@ -51,8 +51,6 @@ pub trait Prover {
     /// This is the production path: no toxic-waste scalars are needed.
     /// The prover uses multi-scalar multiplication over pre-computed
     /// curve points from the proving key.
-    ///
-    /// Default implementation panics — concrete provers must override.
     fn prove_with_full_pk<E: QapEngine, T: Copy + Into<Fr>, L: AsRef<[T]>, R: AsRef<[T]>, O: AsRef<[T]>>(
         &self,
         engine: &E,
@@ -61,18 +59,13 @@ pub trait Prover {
         r: &[R],
         o: &[O],
         witness: &[Fr],
-    ) -> (Proof, PublicInput) {
-        let _ = (engine, full_pk, l, r, o, witness);
-        unimplemented!("prove_with_full_pk must be implemented for this prover")
-    }
+    ) -> (Proof, PublicInput);
 
     /// Assemble the proof using a `FullProvingKey` and **sparse** constraints.
     ///
     /// This is the Implementation 6 path: the prover never materialises
     /// dense R1CS matrices.  Witness polynomials are built directly from
     /// the sparse constraint representation via three IFFTs.
-    ///
-    /// Default implementation panics — concrete provers must override.
     fn prove_with_full_pk_sparse(
         &self,
         engine: &impl QapEngine,
@@ -82,11 +75,175 @@ pub trait Prover {
         sparse_r: &[Vec<(u32, Fr)>],
         sparse_o: &[Vec<(u32, Fr)>],
         witness: &[Fr],
-    ) -> (Proof, PublicInput) {
-        let _ = (engine, full_pk, n_constraints, sparse_l, sparse_r, sparse_o, witness);
-        unimplemented!("prove_with_full_pk_sparse must be implemented for this prover")
-    }
+    ) -> (Proof, PublicInput);
 }
+
+// ------------------------------------------------------------------
+// Shared helpers: witness-polynomial + quotient construction
+// ------------------------------------------------------------------
+
+/// Build the three witness polynomials and the quotient `h(x)` from **dense**
+/// constraint matrices.  The construction is identical for both prover
+/// strategies; only the final MSM vs scalar-by-scalar accumulation differs.
+fn build_witness_polys_and_quotient_dense<E: QapEngine, T: Copy + Into<Fr>, L: AsRef<[T]>, R: AsRef<[T]>, O: AsRef<[T]>>(
+    engine: &E,
+    l: &[L],
+    r: &[R],
+    o: &[O],
+    witness: &[Fr],
+) -> (DensePolynomial<Fr>, DensePolynomial<Fr>, DensePolynomial<Fr>, DensePolynomial<Fr>) {
+    let n_vars = witness.len();
+    let n_constraints = l.len();
+    let d_size = engine.domain_size(n_constraints);
+
+    let (l_poly, r_poly, o_poly) = if d_size > n_constraints {
+        // FFT engine — on-the-fly construction to avoid O(n_vars × domain_size) memory.
+        let domain = GeneralEvaluationDomain::<Fr>::new(d_size)
+            .expect("Failed to create evaluation domain");
+
+        let mut lp = DensePolynomial::zero();
+        let mut rp = DensePolynomial::zero();
+        let mut op = DensePolynomial::zero();
+
+        for i in 0..n_vars {
+            let wi = witness[i];
+
+            let mut evals: Vec<Fr> = (0..d_size)
+                .map(|j| if j < n_constraints { l[j].as_ref()[i].into() } else { Fr::zero() })
+                .collect();
+            domain.ifft_in_place(&mut evals);
+            if lp.coeffs.len() < d_size {
+                lp.coeffs.resize(d_size, Fr::zero());
+            }
+            for (k, &e) in evals.iter().enumerate() {
+                lp.coeffs[k] += e * wi;
+            }
+
+            let mut evals: Vec<Fr> = (0..d_size)
+                .map(|j| if j < n_constraints { r[j].as_ref()[i].into() } else { Fr::zero() })
+                .collect();
+            domain.ifft_in_place(&mut evals);
+            if rp.coeffs.len() < d_size {
+                rp.coeffs.resize(d_size, Fr::zero());
+            }
+            for (k, &e) in evals.iter().enumerate() {
+                rp.coeffs[k] += e * wi;
+            }
+
+            let mut evals: Vec<Fr> = (0..d_size)
+                .map(|j| if j < n_constraints { o[j].as_ref()[i].into() } else { Fr::zero() })
+                .collect();
+            domain.ifft_in_place(&mut evals);
+            if op.coeffs.len() < d_size {
+                op.coeffs.resize(d_size, Fr::zero());
+            }
+            for (k, &e) in evals.iter().enumerate() {
+                op.coeffs[k] += e * wi;
+            }
+        }
+
+        (lp, rp, op)
+    } else {
+        // Dense engine — standard build_qap (tiny circuit, no memory concern)
+        let (us, vs, ws) = engine.build_qap(l, r, o);
+        let mut lp = DensePolynomial::zero();
+        let mut rp = DensePolynomial::zero();
+        let mut op = DensePolynomial::zero();
+        for i in 0..n_vars {
+            lp = poly_add(&lp, &poly_scalar_mul(&us[i], witness[i]));
+            rp = poly_add(&rp, &poly_scalar_mul(&vs[i], witness[i]));
+            op = poly_add(&op, &poly_scalar_mul(&ws[i], witness[i]));
+        }
+        (lp, rp, op)
+    };
+
+    let t = engine.target_poly(n_constraints);
+    let h = engine.compute_quotient(&l_poly, &r_poly, &o_poly, &t);
+    (l_poly, r_poly, o_poly, h)
+}
+
+/// Build the three witness polynomials and the quotient `h(x)` from **sparse**
+/// constraint matrices.
+fn build_witness_polys_and_quotient_sparse(
+    engine: &impl QapEngine,
+    n_constraints: usize,
+    sparse_l: &[Vec<(u32, Fr)>],
+    sparse_r: &[Vec<(u32, Fr)>],
+    sparse_o: &[Vec<(u32, Fr)>],
+    witness: &[Fr],
+) -> (DensePolynomial<Fr>, DensePolynomial<Fr>, DensePolynomial<Fr>, DensePolynomial<Fr>) {
+    use crate::engine::build_witness_polys_sparse;
+
+    let d_size = engine.domain_size(n_constraints);
+    let domain = GeneralEvaluationDomain::<Fr>::new(d_size)
+        .expect("Failed to create evaluation domain");
+    let (l_poly, r_poly, o_poly) =
+        build_witness_polys_sparse(&domain, d_size, n_constraints, sparse_l, sparse_r, sparse_o, witness);
+
+    let t = engine.target_poly(n_constraints);
+    let h = engine.compute_quotient(&l_poly, &r_poly, &o_poly, &t);
+    (l_poly, r_poly, o_poly, h)
+}
+
+// ------------------------------------------------------------------
+// Shared helper: toxic-waste scalar path (A, B, h_tau)
+// ------------------------------------------------------------------
+
+/// Compute the parts of the scalar-based Groth16 proof that are **independent**
+/// of the MSM strategy: `A`, `B`, and `h_tau_scalar`.
+fn compute_scalar_path_common<E: QapEngine, T: Copy + Into<Fr>, L: AsRef<[T]>, R: AsRef<[T]>, O: AsRef<[T]>>(
+    engine: &E,
+    l: &[L],
+    r: &[R],
+    o: &[O],
+    witness: &[Fr],
+    tau: Fr,
+    alpha: Fr,
+    beta: Fr,
+    delta: Fr,
+) -> (G1Affine, G2Affine, Fr, Vec<Fr>, Vec<Fr>, Vec<Fr>) {
+    let g1_proj = G1Projective::generator();
+    let g2_proj = G2Projective::generator();
+
+    let (us_tau, vs_tau, ws_tau) = engine.evaluate_qap_at_tau(l, r, o, tau);
+
+    // A = l(tau)·G1 + alpha·G1
+    let mut l_tau = Fr::zero();
+    for i in 0..witness.len() {
+        l_tau += us_tau[i] * witness[i];
+    }
+    let a = G1Affine::from(g1_proj * (l_tau + alpha));
+
+    // B = r(tau)·G2 + beta·G2
+    let mut r_tau = Fr::zero();
+    for i in 0..witness.len() {
+        r_tau += vs_tau[i] * witness[i];
+    }
+    let b = G2Affine::from(g2_proj * (r_tau + beta));
+
+    // h(tau)·T(tau)/delta
+    let delta_inv = delta.inverse().unwrap();
+    let (us, vs, ws) = engine.build_qap(l, r, o);
+    let mut l_poly = DensePolynomial::zero();
+    let mut r_poly = DensePolynomial::zero();
+    let mut o_poly = DensePolynomial::zero();
+    for i in 0..witness.len() {
+        l_poly = poly_add(&l_poly, &poly_scalar_mul(&us[i], witness[i]));
+        r_poly = poly_add(&r_poly, &poly_scalar_mul(&vs[i], witness[i]));
+        o_poly = poly_add(&o_poly, &poly_scalar_mul(&ws[i], witness[i]));
+    }
+    let t = engine.target_poly(l.len());
+    let h = engine.compute_quotient(&l_poly, &r_poly, &o_poly, &t);
+    let h_tau = h.evaluate(&tau);
+    let t_tau = t.evaluate(&tau);
+    let h_tau_scalar = h_tau * t_tau * delta_inv;
+
+    (a, b, h_tau_scalar, us_tau, vs_tau, ws_tau)
+}
+
+// ------------------------------------------------------------------
+// Naive prover
+// ------------------------------------------------------------------
 
 /// Naive prover — scalar-by-scalar accumulation.
 ///
@@ -116,69 +273,26 @@ impl Prover for NaiveProver {
         delta: Fr,
     ) -> (Proof, PublicInput) {
         let g1_proj = G1Projective::generator();
-        let g2_proj = G2Projective::generator();
+        let (a, b, h_tau_scalar, us_tau, vs_tau, ws_tau) =
+            compute_scalar_path_common(engine, l, r, o, witness, tau, alpha, beta, delta);
 
-        let (us_tau, vs_tau, ws_tau) = engine.evaluate_qap_at_tau(l, r, o, tau);
-
-        // ------------------------------------------------------------------
-        // A = l(tau)·G1 + alpha·G1
-        // ------------------------------------------------------------------
-        let mut l_tau = Fr::zero();
-        for i in 0..witness.len() {
-            l_tau += us_tau[i] * witness[i];
-        }
-        let a_pt = g1_proj * (l_tau + alpha);
-        let a = G1Affine::from(a_pt);
-
-        // ------------------------------------------------------------------
-        // B = r(tau)·G2 + beta·G2
-        // ------------------------------------------------------------------
-        let mut r_tau = Fr::zero();
-        for i in 0..witness.len() {
-            r_tau += vs_tau[i] * witness[i];
-        }
-        let b_pt = g2_proj * (r_tau + beta);
-        let b = G2Affine::from(b_pt);
-
-        // ------------------------------------------------------------------
-        // C = sum_{private} a_i·Psi_P_G1 + h(tau)·T(tau)/delta·G1
-        // ------------------------------------------------------------------
         let gamma_inv = gamma.inverse().unwrap();
         let delta_inv = delta.inverse().unwrap();
 
-        // Compute h(tau) from the quotient polynomial
-        let (us, vs, ws) = engine.build_qap(l, r, o);
-        let mut l_poly = DensePolynomial::zero();
-        let mut r_poly = DensePolynomial::zero();
-        let mut o_poly = DensePolynomial::zero();
-        for i in 0..witness.len() {
-            l_poly = poly_add(&l_poly, &poly_scalar_mul(&us[i], witness[i]));
-            r_poly = poly_add(&r_poly, &poly_scalar_mul(&vs[i], witness[i]));
-            o_poly = poly_add(&o_poly, &poly_scalar_mul(&ws[i], witness[i]));
-        }
-        let t = engine.target_poly(l.len());
-        let h = engine.compute_quotient(&l_poly, &r_poly, &o_poly, &t);
-        let h_tau = h.evaluate(&tau);
-        let t_tau = t.evaluate(&tau);
-        let h_tau_scalar = h_tau * t_tau * delta_inv;
-
+        // C = sum_{private} a_i·Psi_P_G1 + h(tau)·T(tau)/delta·G1
         let mut c_proj = G1Projective::zero();
         for i in 2..witness.len() {
             let psi_scalar = (vs_tau[i] * alpha + us_tau[i] * beta + ws_tau[i]) * delta_inv;
-            let weighted = g1_proj * (psi_scalar * witness[i]);
-            c_proj += weighted;
+            c_proj += g1_proj * (psi_scalar * witness[i]);
         }
         c_proj += g1_proj * h_tau_scalar;
         let c = G1Affine::from(c_proj);
 
-        // ------------------------------------------------------------------
         // V = sum_{public} a_i·Psi_V_G1
-        // ------------------------------------------------------------------
         let mut v_proj = G1Projective::zero();
         for i in 0..2 {
             let psi_scalar = (vs_tau[i] * alpha + us_tau[i] * beta + ws_tau[i]) * gamma_inv;
-            let weighted = g1_proj * (psi_scalar * witness[i]);
-            v_proj += weighted;
+            v_proj += g1_proj * (psi_scalar * witness[i]);
         }
         let v = G1Affine::from(v_proj);
 
@@ -196,91 +310,24 @@ impl Prover for NaiveProver {
     ) -> (Proof, PublicInput) {
         let n_public = full_pk.vk.n_public;
         let n_vars = witness.len();
-        let n_constraints = l.len();
 
-        // 1. Build witness polynomials l(x), r(x), o(x) and quotient h(x).
-        //    For FFT engines on large circuits, build on-the-fly to avoid
-        //    O(n_vars × domain_size) memory. For dense engines (tiny test
-        //    circuits), use the standard build_qap path.
-        let d_size = engine.domain_size(n_constraints);
-        let (l_poly, r_poly, o_poly) = if d_size > n_constraints {
-            // FFT engine — on-the-fly construction
-            let domain = GeneralEvaluationDomain::<Fr>::new(d_size)
-                .expect("Failed to create evaluation domain");
+        let (_l_poly, _r_poly, _o_poly, h) = build_witness_polys_and_quotient_dense(engine, l, r, o, witness);
 
-            let mut lp = DensePolynomial::zero();
-            let mut rp = DensePolynomial::zero();
-            let mut op = DensePolynomial::zero();
-
-            for i in 0..n_vars {
-                let mut evals: Vec<Fr> = (0..d_size)
-                    .map(|j| if j < n_constraints { l[j].as_ref()[i].into() } else { Fr::zero() })
-                    .collect();
-                domain.ifft_in_place(&mut evals);
-                let wi = witness[i];
-                if lp.coeffs.len() < d_size {
-                    lp.coeffs.resize(d_size, Fr::zero());
-                }
-                for (k, &e) in evals.iter().enumerate() {
-                    lp.coeffs[k] += e * wi;
-                }
-
-                let mut evals: Vec<Fr> = (0..d_size)
-                    .map(|j| if j < n_constraints { r[j].as_ref()[i].into() } else { Fr::zero() })
-                    .collect();
-                domain.ifft_in_place(&mut evals);
-                if rp.coeffs.len() < d_size {
-                    rp.coeffs.resize(d_size, Fr::zero());
-                }
-                for (k, &e) in evals.iter().enumerate() {
-                    rp.coeffs[k] += e * wi;
-                }
-
-                let mut evals: Vec<Fr> = (0..d_size)
-                    .map(|j| if j < n_constraints { o[j].as_ref()[i].into() } else { Fr::zero() })
-                    .collect();
-                domain.ifft_in_place(&mut evals);
-                if op.coeffs.len() < d_size {
-                    op.coeffs.resize(d_size, Fr::zero());
-                }
-                for (k, &e) in evals.iter().enumerate() {
-                    op.coeffs[k] += e * wi;
-                }
-            }
-
-            (lp, rp, op)
-        } else {
-            // Dense engine — use standard build_qap (tiny circuit, no memory concern)
-            let (us, vs, ws) = engine.build_qap(l, r, o);
-            let mut lp = DensePolynomial::zero();
-            let mut rp = DensePolynomial::zero();
-            let mut op = DensePolynomial::zero();
-            for i in 0..n_vars {
-                lp = poly_add(&lp, &poly_scalar_mul(&us[i], witness[i]));
-                rp = poly_add(&rp, &poly_scalar_mul(&vs[i], witness[i]));
-                op = poly_add(&op, &poly_scalar_mul(&ws[i], witness[i]));
-            }
-            (lp, rp, op)
-        };
-
-        let t = engine.target_poly(n_constraints);
-        let h = engine.compute_quotient(&l_poly, &r_poly, &o_poly, &t);
-
-        // 2. A = sum witness[i] * a_query[i] + alpha_g1
+        // A = sum witness[i] * a_query[i] + alpha_g1
         let mut a_proj = G1Projective::from(full_pk.vk.alpha_g1);
         for i in 0..n_vars {
             a_proj += G1Projective::from(full_pk.a_query[i]) * witness[i];
         }
         let a = G1Affine::from(a_proj);
 
-        // 3. B = sum witness[i] * b_g2_query[i] + beta_g2
+        // B = sum witness[i] * b_g2_query[i] + beta_g2
         let mut b_proj = G2Projective::from(full_pk.vk.beta_g2);
         for i in 0..n_vars {
             b_proj += G2Projective::from(full_pk.b_g2_query[i]) * witness[i];
         }
         let b = G2Affine::from(b_proj);
 
-        // 4. C = sum_{private} witness[i] * c_query[i] + sum_j h_j * h_query[j]
+        // C = sum_{private} witness[i] * c_query[i] + sum_j h_j * h_query[j]
         let mut c_proj = G1Projective::zero();
         for i in n_public..n_vars {
             c_proj += G1Projective::from(full_pk.c_query[i]) * witness[i];
@@ -291,7 +338,7 @@ impl Prover for NaiveProver {
         }
         let c = G1Affine::from(c_proj);
 
-        // 5. V = sum_{public} witness[i] * l_query[i]
+        // V = sum_{public} witness[i] * l_query[i]
         let mut v_proj = G1Projective::zero();
         for i in 0..n_public {
             v_proj += G1Projective::from(full_pk.l_query[i]) * witness[i];
@@ -311,36 +358,27 @@ impl Prover for NaiveProver {
         sparse_o: &[Vec<(u32, Fr)>],
         witness: &[Fr],
     ) -> (Proof, PublicInput) {
-        use crate::engine::build_witness_polys_sparse;
-
         let n_public = full_pk.vk.n_public;
         let n_vars = witness.len();
 
-        // 1. Build witness polynomials l(x), r(x), o(x) from sparse constraints.
-        let d_size = engine.domain_size(n_constraints);
-        let domain = GeneralEvaluationDomain::<Fr>::new(d_size)
-            .expect("Failed to create evaluation domain");
-        let (l_poly, r_poly, o_poly) =
-            build_witness_polys_sparse(&domain, d_size, n_constraints, sparse_l, sparse_r, sparse_o, witness);
+        let (_l_poly, _r_poly, _o_poly, h) =
+            build_witness_polys_and_quotient_sparse(engine, n_constraints, sparse_l, sparse_r, sparse_o, witness);
 
-        let t = engine.target_poly(n_constraints);
-        let h = engine.compute_quotient(&l_poly, &r_poly, &o_poly, &t);
-
-        // 2. A = sum witness[i] * a_query[i] + alpha_g1
+        // A = sum witness[i] * a_query[i] + alpha_g1
         let mut a_proj = G1Projective::from(full_pk.vk.alpha_g1);
         for i in 0..n_vars {
             a_proj += G1Projective::from(full_pk.a_query[i]) * witness[i];
         }
         let a = G1Affine::from(a_proj);
 
-        // 3. B = sum witness[i] * b_g2_query[i] + beta_g2
+        // B = sum witness[i] * b_g2_query[i] + beta_g2
         let mut b_proj = G2Projective::from(full_pk.vk.beta_g2);
         for i in 0..n_vars {
             b_proj += G2Projective::from(full_pk.b_g2_query[i]) * witness[i];
         }
         let b = G2Affine::from(b_proj);
 
-        // 4. C = sum_{private} witness[i] * c_query[i] + sum_j h_j * h_query[j]
+        // C = sum_{private} witness[i] * c_query[i] + sum_j h_j * h_query[j]
         let mut c_proj = G1Projective::zero();
         for i in n_public..n_vars {
             c_proj += G1Projective::from(full_pk.c_query[i]) * witness[i];
@@ -351,7 +389,7 @@ impl Prover for NaiveProver {
         }
         let c = G1Affine::from(c_proj);
 
-        // 5. V = sum_{public} witness[i] * l_query[i]
+        // V = sum_{public} witness[i] * l_query[i]
         let mut v_proj = G1Projective::zero();
         for i in 0..n_public {
             v_proj += G1Projective::from(full_pk.l_query[i]) * witness[i];
@@ -361,6 +399,10 @@ impl Prover for NaiveProver {
         (Proof { a, b, c }, PublicInput { v })
     }
 }
+
+// ------------------------------------------------------------------
+// Pippenger prover
+// ------------------------------------------------------------------
 
 /// Pippenger prover — batched multi-scalar multiplication.
 ///
@@ -394,55 +436,14 @@ impl Prover for PippengerProver {
         gamma: Fr,
         delta: Fr,
     ) -> (Proof, PublicInput) {
-        let g1_proj = G1Projective::generator();
-        let g2_proj = G2Projective::generator();
         let g1_gen = G1Affine::generator();
+        let (a, b, h_tau_scalar, us_tau, vs_tau, ws_tau) =
+            compute_scalar_path_common(engine, l, r, o, witness, tau, alpha, beta, delta);
 
-        let (us_tau, vs_tau, ws_tau) = engine.evaluate_qap_at_tau(l, r, o, tau);
-
-        // ------------------------------------------------------------------
-        // A = l(tau)·G1 + alpha·G1
-        // ------------------------------------------------------------------
-        let mut l_tau = Fr::zero();
-        for i in 0..witness.len() {
-            l_tau += us_tau[i] * witness[i];
-        }
-        let a_pt = g1_proj * (l_tau + alpha);
-        let a = G1Affine::from(a_pt);
-
-        // ------------------------------------------------------------------
-        // B = r(tau)·G2 + beta·G2
-        // ------------------------------------------------------------------
-        let mut r_tau = Fr::zero();
-        for i in 0..witness.len() {
-            r_tau += vs_tau[i] * witness[i];
-        }
-        let b_pt = g2_proj * (r_tau + beta);
-        let b = G2Affine::from(b_pt);
-
-        // ------------------------------------------------------------------
-        // C = sum_{private} a_i·Psi_P_G1 + h(tau)·T(tau)/delta·G1
-        // ------------------------------------------------------------------
         let gamma_inv = gamma.inverse().unwrap();
         let delta_inv = delta.inverse().unwrap();
 
-        // Compute h(tau) from the quotient polynomial
-        let (us, vs, ws) = engine.build_qap(l, r, o);
-        let mut l_poly = DensePolynomial::zero();
-        let mut r_poly = DensePolynomial::zero();
-        let mut o_poly = DensePolynomial::zero();
-        for i in 0..witness.len() {
-            l_poly = poly_add(&l_poly, &poly_scalar_mul(&us[i], witness[i]));
-            r_poly = poly_add(&r_poly, &poly_scalar_mul(&vs[i], witness[i]));
-            o_poly = poly_add(&o_poly, &poly_scalar_mul(&ws[i], witness[i]));
-        }
-        let t = engine.target_poly(l.len());
-        let h = engine.compute_quotient(&l_poly, &r_poly, &o_poly, &t);
-        let h_tau = h.evaluate(&tau);
-        let t_tau = t.evaluate(&tau);
-        let h_tau_scalar = h_tau * t_tau * delta_inv;
-
-        // Collect bases (all G1 generator) and scalars for private-input MSM
+        // C = sum_{private} a_i·Psi_P_G1 + h(tau)·T(tau)/delta·G1
         let n_private = witness.len() - 2;
         let mut c_bases = Vec::with_capacity(n_private + 1);
         let mut c_scalars = Vec::with_capacity(n_private + 1);
@@ -451,16 +452,13 @@ impl Prover for PippengerProver {
             c_bases.push(g1_gen);
             c_scalars.push(psi_scalar * witness[i]);
         }
-        // Add h_tau term
         c_bases.push(g1_gen);
         c_scalars.push(h_tau_scalar);
 
         let c_proj = G1Projective::msm(&c_bases, &c_scalars).expect("MSM length mismatch");
         let c = G1Affine::from(c_proj);
 
-        // ------------------------------------------------------------------
         // V = sum_{public} a_i·Psi_V_G1
-        // ------------------------------------------------------------------
         let mut v_bases = Vec::with_capacity(2);
         let mut v_scalars = Vec::with_capacity(2);
         for i in 0..2 {
@@ -485,88 +483,20 @@ impl Prover for PippengerProver {
         witness: &[Fr],
     ) -> (Proof, PublicInput) {
         let n_public = full_pk.vk.n_public;
-        let n_vars = witness.len();
-        let n_constraints = l.len();
 
-        // 1. Build witness polynomials l(x), r(x), o(x) and quotient h(x).
-        //    For FFT engines on large circuits, build on-the-fly to avoid
-        //    O(n_vars × domain_size) memory. For dense engines (tiny test
-        //    circuits), use the standard build_qap path.
-        let d_size = engine.domain_size(n_constraints);
-        let (l_poly, r_poly, o_poly) = if d_size > n_constraints {
-            // FFT engine — on-the-fly construction
-            let domain = GeneralEvaluationDomain::<Fr>::new(d_size)
-                .expect("Failed to create evaluation domain");
+        let (_l_poly, _r_poly, _o_poly, h) = build_witness_polys_and_quotient_dense(engine, l, r, o, witness);
 
-            let mut lp = DensePolynomial::zero();
-            let mut rp = DensePolynomial::zero();
-            let mut op = DensePolynomial::zero();
-
-            for i in 0..n_vars {
-                let mut evals: Vec<Fr> = (0..d_size)
-                    .map(|j| if j < n_constraints { l[j].as_ref()[i].into() } else { Fr::zero() })
-                    .collect();
-                domain.ifft_in_place(&mut evals);
-                let wi = witness[i];
-                if lp.coeffs.len() < d_size {
-                    lp.coeffs.resize(d_size, Fr::zero());
-                }
-                for (k, &e) in evals.iter().enumerate() {
-                    lp.coeffs[k] += e * wi;
-                }
-
-                let mut evals: Vec<Fr> = (0..d_size)
-                    .map(|j| if j < n_constraints { r[j].as_ref()[i].into() } else { Fr::zero() })
-                    .collect();
-                domain.ifft_in_place(&mut evals);
-                if rp.coeffs.len() < d_size {
-                    rp.coeffs.resize(d_size, Fr::zero());
-                }
-                for (k, &e) in evals.iter().enumerate() {
-                    rp.coeffs[k] += e * wi;
-                }
-
-                let mut evals: Vec<Fr> = (0..d_size)
-                    .map(|j| if j < n_constraints { o[j].as_ref()[i].into() } else { Fr::zero() })
-                    .collect();
-                domain.ifft_in_place(&mut evals);
-                if op.coeffs.len() < d_size {
-                    op.coeffs.resize(d_size, Fr::zero());
-                }
-                for (k, &e) in evals.iter().enumerate() {
-                    op.coeffs[k] += e * wi;
-                }
-            }
-
-            (lp, rp, op)
-        } else {
-            // Dense engine — use standard build_qap (tiny circuit, no memory concern)
-            let (us, vs, ws) = engine.build_qap(l, r, o);
-            let mut lp = DensePolynomial::zero();
-            let mut rp = DensePolynomial::zero();
-            let mut op = DensePolynomial::zero();
-            for i in 0..n_vars {
-                lp = poly_add(&lp, &poly_scalar_mul(&us[i], witness[i]));
-                rp = poly_add(&rp, &poly_scalar_mul(&vs[i], witness[i]));
-                op = poly_add(&op, &poly_scalar_mul(&ws[i], witness[i]));
-            }
-            (lp, rp, op)
-        };
-
-        let t = engine.target_poly(n_constraints);
-        let h = engine.compute_quotient(&l_poly, &r_poly, &o_poly, &t);
-
-        // 2. A = MSM(a_query, witness) + alpha_g1
+        // A = MSM(a_query, witness) + alpha_g1
         let a_proj = G1Projective::msm(&full_pk.a_query, witness)
             .expect("MSM length mismatch");
         let a = G1Affine::from(a_proj + G1Projective::from(full_pk.vk.alpha_g1));
 
-        // 3. B = MSM(b_g2_query, witness) + beta_g2
+        // B = MSM(b_g2_query, witness) + beta_g2
         let b_proj = G2Projective::msm(&full_pk.b_g2_query, witness)
             .expect("MSM length mismatch");
         let b = G2Affine::from(b_proj + G2Projective::from(full_pk.vk.beta_g2));
 
-        // 4. C = MSM(c_query[private], witness[private]) + MSM(h_query, h_coeffs)
+        // C = MSM(c_query[private], witness[private]) + MSM(h_query, h_coeffs)
         let private_c = &full_pk.c_query[n_public..];
         let private_w = &witness[n_public..];
         let c_private = G1Projective::msm(private_c, private_w)
@@ -582,7 +512,7 @@ impl Prover for PippengerProver {
 
         let c = G1Affine::from(c_private + h_c);
 
-        // 5. V = MSM(l_query, witness[public])
+        // V = MSM(l_query, witness[public])
         let public_w = &witness[..n_public];
         let v = G1Affine::from(
             G1Projective::msm(&full_pk.l_query, public_w)
@@ -602,31 +532,22 @@ impl Prover for PippengerProver {
         sparse_o: &[Vec<(u32, Fr)>],
         witness: &[Fr],
     ) -> (Proof, PublicInput) {
-        use crate::engine::build_witness_polys_sparse;
-
         let n_public = full_pk.vk.n_public;
 
-        // 1. Build witness polynomials l(x), r(x), o(x) from sparse constraints.
-        let d_size = engine.domain_size(n_constraints);
-        let domain = GeneralEvaluationDomain::<Fr>::new(d_size)
-            .expect("Failed to create evaluation domain");
-        let (l_poly, r_poly, o_poly) =
-            build_witness_polys_sparse(&domain, d_size, n_constraints, sparse_l, sparse_r, sparse_o, witness);
+        let (_l_poly, _r_poly, _o_poly, h) =
+            build_witness_polys_and_quotient_sparse(engine, n_constraints, sparse_l, sparse_r, sparse_o, witness);
 
-        let t = engine.target_poly(n_constraints);
-        let h = engine.compute_quotient(&l_poly, &r_poly, &o_poly, &t);
-
-        // 2. A = MSM(a_query, witness) + alpha_g1
+        // A = MSM(a_query, witness) + alpha_g1
         let a_proj = G1Projective::msm(&full_pk.a_query, witness)
             .expect("MSM length mismatch");
         let a = G1Affine::from(a_proj + G1Projective::from(full_pk.vk.alpha_g1));
 
-        // 3. B = MSM(b_g2_query, witness) + beta_g2
+        // B = MSM(b_g2_query, witness) + beta_g2
         let b_proj = G2Projective::msm(&full_pk.b_g2_query, witness)
             .expect("MSM length mismatch");
         let b = G2Affine::from(b_proj + G2Projective::from(full_pk.vk.beta_g2));
 
-        // 4. C = MSM(c_query[private], witness[private]) + MSM(h_query, h_coeffs)
+        // C = MSM(c_query[private], witness[private]) + MSM(h_query, h_coeffs)
         let private_c = &full_pk.c_query[n_public..];
         let private_w = &witness[n_public..];
         let c_private = G1Projective::msm(private_c, private_w)
@@ -642,7 +563,7 @@ impl Prover for PippengerProver {
 
         let c = G1Affine::from(c_private + h_c);
 
-        // 5. V = MSM(l_query, witness[public])
+        // V = MSM(l_query, witness[public])
         let public_w = &witness[..n_public];
         let v = G1Affine::from(
             G1Projective::msm(&full_pk.l_query, public_w)

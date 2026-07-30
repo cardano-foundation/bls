@@ -6,6 +6,7 @@ use ark_std::{One, Zero, vec::Vec};
 /// Lagrange interpolation for three fixed evaluation points x ∈ {0, 1, 2}.
 /// Given values y0, y1, y2 returns the unique degree ≤ 2 polynomial p(x)
 /// such that p(0)=y0, p(1)=y1, p(2)=y2.
+#[cfg(any(test, feature = "bins"))]
 pub fn interpolate_3_points(y0: Fr, y1: Fr, y2: Fr) -> DensePolynomial<Fr> {
     // Basis polynomials over xs = [0, 1, 2]:
     //   L0(x) = (x-1)(x-2)/2  = 1 - 3/2·x + 1/2·x^2
@@ -62,6 +63,7 @@ pub fn interpolate_points(xs: &[Fr], ys: &[Fr]) -> DensePolynomial<Fr> {
 
 /// Build the QAP polynomials u_i(x), v_i(x), w_i(x) by interpolating each
 /// column of L, R, O over the evaluation points {0, 1, ..., n_constraints-1}.
+#[cfg(any(test, feature = "bins"))]
 pub fn build_qap_polynomials(
     l: &[[u64; 8]],
     r: &[[u64; 8]],
@@ -92,6 +94,7 @@ pub fn build_qap_polynomials(
 }
 
 /// Build the QAP polynomials from a `Circuit` descriptor (dynamic matrices).
+#[cfg(any(test, feature = "bins"))]
 pub fn build_qap_polynomials_circuit(
     circuit: &crate::r1cs::Circuit,
 ) -> (Vec<DensePolynomial<Fr>>, Vec<DensePolynomial<Fr>>, Vec<DensePolynomial<Fr>>) {
@@ -119,6 +122,7 @@ pub fn build_qap_polynomials_circuit(
 
 /// Build the target polynomial T(x) = ∏(x - xi) for the given constraint points.
 /// For points [0, 1, 2] this yields x³ - 3x² + 2x.
+#[cfg(any(test, feature = "bins"))]
 pub fn build_target_polynomial(points: &[Fr]) -> DensePolynomial<Fr> {
     let mut result = DensePolynomial::from_coefficients_vec(vec![Fr::one()]);
     for &p in points {
@@ -130,6 +134,7 @@ pub fn build_target_polynomial(points: &[Fr]) -> DensePolynomial<Fr> {
 
 /// Pretty-print a polynomial with named coefficients.
 /// arkworks 0.4 formats Fr::zero() as an empty string, so we remap it to "0".
+#[cfg(any(test, feature = "bins"))]
 pub fn print_poly(name: &str, poly: &DensePolynomial<Fr>) {
     let coeffs: Vec<String> = poly
         .coeffs
