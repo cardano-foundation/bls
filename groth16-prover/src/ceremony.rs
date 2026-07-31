@@ -147,10 +147,15 @@ pub struct FullProvingKey {
     pub b_g2_query: Vec<G2Affine>,
     /// `delta_inv·(beta·u_i + alpha·v_i + w_i)(tau)·G1` for private variables
     pub c_query: Vec<G1Affine>,
-    /// `delta_inv·tau^j·T(tau)·G1` for j = 0..deg(h) — basis for the quotient commitment
+    /// `delta_inv·tau^j·T(tau)·G1` for j = 0..deg(h) — basis for the quotient commitment.
+    /// When `h_scalar` is `Some`, this vector may be empty (the prover uses the fast scalar path).
     pub h_query: Vec<G1Affine>,
     /// Public-input subset of `c_query` (same content as `vk.ic` but stored here for arkworks parity)
     pub l_query: Vec<G1Affine>,
+    /// NEW (Impl 7): `delta_inv * T(tau)` — replaces the entire h_query vector with a single scalar.
+    /// When present, the prover computes h_commitment as one scalar multiplication
+    /// instead of a multi-million-point MSM.
+    pub h_scalar: Option<Fr>,
 }
 
 /// Run the trusted-setup ceremony for a given circuit.
@@ -257,9 +262,10 @@ pub fn single_party_ceremony_full<E: QapEngine, T: Copy + Into<Fr>, L: AsRef<[T]
     o: &[O],
     n_public: usize,
     rng: &mut impl RngCore,
+    use_h_scalar: bool,
 ) -> (FullProvingKey, VerifyingKey) {
     let tw = ToxicWaste::random(rng);
-    single_party_ceremony_full_from_tw(engine, l, r, o, n_public, tw)
+    single_party_ceremony_full_from_tw(engine, l, r, o, n_public, tw, use_h_scalar)
 }
 
 /// Same as `single_party_ceremony_full` but accepts explicit `ToxicWaste`.
@@ -272,6 +278,7 @@ pub fn single_party_ceremony_full_from_tw<E: QapEngine, T: Copy + Into<Fr>, L: A
     o: &[O],
     n_public: usize,
     tw: ToxicWaste,
+    use_h_scalar: bool,
 ) -> (FullProvingKey, VerifyingKey) {
     let (us_tau, vs_tau, ws_tau) = engine.evaluate_qap_at_tau(l, r, o, tw.tau);
     let n_vars = us_tau.len();
@@ -281,7 +288,7 @@ pub fn single_party_ceremony_full_from_tw<E: QapEngine, T: Copy + Into<Fr>, L: A
         n_public,
         n_vars
     );
-    build_keys_from_qap_evals(engine, n_vars, n_public, l.len(), &us_tau, &vs_tau, &ws_tau, tw)
+    build_keys_from_qap_evals(engine, n_vars, n_public, l.len(), &us_tau, &vs_tau, &ws_tau, tw, use_h_scalar)
 }
 
 /// Same as `single_party_ceremony_full_from_tw` but accepts **sparse**
@@ -299,6 +306,7 @@ pub fn single_party_ceremony_full_from_tw_sparse(
     sparse_r: &[Vec<(u32, Fr)>],
     sparse_o: &[Vec<(u32, Fr)>],
     tw: ToxicWaste,
+    use_h_scalar: bool,
 ) -> (FullProvingKey, VerifyingKey) {
     use crate::engine::evaluate_qap_at_tau_sparse;
 
@@ -312,7 +320,7 @@ pub fn single_party_ceremony_full_from_tw_sparse(
         n_vars
     );
 
-    build_keys_from_qap_evals(engine, n_vars, n_public, n_constraints, &us_tau, &vs_tau, &ws_tau, tw)
+    build_keys_from_qap_evals(engine, n_vars, n_public, n_constraints, &us_tau, &vs_tau, &ws_tau, tw, use_h_scalar)
 }
 
 /// Build a `FullProvingKey` + `VerifyingKey` from per-variable QAP evaluations
@@ -327,6 +335,7 @@ fn build_keys_from_qap_evals(
     vs_tau: &[Fr],
     ws_tau: &[Fr],
     tw: ToxicWaste,
+    use_h_scalar: bool,
 ) -> (FullProvingKey, VerifyingKey) {
     // CRS fixed points
     let g1_proj = G1Projective::generator();
@@ -419,6 +428,7 @@ fn build_keys_from_qap_evals(
         c_query,
         h_query,
         l_query,
+        h_scalar: Some(h_scalar_base),
     };
 
     (full_pk, vk)
