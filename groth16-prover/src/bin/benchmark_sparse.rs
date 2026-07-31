@@ -140,7 +140,7 @@ fn bench_toy() {
 
     // Dense FullProvingKey
     let (pk_dense, _vk_dense) = single_party_ceremony_full_from_tw(
-        &engine, &dense.l, &dense.r, &dense.o, n_public, tw.clone(),
+        &engine, &dense.l, &dense.r, &dense.o, n_public, tw.clone(), false,
     );
 
     // Sparse FullProvingKey
@@ -153,6 +153,7 @@ fn bench_toy() {
         &sparse.r,
         &sparse.o,
         tw.clone(),
+        false,
     );
 
     // Verify keys match (parity check)
@@ -254,11 +255,11 @@ fn bench_real_circuit(name: &str, r1cs_path: &str, wtns_path: &str) {
     let tw = ToxicWaste::deterministic();
 
     let (pk_dense, _vk_dense) = single_party_ceremony_full_from_tw(
-        &engine, &dense.l, &dense.r, &dense.o, n_public, tw.clone(),
+        &engine, &dense.l, &dense.r, &dense.o, n_public, tw.clone(), false,
     );
     let (pk_sparse, _vk_sparse) = single_party_ceremony_full_from_tw_sparse(
         &engine, n_constraints, n_wires, n_public,
-        &sparse.l, &sparse.r, &sparse.o, tw.clone(),
+        &sparse.l, &sparse.r, &sparse.o, tw.clone(), false,
     );
 
     assert_eq!(pk_dense.a_query, pk_sparse.a_query, "PK mismatch on real circuit");

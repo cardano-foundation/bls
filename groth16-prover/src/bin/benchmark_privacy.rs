@@ -41,6 +41,7 @@ fn main() {
             gamma: Fr::from(11u64),
             delta: Fr::from(13u64),
         },
+        false,
     );
     println!("FullProvingKey generated (group elements only, no scalars)\n");
 

@@ -564,7 +564,7 @@ mod tests {
 
         // New FullProvingKey path (on-the-fly QAP construction)
         let (full_pk, _vk) = single_party_ceremony_full_from_tw(
-            &engine, &circuit.l, &circuit.r, &circuit.o, n_public, tw,
+            &engine, &circuit.l, &circuit.r, &circuit.o, n_public, tw, false,
         );
         let (proof_full, public_full) = naive.prove_with_full_pk(
             &engine,
@@ -679,7 +679,7 @@ mod tests {
         let n_public = 1 + dense.n_pub_out as usize + dense.n_pub_in as usize;
 
         let (pk_dense, vk_dense) = single_party_ceremony_full_from_tw(
-            &engine, &dense.l, &dense.r, &dense.o, n_public, tw.clone(),
+            &engine, &dense.l, &dense.r, &dense.o, n_public, tw.clone(), false,
         );
         let (pk_sparse, vk_sparse) = single_party_ceremony_full_from_tw_sparse(
             &engine,
@@ -690,6 +690,7 @@ mod tests {
             &sparse.r,
             &sparse.o,
             tw,
+            false,
         );
 
         assert_eq!(vk_dense.alpha_g1, vk_sparse.alpha_g1, "VK alpha_g1 mismatch");
@@ -726,7 +727,7 @@ mod tests {
         let n_public = 1 + dense.n_pub_out as usize + dense.n_pub_in as usize;
 
         let (pk_dense, _) = single_party_ceremony_full_from_tw(
-            &engine, &dense.l, &dense.r, &dense.o, n_public, tw.clone(),
+            &engine, &dense.l, &dense.r, &dense.o, n_public, tw.clone(), false,
         );
         let (pk_sparse, _) = single_party_ceremony_full_from_tw_sparse(
             &engine,
@@ -737,6 +738,7 @@ mod tests {
             &sparse.r,
             &sparse.o,
             tw,
+            false,
         );
 
         let prover = NaiveProver::new();
@@ -776,7 +778,7 @@ mod tests {
         let n_public = 1 + dense.n_pub_out as usize + dense.n_pub_in as usize;
 
         let (pk_dense, _) = single_party_ceremony_full_from_tw(
-            &engine, &dense.l, &dense.r, &dense.o, n_public, tw.clone(),
+            &engine, &dense.l, &dense.r, &dense.o, n_public, tw.clone(), false,
         );
         let (pk_sparse, _) = single_party_ceremony_full_from_tw_sparse(
             &engine,
@@ -833,6 +835,7 @@ mod tests {
             &sparse.r,
             &sparse.o,
             tw,
+            false,
         );
 
         let prover = PippengerProver::new();

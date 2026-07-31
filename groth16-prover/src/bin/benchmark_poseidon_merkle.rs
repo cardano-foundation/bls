@@ -67,6 +67,7 @@ fn main() {
         &circuit.o,
         n_public,
         tw.clone(),
+        false,
     );
     println!("FullProvingKey generated (group elements only, no scalars)\n");
 
