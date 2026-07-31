@@ -1145,6 +1145,9 @@ let (proof, public_input) = prover.prove_with_full_pk_sparse(
 
 ## Implementation 7 (h-query scalar compression + parallel proof assembly)
 
+<details>
+<summary><b>Implementation 7 — click to expand</b></summary>
+
 > **Status:** ⏳ **Planned.** Design complete; implementation pending.
 >
 > **Goal:** Cut the dominant proving cost — the `h_query` MSM — and overlap the remaining independent MSMs with Rayon parallelism.
@@ -1282,9 +1285,14 @@ The current ceremony runs **6 MSMs sequentially**. Each MSM already uses `FixedB
 
 Groth16 requires a **circuit-specific trusted setup**. Alternatives like PLONK + KZG or Halo2 (IPA) eliminate the per-circuit ceremony but trade larger proofs and higher verification cost. For Cardano, Groth16's **192-byte proof** and **~2–3 ms verification** is the current standard. Moving to PLONK would roughly double proof size and verification cost — acceptable for some use cases, but a regression for fee-sensitive ones.
 
+</details>
+
 ---
 
 ## Implementation 8 (Nova IVC + compression SNARK)
+
+<details>
+<summary><b>Implementation 8 — click to expand</b></summary>
 
 > **Status:** ⏳ **Planned.** Research complete; circuit redesign and prover integration pending.
 >
@@ -1421,6 +1429,8 @@ For **long-term research**:
 6. Evaluate FHE-based selective disclosure for quantum resistance (see `aiken/selective-disclosure`).
 
 > **Note on the ownership circuit.** The Cardano Ed25519 key ownership circuit (~1.97M constraints) already has a ceremony of only **~5 min** and proving of **~1.7 min** — a total of ~7 min e2e. This is already acceptable for dev/testnet workflows. The ~16 min Ed25519 full-signature ceremony is the outlier because SHA-512 in-circuit is expensive. If the use case is "prove I own this key" rather than "verify a signature", the bottleneck is already manageable.
+
+</details>
 
 ---
 
