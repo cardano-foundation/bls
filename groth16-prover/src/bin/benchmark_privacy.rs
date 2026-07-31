@@ -28,22 +28,20 @@ fn main() {
     // Generate FullProvingKey once (same as `ceremony-dev` CLI)
     let engine = FftQapEngine::new();
     let n_public = 1; // constant wire only
+    let tw = groth16_prover::ceremony::ToxicWaste {
+        tau: Fr::from(3u64),
+        alpha: Fr::from(5u64),
+        beta: Fr::from(7u64),
+        gamma: Fr::from(11u64),
+        delta: Fr::from(13u64),
+    };
     let (full_pk, _vk) = single_party_ceremony_full_from_tw(
-        &engine,
-        &circuit.l,
-        &circuit.r,
-        &circuit.o,
-        n_public,
-        groth16_prover::ceremony::ToxicWaste {
-            tau: Fr::from(3u64),
-            alpha: Fr::from(5u64),
-            beta: Fr::from(7u64),
-            gamma: Fr::from(11u64),
-            delta: Fr::from(13u64),
-        },
-        false,
+        &engine, &circuit.l, &circuit.r, &circuit.o, n_public, tw.clone(), false,
     );
-    println!("FullProvingKey generated (group elements only, no scalars)\n");
+    let (full_pk_h, _vk_h) = single_party_ceremony_full_from_tw(
+        &engine, &circuit.l, &circuit.r, &circuit.o, n_public, tw, true,
+    );
+    println!("FullProvingKey generated (legacy + h_scalar)\n");
 
     let iterations = 1u64;
 
@@ -54,6 +52,8 @@ fn main() {
     for _ in 0..1 {
         let _ = naive.prove_with_full_pk(&engine, &full_pk, &circuit.l, &circuit.r, &circuit.o, &circuit.witness);
         let _ = pippenger.prove_with_full_pk(&engine, &full_pk, &circuit.l, &circuit.r, &circuit.o, &circuit.witness);
+        let _ = naive.prove_with_full_pk(&engine, &full_pk_h, &circuit.l, &circuit.r, &circuit.o, &circuit.witness);
+        let _ = pippenger.prove_with_full_pk(&engine, &full_pk_h, &circuit.l, &circuit.r, &circuit.o, &circuit.witness);
     }
 
     // --- FFT + Naive (legacy scalar path, for comparison) ---
@@ -64,37 +64,56 @@ fn main() {
     }
     let t_legacy = start.elapsed();
 
-    // --- FFT + Naive (FullProvingKey) ---
+    // --- FFT + Naive (FullProvingKey legacy) ---
     let start = Instant::now();
     for _ in 0..iterations {
         let _ = naive.prove_with_full_pk(&engine, &full_pk, &circuit.l, &circuit.r, &circuit.o, &circuit.witness);
     }
     let t_fft_naive = start.elapsed();
 
-    // --- FFT + Pippenger (FullProvingKey) ---
+    // --- FFT + Pippenger (FullProvingKey legacy) ---
     let start = Instant::now();
     for _ in 0..iterations {
         let _ = pippenger.prove_with_full_pk(&engine, &full_pk, &circuit.l, &circuit.r, &circuit.o, &circuit.witness);
     }
     let t_fft_pippenger = start.elapsed();
 
+    // --- FFT + Naive (FullProvingKey h_scalar) ---
+    let start = Instant::now();
+    for _ in 0..iterations {
+        let _ = naive.prove_with_full_pk(&engine, &full_pk_h, &circuit.l, &circuit.r, &circuit.o, &circuit.witness);
+    }
+    let t_fft_naive_h = start.elapsed();
+
+    // --- FFT + Pippenger (FullProvingKey h_scalar) ---
+    let start = Instant::now();
+    for _ in 0..iterations {
+        let _ = pippenger.prove_with_full_pk(&engine, &full_pk_h, &circuit.l, &circuit.r, &circuit.o, &circuit.witness);
+    }
+    let t_fft_pippenger_h = start.elapsed();
+
     println!("Iterations: {}\n", iterations);
-    println!("| Path             | Engine         | Prover          | Total time | Per-proof |");
-    println!("|------------------|----------------|-----------------|------------|-----------|");
+    println!("| Path             | Engine         | Prover          | h_scalar? | Total time | Per-proof |");
+    println!("|------------------|----------------|-----------------|-----------|------------|-----------|");
     println!(
-        "| Legacy (scalars) | FftQapEngine   | NaiveProver     | {:?} | {:?} |",
-        t_legacy,
-        t_legacy / iterations as u32
+        "| Legacy (scalars)       | FftQapEngine | NaiveProver     | no  | {:?} | {:?} |",
+        t_legacy, t_legacy / iterations as u32
     );
     println!(
-        "| FullProvingKey   | FftQapEngine   | NaiveProver     | {:?} | {:?} |",
-        t_fft_naive,
-        t_fft_naive / iterations as u32
+        "| FullProvingKey (legacy)| FftQapEngine | NaiveProver     | no  | {:?} | {:?} |",
+        t_fft_naive, t_fft_naive / iterations as u32
     );
     println!(
-        "| FullProvingKey   | FftQapEngine   | PippengerProver | {:?} | {:?} |",
-        t_fft_pippenger,
-        t_fft_pippenger / iterations as u32
+        "| FullProvingKey (legacy)| FftQapEngine | PippengerProver | no  | {:?} | {:?} |",
+        t_fft_pippenger, t_fft_pippenger / iterations as u32
+    );
+    println!(
+        "| FullProvingKey (h_scalar)| FftQapEngine | NaiveProver     | yes | {:?} | {:?} |",
+        t_fft_naive_h, t_fft_naive_h / iterations as u32
+    );
+    println!(
+        "| FullProvingKey (h_scalar)| FftQapEngine | PippengerProver | yes | {:?} | {:?} |",
+        t_fft_pippenger_h, t_fft_pippenger_h / iterations as u32
     );
 
     println!("\n✅ Privacy circuit benchmarks complete.");
