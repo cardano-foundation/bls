@@ -84,7 +84,8 @@ pub fn compute_spend_inputs(
     };
 
     let commitment = mimc2(nullifier_fr, nonce);
-    let path = tree.path(commitment);
+    let path = tree.path(commitment)
+        .ok_or("Commitment not found in tree (internal error)")?;
 
     let siblings: Vec<String> = path.iter().map(|(s, _)| s.to_string()).collect();
     let directions: Vec<String> = path.iter().map(|(_, d)| if *d { "1".to_string() } else { "0".to_string() }).collect();

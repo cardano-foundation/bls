@@ -23,6 +23,7 @@ rayon = "1.7"
 
 [dev-dependencies]
 ark-std = { version = "0.4", features = ["std"] }
+proptest = "1.4"
 
 [[bin]]
 name = "print_proof_pippenger"

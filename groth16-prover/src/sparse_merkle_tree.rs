@@ -70,11 +70,10 @@ impl SparseMerkleTree {
     ///
     /// The path is a vector of `(sibling, direction)` pairs from leaf to root.
     /// `direction` is `true` when the sibling is on the left.
-    pub fn path(&self, item: Fr) -> Vec<(Fr, bool)> {
+    /// Returns `None` if the item is not in the tree.
+    pub fn path(&self, item: Fr) -> Option<Vec<(Fr, bool)>> {
         let item_key = fr_to_key(item);
-        let Some(&index) = self.leaf_indices.get(&item_key) else {
-            panic!("Item {} not found in tree", item);
-        };
+        let &index = self.leaf_indices.get(&item_key)?;
 
         let mut level = self.depth;
         let mut idx = index;
@@ -87,7 +86,7 @@ impl SparseMerkleTree {
             let sibling = self.node(level + 1, sibling_idx);
             path.push((sibling, direction));
         }
-        path
+        Some(path)
     }
 
     fn node(&self, level: usize, index: usize) -> Fr {
@@ -110,6 +109,7 @@ fn node_key(level: usize, index: usize) -> String {
 mod tests {
     use super::*;
     use ark_std::Zero;
+    use proptest::prelude::*;
 
     #[test]
     fn test_empty_tree_digest() {
@@ -123,7 +123,80 @@ mod tests {
         let mut tree = SparseMerkleTree::new(2);
         let item = Fr::from(42u64);
         tree.insert(item);
-        let path = tree.path(item);
+        let path = tree.path(item).unwrap();
         assert_eq!(path.len(), 2);
+    }
+
+    /// Recompute the root from a leaf and its Merkle path.
+    ///
+    /// `direction` is `true` when the sibling is on the **left**.
+    fn recompute_root(leaf: Fr, path: &[(Fr, bool)]) -> Fr {
+        let mut current = leaf;
+        for (sibling, direction) in path {
+            current = if *direction {
+                // sibling is on the left
+                mimc2(*sibling, current)
+            } else {
+                // sibling is on the right
+                mimc2(current, *sibling)
+            };
+        }
+        current
+    }
+
+    proptest! {
+        #[test]
+        fn prop_path_hashes_to_root(item in 1u64..1000u64) {
+            let mut tree = SparseMerkleTree::new(4);
+            let fr = Fr::from(item);
+            tree.insert(fr);
+            let path = tree.path(fr).unwrap();
+            let root = recompute_root(fr, &path);
+            prop_assert_eq!(root, tree.digest());
+        }
+
+        #[test]
+        fn prop_multiple_items_path_verifies(
+            items in prop::collection::hash_set(1u64..1000u64, 1..10)
+        ) {
+            let mut tree = SparseMerkleTree::new(4);
+            let frs: Vec<Fr> = items.iter().map(|&i| Fr::from(i)).collect();
+            for fr in &frs {
+                tree.insert(*fr);
+            }
+            for fr in &frs {
+                let path = tree.path(*fr).unwrap();
+                let root = recompute_root(*fr, &path);
+                prop_assert_eq!(root, tree.digest());
+            }
+        }
+
+        #[test]
+        fn prop_rebuild_tree_same_digest(
+            items in prop::collection::hash_set(1u64..1000u64, 1..10)
+        ) {
+            let mut tree1 = SparseMerkleTree::new(4);
+            let frs: Vec<Fr> = items.iter().map(|&i| Fr::from(i)).collect();
+            for fr in &frs {
+                tree1.insert(*fr);
+            }
+            let mut tree2 = SparseMerkleTree::new(4);
+            for fr in &frs {
+                tree2.insert(*fr);
+            }
+            prop_assert_eq!(tree1.digest(), tree2.digest());
+        }
+
+        #[test]
+        fn prop_missing_leaf_returns_none(
+            items in prop::collection::hash_set(1u64..1000u64, 1..10),
+            missing in 1001u64..2000u64
+        ) {
+            let mut tree = SparseMerkleTree::new(4);
+            for &i in &items {
+                tree.insert(Fr::from(i));
+            }
+            prop_assert!(tree.path(Fr::from(missing)).is_none());
+        }
     }
 }
