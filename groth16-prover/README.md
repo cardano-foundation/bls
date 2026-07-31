@@ -272,11 +272,20 @@ The CLI includes an insert-only sparse Merkle tree backed by MiMC(x⁷) over BLS
 # Insert items and persist tree state
 cargo run --release -- smt insert --depth 2 --items "1,2,3" --state /tmp/smt.json
 
+# Bulk insert from a transcript file
+cargo run --release -- smt insert --depth 2 --transcript transcript.txt --state /tmp/smt.json
+
 # Print the current Merkle root
 cargo run --release -- smt digest --state /tmp/smt.json
 
 # Print the Merkle path for a leaf
-cargo run --release -- smt path --state /tmp/smt.json --index 1
+cargo run --release -- smt path --state /tmp/smt.json --leaf <commitment>
+
+# Verify a Merkle path hashes back to the stored digest
+cargo run --release -- smt verify --state /tmp/smt.json --leaf <commitment>
+
+# Export witness input.json for the Privacy circuit
+cargo run --release -- smt export --state /tmp/smt.json --nullifier 1 --out input.json
 ```
 
 See [`cli/README.md`](cli/README.md) for full CLI documentation, including proof serialization format, proving key structure, and complete end-to-end examples.
@@ -1447,7 +1456,7 @@ For **long-term research**:
   1. **Poseidon hash** — demonstrate hash pre-image knowledge inside a Groth16 proof.  
      **Status:** ✅ **Complete.** A `PoseidonPreimage` circuit lives in `circom/PoseidonPreimage/`. It uses a BLS12-381 Poseidon permutation (t=3, alpha=5, RF=8, RP=57) with round constants and MDS matrix from ZeroJ's `PoseidonParamsBLS12_381T3`. The circuit proves `hash_commitment = Poseidon(pre_image, 0)` without revealing `pre_image`. See [`circom/PoseidonPreimage/README.md`](circom/PoseidonPreimage/README.md) for the full step-by-step walkthrough.
   2. **Merkle membership** — prove that a leaf exists in a Merkle tree without revealing the leaf or the path.  
-     **Status:** ✅ **Complete.** A shielded-spend circuit (`Spend(depth)`) based on Stanford CS251 Project #4 lives in `circom/Privacy/`. It uses MiMC(x⁷) hashing and `SelectiveSwitch` gadgets to verify a Merkle path. A depth-2 wrapper (`spend_depth2.circom`) has been compiled with `circom --r1cs --wasm` and the full pipeline is working end-to-end: witness-input generation (via `compute-inputs` CLI or Rust library), witness calculation (snarkjs), dev ceremony, proof generation (`prove` CLI with FFT + Pippenger), off-chain verification (`verify` CLI), and on-chain verification (Aiken test in `aiken/groth16/lib/groth16/verifier.ak`). The CLI also includes `smt insert` / `smt digest` / `smt path` commands for sparse Merkle tree operations backed by the same MiMC(x⁷) hash. See [`circom/Privacy/README.md`](circom/Privacy/README.md) for the full step-by-step walkthrough.
+     **Status:** ✅ **Complete.** A shielded-spend circuit (`Spend(depth)`) based on Stanford CS251 Project #4 lives in `circom/Privacy/`. It uses MiMC(x⁷) hashing and `SelectiveSwitch` gadgets to verify a Merkle path. A depth-2 wrapper (`spend_depth2.circom`) has been compiled with `circom --r1cs --wasm` and the full pipeline is working end-to-end: witness-input generation (via `compute-inputs` CLI or Rust library), witness calculation (snarkjs), dev ceremony, proof generation (`prove` CLI with FFT + Pippenger), off-chain verification (`verify` CLI), and on-chain verification (Aiken test in `aiken/groth16/lib/groth16/verifier.ak`). The CLI also includes `smt insert` / `smt digest` / `smt path` / `smt verify` / `smt export` commands for sparse Merkle tree operations backed by the same MiMC(x⁷) hash, plus bulk loading via `--transcript`. See [`circom/Privacy/README.md`](circom/Privacy/README.md) for the full step-by-step walkthrough.
   3. **Range proof / comparison** — prove that a committed value lies in a range `[0, 2^n)`.  
      **Status:** ✅ **Complete.** Two circuits in `circom/RangeProof/`: `RangeProofSimple(n)` (public value, ~n constraints) and `RangeProofCommitted(n)` (Poseidon commitment, ~n+250 constraints). Both compile, generate witnesses, and produce valid Groth16 proofs end-to-end on BLS12-381. See [`circom/RangeProof/README.md`](circom/RangeProof/README.md) for full pipeline and the JSON string-precision caveat.
    4. **EdDSA / JubJub signature** — verify a signature inside the circuit (requires JubJub curve gadgets).  

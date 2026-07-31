@@ -1156,7 +1156,7 @@ fn smt_insert_and_digest() {
     cmd_insert
         .assert()
         .success()
-        .stderr(predicate::str::contains("Inserted items into SMT"))
+        .stderr(predicate::str::contains("Inserted"))
         .stderr(predicate::str::contains("digest:"));
 
     // Verify state file was written and contains valid JSON
@@ -1199,7 +1199,7 @@ fn smt_insert_raw_commitments() {
 
     cmd.assert()
         .success()
-        .stderr(predicate::str::contains("Inserted items into SMT"));
+        .stderr(predicate::str::contains("Inserted"));
 
     let state_text = fs::read_to_string(state_file.path()).unwrap();
     let state_json: serde_json::Value = serde_json::from_str(&state_text).unwrap();
@@ -1219,12 +1219,12 @@ fn smt_path_prints_digest() {
         .arg("--depth")
         .arg("2")
         .arg("--items")
-        .arg("1 100")
+        .arg("42")
         .arg("--state")
         .arg(state_file.path());
     cmd_insert.assert().success();
 
-    // Now query path
+    // Now query path for the inserted leaf
     let mut cmd_path = Command::cargo_bin("groth16-prover").unwrap();
     cmd_path
         .arg("smt")
@@ -1232,11 +1232,12 @@ fn smt_path_prints_digest() {
         .arg("--state")
         .arg(state_file.path())
         .arg("--leaf")
-        .arg("1");
+        .arg("42");
     cmd_path
         .assert()
         .success()
-        .stdout(predicate::str::contains("digest:"));
+        .stdout(predicate::str::contains("digest:"))
+        .stdout(predicate::str::contains("level 0:"));
 }
 
 #[test]
@@ -1250,6 +1251,140 @@ fn smt_missing_state_file() {
     cmd.assert()
         .failure()
         .stderr(predicate::str::contains("failed to read state file"));
+}
+
+#[test]
+fn smt_verify_valid_path() {
+    let state_file = NamedTempFile::new().unwrap();
+
+    // Insert raw commitments
+    let mut cmd_insert = Command::cargo_bin("groth16-prover").unwrap();
+    cmd_insert
+        .arg("smt")
+        .arg("insert")
+        .arg("--depth")
+        .arg("2")
+        .arg("--items")
+        .arg("10,20")
+        .arg("--state")
+        .arg(state_file.path());
+    cmd_insert.assert().success();
+
+    // Verify path for a known commitment
+    let mut cmd_verify = Command::cargo_bin("groth16-prover").unwrap();
+    cmd_verify
+        .arg("smt")
+        .arg("verify")
+        .arg("--state")
+        .arg(state_file.path())
+        .arg("--leaf")
+        .arg("10");
+    cmd_verify
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("VALID"));
+}
+
+#[test]
+fn smt_verify_invalid_path() {
+    let state_file = NamedTempFile::new().unwrap();
+
+    let mut cmd_insert = Command::cargo_bin("groth16-prover").unwrap();
+    cmd_insert
+        .arg("smt")
+        .arg("insert")
+        .arg("--depth")
+        .arg("2")
+        .arg("--items")
+        .arg("10,20")
+        .arg("--state")
+        .arg(state_file.path());
+    cmd_insert.assert().success();
+
+    // Verify path for a leaf NOT in the tree
+    let mut cmd_verify = Command::cargo_bin("groth16-prover").unwrap();
+    cmd_verify
+        .arg("smt")
+        .arg("verify")
+        .arg("--state")
+        .arg(state_file.path())
+        .arg("--leaf")
+        .arg("999");
+    cmd_verify
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("INVALID"))
+        .stdout(predicate::str::contains("not found in tree"));
+}
+
+#[test]
+fn smt_export_creates_input_json() {
+    let state_file = NamedTempFile::new().unwrap();
+    let input_file = NamedTempFile::new().unwrap();
+
+    let mut cmd_insert = Command::cargo_bin("groth16-prover").unwrap();
+    cmd_insert
+        .arg("smt")
+        .arg("insert")
+        .arg("--depth")
+        .arg("2")
+        .arg("--items")
+        .arg("1 100,2 200")
+        .arg("--state")
+        .arg(state_file.path());
+    cmd_insert.assert().success();
+
+    let mut cmd_export = Command::cargo_bin("groth16-prover").unwrap();
+    cmd_export
+        .arg("smt")
+        .arg("export")
+        .arg("--state")
+        .arg(state_file.path())
+        .arg("--nullifier")
+        .arg("1")
+        .arg("--out")
+        .arg(input_file.path());
+    cmd_export
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Witness input written to"));
+
+    let input_text = fs::read_to_string(input_file.path()).unwrap();
+    let input_json: serde_json::Value = serde_json::from_str(&input_text).unwrap();
+    assert!(input_json["digest"].as_str().unwrap().len() > 0);
+    assert_eq!(input_json["nullifier"], "1");
+    assert!(input_json["nonce"].as_str().unwrap().len() > 0);
+}
+
+#[test]
+fn smt_insert_from_transcript_file() {
+    let state_file = NamedTempFile::new().unwrap();
+    let transcript_file = NamedTempFile::new().unwrap();
+
+    fs::write(
+        transcript_file.path(),
+        "1 100\n2 200\n3 300\n",
+    ).unwrap();
+
+    let mut cmd = Command::cargo_bin("groth16-prover").unwrap();
+    cmd.arg("smt")
+        .arg("insert")
+        .arg("--depth")
+        .arg("2")
+        .arg("--transcript")
+        .arg(transcript_file.path())
+        .arg("--state")
+        .arg(state_file.path());
+
+    cmd.assert()
+        .success()
+        .stderr(predicate::str::contains("Inserted 3 item(s) into SMT"));
+
+    let state_text = fs::read_to_string(state_file.path()).unwrap();
+    let state_json: serde_json::Value = serde_json::from_str(&state_text).unwrap();
+    assert_eq!(state_json["depth"], 2);
+    assert!(state_json["digest"].as_str().unwrap().len() > 0);
+    assert_eq!(state_json["items"].as_array().unwrap().len(), 3);
 }
 
 // ------------------------------------------------------------------

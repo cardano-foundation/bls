@@ -16,7 +16,7 @@ This CLI covers everything from trusted-setup ceremonies (both dev and multi-par
 | `verify` | Verify a proof against its public input |
 | `export-vk` | Convert a binary `.vk` to Aiken source code |
 | `compute-inputs` | Build private Merkle-path JSON for the Spend(depth) circuit |
-| `smt` | Sparse Merkle Tree operations (insert, digest, path) |
+| `smt` | Sparse Merkle Tree operations (insert, digest, path, verify, export) |
 
 ### Quickest possible workflow (dev ceremony)
 
@@ -287,19 +287,36 @@ groth16-prover smt insert \
   --items "1 100,2 200,3 300" \
   --state smt.json
 
+# Bulk insert from a transcript file (one item per line)
+groth16-prover smt insert \
+  --depth 2 \
+  --transcript transcript.txt \
+  --state smt.json
+
 # Print the current Merkle root
 groth16-prover smt digest --state smt.json
 
-# Print the Merkle path for a leaf
+# Print the Merkle path for a leaf (rebuilds tree from transcript)
 groth16-prover smt path --state smt.json --leaf <commitment>
+
+# Verify a Merkle path hashes back to the stored digest
+groth16-prover smt verify --state smt.json --leaf <commitment>
+
+# Export input.json for the Privacy circuit
+groth16-prover smt export \
+  --state smt.json \
+  --nullifier 1 \
+  --out input.json
 ```
 
-**Item syntax:** each item is either a single field element (raw commitment) or two space-separated values (`nullifier nonce`). Items are comma-separated.
+**Item syntax:** each item is either a single field element (raw commitment) or two space-separated values (`nullifier nonce`). Items are comma-separated when passed via `--items`, or one per line when passed via `--transcript`.
 
 **What happens under the hood:**
-1. `insert` — create a `SparseMerkleTree` of the given depth, hash each item with `MiMC(x⁷)` if needed, insert the commitments, and persist the depth and root digest to a JSON state file.
+1. `insert` — create a `SparseMerkleTree` of the given depth, hash each item with `MiMC(x⁷)` if needed, insert the commitments, and persist the depth, root digest, and full transcript to a JSON state file.
 2. `digest` — load the persisted state and print the root digest.
-3. `path` — load the state and (in a full implementation) rebuild the tree to retrieve the sibling hashes and direction bits for the requested leaf. The current implementation prints the digest and refers the user to `compute-inputs` for end-to-end witness generation.
+3. `path` — rebuild the tree from the persisted transcript and print the sibling hashes and direction bits for the requested leaf.
+4. `verify` — rebuild the tree, retrieve the path for the leaf, and recompute the root from the leaf + path. Prints `VALID` if the recomputed root matches the stored digest, otherwise `INVALID`.
+5. `export` — rebuild the tree, look up the target nullifier in the transcript, and emit `input.json` with `digest`, `nullifier`, `nonce`, `sibling[N]`, and `direction[N]` fields ready for the Spend circuit.
 
 </details>
 
