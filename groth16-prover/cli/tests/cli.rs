@@ -1673,3 +1673,166 @@ fn compute_inputs_missing_transcript() {
         .failure()
         .stderr(predicate::str::contains("failed to read transcript"));
 }
+
+// ------------------------------------------------------------------
+// AnonymousAirdrop end-to-end test
+// ------------------------------------------------------------------
+
+fn airdrop_input_json_accepted() -> String {
+    // Carol: nullifier=3, nonce=300, score=120, minScore=100
+    // SMT built from credentials (1,100,85), (2,200,42), (3,300,120)
+    r#"{
+  "digest": "11532464310312174561046533224304711315458591992375104258711270731788815721034",
+  "minScore": "100",
+  "nullifier": "3",
+  "nonce": "300",
+  "score": "120",
+  "sibling": ["0", "47252287271164011656207288696370005352642778257683443251406641354340159993877"],
+  "direction": ["0", "1"]
+}"#.to_string()
+}
+
+fn airdrop_input_json_rejected() -> String {
+    // Bob: nullifier=2, nonce=200, score=42, minScore=100
+    r#"{
+  "digest": "11532464310312174561046533224304711315458591992375104258711270731788815721034",
+  "minScore": "100",
+  "nullifier": "2",
+  "nonce": "200",
+  "score": "42",
+  "sibling": ["35160131748704873718595568135151760221085503677314381633708407820008083539060", "17658844911186938366405770927670297620261209849670034280597915862109464511349"],
+  "direction": ["1", "0"]
+}"#.to_string()
+}
+
+/// Full pipeline for the AnonymousAirdrop circuit:
+///   generate input.json → snarkjs witness → ceremony-dev → prove → verify
+///
+/// Skips if snarkjs or compiled circom artifacts are not present.
+#[test]
+fn anonymous_airdrop_e2e_accepted() {
+    let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let repo_root = manifest_dir.parent().unwrap();
+    let airdrop_dir = repo_root.join("circom/AnonymousAirdrop");
+    let r1cs = airdrop_dir.join("anonymous_airdrop_depth2.r1cs");
+    let wasm = airdrop_dir.join("anonymous_airdrop_depth2_js/anonymous_airdrop_depth2.wasm");
+
+    if !r1cs.exists() || !wasm.exists() {
+        eprintln!("AnonymousAirdrop compiled artifacts missing; skipping e2e test");
+        return;
+    }
+
+    if std::process::Command::new("snarkjs").arg("--version").output().is_err() {
+        eprintln!("snarkjs not installed; skipping e2e test");
+        return;
+    }
+
+    let input_file = NamedTempFile::new().unwrap();
+    fs::write(input_file.path(), airdrop_input_json_accepted()).unwrap();
+
+    let wtns_file = NamedTempFile::new().unwrap();
+    let pk_file = NamedTempFile::new().unwrap();
+    let vk_file = NamedTempFile::new().unwrap();
+    let proof_file = NamedTempFile::new().unwrap();
+
+    // 1. Generate witness with snarkjs
+    let mut snarkjs = std::process::Command::new("snarkjs");
+    snarkjs
+        .arg("wtns")
+        .arg("calculate")
+        .arg(&wasm)
+        .arg(input_file.path())
+        .arg(wtns_file.path());
+    let out = snarkjs.output().expect("snarkjs failed");
+    assert!(
+        out.status.success(),
+        "snarkjs witness generation failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    // 2. Dev ceremony
+    let mut cmd_ceremony = Command::cargo_bin("groth16-prover").unwrap();
+    cmd_ceremony
+        .arg("ceremony-dev")
+        .arg("--circuit")
+        .arg(&r1cs)
+        .arg("--proving-key")
+        .arg(pk_file.path())
+        .arg("--verifying-key")
+        .arg(vk_file.path());
+    cmd_ceremony.assert().success();
+
+    // 3. Prove
+    let mut cmd_prove = Command::cargo_bin("groth16-prover").unwrap();
+    cmd_prove
+        .arg("prove")
+        .arg("--circuit")
+        .arg(&r1cs)
+        .arg("--witness")
+        .arg(wtns_file.path())
+        .arg("--proving-key")
+        .arg(pk_file.path())
+        .arg("--out")
+        .arg(proof_file.path());
+    cmd_prove.assert().success();
+
+    // 4. Verify
+    let pub_file = proof_file.path().with_extension("pub");
+    let mut cmd_verify = Command::cargo_bin("groth16-prover").unwrap();
+    cmd_verify
+        .arg("verify")
+        .arg("--proof")
+        .arg(proof_file.path())
+        .arg("--public")
+        .arg(&pub_file)
+        .arg("--verifying-key")
+        .arg(vk_file.path());
+    cmd_verify
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("VALID"));
+}
+
+/// Rejected case: score < minScore should fail at witness generation.
+#[test]
+fn anonymous_airdrop_e2e_rejected() {
+    let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let repo_root = manifest_dir.parent().unwrap();
+    let airdrop_dir = repo_root.join("circom/AnonymousAirdrop");
+    let wasm = airdrop_dir.join("anonymous_airdrop_depth2_js/anonymous_airdrop_depth2.wasm");
+
+    if !wasm.exists() {
+        eprintln!("AnonymousAirdrop WASM artifact missing; skipping rejected e2e test");
+        return;
+    }
+
+    if std::process::Command::new("snarkjs").arg("--version").output().is_err() {
+        eprintln!("snarkjs not installed; skipping rejected e2e test");
+        return;
+    }
+
+    let input_file = NamedTempFile::new().unwrap();
+    fs::write(input_file.path(), airdrop_input_json_rejected()).unwrap();
+
+    let wtns_file = NamedTempFile::new().unwrap();
+
+    let mut snarkjs = std::process::Command::new("snarkjs");
+    snarkjs
+        .arg("wtns")
+        .arg("calculate")
+        .arg(&wasm)
+        .arg(input_file.path())
+        .arg(wtns_file.path());
+    let out = snarkjs.output().expect("snarkjs failed");
+
+    // Witness generation must fail because score (42) < minScore (100)
+    assert!(
+        !out.status.success(),
+        "Expected witness generation to fail for rejected input, but it succeeded"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("Assert Failed") || stderr.contains("Error"),
+        "Expected assertion error, got: {}", stderr
+    );
+}

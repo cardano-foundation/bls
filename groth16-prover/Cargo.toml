@@ -54,3 +54,8 @@ required-features = ["bins"]
 name = "benchmark_poseidon_merkle"
 path = "src/bin/benchmark_poseidon_merkle.rs"
 required-features = ["bins"]
+
+[[bin]]
+name = "compute_airdrop_inputs"
+path = "src/bin/compute_airdrop_inputs.rs"
+required-features = ["privacy"]
