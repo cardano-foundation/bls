@@ -1560,8 +1560,14 @@ Proof-production time for the hard-coded 3-constraint circuit (`x1·x2 = x5`, `x
 | 5a (Circom Full PK) | `FftQapEngine` | `NaiveProver` | **1.74 ms** | 2.29× | 3.20× | 2.30× |
 | 5b (Circom Full PK Pippenger) | `FftQapEngine` | `PippengerProver` | **1.72 ms** | 2.32× | 3.23× | 2.33× |
 | 6 (sparse Full PK Pippenger) | `FftQapEngine` | `PippengerProver` | **1.59 ms** | 2.51× | 3.50× | 2.52× |
+| 7a (h_scalar Naive) | `FftQapEngine` | `NaiveProver` | **1.23 ms** | 3.24× | 4.52× | 3.23× |
+| 7b (h_scalar Pippenger) | `FftQapEngine` | `PippengerProver` | **5.78 ms** | 0.69× | 0.96× | 0.69× |
+| 7c (sparse h_scalar Naive) | `FftQapEngine` | `NaiveProver` | **1.26 ms** | 3.17× | 4.41× | 3.17× |
+| 7d (sparse h_scalar Pippenger) | `FftQapEngine` | `PippengerProver` | **4.63 ms** | 0.86× | 1.20× | 0.86× |
 
 > **What the numbers mean.** For a 3-gate circuit the FFT overhead (padding to 4 points, extra IFFT steps) outweighs its `O(N log N)` advantage, so Implementation 2 is slightly slower than Implementation 1. Pippenger's batched MSM yields a modest ~48 % speedup over naive FFT at this tiny scale. The Circom adapter parser overhead is now negligible in `--release` mode, so Implementations 4a–4c match the hard-coded-matrix timings. Implementation 5 moves to the group-element-only `FullProvingKey` path: the on-the-fly QAP construction is negligible for 8 wires, but the pre-computed `a_query`, `b_g2_query`, `c_query` and `l_query` points eliminate the per-proof QAP evaluation at `tau` and make the proof roughly 2.3–3.3× faster than every scalar path. On realistic circuits with hundreds or thousands of gates, the combined FFT + FullProvingKey + Pippenger path is the fastest production configuration.
+>
+> **Implementation 7** on the tiny toy circuit shows the h_scalar benefit clearly for Naive (~3× faster, because the h_query MSM is scalar-by-scalar) but not for Pippenger (~6 % improvement on dense, ~30 % on sparse), since the h_query MSM already uses batched Pippenger and is tiny at this scale. The real speedup appears on large circuits where h_query has millions of points.
 >
 > **Implementation 6** at this scale is effectively the same speed as Implementation 5 because the sparse overhead (iterating triplets instead of dense columns) is negligible for 9 non-zero entries. The benefit only becomes visible once the dense matrices grow large enough that allocation and zero-filling dominate.
 >
