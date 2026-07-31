@@ -1,12 +1,15 @@
 //! `benchmark_poseidon_merkle` — benchmark proof generation for the PoseidonMerkle depth-2 circuit.
 //!
 //! Loads the real `circom/PoseidonMerkle/poseidon_merkle_depth2.r1cs` +
-//! `witness.wtns` artifacts from disk, then times all five Circom prover paths:
+//! `witness.wtns` artifacts from disk, then times all Circom prover paths
+//! including the h_scalar fast path (Implementation 7).
 //!
 //!   4b. Circom + FftQapEngine   + NaiveProver      (scalar path)
 //!   4c. Circom + FftQapEngine   + PippengerProver  (scalar path)
-//!   5a. Circom + FftQapEngine   + NaiveProver      + FullProvingKey
-//!   5b. Circom + FftQapEngine   + PippengerProver  + FullProvingKey
+//!   5a. Circom + FftQapEngine   + NaiveProver      + FullProvingKey (legacy)
+//!   5b. Circom + FftQapEngine   + PippengerProver  + FullProvingKey (legacy)
+//!   7a. Circom + FftQapEngine   + NaiveProver      + FullProvingKey (h_scalar)
+//!   7b. Circom + FftQapEngine   + PippengerProver  + FullProvingKey (h_scalar)
 //!
 //! Note: `DenseQapEngine` is hard-coded for the 3-gate toy circuit, so the
 //! dense Circom path (4a) is not included for this 1,911-constraint circuit.
@@ -59,7 +62,7 @@ fn main() {
     let naive = NaiveProver::new();
     let pippenger = PippengerProver::new();
 
-    // Generate the group-element-only FullProvingKey once.
+    // Generate the group-element-only FullProvingKey once (legacy and h_scalar).
     let (full_pk, _vk) = single_party_ceremony_full_from_tw(
         &fft,
         &circuit.l,
@@ -69,55 +72,38 @@ fn main() {
         tw.clone(),
         false,
     );
-    println!("FullProvingKey generated (group elements only, no scalars)\n");
+    let (full_pk_h, _vk_h) = single_party_ceremony_full_from_tw(
+        &fft,
+        &circuit.l,
+        &circuit.r,
+        &circuit.o,
+        n_public,
+        tw.clone(),
+        true,
+    );
+    println!("FullProvingKey generated (legacy + h_scalar)\n");
 
     // Warm-up: one proof for each path so caches / allocators are hot.
     let _ = naive.prove(
-        &fft,
-        &circuit.l,
-        &circuit.r,
-        &circuit.o,
-        &circuit.witness,
-        tw.tau,
-        tw.alpha,
-        tw.beta,
-        tw.gamma,
-        tw.delta,
+        &fft, &circuit.l, &circuit.r, &circuit.o, &circuit.witness,
+        tw.tau, tw.alpha, tw.beta, tw.gamma, tw.delta,
     );
     let _ = pippenger.prove(
-        &fft,
-        &circuit.l,
-        &circuit.r,
-        &circuit.o,
-        &circuit.witness,
-        tw.tau,
-        tw.alpha,
-        tw.beta,
-        tw.gamma,
-        tw.delta,
+        &fft, &circuit.l, &circuit.r, &circuit.o, &circuit.witness,
+        tw.tau, tw.alpha, tw.beta, tw.gamma, tw.delta,
     );
-    let _ = naive.prove_with_full_pk(
-        &fft,
-        &full_pk,
-        &circuit.l,
-        &circuit.r,
-        &circuit.o,
-        &circuit.witness,
-    );
-    let _ = pippenger.prove_with_full_pk(
-        &fft,
-        &full_pk,
-        &circuit.l,
-        &circuit.r,
-        &circuit.o,
-        &circuit.witness,
-    );
+    let _ = naive.prove_with_full_pk(&fft, &full_pk, &circuit.l, &circuit.r, &circuit.o, &circuit.witness);
+    let _ = pippenger.prove_with_full_pk(&fft, &full_pk, &circuit.l, &circuit.r, &circuit.o, &circuit.witness);
+    let _ = naive.prove_with_full_pk(&fft, &full_pk_h, &circuit.l, &circuit.r, &circuit.o, &circuit.witness);
+    let _ = pippenger.prove_with_full_pk(&fft, &full_pk_h, &circuit.l, &circuit.r, &circuit.o, &circuit.witness);
 
     // Iteration counts tuned per path so the total run stays reasonable.
     let it_4b = 3u64;
     let it_4c = 3u64;
     let it_5a = 10u64;
     let it_5b = 10u64;
+    let it_7a = 10u64;
+    let it_7b = 10u64;
 
     // --- 4b: Circom + FFT + Naive ---
     let start = Instant::now();
@@ -169,69 +155,77 @@ fn main() {
     }
     let t5a = start.elapsed();
 
-    // --- 5b: Circom + FFT + Pippenger + FullProvingKey ---
+    // --- 5b: Circom + FFT + Pippenger + FullProvingKey (legacy) ---
     let start = Instant::now();
     for _ in 0..it_5b {
         let _ = pippenger.prove_with_full_pk(
-            &fft,
-            &full_pk,
-            &circuit.l,
-            &circuit.r,
-            &circuit.o,
-            &circuit.witness,
+            &fft, &full_pk, &circuit.l, &circuit.r, &circuit.o, &circuit.witness,
         );
     }
     let t5b = start.elapsed();
 
+    // --- 7a: Circom + FFT + Naive + FullProvingKey (h_scalar) ---
+    let start = Instant::now();
+    for _ in 0..it_7a {
+        let _ = naive.prove_with_full_pk(
+            &fft, &full_pk_h, &circuit.l, &circuit.r, &circuit.o, &circuit.witness,
+        );
+    }
+    let t7a = start.elapsed();
+
+    // --- 7b: Circom + FFT + Pippenger + FullProvingKey (h_scalar) ---
+    let start = Instant::now();
+    for _ in 0..it_7b {
+        let _ = pippenger.prove_with_full_pk(
+            &fft, &full_pk_h, &circuit.l, &circuit.r, &circuit.o, &circuit.witness,
+        );
+    }
+    let t7b = start.elapsed();
+
     println!(
-        "| Implementation | Engine | Prover | Full PK | Iterations | Total time | Per-proof |"
+        "| Implementation | Engine | Prover | Full PK | h_scalar? | Iterations | Total time | Per-proof |"
     );
     println!(
-        "|----------------|--------|--------|---------|------------|------------|-----------|"
+        "|----------------|--------|--------|---------|-----------|------------|------------|-----------|"
     );
     println!(
-        "| 4b (Circom FFT)   | FftQapEngine   | NaiveProver | no | {} | {:?} | {:?} |",
-        it_4b,
-        t4b,
-        t4b / it_4b as u32
+        "| 4b (Circom FFT)          | FftQapEngine | NaiveProver     | no  | no  | {} | {:?} | {:?} |",
+        it_4b, t4b, t4b / it_4b as u32
     );
     println!(
-        "| 4c (Circom Pipp)  | FftQapEngine   | PippengerProver | no | {} | {:?} | {:?} |",
-        it_4c,
-        t4c,
-        t4c / it_4c as u32
+        "| 4c (Circom Pipp)         | FftQapEngine | PippengerProver | no  | no  | {} | {:?} | {:?} |",
+        it_4c, t4c, t4c / it_4c as u32
     );
     println!(
-        "| 5a (Circom Full PK) | FftQapEngine   | NaiveProver | yes | {} | {:?} | {:?} |",
-        it_5a,
-        t5a,
-        t5a / it_5a as u32
+        "| 5a (Circom Full PK)      | FftQapEngine | NaiveProver     | yes | no  | {} | {:?} | {:?} |",
+        it_5a, t5a, t5a / it_5a as u32
     );
     println!(
-        "| 5b (Circom Full PK Pipp) | FftQapEngine   | PippengerProver | yes | {} | {:?} | {:?} |",
-        it_5b,
-        t5b,
-        t5b / it_5b as u32
+        "| 5b (Circom Full PK Pipp) | FftQapEngine | PippengerProver | yes | no  | {} | {:?} | {:?} |",
+        it_5b, t5b, t5b / it_5b as u32
+    );
+    println!(
+        "| 7a (Circom h_scalar)     | FftQapEngine | NaiveProver     | yes | yes | {} | {:?} | {:?} |",
+        it_7a, t7a, t7a / it_7a as u32
+    );
+    println!(
+        "| 7b (Circom h_scalar Pip) | FftQapEngine | PippengerProver | yes | yes | {} | {:?} | {:?} |",
+        it_7b, t7b, t7b / it_7b as u32
     );
 
     let per_4b = t4b / it_4b.max(1) as u32;
     let per_4c = t4c / it_4c.max(1) as u32;
     let per_5a = t5a / it_5a.max(1) as u32;
     let per_5b = t5b / it_5b.max(1) as u32;
+    let per_7a = t7a / it_7a.max(1) as u32;
+    let per_7b = t7b / it_7b.max(1) as u32;
 
     println!("\nSpeedup relative to 4b (Circom FFT + Naive):");
-    println!(
-        "  4c (FFT + Pippenger): {:.2}×",
-        ratio(per_4b, per_4c)
-    );
-    println!(
-        "  5a (Full PK + Naive):  {:.2}×",
-        ratio(per_4b, per_5a)
-    );
-    println!(
-        "  5b (Full PK + Pippenger): {:.2}×",
-        ratio(per_4b, per_5b)
-    );
+    println!("  4c (FFT + Pippenger):      {:.2}×", ratio(per_4b, per_4c));
+    println!("  5a (Full PK + Naive):       {:.2}×", ratio(per_4b, per_5a));
+    println!("  5b (Full PK + Pippenger):   {:.2}×", ratio(per_4b, per_5b));
+    println!("  7a (h_scalar + Naive):      {:.2}×", ratio(per_4b, per_7a));
+    println!("  7b (h_scalar + Pippenger):  {:.2}×", ratio(per_4b, per_7b));
 
     println!("\n✅ PoseidonMerkle benchmarks complete.");
 }

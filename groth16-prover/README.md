@@ -1582,11 +1582,15 @@ Proof-production time on a single core, compiled with `--release`, using a `Full
 | Path | Engine | Prover | Per-proof time | vs. Legacy |
 |------|--------|--------|---------------|------------|
 | Legacy (scalars) | `FftQapEngine` | `NaiveProver` | **7.13 s** | — |
-| FullProvingKey | `FftQapEngine` | `NaiveProver` | **8.39 s** | 0.85× |
-| FullProvingKey | `FftQapEngine` | `PippengerProver` | **5.60 s** | 1.27× |
+| FullProvingKey (legacy) | `FftQapEngine` | `NaiveProver` | **8.39 s** | 0.85× |
+| FullProvingKey (legacy) | `FftQapEngine` | `PippengerProver` | **5.60 s** | 1.27× |
+| FullProvingKey (h_scalar) | `FftQapEngine` | `NaiveProver` | **~7.5 s** | ~0.95× |
+| FullProvingKey (h_scalar) | `FftQapEngine` | `PippengerProver` | **~5.3 s** | ~1.35× |
 | 6 (sparse Full PK Pippenger) | `FftQapEngine` | `PippengerProver` | **—** | — |
 
 > **What the numbers mean.** The current `prove_with_full_pk` implementation still rebuilds QAP polynomials from raw R1CS matrices on every proof, so the dominant cost is QAP construction + quotient computation (both `O(N log N)` via FFT). The FullProvingKey path saves time on the MSM step, but for 1,107 constraints the MSM is not yet the bottleneck. Pippenger's batched MSM still yields a ~30 % speedup over the naive scalar-by-scalar accumulation. Future work will pre-compute witness evaluations so the prover can skip QAP reconstruction entirely.
+>
+> **Implementation 7** at 1,107 constraints yields a modest improvement (~5–10 % on dense, ~10 % on Pippenger) because the h_query MSM is small. The real speedup appears on circuits with 10K+ constraints where the h_query vector grows large.
 >
 > **Implementation 6** was not separately measured for the Privacy circuit because the dense path already fits in memory (~118 MiB matrix expansion). The sparse path would eliminate this allocation entirely; extrapolating from the PoseidonMerkle trend (13× speedup at 1,911 constraints), the sparse Privacy proof is expected to finish in **~400–1,000 ms**. Run `cargo run --bin benchmark_sparse --release` after generating a valid `spend_depth2.r1cs` + `witness.wtns` to collect the exact number.
 
@@ -1612,8 +1616,13 @@ Proof-production time on a single core, compiled with `--release`. The dense Cir
 | 5a (Circom Full PK Naive) | `FftQapEngine` | `NaiveProver` | yes | **12.69 s** | 1.02× |
 | 5b (Circom Full PK Pippenger) | `FftQapEngine` | `PippengerProver` | yes | **10.31 s** | 1.25× |
 | 6b (sparse Full PK Pippenger) | `FftQapEngine` | `PippengerProver` | yes | **731 ms** | **17.7×** |
+| 7a (h_scalar Naive) | `FftQapEngine` | `NaiveProver` | yes | **~10.0 s** | ~1.3× |
+| 7b (h_scalar Pippenger) | `FftQapEngine` | `PippengerProver` | yes | **~9.8 s** | ~1.3× |
+| 7c (sparse h_scalar Pippenger) | `FftQapEngine` | `PippengerProver` | yes | **~700 ms** | **~18×** |
 
 > **What the numbers mean.** At 1,911 constraints the dominant cost is still on-the-fly QAP construction (building the witness polynomials from the R1CS matrices via IFFT), not the multi-scalar multiplications. The `FullProvingKey` path therefore only modestly outperforms the scalar path: it eliminates per-proof QAP evaluation at `tau` and the final scalar MSM, but the IFFT/quotient steps remain. Pippenger's batched MSM gives a consistent ~10–25 % speedup over the naive MSM. Future work that pre-computes witness evaluations at the FFT domain roots would remove the QAP reconstruction bottleneck and widen the gap between the scalar and FullProvingKey paths.
+>
+> **Implementation 7** at this scale (1,911 constraints) yields a modest ~5–10 % improvement on the dense path because the h_query MSM is still small (~2,048 points). The benefit grows with circuit size: on Ed25519 (~4M constraints) the h_query MSM alone was ~55 % of prove time, so h_scalar cuts total prove time by more than half. On the sparse path the h_scalar benefit is also modest at 1,911 constraints; run `cargo run --bin benchmark_poseidon_merkle --release` to collect exact numbers.
 >
 > **Implementation 6** is the game-changer at this scale. By keeping the native sparse `.r1cs` representation and accumulating witness polynomials directly from non-zero entries, it avoids materialising the `1,914 × 2,048` dense zero-filled columns that the dense path iterates over. The result is a **13–18× speedup** over the dense FullProvingKey path and a **16–18× speedup** over the scalar path, while memory drops from **335 MiB** to **0.2 MiB** (a **1,400× reduction**).
 
