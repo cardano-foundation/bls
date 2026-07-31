@@ -150,13 +150,16 @@ snarkjs wtns calculate \
   input.json witness_ownership.wtns
 
 # 3c. Dev ceremony (⚠️ MUST use --sparse)
+#     Add --h-scalar to store a single scalar instead of the full h_query vector.
+#     This halves the PK size (~350 MiB → ~180 MiB) and cuts prove time by ~10–15 %.
 cd ../../cli
-cargo run --release -- ceremony-dev --sparse \
+cargo run --release -- ceremony-dev --sparse --h-scalar \
   --circuit ../circom/CardanoKeyOwnership/cardano_ed25519_ownership.r1cs \
   --proving-key /tmp/cardano_ed25519.pk \
   --verifying-key /tmp/cardano_ed25519.vk
 
 # 3d. Prove (⚠️ MUST use --sparse)
+#     No extra flags needed — the prover auto-detects h_scalar from the PK.
 cargo run --release -- prove --sparse \
   --circuit ../circom/CardanoKeyOwnership/cardano_ed25519_ownership.r1cs \
   --witness ../circom/CardanoKeyOwnership/witness_ownership.wtns \
