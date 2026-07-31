@@ -1326,8 +1326,8 @@ The existing `aiken/groth16` verifier checks the compression SNARK. An additiona
 
 ### Verdict
 
-- **Now:** Not needed. Implementation 6 handles all current circuits. Ceremony times are acceptable.
-- **After Implementation 7:** Evaluate for Ed25519Verify if the ~16 min ceremony becomes operationally painful.
+- **Now:** Not needed. Implementation 6 + 7 handle all current circuits. Ceremony times are acceptable.
+- **After Implementation 7:** The ~16 min Ed25519Verify ceremony is now the e2e bottleneck (~89 % of total time). Evaluate Nova IVC only if this becomes operationally painful.
 - **When mandatory:** For 10M+ constraint circuits (rollups, full transaction validation) where monolithic Groth16 is infeasible.
 
 ---
@@ -1336,7 +1336,7 @@ The existing `aiken/groth16` verifier checks the compression SNARK. An additiona
 
 For **short-term production on Cardano**:
 1. ✅ Implementation 6 (sparse prover) — **done**
-2. ⏳ Implementation 7 (h_scalar + parallel proof assembly) — **next**
+2. ✅ Implementation 7 (h_scalar + parallel proof assembly) — **done**
 3. ⏳ Ceremony MSM parallelization — **low-hanging follow-up**
 
 For **medium-term** (when ceremony dominates or circuits exceed 4M):
