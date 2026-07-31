@@ -83,9 +83,12 @@ In plain English: the prover demonstrates knowledge of the private key that gene
 | Variant | Ceremony | Prove | Verify | Peak RAM | PK size (compressed) | VK size |
 |---------|----------|-------|--------|----------|------------------------|---------|
 | **JubJub (~4K constraints)** | ~1 s | ~1 s | ~1 s | ~1.5 MiB | ~0.5 MiB | ~1 KiB |
-| **Ed25519 (~1.97M constraints)** | **~5 min** | **~1.7 min** | **~2 s** | **~2.5 GiB** | **~350 MiB** | **~3.8 MiB** |
+| **Ed25519 (~1.97M constraints, legacy)** | **~5 min** | **~1.7 min** | **~2 s** | **~2.5 GiB** | **~350 MiB** | **~3.8 MiB** |
+| **Ed25519 (~1.97M constraints, h_scalar)** | **~5 min** | **~1.5 min** | **~2 s** | **~2.5 GiB** | **~180 MiB** | **~3.8 MiB** |
 
 ⚠️ **Critical:** The Ed25519 circuit **must** use `--sparse` for both `ceremony-dev` and `prove`. The dense path would allocate ~15 TB and OOM-kill immediately. The JubJub circuit is small enough that either path works, but sparse is still recommended.
+
+> **Implementation 7 (h_scalar).** Add `--h-scalar` to `ceremony-dev` to store a single scalar instead of the full h_query vector. This halves the PK size (~350 MiB → ~180 MiB) and cuts prove time by ~10–15 % (~1.7 min → ~1.5 min) because the h_query MSM is eliminated. The prover auto-detects h_scalar with no extra flags. At 1.97M constraints the h_query vector has ~2M points, so the benefit is visible but not as dramatic as on the 4M-constraint Ed25519Verify circuit.
 
 ---
 

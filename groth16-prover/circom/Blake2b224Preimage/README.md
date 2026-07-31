@@ -213,6 +213,15 @@ cargo run --release -- verify \
 | Verify | **~0.2 s** |
 | **Total** | **~26 s** |
 
+> **Implementation 7 (h_scalar).** At ~79K constraints the h_query MSM is already modest, so the h_scalar fast path yields a small but measurable improvement. Add `--h-scalar` to the `ceremony-dev` command to compress the proving key (halves PK size by omitting the h_query vector). Prove time drops from **~5 s → ~4.5 s** (~10 % faster). The prover auto-detects h_scalar with no extra flags.
+>
+> ```bash
+> cargo run --release -- ceremony-dev --sparse --h-scalar \
+>   --circuit ../circom/Blake2b224Preimage/blake2b224_preimage.r1cs \
+>   --proving-key /tmp/blake2b224.pk \
+>   --verifying-key /tmp/blake2b224.vk
+> ```
+
 ### 7. Export VK to Aiken (optional)
 
 ```bash
