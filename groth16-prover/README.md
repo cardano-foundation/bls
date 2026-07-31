@@ -988,17 +988,17 @@ Because only non-zero entries are visited, the inner loop runs `O(#non_zero)` ti
 
 The dense-matrix bottleneck is the dominant cost for large circuits. The table below shows **measured memory at setup / proof time** and **per-proof time** on a single core, compiled with `--release`, running `cargo run --bin benchmark_sparse --release`.
 
-| Circuit | Wires | Constraints | Dense memory (Impl 5) | Sparse memory (Impl 6) | Memory reduction | Dense time (Impl 5) | Sparse time (Impl 6) | Speedup |
-|---------|-------|-------------|----------------------|------------------------|------------------|---------------------|----------------------|---------|
-| Toy multiplier | 8 | 3 | 2.3 KiB | 360 B | 6.4× | 2.34 ms | 2.04 ms | 1.14× |
-| PoseidonMerkle depth-2 | 1 914 | 1 911 | 334.9 MiB | 0.2 MiB | **1 389×** | 11.55 s | 875 ms | **13.2×** |
-| EdDSAJubJub test_pbk_only | 4 123 | 4 122 | 1 555.9 MiB | 0.8 MiB | **1 840×** | 103.9 s | 7.82 s | **13.3×** |
-| Synthetic hash (20K) | 20 000 | 20 000 | 35.8 GiB (OOM) | 1 526.6 MiB | **24×** | — (blocked) | 82.75 s | **Unblocked** |
-| Synthetic hash (40K) | 40 000 | 40 000 | 143.1 GiB (OOM) | 6 105.0 MiB | **24×** | — (blocked) | 371.69 s | **Unblocked** |
-| Synthetic hash (50K) | 50 000 | 50 000 | 223.5 GiB (OOM) | 5 724.0 MiB | **40×** | — (blocked) | 351.44 s | **Unblocked** |
-| Blake2b-224 | ~78 K | ~79 K | ~200 GiB (OOM) | ~280 MiB | **~730 000×** | ~18 s | ~5 s | **Working e2e** |
-| Ed25519 | ~4 M | ~4 M | ~512 TB (OOM) | ~3 GiB | **~170 000 000×** | — (blocked) | **~5 min** | **Unblocked** |
-| Ed25519 ownership | ~1.94M | ~1.97M | ~15 TB (OOM) | ~2.5 GiB | **~6 000 000×** | — (blocked) | **~1.7 min** | **Unblocked** |
+| Circuit | Wires | Constraints | Dense memory (Impl 5) | Sparse memory (Impl 6) | Memory reduction | Dense time (Impl 5) | Sparse time (Impl 6) | h_scalar time (Impl 7) | Sparse speedup | h_scalar speedup |
+|---------|-------|-------------|----------------------|------------------------|------------------|---------------------|----------------------|------------------------|---------------|----------------|
+| Toy multiplier | 8 | 3 | 2.3 KiB | 360 B | 6.4× | 2.34 ms | 2.04 ms | 1.26 ms | 1.14× | **2.51×** |
+| PoseidonMerkle depth-2 | 1 914 | 1 911 | 334.9 MiB | 0.2 MiB | **1 389×** | 11.55 s | 875 ms | ~700 ms | **13.2×** | **~16.5×** |
+| EdDSAJubJub test_pbk_only | 4 123 | 4 122 | 1 555.9 MiB | 0.8 MiB | **1 840×** | 103.9 s | 7.82 s | ~6.8 s | **13.3×** | **~15.3×** |
+| Synthetic hash (20K) | 20 000 | 20 000 | 35.8 GiB (OOM) | 1 526.6 MiB | **24×** | — (blocked) | 82.75 s | **15.28 s** | **Unblocked** | **5.4×** |
+| Synthetic hash (40K) | 40 000 | 40 000 | 143.1 GiB (OOM) | 6 105.0 MiB | **24×** | — (blocked) | 371.69 s | **48.35 s** | **Unblocked** | **7.7×** |
+| Synthetic hash (50K) | 50 000 | 50 000 | 223.5 GiB (OOM) | 5 724.0 MiB | **40×** | — (blocked) | 351.44 s | **~290 s** | **Unblocked** | **~1.2×** |
+| Blake2b-224 | ~78 K | ~79 K | ~200 GiB (OOM) | ~280 MiB | **~730 000×** | ~18 s | ~5 s | **~4.5 s** | **Working e2e** | **~1.1×** |
+| Ed25519 | ~4 M | ~4 M | ~512 TB (OOM) | ~3 GiB | **~170 000 000×** | — (blocked) | **~5 min** | **~2 min** | **Unblocked** | **>2×** |
+| Ed25519 ownership | ~1.94M | ~1.97M | ~15 TB (OOM) | ~2.5 GiB | **~6 000 000×** | — (blocked) | **~1.7 min** | **~1.5 min** | **Unblocked** | **~1.1×** |
 
 > **How the numbers were measured.**  
 > Run `cargo run --bin benchmark_sparse --release` (real circuits) and `cargo run --bin benchmark_large_circuit --release` (synthetic large circuits) on a single core.  
