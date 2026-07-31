@@ -1,11 +1,6 @@
-//! `benchmark_circom_full_pk` — benchmark Implementation 5 (Circom adapter + FullProvingKey + on-the-fly QAP construction).
-//!
-//! Loads the synthetic `.r1cs` / `.wtns` data through the Circom parser,
-//! generates a `FullProvingKey` once, then times proof production using the
-//! group-element-only path.  The prover builds the witness polynomials `l(x)`,
-//! `r(x)`, `o(x)` on-the-fly via variable-by-variable IFFT instead of
-//! materialising the full `n_vars × domain_size` QAP matrix, which is the
-//! key memory optimisation added in Implementation 5.
+//! `benchmark_circom_full_pk` — benchmark Implementation 5 and 7
+//! (Circom adapter + FullProvingKey + on-the-fly QAP construction,
+//! with and without h_scalar compression).
 
 use groth16_prover::{
     ceremony::{single_party_ceremony_full_from_tw, ToxicWaste},
@@ -120,10 +115,18 @@ fn main() {
     let engine = FftQapEngine::new();
     let n_public = 1; // constant wire only
     let tw = ToxicWaste::deterministic();
+
+    // Legacy path (Impl 5/6)
     let (full_pk, _vk) = single_party_ceremony_full_from_tw(
-        &engine, &circuit.l, &circuit.r, &circuit.o, n_public, tw, false,
+        &engine, &circuit.l, &circuit.r, &circuit.o, n_public, tw.clone(), false,
     );
-    println!("FullProvingKey generated (group elements only, no scalars)\n");
+    println!("FullProvingKey generated (legacy, h_query MSM)\n");
+
+    // h_scalar path (Impl 7)
+    let (full_pk_h, _vk_h) = single_party_ceremony_full_from_tw(
+        &engine, &circuit.l, &circuit.r, &circuit.o, n_public, tw, true,
+    );
+    println!("FullProvingKey generated (h_scalar compression)\n");
 
     let iterations = 100u64;
 
@@ -133,68 +136,78 @@ fn main() {
     // Warm-up
     for _ in 0..100 {
         let _ = naive.prove_with_full_pk(
-            &engine,
-            &full_pk,
-            &circuit.l,
-            &circuit.r,
-            &circuit.o,
-            &circuit.witness,
+            &engine, &full_pk, &circuit.l, &circuit.r, &circuit.o, &circuit.witness,
         );
         let _ = pippenger.prove_with_full_pk(
-            &engine,
-            &full_pk,
-            &circuit.l,
-            &circuit.r,
-            &circuit.o,
-            &circuit.witness,
+            &engine, &full_pk, &circuit.l, &circuit.r, &circuit.o, &circuit.witness,
+        );
+        let _ = naive.prove_with_full_pk(
+            &engine, &full_pk_h, &circuit.l, &circuit.r, &circuit.o, &circuit.witness,
+        );
+        let _ = pippenger.prove_with_full_pk(
+            &engine, &full_pk_h, &circuit.l, &circuit.r, &circuit.o, &circuit.witness,
         );
     }
 
-    // --- Implementation 5a: Circom + FFT + Naive + FullProvingKey ---
+    // --- Implementation 5a: Circom + FFT + Naive + FullProvingKey (legacy) ---
     let start = Instant::now();
     for _ in 0..iterations {
         let _ = naive.prove_with_full_pk(
-            &engine,
-            &full_pk,
-            &circuit.l,
-            &circuit.r,
-            &circuit.o,
-            &circuit.witness,
+            &engine, &full_pk, &circuit.l, &circuit.r, &circuit.o, &circuit.witness,
         );
     }
     let t5a = start.elapsed();
 
-    // --- Implementation 5b: Circom + FFT + Pippenger + FullProvingKey ---
+    // --- Implementation 5b: Circom + FFT + Pippenger + FullProvingKey (legacy) ---
     let start = Instant::now();
     for _ in 0..iterations {
         let _ = pippenger.prove_with_full_pk(
-            &engine,
-            &full_pk,
-            &circuit.l,
-            &circuit.r,
-            &circuit.o,
-            &circuit.witness,
+            &engine, &full_pk, &circuit.l, &circuit.r, &circuit.o, &circuit.witness,
         );
     }
     let t5b = start.elapsed();
 
+    // --- Implementation 7a: Circom + FFT + Naive + h_scalar ---
+    let start = Instant::now();
+    for _ in 0..iterations {
+        let _ = naive.prove_with_full_pk(
+            &engine, &full_pk_h, &circuit.l, &circuit.r, &circuit.o, &circuit.witness,
+        );
+    }
+    let t7a = start.elapsed();
+
+    // --- Implementation 7b: Circom + FFT + Pippenger + h_scalar ---
+    let start = Instant::now();
+    for _ in 0..iterations {
+        let _ = pippenger.prove_with_full_pk(
+            &engine, &full_pk_h, &circuit.l, &circuit.r, &circuit.o, &circuit.witness,
+        );
+    }
+    let t7b = start.elapsed();
+
     println!("Iterations: {}\n", iterations);
     println!(
-        "| Implementation | Engine         | Prover          | Full PK? | Total time | Per-proof |"
+        "| Implementation | Engine         | Prover          | h_scalar? | Total time | Per-proof |"
     );
     println!(
-        "|----------------|----------------|-----------------|----------|------------|-----------|"
+        "|----------------|----------------|-----------------|-----------|------------|-----------|"
     );
     println!(
-        "| 5a (Circom FFT Naive)  | FftQapEngine | NaiveProver    | yes      | {:?} | {:?} |",
-        t5a,
-        t5a / iterations as u32
+        "| 5a (legacy Naive)    | FftQapEngine | NaiveProver     | no        | {:?} | {:?} |",
+        t5a, t5a / iterations as u32
     );
     println!(
-        "| 5b (Circom FFT Pipp)   | FftQapEngine | PippengerProver| yes      | {:?} | {:?} |",
-        t5b,
-        t5b / iterations as u32
+        "| 5b (legacy Pipp)     | FftQapEngine | PippengerProver | no        | {:?} | {:?} |",
+        t5b, t5b / iterations as u32
+    );
+    println!(
+        "| 7a (h_scalar Naive)  | FftQapEngine | NaiveProver     | yes       | {:?} | {:?} |",
+        t7a, t7a / iterations as u32
+    );
+    println!(
+        "| 7b (h_scalar Pipp)   | FftQapEngine | PippengerProver | yes       | {:?} | {:?} |",
+        t7b, t7b / iterations as u32
     );
 
-    println!("\n✅ Implementation 5 benchmarks complete.");
+    println!("\n✅ Implementation 5 + 7 benchmarks complete.");
 }
