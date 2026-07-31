@@ -327,15 +327,25 @@ impl Prover for NaiveProver {
         }
         let b = G2Affine::from(b_proj);
 
-        // C = sum_{private} witness[i] * c_query[i] + sum_j h_j * h_query[j]
+        // C = sum_{private} witness[i] * c_query[i] + h_commitment
         let mut c_proj = G1Projective::zero();
         for i in n_public..n_vars {
             c_proj += G1Projective::from(full_pk.c_query[i]) * witness[i];
         }
-        let h_len = h.coeffs.len().min(full_pk.h_query.len());
-        for j in 0..h_len {
-            c_proj += G1Projective::from(full_pk.h_query[j]) * h.coeffs[j];
-        }
+
+        // Fast path (Impl 7): h_commitment = h_scalar * h(tau) * G1
+        let h_c = if let (Some(h_scalar), Some(tau)) = (full_pk.h_scalar, full_pk.h_scalar_tau) {
+            let h_tau = h.evaluate(&tau);
+            G1Projective::from(G1Affine::generator()) * (h_scalar * h_tau)
+        } else {
+            let h_len = h.coeffs.len().min(full_pk.h_query.len());
+            let mut hc = G1Projective::zero();
+            for j in 0..h_len {
+                hc += G1Projective::from(full_pk.h_query[j]) * h.coeffs[j];
+            }
+            hc
+        };
+        c_proj += h_c;
         let c = G1Affine::from(c_proj);
 
         // V = sum_{public} witness[i] * l_query[i]
@@ -378,15 +388,25 @@ impl Prover for NaiveProver {
         }
         let b = G2Affine::from(b_proj);
 
-        // C = sum_{private} witness[i] * c_query[i] + sum_j h_j * h_query[j]
+        // C = sum_{private} witness[i] * c_query[i] + h_commitment
         let mut c_proj = G1Projective::zero();
         for i in n_public..n_vars {
             c_proj += G1Projective::from(full_pk.c_query[i]) * witness[i];
         }
-        let h_len = h.coeffs.len().min(full_pk.h_query.len());
-        for j in 0..h_len {
-            c_proj += G1Projective::from(full_pk.h_query[j]) * h.coeffs[j];
-        }
+
+        // Fast path (Impl 7): h_commitment = h_scalar * h(tau) * G1
+        let h_c = if let (Some(h_scalar), Some(tau)) = (full_pk.h_scalar, full_pk.h_scalar_tau) {
+            let h_tau = h.evaluate(&tau);
+            G1Projective::from(G1Affine::generator()) * (h_scalar * h_tau)
+        } else {
+            let h_len = h.coeffs.len().min(full_pk.h_query.len());
+            let mut hc = G1Projective::zero();
+            for j in 0..h_len {
+                hc += G1Projective::from(full_pk.h_query[j]) * h.coeffs[j];
+            }
+            hc
+        };
+        c_proj += h_c;
         let c = G1Affine::from(c_proj);
 
         // V = sum_{public} witness[i] * l_query[i]
@@ -496,18 +516,24 @@ impl Prover for PippengerProver {
             .expect("MSM length mismatch");
         let b = G2Affine::from(b_proj + G2Projective::from(full_pk.vk.beta_g2));
 
-        // C = MSM(c_query[private], witness[private]) + MSM(h_query, h_coeffs)
+        // C = MSM(c_query[private], witness[private]) + h_commitment
         let private_c = &full_pk.c_query[n_public..];
         let private_w = &witness[n_public..];
         let c_private = G1Projective::msm(private_c, private_w)
             .expect("MSM length mismatch");
 
-        let h_len = h.coeffs.len().min(full_pk.h_query.len());
-        let h_c = if h_len > 0 {
-            G1Projective::msm(&full_pk.h_query[..h_len], &h.coeffs[..h_len])
-                .expect("MSM length mismatch")
+        // Fast path (Impl 7): h_commitment = h_scalar * h(tau) * G1
+        let h_c = if let (Some(h_scalar), Some(tau)) = (full_pk.h_scalar, full_pk.h_scalar_tau) {
+            let h_tau = h.evaluate(&tau);
+            G1Projective::from(G1Affine::generator()) * (h_scalar * h_tau)
         } else {
-            G1Projective::zero()
+            let h_len = h.coeffs.len().min(full_pk.h_query.len());
+            if h_len > 0 {
+                G1Projective::msm(&full_pk.h_query[..h_len], &h.coeffs[..h_len])
+                    .expect("MSM length mismatch")
+            } else {
+                G1Projective::zero()
+            }
         };
 
         let c = G1Affine::from(c_private + h_c);
@@ -547,18 +573,24 @@ impl Prover for PippengerProver {
             .expect("MSM length mismatch");
         let b = G2Affine::from(b_proj + G2Projective::from(full_pk.vk.beta_g2));
 
-        // C = MSM(c_query[private], witness[private]) + MSM(h_query, h_coeffs)
+        // C = MSM(c_query[private], witness[private]) + h_commitment
         let private_c = &full_pk.c_query[n_public..];
         let private_w = &witness[n_public..];
         let c_private = G1Projective::msm(private_c, private_w)
             .expect("MSM length mismatch");
 
-        let h_len = h.coeffs.len().min(full_pk.h_query.len());
-        let h_c = if h_len > 0 {
-            G1Projective::msm(&full_pk.h_query[..h_len], &h.coeffs[..h_len])
-                .expect("MSM length mismatch")
+        // Fast path (Impl 7): h_commitment = h_scalar * h(tau) * G1
+        let h_c = if let (Some(h_scalar), Some(tau)) = (full_pk.h_scalar, full_pk.h_scalar_tau) {
+            let h_tau = h.evaluate(&tau);
+            G1Projective::from(G1Affine::generator()) * (h_scalar * h_tau)
         } else {
-            G1Projective::zero()
+            let h_len = h.coeffs.len().min(full_pk.h_query.len());
+            if h_len > 0 {
+                G1Projective::msm(&full_pk.h_query[..h_len], &h.coeffs[..h_len])
+                    .expect("MSM length mismatch")
+            } else {
+                G1Projective::zero()
+            }
         };
 
         let c = G1Affine::from(c_private + h_c);
