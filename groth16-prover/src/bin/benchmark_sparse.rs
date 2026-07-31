@@ -1,9 +1,9 @@
-//! `benchmark_sparse` — benchmark Implementation 6 (sparse-matrix prover).
+//! `benchmark_sparse` — benchmark Implementation 6 and 7 (sparse-matrix prover
+//! with and without h_scalar compression).
 //!
 //! Compares the dense path (Implementation 5) against the sparse path
-//! (Implementation 6) on the same circuits.  Both paths use FFT QAP engine +
-//! Pippenger MSM + FullProvingKey.  The only difference is whether the `.r1cs`
-//! is expanded into dense matrices or kept in sparse triplet form.
+//! (Implementation 6) and the h_scalar fast path (Implementation 7) on the same
+//! circuits.  All paths use FFT QAP engine + Pippenger MSM + FullProvingKey.
 //!
 //! Circuits tested:
 //!   1. Synthetic toy multiplier (3 constraints, 8 wires) — many iterations
@@ -143,7 +143,7 @@ fn bench_toy() {
         &engine, &dense.l, &dense.r, &dense.o, n_public, tw.clone(), false,
     );
 
-    // Sparse FullProvingKey
+    // Sparse FullProvingKey (legacy)
     let (pk_sparse, _vk_sparse) = single_party_ceremony_full_from_tw_sparse(
         &engine,
         dense.n_constraints as usize,
@@ -156,9 +156,23 @@ fn bench_toy() {
         false,
     );
 
+    // Sparse FullProvingKey (h_scalar)
+    let (pk_sparse_h, _vk_sparse_h) = single_party_ceremony_full_from_tw_sparse(
+        &engine,
+        dense.n_constraints as usize,
+        dense.n_wires as usize,
+        n_public,
+        &sparse.l,
+        &sparse.r,
+        &sparse.o,
+        tw.clone(),
+        true,
+    );
+
     // Verify keys match (parity check)
     assert_eq!(pk_dense.a_query, pk_sparse.a_query, "PK mismatch");
     assert_eq!(pk_dense.c_query, pk_sparse.c_query, "PK mismatch");
+    assert_eq!(pk_sparse_h.a_query, pk_sparse.a_query, "PK h_scalar mismatch");
 
     let naive = NaiveProver::new();
     let pippenger = PippengerProver::new();
@@ -169,6 +183,7 @@ fn bench_toy() {
     for _ in 0..100 {
         let _ = naive.prove_with_full_pk(&engine, &pk_dense, &dense.l, &dense.r, &dense.o, &dense.witness);
         let _ = naive.prove_with_full_pk_sparse(&engine, &pk_sparse, dense.n_constraints as usize, &sparse.l, &sparse.r, &sparse.o, &sparse.witness);
+        let _ = naive.prove_with_full_pk_sparse(&engine, &pk_sparse_h, dense.n_constraints as usize, &sparse.l, &sparse.r, &sparse.o, &sparse.witness);
     }
 
     // Dense + Naive
@@ -178,12 +193,19 @@ fn bench_toy() {
     }
     let t_dense_naive = start.elapsed();
 
-    // Sparse + Naive
+    // Sparse + Naive (legacy)
     let start = Instant::now();
     for _ in 0..iterations {
         let _ = naive.prove_with_full_pk_sparse(&engine, &pk_sparse, dense.n_constraints as usize, &sparse.l, &sparse.r, &sparse.o, &sparse.witness);
     }
     let t_sparse_naive = start.elapsed();
+
+    // Sparse + Naive (h_scalar)
+    let start = Instant::now();
+    for _ in 0..iterations {
+        let _ = naive.prove_with_full_pk_sparse(&engine, &pk_sparse_h, dense.n_constraints as usize, &sparse.l, &sparse.r, &sparse.o, &sparse.witness);
+    }
+    let t_sparse_h_naive = start.elapsed();
 
     // Dense + Pippenger
     let start = Instant::now();
@@ -192,28 +214,44 @@ fn bench_toy() {
     }
     let t_dense_pipp = start.elapsed();
 
-    // Sparse + Pippenger
+    // Sparse + Pippenger (legacy)
     let start = Instant::now();
     for _ in 0..iterations {
         let _ = pippenger.prove_with_full_pk_sparse(&engine, &pk_sparse, dense.n_constraints as usize, &sparse.l, &sparse.r, &sparse.o, &sparse.witness);
     }
     let t_sparse_pipp = start.elapsed();
 
-    println!("| Path | Dense / Sparse | Prover | Iterations | Total | Per-proof |");
-    println!("|------|----------------|--------|------------|-------|-----------|");
-    println!("| 5a (dense) | dense | Naive | {} | {:?} | {:?} |", iterations, t_dense_naive, t_dense_naive / iterations as u32);
-    println!("| 6a (sparse)| sparse| Naive | {} | {:?} | {:?} |", iterations, t_sparse_naive, t_sparse_naive / iterations as u32);
-    println!("| 5b (dense) | dense | Pippenger | {} | {:?} | {:?} |", iterations, t_dense_pipp, t_dense_pipp / iterations as u32);
-    println!("| 6b (sparse)| sparse| Pippenger | {} | {:?} | {:?} |", iterations, t_sparse_pipp, t_sparse_pipp / iterations as u32);
+    // Sparse + Pippenger (h_scalar)
+    let start = Instant::now();
+    for _ in 0..iterations {
+        let _ = pippenger.prove_with_full_pk_sparse(&engine, &pk_sparse_h, dense.n_constraints as usize, &sparse.l, &sparse.r, &sparse.o, &sparse.witness);
+    }
+    let t_sparse_h_pipp = start.elapsed();
+
+    println!("| Path | Dense / Sparse | Prover | h_scalar? | Iterations | Total | Per-proof |");
+    println!("|------|----------------|--------|-----------|------------|-------|-----------|");
+    println!("| 5a (dense)     | dense  | Naive     | no  | {} | {:?} | {:?} |", iterations, t_dense_naive, t_dense_naive / iterations as u32);
+    println!("| 6a (sparse)    | sparse | Naive     | no  | {} | {:?} | {:?} |", iterations, t_sparse_naive, t_sparse_naive / iterations as u32);
+    println!("| 7a (sparse h)  | sparse | Naive     | yes | {} | {:?} | {:?} |", iterations, t_sparse_h_naive, t_sparse_h_naive / iterations as u32);
+    println!("| 5b (dense)     | dense  | Pippenger | no  | {} | {:?} | {:?} |", iterations, t_dense_pipp, t_dense_pipp / iterations as u32);
+    println!("| 6b (sparse)    | sparse | Pippenger | no  | {} | {:?} | {:?} |", iterations, t_sparse_pipp, t_sparse_pipp / iterations as u32);
+    println!("| 7b (sparse h)  | sparse | Pippenger | yes | {} | {:?} | {:?} |", iterations, t_sparse_h_pipp, t_sparse_h_pipp / iterations as u32);
 
     let per_dense_naive = t_dense_naive / iterations as u32;
     let per_sparse_naive = t_sparse_naive / iterations as u32;
+    let per_sparse_h_naive = t_sparse_h_naive / iterations as u32;
     let per_dense_pipp = t_dense_pipp / iterations as u32;
     let per_sparse_pipp = t_sparse_pipp / iterations as u32;
+    let per_sparse_h_pipp = t_sparse_h_pipp / iterations as u32;
 
     println!("\nSparse vs Dense speedup (same prover):");
-    println!("  Naive:  {:.2}×", ratio(per_dense_naive, per_sparse_naive));
-    println!("  Pippenger: {:.2}×", ratio(per_dense_pipp, per_sparse_pipp));
+    println!("  Naive legacy:  {:.2}×", ratio(per_dense_naive, per_sparse_naive));
+    println!("  Naive h_scalar: {:.2}×", ratio(per_dense_naive, per_sparse_h_naive));
+    println!("  Pippenger legacy: {:.2}×", ratio(per_dense_pipp, per_sparse_pipp));
+    println!("  Pippenger h_scalar: {:.2}×", ratio(per_dense_pipp, per_sparse_h_pipp));
+    println!("\nh_scalar vs legacy sparse speedup:");
+    println!("  Naive:  {:.2}×", ratio(per_sparse_naive, per_sparse_h_naive));
+    println!("  Pippenger: {:.2}×", ratio(per_sparse_pipp, per_sparse_h_pipp));
 }
 
 fn bench_real_circuit(name: &str, r1cs_path: &str, wtns_path: &str) {
@@ -261,14 +299,20 @@ fn bench_real_circuit(name: &str, r1cs_path: &str, wtns_path: &str) {
         &engine, n_constraints, n_wires, n_public,
         &sparse.l, &sparse.r, &sparse.o, tw.clone(), false,
     );
+    let (pk_sparse_h, _vk_sparse_h) = single_party_ceremony_full_from_tw_sparse(
+        &engine, n_constraints, n_wires, n_public,
+        &sparse.l, &sparse.r, &sparse.o, tw.clone(), true,
+    );
 
     assert_eq!(pk_dense.a_query, pk_sparse.a_query, "PK mismatch on real circuit");
+    assert_eq!(pk_sparse_h.a_query, pk_sparse.a_query, "PK h_scalar mismatch on real circuit");
 
     let pippenger = PippengerProver::new();
 
     // Warm-up
     let _ = pippenger.prove_with_full_pk(&engine, &pk_dense, &dense.l, &dense.r, &dense.o, &dense.witness);
     let _ = pippenger.prove_with_full_pk_sparse(&engine, &pk_sparse, n_constraints, &sparse.l, &sparse.r, &sparse.o, &sparse.witness);
+    let _ = pippenger.prove_with_full_pk_sparse(&engine, &pk_sparse_h, n_constraints, &sparse.l, &sparse.r, &sparse.o, &sparse.witness);
 
     // Adaptive iteration count: fewer iterations for larger circuits
     let iterations = if n_constraints > 3000 { 1u64 } else { 10u64 };
@@ -280,29 +324,42 @@ fn bench_real_circuit(name: &str, r1cs_path: &str, wtns_path: &str) {
     }
     let t_dense = start.elapsed();
 
-    // Sparse
+    // Sparse (legacy)
     let start = Instant::now();
     for _ in 0..iterations {
         let _ = pippenger.prove_with_full_pk_sparse(&engine, &pk_sparse, n_constraints, &sparse.l, &sparse.r, &sparse.o, &sparse.witness);
     }
     let t_sparse = start.elapsed();
 
-    println!("| Path | Prover | Iterations | Total | Per-proof |");
-    println!("|------|--------|------------|-------|-----------|");
-    println!("| 5b (dense Full PK) | Pippenger | {} | {:?} | {:?} |",
+    // Sparse (h_scalar)
+    let start = Instant::now();
+    for _ in 0..iterations {
+        let _ = pippenger.prove_with_full_pk_sparse(&engine, &pk_sparse_h, n_constraints, &sparse.l, &sparse.r, &sparse.o, &sparse.witness);
+    }
+    let t_sparse_h = start.elapsed();
+
+    println!("| Path | Prover | h_scalar? | Iterations | Total | Per-proof |");
+    println!("|------|--------|-----------|------------|-------|-----------|");
+    println!("| 5b (dense Full PK)  | Pippenger | no  | {} | {:?} | {:?} |",
         iterations, t_dense, t_dense / iterations as u32);
-    println!("| 6b (sparse Full PK)| Pippenger | {} | {:?} | {:?} |",
+    println!("| 6b (sparse Full PK) | Pippenger | no  | {} | {:?} | {:?} |",
         iterations, t_sparse, t_sparse / iterations as u32);
+    println!("| 7b (sparse h_scalar)| Pippenger | yes | {} | {:?} | {:?} |",
+        iterations, t_sparse_h, t_sparse_h / iterations as u32);
 
     let per_dense = t_dense / iterations as u32;
     let per_sparse = t_sparse / iterations as u32;
-    println!("\nSparse vs Dense speedup: {:.2}×", ratio(per_dense, per_sparse));
+    let per_sparse_h = t_sparse_h / iterations as u32;
+    println!("\nSparse vs Dense speedup:");
+    println!("  Legacy:  {:.2}×", ratio(per_dense, per_sparse));
+    println!("  h_scalar: {:.2}×", ratio(per_dense, per_sparse_h));
+    println!("h_scalar vs legacy sparse speedup: {:.2}×", ratio(per_sparse, per_sparse_h));
 }
 
 fn main() {
-    println!("=== Benchmark: Sparse-matrix prover (Implementation 6) ===");
-    println!("Comparing dense path (Impl 5) vs sparse path (Impl 6).");
-    println!("Both use FFT engine + Pippenger MSM + FullProvingKey.");
+    println!("=== Benchmark: Sparse-matrix prover (Implementation 6 + 7) ===");
+    println!("Comparing dense path (Impl 5) vs sparse path (Impl 6) vs h_scalar path (Impl 7).");
+    println!("All use FFT engine + Pippenger MSM + FullProvingKey.");
 
     // 1. Toy circuit
     bench_toy();
