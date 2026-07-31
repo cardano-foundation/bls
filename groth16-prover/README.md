@@ -264,7 +264,24 @@ cargo run --release -- compute-inputs \
   --out /tmp/input.json
 ```
 
-#### Sparse Merkle Tree operations
+<details>
+<summary><b>Sparse Merkle Tree operations — click to expand</b></summary>
+
+#### What are Sparse Merkle Trees and why should you care?
+
+Imagine you want to prove *"I own this credential"* without revealing which one, or prove *"this transaction is valid"* without disclosing the sender. A **Sparse Merkle Tree (SMT)** is the standard data structure that makes this possible.
+
+An SMT is a perfect binary tree with a fixed depth — one leaf for every possible hash output. Most leaves are empty (that's the "sparse" part), yet a single **root hash** still commits to the entire tree. The magic is in the **Merkle path**: to prove a leaf exists, you only need `depth` sibling hashes. It doesn't matter if the tree has 10 items or 10 million — the proof is always the same tiny size.
+
+**Why this matters for zk-SNARKs:**
+- **Privacy**: You can prove membership without revealing the leaf or its position.
+- **Non-membership**: A leaf at the default value proves an item was never inserted.
+- **Succinctness**: The proof size is `O(depth)`, not `O(n)`, making it ideal for blockchain state where storage is expensive.
+- **Composability**: The root hash acts as a public commitment; the path becomes a private witness inside a Groth16 proof.
+
+This concept was formalised by Dahlberg, Pulls, and Peeters in *"Efficient Sparse Merkle Trees: Caching Strategies and Secure (Non-)Membership Proofs"* (2016) [eprint.iacr.org/2016/683](https://eprint.iacr.org/2016/683). Their work defines SMTs as authenticated data structures and shows that verifiable audit paths for both membership and non-membership can be generated in practically constant time (< 4 ms with SHA-512/256) even with limited cache space. For our project, the key takeaway is the **formal treatment of (non-)membership proofs** — our `smt verify` command implements exactly this idea by recomputing the root from a leaf and its path. We substitute SHA-512/256 with **MiMC(x⁷)** because MiMC is arithmetization-friendly: it minimises constraints inside the zk-SNARK circuit, making the on-chain verification drastically cheaper.
+
+#### CLI commands
 
 The CLI includes an insert-only sparse Merkle tree backed by MiMC(x⁷) over BLS12-381:
 
@@ -289,6 +306,8 @@ cargo run --release -- smt export --state /tmp/smt.json --nullifier 1 --out inpu
 ```
 
 See [`cli/README.md`](cli/README.md) for full CLI documentation, including proof serialization format, proving key structure, and complete end-to-end examples.
+
+</details>
 
 ---
 
