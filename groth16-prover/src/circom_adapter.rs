@@ -789,6 +789,7 @@ mod tests {
             &sparse.r,
             &sparse.o,
             tw,
+            false,
         );
 
         let prover = PippengerProver::new();
