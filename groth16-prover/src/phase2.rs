@@ -443,6 +443,9 @@ impl Phase2Accumulator {
             c_query: self.c_query.clone(),
             h_query: self.h_query.clone(),
             l_query: self.l_query.clone(),
+            // Phase-2 MPC does not retain the delta scalar, so h_scalar is unavailable.
+            // The prover falls back to the h_query MSM path.
+            h_scalar: None,
         };
 
         (full_pk, vk)
