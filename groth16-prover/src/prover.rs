@@ -912,19 +912,19 @@ mod tests {
 
         let n_constraints = L.len();
         // Build sparse matrices from dense L, R, O for the sparse prover path
-        let sparse_l: Vec<Vec<(u32, Fr)>> = L.iter().enumerate().map(|(j, row)| {
+        let sparse_l: Vec<Vec<(u32, Fr)>> = L.iter().enumerate().map(|(_j, row)| {
             row.iter().enumerate().filter_map(|(i, &v)| {
                 let fr = Fr::from(v);
                 if fr.is_zero() { None } else { Some((i as u32, fr)) }
             }).collect()
         }).collect();
-        let sparse_r: Vec<Vec<(u32, Fr)>> = R.iter().enumerate().map(|(j, row)| {
+        let sparse_r: Vec<Vec<(u32, Fr)>> = R.iter().enumerate().map(|(_j, row)| {
             row.iter().enumerate().filter_map(|(i, &v)| {
                 let fr = Fr::from(v);
                 if fr.is_zero() { None } else { Some((i as u32, fr)) }
             }).collect()
         }).collect();
-        let sparse_o: Vec<Vec<(u32, Fr)>> = O.iter().enumerate().map(|(j, row)| {
+        let sparse_o: Vec<Vec<(u32, Fr)>> = O.iter().enumerate().map(|(_j, row)| {
             row.iter().enumerate().filter_map(|(i, &v)| {
                 let fr = Fr::from(v);
                 if fr.is_zero() { None } else { Some((i as u32, fr)) }
