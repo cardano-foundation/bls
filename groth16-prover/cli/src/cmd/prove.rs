@@ -148,14 +148,14 @@ pub fn run(args: Args) -> Result<(), Box<dyn Error>> {
                 EngineArg::Dense => {
                     let engine = DenseQapEngine::new();
                     single_party_ceremony_full_from_tw(
-                        &engine, &circuit.l, &circuit.r, &circuit.o, n_public, tw,
+                        &engine, &circuit.l, &circuit.r, &circuit.o, n_public, tw, false,
                     )
                     .0
                 }
                 EngineArg::Fft => {
                     let engine = FftQapEngine::new();
                     single_party_ceremony_full_from_tw(
-                        &engine, &circuit.l, &circuit.r, &circuit.o, n_public, tw,
+                        &engine, &circuit.l, &circuit.r, &circuit.o, n_public, tw, false,
                     )
                     .0
                 }
@@ -306,6 +306,7 @@ fn run_sparse(args: Args) -> Result<(), Box<dyn Error>> {
             &circuit.r,
             &circuit.o,
             tw,
+            false,
         )
         .0
     };
