@@ -73,12 +73,12 @@ Full pipeline for each item: **Circom → groth16-prover (dev ceremony) → Aike
 - **1. Merkle Membership / Privacy Coin Spend** (1,107 constraints, all-private inputs) — ZCash-style shielded UTXO spending on Cardano. See [`Privacy/README.md`](Privacy/README.md).
 - **2. Poseidon Hash Pre-image** — prove knowledge of a secret whose Poseidon hash equals a public commitment. See [`PoseidonPreimage/README.md`](PoseidonPreimage/README.md).
 - **3. Range Proof / Comparison** — prove a committed value lies in range `[0, 2^n)` without revealing the value. See [`RangeProof/README.md`](RangeProof/README.md).
-- **4. Blake2b-224 Hash Pre-image** (~79K constraints) — prove knowledge of a pre-image that hashes to a given Cardano key hash. The sparse prover keeps RAM at ~280 MiB. See [`Blake2b224Preimage/README.md`](Blake2b224Preimage/README.md).
+- **4. Blake2b-224 Hash Pre-image** (~79K constraints) — prove knowledge of a pre-image that hashes to a given Cardano key hash. The sparse prover keeps RAM at ~280 MiB; h_scalar (Impl 7) cuts prove time from ~5 s → ~4.5 s and halves PK size. See [`Blake2b224Preimage/README.md`](Blake2b224Preimage/README.md).
 - **5. EdDSA-JubJub Signature Verification** (12 601 constraints, 7 public inputs) — deterministic EdDSA-JubJub signature proof over the JubJub curve. See [`EdDSAJubJub/README.md`](EdDSAJubJub/README.md).
 - **6. Private Key → Public Key Ownership Proof** — two variants in [`CardanoKeyOwnership/`](CardanoKeyOwnership/README.md):
   1. **JubJub ownership** (~4K constraints) — proves `[sk]·G_JubJub == pk`.
-  2. **Ed25519 ownership** (~1.97M constraints) — proves real Cardano Ed25519 wallet key ownership. The sparse prover keeps RAM at ~2.5 GiB.
-- **7. Ed25519 Signature Verification In-Circuit** (~4M constraints) — verify a standard Ed25519 signature inside a Groth16 circuit. The sparse prover keeps RAM at ~3 GiB. See [`Ed25519Verify/README.md`](Ed25519Verify/README.md).
+  2. **Ed25519 ownership** (~1.97M constraints) — proves real Cardano Ed25519 wallet key ownership. The sparse prover keeps RAM at ~2.5 GiB; h_scalar cuts prove time from ~1.7 min → ~1.5 min and halves PK size.
+- **7. Ed25519 Signature Verification In-Circuit** (~4M constraints) — verify a standard Ed25519 signature inside a Groth16 circuit. The sparse prover keeps RAM at ~3 GiB; h_scalar (Impl 7) is the biggest win here: prove time drops from ~5 min → ~2 min and PK size halves (~2.7 GB → ~1.3 GB). See [`Ed25519Verify/README.md`](Ed25519Verify/README.md).
 
 ---
 

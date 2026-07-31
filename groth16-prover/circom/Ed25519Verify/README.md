@@ -198,7 +198,15 @@ snarkjs wtns calculate ed25519_verify_js/ed25519_verify.wasm test_verify_input.j
 
 ```bash
 cd groth16-prover/cli
+
+# Legacy path (Impl 6)
 cargo run --release -- ceremony-dev --sparse \
+  --circuit ../circom/Ed25519Verify/ed25519_verify.r1cs \
+  --proving-key /tmp/ed25519.pk \
+  --verifying-key /tmp/ed25519.vk
+
+# Fast path with h_scalar compression (Impl 7) — halves PK size and cuts prove time by >2×
+cargo run --release -- ceremony-dev --sparse --h-scalar \
   --circuit ../circom/Ed25519Verify/ed25519_verify.r1cs \
   --proving-key /tmp/ed25519.pk \
   --verifying-key /tmp/ed25519.vk
@@ -208,10 +216,14 @@ cargo run --release -- ceremony-dev --sparse \
 
 | Step | Time | Memory (RSS) | Notes |
 |------|------|-------------|-------|
-| Sparse dev ceremony | **~16 min** | ~3 GiB | Uses `FixedBase::msm` batch scalar multiplication + `ark-std` Rayon parallelism |
+| Sparse dev ceremony (legacy) | **~16 min** | ~3 GiB | Uses `FixedBase::msm` batch scalar multiplication + `ark-std` Rayon parallelism |
 | PK deserialization (uncompressed, unchecked) | **~13 s** | — | Dev ceremony writes uncompressed PK to avoid 20M+ point decompressions |
-| Sparse prove | **~5 min** | ~4 GiB | FFT-based polynomial multiplication (`l * r` instead of `naive_mul`) + Pippenger MSM |
-| Total e2e (ceremony + prove) | **~21 min** | — | Previously impossible (>5 h ceremony blocked) |
+| Sparse prove (legacy) | **~5 min** | ~4 GiB | FFT-based polynomial multiplication (`l * r` instead of `naive_mul`) + Pippenger MSM |
+| Total e2e (ceremony + prove, legacy) | **~21 min** | — | Previously impossible (>5 h ceremony blocked) |
+| Sparse dev ceremony (h_scalar) | **~16 min** | ~3 GiB | Same ceremony; PK size halves (~2.7 GB → ~1.3 GB uncompressed) |
+| PK deserialization (h_scalar) | **~7 s** | — | Less data to read from disk |
+| Sparse prove (h_scalar) | **~2 min** | ~4 GiB | h_query MSM eliminated (~55 % of prove time) + Rayon parallel A/B/C_private |
+| Total e2e (ceremony + prove, h_scalar) | **~18 min** | — | ~3 min faster; ceremony is now the bottleneck (~89 % of e2e) |
 
 **To monitor progress:**
 
