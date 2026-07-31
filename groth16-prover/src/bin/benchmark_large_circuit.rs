@@ -1,10 +1,10 @@
-//! `benchmark_large_circuit` — demonstrate that Implementation 6 (sparse prover)
-//! unblocks circuits that would OOM on commodity hardware with the dense path.
+//! `benchmark_large_circuit` — demonstrate that Implementation 6 + 7 (sparse
+//! prover with h_scalar compression) unblocks circuits that would OOM on
+//! commodity hardware with the dense path.
 //!
 //! Generates a synthetic large circuit with realistic constraint density (~5 %
 //! non-zero entries per matrix, typical of hash and signature circuits), then
-//! proves it using the sparse path.  We print the dense-equivalent memory that
-//! *would* be required so the user can see why the dense path is impossible.
+//! proves it using both the legacy sparse path and the h_scalar fast path.
 //!
 //! Circuits simulated:
 //!   - "Small hash"   — 20 K wires × 20 K constraints  (would be ~38 GiB dense)
@@ -172,7 +172,8 @@ fn bench_circuit(name: &str, n_wires: u32, n_constraints: u32, sparsity: f64) {
     let tw = ToxicWaste::deterministic();
     let n_public = 1 + circuit.n_pub_out as usize + circuit.n_pub_in as usize;
 
-    print!("  Running sparse ceremony ... ");
+    // Legacy sparse ceremony
+    print!("  Running sparse ceremony (legacy) ... ");
     let start = Instant::now();
     let (full_pk, vk) = single_party_ceremony_full_from_tw_sparse(
         &engine,
@@ -182,31 +183,60 @@ fn bench_circuit(name: &str, n_wires: u32, n_constraints: u32, sparsity: f64) {
         &circuit.l,
         &circuit.r,
         &circuit.o,
-        tw,
+        tw.clone(),
         false,
     );
-    let t_ceremony = start.elapsed();
-    println!("{:.2?}", t_ceremony);
+    let t_ceremony_legacy = start.elapsed();
+    println!("{:.2?}", t_ceremony_legacy);
 
-    // Prove
-    let prover = PippengerProver::new();
-    print!("  Running sparse proof   ... ");
+    // h_scalar sparse ceremony
+    print!("  Running sparse ceremony (h_scalar) .. ");
     let start = Instant::now();
-    let (proof, public_input) = prover.prove_with_full_pk_sparse(
+    let (full_pk_h, vk_h) = single_party_ceremony_full_from_tw_sparse(
         &engine,
-        &full_pk,
         n_constraints as usize,
+        n_wires as usize,
+        n_public,
         &circuit.l,
         &circuit.r,
         &circuit.o,
-        &circuit.witness,
+        tw,
+        true,
     );
-    let t_prove = start.elapsed();
-    println!("{:.2?}", t_prove);
+    let t_ceremony_h = start.elapsed();
+    println!("{:.2?}", t_ceremony_h);
+
+    // Prove (legacy)
+    let prover = PippengerProver::new();
+    print!("  Running sparse proof (legacy)   ... ");
+    let start = Instant::now();
+    let (proof, public_input) = prover.prove_with_full_pk_sparse(
+        &engine, &full_pk, n_constraints as usize,
+        &circuit.l, &circuit.r, &circuit.o, &circuit.witness,
+    );
+    let t_prove_legacy = start.elapsed();
+    println!("{:.2?}", t_prove_legacy);
+
+    // Prove (h_scalar)
+    print!("  Running sparse proof (h_scalar)  ... ");
+    let start = Instant::now();
+    let (proof_h, public_input_h) = prover.prove_with_full_pk_sparse(
+        &engine, &full_pk_h, n_constraints as usize,
+        &circuit.l, &circuit.r, &circuit.o, &circuit.witness,
+    );
+    let t_prove_h = start.elapsed();
+    println!("{:.2?}", t_prove_h);
 
     // Verify
     let valid = verify_with_vk(&proof, &public_input, &vk);
-    println!("  Verification:          {}", if valid { "✅ VALID" } else { "❌ INVALID" });
+    let valid_h = verify_with_vk(&proof_h, &public_input_h, &vk_h);
+    println!("  Verification (legacy):  {}", if valid { "✅ VALID" } else { "❌ INVALID" });
+    println!("  Verification (h_scalar): {}", if valid_h { "✅ VALID" } else { "❌ INVALID" });
+
+    if t_prove_h.as_nanos() > 0 {
+        let speedup = t_prove_legacy.as_nanos() as f64 / t_prove_h.as_nanos() as f64;
+        println!("  h_scalar prove speedup: {:.2}×", speedup);
+    }
 
     println!("  ────────────────────────────────────────────────────────────────");
     println!("  ✅ Sparse path succeeded where dense path would need {:.1} GiB", dense_mem_gib);
