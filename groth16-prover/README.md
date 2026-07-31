@@ -1413,6 +1413,16 @@ For **long-term research**:
 - **Tests:** 5 parity tests pass (sparse vs dense): parser equivalence, ceremony key equality, naive prover proof equality, Pippenger prover proof equality, and end-to-end verification. 7 CLI integration tests also pass.
 - **Benefit:** Unlocks circuits with 50K–500K wires (Blake2b-224, Ed25519, large Poseidon trees) on commodity hardware. The dense-matrix OOM at 12K wires disappears entirely. Memory drops from `O(n_constraints × n_wires)` to `O(#non_zero_entries)`.
 
+### (k) h-query scalar compression + parallel proof assembly (beyond what zeroj supports)
+
+- **Status:** ✅ **Implemented** as [Implementation 7](#implementation-7-h-query-scalar-compression--parallel-proof-assembly).
+- **What changed:** The `h_query` vector — which stored `delta_inv * tau^j * T(tau) * G1` for every coefficient of the quotient polynomial `h(x)` — is replaced by a single scalar `h_scalar = delta_inv * T(tau)`. During proving, the h_commitment becomes one scalar multiplication (`generator * h_scalar * h.evaluate(&tau)`) instead of a multi-million-point MSM. This eliminates the dominant proving cost (~55 % of prove time on Ed25519). In addition, the remaining independent MSMs (A, B, C_private) are overlapped with `rayon::join` on multi-core machines.
+- **Fields added:** `FullProvingKey.h_scalar: Option<Fr>` and `h_scalar_tau: Option<Fr>` (the latter stores `tau` so the prover can evaluate `h(tau)` without an external scalar). Both are `None` in the Phase 2 MPC path since the ceremony destroys all scalars.
+- **Prover:** Fast-path branch added to all four prover methods (`Naive`/`Pippenger` × `dense`/`sparse`). Auto-detects via `if let (Some(h_scalar), Some(tau)) = (full_pk.h_scalar, full_pk.h_scalar_tau)` and falls back to the legacy `h_query` MSM when absent.
+- **CLI:** `--h-scalar` flag on `ceremony-dev` triggers the compressed proving key. The `prove` command auto-detects and uses the fast path with no extra flags.
+- **Tests:** 4 parity tests (dense naive, FFT Pippenger, sparse Pippenger, valid proof) plus 1 CLI integration test (`full_ceremony_dev_h_scalar_prove_verify_roundtrip`) all pass.
+- **Benefit:** Cuts Ed25519 prove time from ~5 min to ~2 min, halves the uncompressed PK size (~2.7 GB → ~1.3 GB), and eliminates the single largest MSM bottleneck. Backward-compatible: old `.pk` files without `h_scalar` still work via the fallback path.
+
 ### (l) Poseidon-based Merkle membership gadget ✅ DONE
 
 - **Status:** ✅ **Implemented** end-to-end in `circom/PoseidonMerkle/`.
