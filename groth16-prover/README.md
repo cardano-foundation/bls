@@ -1216,6 +1216,12 @@ cargo run --release -- ceremony-dev --h-scalar \
   --verifying-key /tmp/multiplier.vk
 ```
 
+> **⚠️ `--h-scalar` is NOT a replacement for `--sparse`.** Use them **together** when you have a large circuit:
+> > ```bash
+> > cargo run --release -- ceremony-dev --sparse --h-scalar ...
+> > ```
+> > `--sparse` avoids expanding the `.r1cs` into dense matrices (saves RAM). `--h-scalar` compresses the `h_query` vector into a single scalar (saves PK size and prove time). They solve different bottlenecks and are independent — combine both for maximum efficiency on large circuits.
+
 The prover auto-detects `h_scalar` in the proving key and uses the fast path; if it is absent (e.g. from a Phase 2 MPC ceremony), it falls back to the legacy `h_query` MSM.
 
 ### What was actually added
