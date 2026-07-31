@@ -837,4 +837,130 @@ mod tests {
             "FullPK prover must produce a valid proof"
         );
     }
+
+    // ------------------------------------------------------------------
+    // Implementation 7 parity tests (h_scalar fast path)
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn test_h_scalar_matches_h_query_naive_dense() {
+        let engine = DenseQapEngine::new();
+        let prover = NaiveProver::new();
+        let witness = witness();
+        let tw = crate::ceremony::ToxicWaste::deterministic();
+
+        let (pk_legacy, _vk) = crate::ceremony::single_party_ceremony_full_from_tw(
+            &engine, &L, &R, &O, 2, tw.clone(), false,
+        );
+        let (pk_hscalar, _vk2) = crate::ceremony::single_party_ceremony_full_from_tw(
+            &engine, &L, &R, &O, 2, tw, true,
+        );
+
+        let (proof_legacy, public_legacy) = prover.prove_with_full_pk(
+            &engine, &pk_legacy, &L, &R, &O, &witness,
+        );
+        let (proof_fast, public_fast) = prover.prove_with_full_pk(
+            &engine, &pk_hscalar, &L, &R, &O, &witness,
+        );
+
+        assert_eq!(proof_legacy.a, proof_fast.a, "A must match between legacy and h_scalar path");
+        assert_eq!(proof_legacy.b, proof_fast.b, "B must match between legacy and h_scalar path");
+        assert_eq!(proof_legacy.c, proof_fast.c, "C must match between legacy and h_scalar path");
+        assert_eq!(public_legacy.v, public_fast.v, "V must match between legacy and h_scalar path");
+    }
+
+    #[test]
+    fn test_h_scalar_matches_h_query_pippenger_fft() {
+        let engine = FftQapEngine::new();
+        let prover = PippengerProver::new();
+        let witness = witness();
+        let tw = crate::ceremony::ToxicWaste::deterministic();
+
+        let (pk_legacy, _vk) = crate::ceremony::single_party_ceremony_full_from_tw(
+            &engine, &L, &R, &O, 2, tw.clone(), false,
+        );
+        let (pk_hscalar, _vk2) = crate::ceremony::single_party_ceremony_full_from_tw(
+            &engine, &L, &R, &O, 2, tw, true,
+        );
+
+        let (proof_legacy, public_legacy) = prover.prove_with_full_pk(
+            &engine, &pk_legacy, &L, &R, &O, &witness,
+        );
+        let (proof_fast, public_fast) = prover.prove_with_full_pk(
+            &engine, &pk_hscalar, &L, &R, &O, &witness,
+        );
+
+        assert_eq!(proof_legacy.a, proof_fast.a, "A must match between legacy and h_scalar path");
+        assert_eq!(proof_legacy.b, proof_fast.b, "B must match between legacy and h_scalar path");
+        assert_eq!(proof_legacy.c, proof_fast.c, "C must match between legacy and h_scalar path");
+        assert_eq!(public_legacy.v, public_fast.v, "V must match between legacy and h_scalar path");
+    }
+
+    #[test]
+    fn test_h_scalar_matches_h_query_pippenger_sparse() {
+        let engine = FftQapEngine::new();
+        let prover = PippengerProver::new();
+        let witness = witness();
+        let tw = crate::ceremony::ToxicWaste::deterministic();
+
+        let (pk_legacy, _vk) = crate::ceremony::single_party_ceremony_full_from_tw(
+            &engine, &L, &R, &O, 2, tw.clone(), false,
+        );
+        let (pk_hscalar, _vk2) = crate::ceremony::single_party_ceremony_full_from_tw(
+            &engine, &L, &R, &O, 2, tw, true,
+        );
+
+        let n_constraints = L.len();
+        // Build sparse matrices from dense L, R, O for the sparse prover path
+        let sparse_l: Vec<Vec<(u32, Fr)>> = L.iter().enumerate().map(|(j, row)| {
+            row.iter().enumerate().filter_map(|(i, &v)| {
+                let fr = Fr::from(v);
+                if fr.is_zero() { None } else { Some((i as u32, fr)) }
+            }).collect()
+        }).collect();
+        let sparse_r: Vec<Vec<(u32, Fr)>> = R.iter().enumerate().map(|(j, row)| {
+            row.iter().enumerate().filter_map(|(i, &v)| {
+                let fr = Fr::from(v);
+                if fr.is_zero() { None } else { Some((i as u32, fr)) }
+            }).collect()
+        }).collect();
+        let sparse_o: Vec<Vec<(u32, Fr)>> = O.iter().enumerate().map(|(j, row)| {
+            row.iter().enumerate().filter_map(|(i, &v)| {
+                let fr = Fr::from(v);
+                if fr.is_zero() { None } else { Some((i as u32, fr)) }
+            }).collect()
+        }).collect();
+
+        let (proof_legacy, public_legacy) = prover.prove_with_full_pk_sparse(
+            &engine, &pk_legacy, n_constraints, &sparse_l, &sparse_r, &sparse_o, &witness,
+        );
+        let (proof_fast, public_fast) = prover.prove_with_full_pk_sparse(
+            &engine, &pk_hscalar, n_constraints, &sparse_l, &sparse_r, &sparse_o, &witness,
+        );
+
+        assert_eq!(proof_legacy.a, proof_fast.a, "A must match between legacy and h_scalar sparse path");
+        assert_eq!(proof_legacy.b, proof_fast.b, "B must match between legacy and h_scalar sparse path");
+        assert_eq!(proof_legacy.c, proof_fast.c, "C must match between legacy and h_scalar sparse path");
+        assert_eq!(public_legacy.v, public_fast.v, "V must match between legacy and h_scalar sparse path");
+    }
+
+    #[test]
+    fn test_h_scalar_produces_valid_proof() {
+        let engine = FftQapEngine::new();
+        let prover = PippengerProver::new();
+        let witness = witness();
+        let tw = crate::ceremony::ToxicWaste::deterministic();
+
+        let (full_pk, _vk) = crate::ceremony::single_party_ceremony_full_from_tw(
+            &engine, &L, &R, &O, 2, tw, true,
+        );
+        let (proof, public_input) = prover.prove_with_full_pk(
+            &engine, &full_pk, &L, &R, &O, &witness,
+        );
+
+        assert!(
+            verify_proof(&proof, &public_input, &full_pk.vk.alpha_g1, &full_pk.vk.beta_g2, &full_pk.vk.gamma_g2, &full_pk.vk.delta_g2),
+            "h_scalar prover must produce a valid proof"
+        );
+    }
 }
