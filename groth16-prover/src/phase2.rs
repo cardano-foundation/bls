@@ -446,6 +446,7 @@ impl Phase2Accumulator {
             // Phase-2 MPC does not retain the delta scalar, so h_scalar is unavailable.
             // The prover falls back to the h_query MSM path.
             h_scalar: None,
+            h_scalar_tau: None,
         };
 
         (full_pk, vk)
