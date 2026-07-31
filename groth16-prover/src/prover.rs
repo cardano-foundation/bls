@@ -734,7 +734,7 @@ mod tests {
 
         // New group-element path
         let (full_pk, _vk) = crate::ceremony::single_party_ceremony_full_from_tw(
-            &engine, &L, &R, &O, 2, tw,
+            &engine, &L, &R, &O, 2, tw, false,
         );
         let (proof_new, public_new) = prover.prove_with_full_pk(
             &engine, &full_pk, &L, &R, &O, &witness,
@@ -761,7 +761,7 @@ mod tests {
 
         // New group-element path
         let (full_pk, _vk) = crate::ceremony::single_party_ceremony_full_from_tw(
-            &engine, &L, &R, &O, 2, tw,
+            &engine, &L, &R, &O, 2, tw, false,
         );
         let (proof_new, public_new) = prover.prove_with_full_pk(
             &engine, &full_pk, &L, &R, &O, &witness,
@@ -781,7 +781,7 @@ mod tests {
         let tw = crate::ceremony::ToxicWaste::deterministic();
 
         let (full_pk, _vk) = crate::ceremony::single_party_ceremony_full_from_tw(
-            &engine, &L, &R, &O, 2, tw,
+            &engine, &L, &R, &O, 2, tw, false,
         );
         let (proof, public_input) = prover.prove_with_full_pk(
             &engine, &full_pk, &L, &R, &O, &witness,

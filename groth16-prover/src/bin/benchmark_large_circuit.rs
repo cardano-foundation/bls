@@ -183,6 +183,7 @@ fn bench_circuit(name: &str, n_wires: u32, n_constraints: u32, sparsity: f64) {
         &circuit.r,
         &circuit.o,
         tw,
+        false,
     );
     let t_ceremony = start.elapsed();
     println!("{:.2?}", t_ceremony);

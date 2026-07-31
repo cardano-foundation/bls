@@ -121,7 +121,7 @@ fn main() {
     let n_public = 1; // constant wire only
     let tw = ToxicWaste::deterministic();
     let (full_pk, _vk) = single_party_ceremony_full_from_tw(
-        &engine, &circuit.l, &circuit.r, &circuit.o, n_public, tw,
+        &engine, &circuit.l, &circuit.r, &circuit.o, n_public, tw, false,
     );
     println!("FullProvingKey generated (group elements only, no scalars)\n");
 
