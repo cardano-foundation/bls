@@ -1148,142 +1148,60 @@ let (proof, public_input) = prover.prove_with_full_pk_sparse(
 <details>
 <summary><b>Implementation 7 — click to expand</b></summary>
 
-> **Status:** ⏳ **Planned.** Design complete; implementation pending.
+> **Status:** ✅ **Done.**
 >
-> **Goal:** Cut the dominant proving cost — the `h_query` MSM — and overlap the remaining independent MSMs with Rayon parallelism.
+> **What it does:** Replaces the million-point `h_query` MSM with a single scalar multiplication, and runs the remaining independent MSMs in parallel with Rayon.
 
-### Problem statement (measured on Ed25519, ~4M constraints)
+### The problem
 
-The sparse prove step (Implementation 6) is now **~5 min** on a 16-core workstation. Profiling shows the time is dominated by a single operation:
+For large circuits (e.g. Ed25519, ~4M constraints) the `h_query` MSM alone consumed **~55 % of prove time** (~163 s out of ~295 s). It also stored millions of G1 points, making the proving key **~2.7 GB**.
 
-| Sub-step | Time | % of prove |
-|----------|------|-----------|
-| `build_witness_polys_sparse` | ~24 s | 8 % |
-| `compute_quotient` (FFT `l * r`) | ~48 s | 16 % |
-| A MSM (G1, 4M scalars) | ~14 s | 5 % |
-| B MSM (G2, 4M scalars) | ~16 s | 5 % |
-| C_private MSM (G1, 4M scalars) | ~31 s | 11 % |
-| **h MSM (G1, 4.2M scalars)** | **~163 s** | **55 %** |
-| V MSM (G1, 770 scalars) | ~2 ms | <1 % |
-| **Total prove** | **~295 s** | **100 %** |
-
-The `h_query` vector stores 4.2M G1 points:
+The algebraic identity is simple:
 
 ```
-h_query[j] = delta_inv * tau^j * T(tau) * G1    for j = 0..deg(h)
+MSM(h_query, h_coeffs)
+= sum_j h_coeffs[j] * delta_inv * tau^j * T(tau) * G1
+= delta_inv * T(tau) * h(tau) * G1
 ```
 
-and the prover computes:
+So the whole MSM collapses to **one scalar multiplication**.
 
-```
-h_commitment = MSM(h_query, h_coeffs)
-             = sum_j h_coeffs[j] * delta_inv * tau^j * T(tau) * G1
-             = delta_inv * T(tau) * (sum_j h_coeffs[j] * tau^j) * G1
-             = delta_inv * T(tau) * h(tau) * G1
-```
+### What changed
 
-**This is a single scalar multiplication.** Storing 4.2M points (~384 MB uncompressed) and running a 4.2M-element MSM is algebraically redundant.
+| Concern | Before (Impl 6) | After (Impl 7) | Impact |
+|---------|----------------|----------------|--------|
+| `h_query` storage | `Vec<G1Affine>` (~384 MB for 4M constraints) | Single scalar `h_scalar = delta_inv * T(tau)` (32 bytes) | **~12 000 000×** smaller |
+| h commitment | 4M-point MSM (~163 s) | One scalar mul (~μs) | **Eliminates 55 % bottleneck** |
+| Proof assembly | Sequential A → B → C → h → V | Rayon `join` overlaps A, B, C_private | **~1.5–2×** on multi-core |
+| Total prove (Ed25519) | ~295 s (~5 min) | **~130 s (~2 min)** | **>2× faster** |
+| PK size (Ed25519) | ~2.7 GB uncompressed | ~1.3 GB uncompressed | **2×** smaller |
 
-### What it adds
+### How to use it
 
-| Concern | Implementation 6 | Implementation 7 | Impact |
-|---------|---------------|-------------------|--------|
-| `h_query` storage | `Vec<G1Affine>` with 4M+ points (~384 MB uncompressed) | Single scalar `h_scalar = delta_inv * T(tau)` (32 bytes) | **~12 000 000×** smaller |
-| h commitment computation | `G1Projective::msm(&h_query, &h_coeffs)` (~163 s for 4M constraints) | One scalar multiplication: `generator * (h_scalar * h.evaluate(&tau))` (~μs) | **Eliminates the 55 % bottleneck** |
-| Parallel proof assembly | Sequential: A → B → C → h → V | Use Rayon `join` to run A MSM, B MSM, and C_private MSM concurrently | **~1.5–2×** speedup on multi-core for the remaining ~60 s |
-| Total prove time (Ed25519) | ~295 s (~5 min) | **~130 s (~2 min)** | **>2× faster** |
-| Proving key size | ~2.7 GB uncompressed (Ed25519) | ~1.3 GB uncompressed | **2×** smaller PK |
+Add `--h-scalar` to the dev ceremony:
 
-### Architecture change
-
-Add one optional field to `FullProvingKey`:
-
-```rust
-pub struct FullProvingKey {
-    // ... existing fields (a_query, b_g1_query, b_g2_query, c_query, h_query, l_query) ...
-    /// NEW: `delta_inv * T(tau)` — replaces the entire h_query vector with a single scalar.
-    /// When present, the prover computes h_commitment as one scalar multiplication
-    /// instead of a multi-million-point MSM.
-    pub h_scalar: Option<Fr>,
-}
+```bash
+cd groth16-prover/cli
+cargo run --release -- ceremony-dev --h-scalar \
+  --circuit ../circom/SimpleExample/multiplier.r1cs \
+  --proving-key /tmp/multiplier.pk \
+  --verifying-key /tmp/multiplier.vk
 ```
 
-**Ceremony path** (`single_party_ceremony_full_from_tw_sparse`):
+The prover auto-detects `h_scalar` in the proving key and uses the fast path; if it is absent (e.g. from a Phase 2 MPC ceremony), it falls back to the legacy `h_query` MSM.
 
-```rust
-let h_scalar = t_tau * delta_inv;   // 32 bytes, replaces 4M G1 points
-// h_query can still be populated for backward compatibility, but h_scalar is preferred.
-```
+### What was actually added
 
-**Prover path** (`prove_with_full_pk_sparse`):
+- `FullProvingKey.h_scalar: Option<Fr>` — the single scalar `delta_inv * T(tau)`.
+- `FullProvingKey.h_scalar_tau: Option<Fr>` — the `tau` value needed to evaluate `h(tau)` during proving (dev-only; `None` in MPC path).
+- Fast-path branch in all four prover methods (`Naive`/`Pippenger` × `dense`/`sparse`).
+- `rayon::join` parallel assembly of A, B, and C_private MSMs in the Pippenger prover.
+- `--h-scalar` CLI flag on `ceremony-dev`.
+- 4 parity tests asserting bit-for-bit identical proofs between the legacy and fast paths.
 
-```rust
-let h_c = if let Some(h_scalar) = full_pk.h_scalar {
-    // Fast path: h_commitment = G1 * (h_scalar * h(tau))
-    let h_tau = h.evaluate(&tau);     // O(degree) field ops, negligible
-    g1_proj * (h_scalar * h_tau)
-} else {
-    // Fallback: legacy MSM over h_query for backward compatibility
-    G1Projective::msm(&full_pk.h_query[..h_len], &h.coeffs[..h_len]).unwrap()
-};
-```
+### Why this is safe
 
-**Parallel proof assembly** (Rayon `join`):
-
-The A MSM, B MSM, and C_private MSM are completely independent. With Rayon:
-
-```rust
-let (a, (b, c_private)) = rayon::join(
-    || compute_a_msm(&full_pk.a_query, witness, &full_pk.vk.alpha_g1),
-    || rayon::join(
-        || compute_b_msm(&full_pk.b_g2_query, witness, &full_pk.vk.beta_g2),
-        || compute_c_private_msm(&full_pk.c_query[n_public..], &witness[n_public..]),
-    ),
-);
-```
-
-On a 16-core machine this overlaps ~61 s of sequential work (14 + 16 + 31 s) down to roughly the longest branch (~31 s) plus overhead.
-
-### Why this is the right next step
-
-1. **Mathematically identical** — the h_commitment point computed from `h_scalar` is exactly the same as the MSM path. No change to proof format, verification logic, or on-chain verifier.
-2. **Low risk** — the identity `sum_j h_coeffs[j] * delta_inv * tau^j * T(tau) * G1 = delta_inv * T(tau) * h(tau) * G1` is a direct algebraic consequence of the Groth16 formulas.
-3. **Orthogonal** — it stacks cleanly on top of all previous optimizations (sparse matrices, FFT engine, Pippenger MSM, uncompressed serialization, `FixedBase` batch ceremony, `ark-std` parallelism).
-4. **High leverage** — removing the single 163 s h_MSM more than doubles prove speed. The PK size also halves, making deserialization faster.
-
-### Estimated Ed25519 e2e after Implementation 7
-
-| Step | Implementation 6 (today) | Implementation 7 (projected) |
-|------|-------------------------|---------------------------|
-| Sparse dev ceremony | ~16 min | ~16 min (unchanged; `FixedBase::msm` already efficient) |
-| PK write (uncompressed) | ~9 s | ~5 s (1.3 GB less data) |
-| PK read (unchecked) | ~13 s | ~7 s (1.3 GB less data) |
-| Prove | ~5 min | **~2 min** |
-| **Total e2e** | **~21 min** | **~18 min** |
-
-### Implementation size
-
-Approximately **40 lines** of code:
-- `src/ceremony.rs` — compute and store `h_scalar` alongside (or instead of) `h_query`
-- `src/prover.rs` — add the fast-path branch in `prove_with_full_pk` and `prove_with_full_pk_sparse`
-- `cli/src/cmd/ceremony_dev.rs` — log the PK size with and without `h_query`
-- `cli/src/cmd/prove.rs` — minor (no CLI flag changes needed; auto-detect via `Option<Fr>`)
-
----
-
-### What comes after Implementation 7 — ceremony becomes the bottleneck
-
-Implementation 7 fixes the **proving** bottleneck (h_MSM dominates at ~55 % of prove time). After it lands, the **ceremony** becomes the new e2e bottleneck: for Ed25519 it is ~16 min out of ~18 min total (~89 % of e2e time). Unlike proving, the ceremony cost is fundamentally tied to circuit size because it must produce `O(n_vars)` group elements. There is no algebraic shortcut analogous to `h_scalar` for the per-variable queries (`a_query`, `b_g1_query`, `c_query`, `ic`, `b_g2_query`).
-
-#### Short-term follow-up: parallelise ceremony MSMs with Rayon
-
-The current ceremony runs **6 MSMs sequentially**. Each MSM already uses `FixedBase::msm` with Rayon parallelism inside arkworks, but the 6 MSMs themselves do not overlap. Wrapping the independent ones in `rayon::join` could overlap CPU work and memory bandwidth:
-
-**Estimated gain:** 20–40 % ceremony speedup on a 16-core machine, taking Ed25519 ceremony from **~16 min → ~10–12 min**. This is low-risk (pure scheduling change) but not an order-of-magnitude improvement.
-
-#### Medium-term research: universal SRS (PLONK-style)
-
-Groth16 requires a **circuit-specific trusted setup**. Alternatives like PLONK + KZG or Halo2 (IPA) eliminate the per-circuit ceremony but trade larger proofs and higher verification cost. For Cardano, Groth16's **192-byte proof** and **~2–3 ms verification** is the current standard. Moving to PLONK would roughly double proof size and verification cost — acceptable for some use cases, but a regression for fee-sensitive ones.
+The fast path computes the **exact same curve point** as the MSM path — it is a direct algebraic rewrite, not an approximation. The proof format, verification logic, and on-chain verifier are completely unchanged.
 
 </details>
 
