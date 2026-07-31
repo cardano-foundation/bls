@@ -108,10 +108,12 @@ fn run_insert(args: InsertArgs) -> Result<(), Box<dyn Error>> {
         }
     }
 
-    // Persist state
+    // Persist state (include transcript for rebuild)
+    let item_strings: Vec<String> = args.items.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
     let state = SmtState {
         depth: args.depth,
         digest: tree.digest().to_string(),
+        items: item_strings,
     };
     let json = serde_json::to_string_pretty(&state)
         .map_err(|e| format!("failed to serialize state: {e}"))?;
@@ -133,16 +135,36 @@ fn run_digest(args: DigestArgs) -> Result<(), Box<dyn Error>> {
 
 fn run_path(args: PathArgs) -> Result<(), Box<dyn Error>> {
     let state: SmtState = load_state(&args.state)?;
-    let _leaf = Fr::from_str(&args.leaf)
+    let leaf = Fr::from_str(&args.leaf)
         .map_err(|_| format!("invalid leaf value: {}", args.leaf))?;
 
-    // Note: path computation requires rebuilding the tree from state.
-    // For a full implementation we'd persist the full tree nodes.
-    // Here we print a helpful message about the limitation.
-    eprintln!("SMT path for leaf {}", args.leaf);
-    eprintln!("  (Full path computation requires tree rebuild from transcript.");
-    eprintln!("   Use `compute-inputs` for end-to-end witness generation.)");
-    println!("digest: {}", state.digest);
+    // Rebuild tree from transcript
+    let mut tree = SparseMerkleTree::new(state.depth);
+    for item_str in &state.items {
+        let parts: Vec<&str> = item_str.split_whitespace().collect();
+        match parts.len() {
+            1 => {
+                let val = Fr::from_str(parts[0])
+                    .map_err(|_| format!("invalid field element: {}", parts[0]))?;
+                tree.insert(val);
+            }
+            2 => {
+                let nf = Fr::from_str(parts[0])
+                    .map_err(|_| format!("invalid nullifier: {}", parts[0]))?;
+                let nonce = Fr::from_str(parts[1])
+                    .map_err(|_| format!("invalid nonce: {}", parts[1]))?;
+                tree.insert(mimc2(nf, nonce));
+            }
+            n => return Err(format!("expected 1 or 2 values, got {}: {}", n, item_str).into()),
+        }
+    }
+
+    let path = tree.path(leaf);
+    println!("digest: {}", tree.digest());
+    for (i, (sibling, direction)) in path.iter().enumerate() {
+        println!("  level {}: sibling={}  direction={}",
+            i, sibling, if *direction { "right (leaf is left)" } else { "left (leaf is right)" });
+    }
 
     Ok(())
 }
@@ -155,9 +177,16 @@ fn load_state(path: &PathBuf) -> Result<SmtState, Box<dyn Error>> {
     Ok(state)
 }
 
-/// Persisted SMT state (minimal — just digest for now)
+/// Persisted SMT state.
+///
+/// Stores the transcript (list of inserted items) so the tree can be
+/// rebuilt on demand for path computation, verification, and export.
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 struct SmtState {
     depth: usize,
     digest: String,
+    /// Raw item strings as provided to `smt insert`.
+    /// Each entry is either a single commitment or "nullifier nonce".
+    #[serde(default)]
+    items: Vec<String>,
 }
