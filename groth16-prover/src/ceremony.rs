@@ -428,7 +428,7 @@ fn build_keys_from_qap_evals(
         c_query,
         h_query,
         l_query,
-        h_scalar: Some(h_scalar_base),
+        h_scalar: if use_h_scalar { Some(h_scalar_base) } else { None },
     };
 
     (full_pk, vk)
@@ -571,7 +571,7 @@ mod tests {
         let n_public = 2;
         let n_vars = L[0].len(); // 8 for the hard-coded 3-constraint circuit
 
-        let (full_pk, vk) = single_party_ceremony_full(&engine, &L, &R, &O, n_public, &mut rng);
+        let (full_pk, vk) = single_party_ceremony_full(&engine, &L, &R, &O, n_public, &mut rng, false);
 
         // 1. Basic sanity checks on vector lengths
         assert_eq!(full_pk.a_query.len(), n_vars, "a_query should have one entry per variable");
