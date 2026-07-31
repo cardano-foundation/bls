@@ -3,6 +3,7 @@ use ark_ec::{pairing::Pairing, AffineRepr, Group, VariableBaseMSM};
 use ark_ff::{Field, Zero};
 use ark_poly::{univariate::DensePolynomial, EvaluationDomain, GeneralEvaluationDomain, Polynomial};
 use ark_std::vec::Vec;
+use rayon;
 
 use crate::engine::{poly_add, poly_scalar_mul, QapEngine};
 
@@ -506,22 +507,6 @@ impl Prover for PippengerProver {
 
         let (_l_poly, _r_poly, _o_poly, h) = build_witness_polys_and_quotient_dense(engine, l, r, o, witness);
 
-        // A = MSM(a_query, witness) + alpha_g1
-        let a_proj = G1Projective::msm(&full_pk.a_query, witness)
-            .expect("MSM length mismatch");
-        let a = G1Affine::from(a_proj + G1Projective::from(full_pk.vk.alpha_g1));
-
-        // B = MSM(b_g2_query, witness) + beta_g2
-        let b_proj = G2Projective::msm(&full_pk.b_g2_query, witness)
-            .expect("MSM length mismatch");
-        let b = G2Affine::from(b_proj + G2Projective::from(full_pk.vk.beta_g2));
-
-        // C = MSM(c_query[private], witness[private]) + h_commitment
-        let private_c = &full_pk.c_query[n_public..];
-        let private_w = &witness[n_public..];
-        let c_private = G1Projective::msm(private_c, private_w)
-            .expect("MSM length mismatch");
-
         // Fast path (Impl 7): h_commitment = h_scalar * h(tau) * G1
         let h_c = if let (Some(h_scalar), Some(tau)) = (full_pk.h_scalar, full_pk.h_scalar_tau) {
             let h_tau = h.evaluate(&tau);
@@ -535,6 +520,28 @@ impl Prover for PippengerProver {
                 G1Projective::zero()
             }
         };
+
+        // Parallel proof assembly (Impl 7): A, B, and C_private are independent.
+        let (a, (b, c_private)) = rayon::join(
+            || {
+                let a_proj = G1Projective::msm(&full_pk.a_query, witness)
+                    .expect("MSM length mismatch");
+                G1Affine::from(a_proj + G1Projective::from(full_pk.vk.alpha_g1))
+            },
+            || rayon::join(
+                || {
+                    let b_proj = G2Projective::msm(&full_pk.b_g2_query, witness)
+                        .expect("MSM length mismatch");
+                    G2Affine::from(b_proj + G2Projective::from(full_pk.vk.beta_g2))
+                },
+                || {
+                    let private_c = &full_pk.c_query[n_public..];
+                    let private_w = &witness[n_public..];
+                    G1Projective::msm(private_c, private_w)
+                        .expect("MSM length mismatch")
+                },
+            ),
+        );
 
         let c = G1Affine::from(c_private + h_c);
 
@@ -563,22 +570,6 @@ impl Prover for PippengerProver {
         let (_l_poly, _r_poly, _o_poly, h) =
             build_witness_polys_and_quotient_sparse(engine, n_constraints, sparse_l, sparse_r, sparse_o, witness);
 
-        // A = MSM(a_query, witness) + alpha_g1
-        let a_proj = G1Projective::msm(&full_pk.a_query, witness)
-            .expect("MSM length mismatch");
-        let a = G1Affine::from(a_proj + G1Projective::from(full_pk.vk.alpha_g1));
-
-        // B = MSM(b_g2_query, witness) + beta_g2
-        let b_proj = G2Projective::msm(&full_pk.b_g2_query, witness)
-            .expect("MSM length mismatch");
-        let b = G2Affine::from(b_proj + G2Projective::from(full_pk.vk.beta_g2));
-
-        // C = MSM(c_query[private], witness[private]) + h_commitment
-        let private_c = &full_pk.c_query[n_public..];
-        let private_w = &witness[n_public..];
-        let c_private = G1Projective::msm(private_c, private_w)
-            .expect("MSM length mismatch");
-
         // Fast path (Impl 7): h_commitment = h_scalar * h(tau) * G1
         let h_c = if let (Some(h_scalar), Some(tau)) = (full_pk.h_scalar, full_pk.h_scalar_tau) {
             let h_tau = h.evaluate(&tau);
@@ -592,6 +583,28 @@ impl Prover for PippengerProver {
                 G1Projective::zero()
             }
         };
+
+        // Parallel proof assembly (Impl 7): A, B, and C_private are independent.
+        let (a, (b, c_private)) = rayon::join(
+            || {
+                let a_proj = G1Projective::msm(&full_pk.a_query, witness)
+                    .expect("MSM length mismatch");
+                G1Affine::from(a_proj + G1Projective::from(full_pk.vk.alpha_g1))
+            },
+            || rayon::join(
+                || {
+                    let b_proj = G2Projective::msm(&full_pk.b_g2_query, witness)
+                        .expect("MSM length mismatch");
+                    G2Affine::from(b_proj + G2Projective::from(full_pk.vk.beta_g2))
+                },
+                || {
+                    let private_c = &full_pk.c_query[n_public..];
+                    let private_w = &witness[n_public..];
+                    G1Projective::msm(private_c, private_w)
+                        .expect("MSM length mismatch")
+                },
+            ),
+        );
 
         let c = G1Affine::from(c_private + h_c);
 
