@@ -37,6 +37,12 @@ pub struct Args {
     /// for large circuits (e.g. Blake2b-224, Ed25519).
     #[arg(long)]
     sparse: bool,
+
+    /// Use h-query scalar compression (Implementation 7).
+    /// Stores a single scalar `delta_inv * T(tau)` instead of the full
+    /// `h_query` G1 vector, cutting PK size and eliminating the h MSM.
+    #[arg(long)]
+    h_scalar: bool,
 }
 
 /// Run the dev ceremony command
@@ -75,6 +81,7 @@ pub fn run(args: Args) -> Result<(), Box<dyn Error>> {
             &circuit.r,
             &circuit.o,
             tw,
+            args.h_scalar,
         );
         (full_pk, vk)
     } else {
@@ -97,11 +104,15 @@ pub fn run(args: Args) -> Result<(), Box<dyn Error>> {
         let n_public = 1 + circuit.n_pub_out as usize + circuit.n_pub_in as usize;
         let mut rng = rand::thread_rng();
         let engine = FftQapEngine::new();
-        let (full_pk, vk) = single_party_ceremony_full(&engine, &circuit.l, &circuit.r, &circuit.o, n_public, &mut rng);
+        let (full_pk, vk) = single_party_ceremony_full(&engine, &circuit.l, &circuit.r, &circuit.o, n_public, &mut rng, args.h_scalar);
         (full_pk, vk)
     };
 
-    eprintln!("Dev ceremony complete. Full proving key generated (group elements only, no scalars).");
+    if args.h_scalar {
+        eprintln!("Dev ceremony complete. Full proving key generated with h_scalar compression (Implementation 7).");
+    } else {
+        eprintln!("Dev ceremony complete. Full proving key generated (group elements only, no scalars).");
+    }
     eprintln!("  Proving key:  {}  ({} bytes compressed / {} bytes uncompressed)", args.proving_key.display(), {
         let mut buf = Vec::new();
         full_pk.serialize_compressed(&mut buf).unwrap();
