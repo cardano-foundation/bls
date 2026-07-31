@@ -156,6 +156,9 @@ pub struct FullProvingKey {
     /// When present, the prover computes h_commitment as one scalar multiplication
     /// instead of a multi-million-point MSM.
     pub h_scalar: Option<Fr>,
+    /// NEW (Impl 7): `tau` stored alongside `h_scalar` so the prover can evaluate
+    /// `h(tau)` without requiring an external scalar.  `None` in production MPC path.
+    pub h_scalar_tau: Option<Fr>,
 }
 
 /// Run the trusted-setup ceremony for a given circuit.
@@ -429,6 +432,7 @@ fn build_keys_from_qap_evals(
         h_query,
         l_query,
         h_scalar: if use_h_scalar { Some(h_scalar_base) } else { None },
+        h_scalar_tau: if use_h_scalar { Some(tw.tau) } else { None },
     };
 
     (full_pk, vk)
