@@ -1246,7 +1246,7 @@ The fast path computes the **exact same curve point** as the MSM path — it is 
 <details>
 <summary><b>Implementation 8 — click to expand</b></summary>
 
-> **Status:** ⏳ **Planned.** Research complete; circuit redesign and prover integration pending.
+> **Status:** ⏳ **Partially implemented (POC).** An end-to-end Nova CLI (`nova params / ceremony / fold / verify`) is implemented in `cli/src/cmd/nova.rs` and smoke-tested on four step circuits (Ed25519Verify, EdDSA-JubJub, CardanoKeyOwnership—Ed25519, AnonymousAirdrop). It proves each step as a **standalone Groth16 proof** and binds the state chain with a BLAKE2b transcript — the full Nova **Relaxed-R1CS folding + compression SNARK** (constant-size proof, no per-step Groth16) is still future work.
 >
 > **Goal:** Eliminate the circuit-specific trusted setup entirely for computations that exceed monolithic Groth16 feasibility (~4M+ constraints), and enable incremental proving where each step fits in memory.
 
@@ -1345,7 +1345,7 @@ The existing `aiken/groth16` verifier checks the compression SNARK. An additiona
 | **Blake2b-224 Preimage (~79K)** | ~79K | ⚠️ Marginal | Ceremony already ~18 s. Nova would add overhead, not worth it. |
 | **EdDSAJubJub (12,601)** | 12,601 | ⚠️ Marginal | Ceremony already ~1 s. Nova overhead ~80% of step size. |
 | **CardanoKeyOwnership — JubJub (~4K)** | ~4K | ❌ No | Trivial. |
-| **CardanoKeyOwnership — Ed25519 (~1.97M)** | ~1.97M | ⚠️ Hard | Main cost is one scalar mul (~1.2M). Not naturally decomposable without redesign. |
+| **CardanoKeyOwnership — Ed25519 (~1.97M)** | ~1.97M | ✅ Done (POC) | Decomposed into 255 × 7.7K `BitElementMulAny` steps (`cardano_ed25519_ownership_nova.circom`); e2e fold+verify passes. |
 | **Ed25519Verify (~4M)** | ~4M | ✅ Yes | Main target. SHA-512 is sequentially foldable. Ceremony drops from ~16 min → ~10–20 s. Memory drops from ~3 GiB → ~50 MiB/step. |
 | **F5a Privacy Pool (~65K)** | ~65K | ❌ No | Nova overhead (10–30K) would be 15–45% of each step. Sparse prover already handles this. |
 | **F5 full depth-32 (~600K)** | ~600K | ⚠️ Maybe | Worth it only if scaling to depth 64+ or 10M+ constraints. |
@@ -1363,6 +1363,110 @@ The existing `aiken/groth16` verifier checks the compression SNARK. An additiona
 - **Now:** Not needed. Implementation 6 + 7 handle all current circuits. Ceremony times are acceptable.
 - **After Implementation 7:** The ~16 min Ed25519Verify ceremony is now the e2e bottleneck (~89 % of total time). Evaluate Nova IVC only if this becomes operationally painful.
 - **When mandatory:** For 10M+ constraint circuits (rollups, full transaction validation) where monolithic Groth16 is infeasible.
+
+### What exists today (implementation plan, step by step)
+
+The POC does **not** implement Relaxed-R1CS folding. Instead it runs a **chain of ordinary Groth16 proofs**, one per step, and binds the state chain with a BLAKE2b512 transcript. Each step proof is fully independent and verifiable; `nova verify` re-derives the chain and the transcript. The only circuit invariant is **`n_pub_in == n_pub_out`** (the public input block of step `i+1` is the public output block of step `i` — public inputs *are* the IVC state), checked by `nova params`.
+
+```
+state_0 ──▶ [step0: f(step_0, state_0)] ──▶ state_1 ──▶ [step1] ──▶ … ──▶ state_N
+              │ Groth16 proof0                       │ Groth16 proof1
+              └──────────────── transcript ─────────┘
+              acc = BLAKE2b512(acc || state_out || proof_bytes)
+```
+
+### How to run the e2e flow (worked example: `cardano_ed25519_ownership_nova`)
+
+`cardano_ed25519_ownership_nova.circom` (in `circom/CardanoKeyOwnership/`) proves knowledge of a 255-bit scalar `sk` with `[sk]·G = PointA` on Curve25519 and `compress(PointA) = A`. It decomposes the base-point scalar multiplication into **255 identical steps**, each one `BitElementMulAny` on extended Edwards coordinates `[4][3]` (each coordinate as 3 limbs of base 2^85):
+
+- state `(dblIn[4][3], addIn[4][3])` — 24 public inputs / 24 public outputs, 1 private input `sel`.
+- per step: `dblOut = 2·dblIn`, `addOut = addIn + sel·dblOut` (`sel` = scalar bit, LSB-first).
+- after 255 steps: `addOut = 2·[sk]·G`; the final checks `addOut == PointA` (projective) and `PointCompress(PointA) == A` are done by the application *after* the fold (they cannot be folded per-step — the accumulator is only complete after all 255 bits).
+- sizes: 7658 wires, 7724 constraints per step (vs ~1.97M monolithic).
+
+**1. Build the CLI**
+
+```bash
+cargo build --release --manifest-path cli/Cargo.toml
+# binary: groth16-prover/cli/target/release/groth16-prover
+```
+
+**2. Compile the step circuit** (BLS12-381 field, `circomlib` include path as in the header comment)
+
+```bash
+circom --prime bls12381 -l ../Ed25519Verify/node_modules/circomlib/circuits \
+  cardano_ed25519_ownership_nova.circom --r1cs --wasm --sym
+```
+
+**3. Inspect the step circuit** (must report `n_pub_in == n_pub_out == 24`)
+
+```bash
+groth16-prover nova params --circuit cardano_ed25519_ownership_nova.r1cs
+```
+
+**4. One ceremony for the step circuit** (reusable for *any* run of the same step shape)
+
+```bash
+groth16-prover nova ceremony --circuit cardano_ed25519_ownership_nova.r1cs \
+  --proving-key cko255.pk --verifying-key cko255.vk
+```
+
+**5. Generate the 255 step witnesses** `step_0000.wtns … step_0254.wtns` in one directory (full witness files, produced by the step circuit's wasm). Generate them **iteratively** so the chain invariant holds by construction:
+
+```
+dblIn := extended(G)          # base point, [4][3] x base-2^85 limbs
+addIn := extended(O)          # identity
+for i in 0..255:
+    inputs = (dblIn, addIn, sel := (sk >> i) & 1)
+    run wasm → full witness step_%04d.wtns
+    read outputs (dblOut, addOut) → next (dblIn, addIn)
+```
+
+**6. Fold** — proves each step, checks the state chain, accumulates the transcript (≈2–4 min for 255 × 7.7K-constraint steps)
+
+```bash
+groth16-prover nova fold --circuit cardano_ed25519_ownership_nova.r1cs \
+  --proving-key cko255.pk --steps <witness-dir> --out cko255_ivc.json
+```
+
+**7. Verify** — re-checks every Groth16 pairing, the state chain, and the transcript
+
+```bash
+groth16-prover nova verify --ivc cko255_ivc.json --verifying-key cko255.vk
+# → Verified 255 steps: 255 pairings OK, state chain OK, transcript OK
+```
+
+Smoke-tested on four step circuits: `ed25519_verify_nova` (255 steps), `eddsa_jubjub_nova` (254), `cardano_ed25519_ownership_nova` (255), `anonymous_airdrop_nova` (5).
+
+### Essence of the improvement
+
+Decompose a computation into `N` identical, small step circuits and prove it **incrementally**, so that **ceremony cost and per-step memory scale with step size, not with total computation**:
+
+- **Ceremony is circuit-agnostic and reusable.** The trusted setup runs once on the ~7.7K-constraint step circuit (seconds), not on the ~1.97M monolithic circuit (minutes). New computations reusing the same step shape need no new ceremony.
+- **Memory scales per step.** Peak memory drops from O(total constraints) to O(step size) — the original motivation for 4M+ circuits that OOM a monolithic pipeline.
+- **Each step is independently checkable.** Every step proof verifies on its own, and the transcript gives a tamper-evident, independently re-derivable binding of the whole chain.
+- **Standard Groth16 stack is reused unchanged** — `FftQapEngine`, `PippengerProver`, `FullProvingKey` ceremony, existing `.pk`/`.vk` formats, `verify_with_vk`. The new code is a thin CLI layer (`cli/src/cmd/nova.rs`), not a new prover.
+
+### Strong points
+
+| Strong point | Detail |
+|--------------|--------|
+| Circuit-agnostic | The CLI works for any step circuit with `n_pub_in == n_pub_out`; only that invariant is checked. |
+| One-time setup | A single ceremony per step shape serves all runs; no per-user or per-computation ceremony. |
+| Debuggable | `nova fold` fails with the exact step whose `state_in` breaks the chain; each step proof is individually verifiable, so a bad witness is isolated to one step. |
+| Auditability | The BLAKE2b512 transcript is fully deterministic; `nova verify` re-derives it from the stored states/proofs — tampering with any step is detected. |
+| Low risk | Reuses the battle-tested Groth16 path; no new cryptographic primitives in the POC. |
+
+### Weak points / limitations
+
+| Weak point | Detail |
+|------------|--------|
+| Not real Nova folding | The POC stores **N Groth16 proofs** (bundle size O(N)) and verification does **N pairing checks**. It is a proof *chain*, not a constant-size accumulated proof. |
+| No compression SNARK yet | The full Nova target — fold to one small proof via a Relaxed-R1CS accumulator + ~100K-constraint compression SNARK — is future work. On-chain verifier cost stays O(N) pairings until then. |
+| Manual circuit redesign | Step decomposition is per-circuit, hand-written (`state_{i+1} = f(step_i, state_i)`); no automatic compiler from flat Circom R1CS. |
+| Sequential folding | The chain is inherently sequential; no parallelism across steps. |
+| App-level final checks | Checks that need the *complete* output (e.g. `PointCompress(PointA) == A`) are done outside the fold, not enforced per-step. |
+| Overhead | For small circuits (≤ ~10K constraints) Nova overhead exceeds the benefit; it pays off only for large/sequential computations. |
 
 ---
 
