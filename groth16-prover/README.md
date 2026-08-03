@@ -1246,7 +1246,7 @@ The fast path computes the **exact same curve point** as the MSM path — it is 
 <details>
 <summary><b>Implementation 8 — click to expand</b></summary>
 
-> **Status:** ⏳ **Partially implemented (POC).** An end-to-end Nova CLI (`nova params / ceremony / fold / verify`) is implemented in `cli/src/cmd/nova.rs` and smoke-tested on four step circuits (Ed25519Verify, EdDSA-JubJub, CardanoKeyOwnership—Ed25519, AnonymousAirdrop). It proves each step as a **standalone Groth16 proof** and binds the state chain with a BLAKE2b transcript — the full Nova **Relaxed-R1CS folding + compression SNARK** (constant-size proof, no per-step Groth16) is still future work.
+> **Status:** ✅ **Done (POC).** An end-to-end Nova CLI (`nova params / ceremony / fold / verify`) is implemented in `cli/src/cmd/nova.rs` and smoke-tested on four step circuits (Ed25519Verify, EdDSA-JubJub, CardanoKeyOwnership—Ed25519, AnonymousAirdrop). It proves each step as a **standalone Groth16 proof** and binds the state chain with a BLAKE2b512 transcript. The POC validates the step-decomposition + incremental-proving approach end to end. The full Nova **Relaxed-R1CS folding + compression SNARK** (constant-size proof, no per-step Groth16) is no longer part of this implementation — it is tracked as **Implementation 9 (item (u) below)**.
 >
 > **Goal:** Eliminate the circuit-specific trusted setup entirely for computations that exceed monolithic Groth16 feasibility (~4M+ constraints), and enable incremental proving where each step fits in memory.
 
@@ -1344,51 +1344,6 @@ flowchart LR
 3. **Composable with existing stack.** The compression SNARK is a standard Groth16 circuit (~100K constraints). Our existing `FftQapEngine`, `PippengerProver`, `aiken/groth16` verifier, and `FullProvingKey` ceremony all apply unchanged. The new work is the IVC prover layer above them.
 4. **Enables recursive proof aggregation.** Batch N independent proofs into one IVC chain, then compress to a single Groth16 proof. On-chain verifier cost drops from O(N) pairing checks to O(1).
 
-### Architecture change
-
-Add a new prover trait and step-circuit abstraction:
-
-```rust
-/// A single step in an IVC computation.
-pub trait StepCircuit<F: PrimeField> {
-    /// Number of constraints in this step.
-    fn num_constraints(&self) -> usize;
-
-    /// Compute the next state from current state + step input.
-    fn synthesize(
-        &self,
-        cs: &mut ConstraintSystem<F>,
-        z: &[F],        // current state
-        w: &[F],        // step witness
-    ) -> Vec<F>;       // next state
-}
-
-/// Nova-style folding prover.
-pub struct NovaProver<C: StepCircuit<Fr>> {
-    step_circuit: C,
-    compression_pk: FullProvingKey,   // Groth16 pk for ~100K compression circuit
-}
-```
-
-**IVC prover path:**
-```rust
-// 1. Fold each step into a running accumulator.
-let mut accumulator = Accumulator::new(public_params);
-for (step_input, step_witness) in steps {
-    let step_proof = step_circuit.prove(step_input, step_witness);
-    accumulator = nova::fold(&accumulator, &step_proof, &public_params);
-}
-
-// 2. Compress to a standard Groth16 proof.
-let (proof, public_inputs) = groth16_prover::prove(
-    &compression_pk,
-    &accumulator.to_witness(),
-);
-```
-
-**On-chain verifier (Aiken):**
-The existing `aiken/groth16` verifier checks the compression SNARK. An additional accumulator check (2–3 group additions) is added to the validator. This is small enough to fit in Plutus V3.
-
 ### Projected gains for our circuits
 
 | Circuit | Monolithic Groth16 | Nova fit | Projected change |
@@ -1404,22 +1359,15 @@ The existing `aiken/groth16` verifier checks the compression SNARK. An additiona
 | **F5 full depth-32 (~600K)** | ~600K | ⚠️ Maybe | Worth it only if scaling to depth 64+ or 10M+ constraints. |
 | **Hypothetical rollup / 10M+** | Impossible | ✅ Mandatory | Only viable path. |
 
-### Why it is hard
-
-1. **Circuit rewrite.** Current Circom circuits are flat R1CS. Nova requires explicit step circuits with state passing (`state_{i+1} = f(step_i, state_i)`). No automatic compiler exists; each circuit must be redesigned.
-2. **Nova overhead.** Each step includes the Nova verifier logic (~10K–30K constraints). For 40K steps this is ~25 % overhead.
-3. **Ecosystem maturity.** Rust Nova crates (`nova-snark`) exist but integration with Circom-generated R1CS is experimental. Most Nova work uses hand-written circuits in custom DSLs.
-4. **On-chain verifier extension.** Aiken needs a small accumulator check in addition to the Groth16 pairing check.
-
 ### Verdict
 
-- **Now:** Not needed. Implementation 6 + 7 handle all current circuits. Ceremony times are acceptable.
-- **After Implementation 7:** The ~16 min Ed25519Verify ceremony is now the e2e bottleneck (~89 % of total time). Evaluate Nova IVC only if this becomes operationally painful.
+- ✅ **Implementation 8 POC delivered.** Step decomposition + incremental proving validated end to end on four step circuits; ceremony elimination and per-step memory scaling are demonstrated.
+- **Next:** the production-grade fold (Relaxed-R1CS accumulator + compression SNARK) is Implementation 9 — pending, tracked as item **(u)**. Undertake it when the O(N) chain or the per-step ceremony becomes operationally painful.
 - **When mandatory:** For 10M+ constraint circuits (rollups, full transaction validation) where monolithic Groth16 is infeasible.
 
 ### What exists today (implementation plan, step by step)
 
-The POC does **not** implement Relaxed-R1CS folding. Instead it runs a **chain of ordinary Groth16 proofs**, one per step, and binds the state chain with a BLAKE2b512 transcript. Each step proof is fully independent and verifiable; `nova verify` re-derives the chain and the transcript. The only circuit invariant is **`n_pub_in == n_pub_out`** (the public input block of step `i+1` is the public output block of step `i` — public inputs *are* the IVC state), checked by `nova params`.
+The POC does **not** implement Relaxed-R1CS folding — that is the scope of Implementation 9 (item **(u)**). Instead it runs a **chain of ordinary Groth16 proofs**, one per step, and binds the state chain with a BLAKE2b512 transcript. Each step proof is fully independent and verifiable; `nova verify` re-derives the chain and the transcript. The only circuit invariant is **`n_pub_in == n_pub_out`** (the public input block of step `i+1` is the public output block of step `i` — public inputs *are* the IVC state), checked by `nova params`.
 
 ```
 state_0 ──▶ [step0: f(step_0, state_0)] ──▶ state_1 ──▶ [step1] ──▶ … ──▶ state_N
@@ -1510,12 +1458,12 @@ Decompose a computation into `N` identical, small step circuits and prove it **i
 | Auditability | The BLAKE2b512 transcript is fully deterministic; `nova verify` re-derives it from the stored states/proofs — tampering with any step is detected. |
 | Low risk | Reuses the battle-tested Groth16 path; no new cryptographic primitives in the POC. |
 
-### Weak points / limitations
+### Weak points / limitations (of the POC)
+
+The two functional gaps of the POC — it is a proof *chain* (N proofs, N pairing checks, bundle O(N)) rather than real Nova folding, and it has no compression SNARK yet — are exactly the scope of **Implementation 9 (item (u))**. The remaining design-level limitations are:
 
 | Weak point | Detail |
 |------------|--------|
-| Not real Nova folding | The POC stores **N Groth16 proofs** (bundle size O(N)) and verification does **N pairing checks**. It is a proof *chain*, not a constant-size accumulated proof. |
-| No compression SNARK yet | The full Nova target — fold to one small proof via a Relaxed-R1CS accumulator + ~100K-constraint compression SNARK — is future work. On-chain verifier cost stays O(N) pairings until then. |
 | Manual circuit redesign | Step decomposition is per-circuit, hand-written (`state_{i+1} = f(step_i, state_i)`); no automatic compiler from flat Circom R1CS. |
 | Sequential folding | The chain is inherently sequential; no parallelism across steps. |
 | App-level final checks | Checks that need the *complete* output (e.g. `PointCompress(PointA) == A`) are done outside the fold, not enforced per-step. |
@@ -1531,11 +1479,12 @@ For **short-term production on Cardano**:
 3. ⏳ Ceremony MSM parallelization — **low-hanging follow-up**
 
 For **medium-term** (when ceremony dominates or circuits exceed 4M):
-4. ⏳ Implementation 8 (Nova IVC + compression SNARK) — **circuit-agnostic trusted setup + incremental proving**
+4. ✅ Implementation 8 (Nova step-chain POC) — **done**
+5. ⏳ Implementation 9 — Relaxed-R1CS folding + compression SNARK — **circuit-agnostic trusted setup + incremental proving (item (u) below)**
 
 For **long-term research**:
-5. Evaluate PLONK / Halo2 only if proof size or verification cost regressions are acceptable.
-6. Evaluate FHE-based selective disclosure for quantum resistance (see `aiken/selective-disclosure`).
+6. Evaluate PLONK / Halo2 only if proof size or verification cost regressions are acceptable.
+7. Evaluate FHE-based selective disclosure for quantum resistance (see `aiken/selective-disclosure`).
 
 > **Note on the ownership circuit.** The Cardano Ed25519 key ownership circuit (~1.97M constraints) already has a ceremony of only **~5 min** and proving of **~1.7 min** — a total of ~7 min e2e. This is already acceptable for dev/testnet workflows. The ~16 min Ed25519 full-signature ceremony is the outlier because SHA-512 in-circuit is expensive. If the use case is "prove I own this key" rather than "verify a signature", the bottleneck is already manageable.
 
@@ -1583,7 +1532,7 @@ For **long-term research**:
 - **Current:** Each proof is standalone — the on-chain verifier checks one Groth16 proof per transaction. For use cases requiring many proofs (e.g., rollups, batched attestations), each proof pays full on-chain verification cost. The Nova step-chain POC ([Implementation 8](#implementation-8-nova-ivc--compression-snark)) proves every step as an individual Groth16 proof, so the bundle grows O(N) and verification is O(N) pairings.
 - **Target:** Support proving "I know a valid Groth16 proof π₁ for circuit C₁" inside a second Groth16 circuit C₂, producing a succinct proof π₂ that attests to the correctness of π₁. The on-chain verifier checks only π₂, regardless of how many inner proofs it covers.
 - **Approach:**
-  1. ✅ **IVC via Nova/SuperNova — step-chain implemented.** The `nova` CLI (`params / ceremony / fold / verify`) runs an end-to-end step-chain: one Groth16 proof per step, bound by a BLAKE2b512 transcript. ⏳ **Remaining:** the full Relaxed-R1CS folding + compression SNARK, so the accumulator folds to a single **constant-size** Groth16 proof instead of N stored/verified proofs.
+  1. ✅ **IVC via Nova/SuperNova — step-chain implemented.** The `nova` CLI (`params / ceremony / fold / verify`) runs an end-to-end step-chain: one Groth16 proof per step, bound by a BLAKE2b512 transcript. ⏳ **Remaining:** the full Relaxed-R1CS folding + compression SNARK, tracked as **Implementation 9 (item (u))** — it folds the accumulator to a single **constant-size** Groth16 proof instead of N stored/verified proofs.
   2. **SNARK-friendly verification gadget** — implement the Groth16 pairing check inside a Circom circuit (pairing operations on BLS12-381 can be expressed as R1CS constraints, though at high cost ~100K–500K constraints for the pairing itself).
   3. **Halo2-style recursive aggregation** — **not buildable on BLS12-381.** A 2-cycle requires two curves with comparable field sizes (Pasta, BN254–Grumpkin); BLS12-381's base field (≈2³⁸¹) is ~126 bits larger than its scalar field (≈2²⁵⁵), so no cycle partner can exist (Hasse bound). JubJub has base field `Fr1` but order ≈2²⁵¹ ≠ `Fq1`, so "BLS12-381 + JubJub" is not a cycle. Recursive verification on our curve would need non-native `Fq1`-in-`Fr1` arithmetic (~1M+ gates/scalar mult). The viable alternative is the non-recursive folding of item **(u)** below.
 - **Benefit:** Amortises on-chain verification cost across N proofs — from O(N) pairing checks to O(1). Essential for rollup and batching use cases. Also enables incremental computation where each step's output feeds into the next.
@@ -1620,6 +1569,52 @@ For **long-term research**:
   3. **CLI:** extend `nova` subcommand (`nova fold --nifs`): fold N step instances → one relaxed instance → one compression proof; `nova verify` = transcript check + single pairings check. `params / ceremony` and existing step circuits unchanged.
   4. **Benchmarks:** extend `benchmark_nova.rs` — bundle O(N)→O(1); verify one pairing (constant vs N); prover time = fast folding + one step-sized compression proof.
   5. **Non-goals (explicitly documented):** true in-circuit IVC (SuperNova-style recursion) is not buildable on BLS12-381 — requires a 2-cycle (Pasta / BN254–Grumpkin) or non-native `Fq1`-in-`Fr1` emulation (~1M+ gates/scalar mult). SuperNova non-uniform steps (different circuit per step) deferred — Implementation 9 assumes one repeated step circuit.
+- **Design (target architecture, moved from Implementation 8):** the POC ships the step-chain CLI; the trait and accumulator path below are the Implementation 9 build target:
+
+  ```rust
+  /// A single step in an IVC computation.
+  pub trait StepCircuit<F: PrimeField> {
+      /// Number of constraints in this step.
+      fn num_constraints(&self) -> usize;
+
+      /// Compute the next state from current state + step input.
+      fn synthesize(
+          &self,
+          cs: &mut ConstraintSystem<F>,
+          z: &[F],        // current state
+          w: &[F],        // step witness
+      ) -> Vec<F>;       // next state
+  }
+
+  /// Nova-style folding prover.
+  pub struct NovaProver<C: StepCircuit<Fr>> {
+      step_circuit: C,
+      compression_pk: FullProvingKey,   // Groth16 pk for ~100K compression circuit
+  }
+  ```
+
+  **IVC prover path:**
+  ```rust
+  // 1. Fold each step into a running accumulator.
+  let mut accumulator = Accumulator::new(public_params);
+  for (step_input, step_witness) in steps {
+      let step_proof = step_circuit.prove(step_input, step_witness);
+      accumulator = nova::fold(&accumulator, &step_proof, &public_params);
+  }
+
+  // 2. Compress to a standard Groth16 proof.
+  let (proof, public_inputs) = groth16_prover::prove(
+      &compression_pk,
+      &accumulator.to_witness(),
+  );
+  ```
+
+  **On-chain verifier (Aiken):** the existing `aiken/groth16` verifier checks the compression SNARK; an additional accumulator check (2–3 group additions) is added to the validator — small enough to fit in Plutus V3.
+- **Why it is hard (moved from Implementation 8):**
+  1. **Circuit rewrite.** Current Circom circuits are flat R1CS; Nova requires explicit step circuits with state passing (`state_{i+1} = f(step_i, state_i)`). No automatic compiler exists; each circuit must be redesigned.
+  2. **Nova overhead.** Each step includes the Nova verifier logic (~10K–30K constraints). For 40K steps this is ~25 % overhead.
+  3. **Ecosystem maturity.** Rust Nova crates (`nova-snark`) exist but integration with Circom-generated R1CS is experimental; most Nova work uses hand-written circuits in custom DSLs.
+  4. **On-chain verifier extension.** Aiken needs a small accumulator check in addition to the Groth16 pairing check.
 - **Design-space position (per the folding survey — Sakwa et al. 2026):** Implementation 9 sits in the **R1CS + elliptic-curve-MSM** quadrant of the folding landscape (the Nova family): the simplest and most mature axis. The survey's other axes are explicitly out of (u) scope and logged as follow-ups:
   - **CCS/Plonkish folding (HyperNova):** generalizes folding beyond fixed-R1CS (custom gates, lookups) — relevant only if a step must mix constraint shapes.
   - **AIR folding (Cairo-style):** CPU/trace-based steps; not our model.
@@ -1782,7 +1777,7 @@ Measured with `cargo run --release --bin benchmark_nova -- --circuit <step.r1cs>
 | `eddsa_jubjub_nova` | 15 | 9 | 254 | **17 ms** | **2.19 s** | **8.6 ms** | **2.48 s** |
 | `anonymous_airdrop_nova` | 1,210 | 1,207 | 5 | **0.51 s** | **1.48 s** | **296 ms** | **0.05 s** |
 
-> **What the numbers mean.** The core claim of Implementation 8 holds: a **one-time ceremony of ~2 s** replaces the monolithic Ed25519Verify (~16 min) / CardanoKeyOwnership (~5 min) ceremonies. The cost is moved to the fold: 255 steps × ~0.42–0.46 s ≈ 2 min, with per-step memory (and therefore peak memory) proportional to the 7.7K-constraint step rather than the ~2–4M-constraint whole circuit. Verification is the current weak point, as documented in the Implementation 8 section: each step proof costs a constant ~8–10 ms pairing check, so verifying the full chain is O(N) — ~2.1–2.5 s for 255 steps, and the bundle stores all N proofs (no constant-size compression yet).
+> **What the numbers mean.** The core claim of Implementation 8 holds: a **one-time ceremony of ~2 s** replaces the monolithic Ed25519Verify (~16 min) / CardanoKeyOwnership (~5 min) ceremonies. The cost is moved to the fold: 255 steps × ~0.42–0.46 s ≈ 2 min, with per-step memory (and therefore peak memory) proportional to the 7.7K-constraint step rather than the ~2–4M-constraint whole circuit. Verification is the current weak point, as documented in Implementation 9 (item **(u)**): each step proof costs a constant ~8–10 ms pairing check, so verifying the full chain is O(N) — ~2.1–2.5 s for 255 steps, and the bundle stores all N proofs (no constant-size compression yet).
 >
 > **Fixed overhead vs. circuit size.** The 9-constraint `eddsa_jubjub_nova` step still costs 8.6 ms to prove and 9.75 ms to verify per step — the entire per-step cost is fixed prover/verifier overhead (FFT-domain setup, witness-polynomial IFFT, MSM, pairing). The 1,207-constraint airdrop step is 296 ms/step for the same reason. Only when step size grows past ~10K constraints does circuit work dominate the fixed cost — which is exactly the regime Nova targets.
 >
