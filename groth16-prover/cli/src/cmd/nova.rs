@@ -19,6 +19,7 @@
 //!   verify    — verify a folded IVC bundle (pairings + chain + transcript)
 
 use ark_bls12_381::{Fr, G1Affine, G2Affine};
+use ark_ff::PrimeField;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use blake2::{Blake2b512, Digest};
 use clap::{Parser, Subcommand};
@@ -428,8 +429,8 @@ fn run_fold(args: FoldArgs) -> Result<(), Box<dyn Error>> {
         let out_fr = &w[1..1 + n_pub_out];
         let in_fr = &w[1 + n_pub_out..1 + n_pub_out + n_pub_in];
 
-        let state_in: Vec<String> = in_fr.iter().map(|f| f.to_string()).collect();
-        let state_out: Vec<String> = out_fr.iter().map(|f| f.to_string()).collect();
+        let state_in: Vec<String> = in_fr.iter().map(fr_to_string).collect();
+        let state_out: Vec<String> = out_fr.iter().map(fr_to_string).collect();
 
         // Chain check: this step's state in must equal the previous state out.
         if let Some(prev) = &prev_out {
@@ -568,6 +569,14 @@ fn run_verify(args: VerifyArgs) -> Result<(), Box<dyn Error>> {
     );
     eprintln!("Final transcript: {}", bundle.transcript_final);
     Ok(())
+}
+
+/// Canonical decimal string for a field element.
+///
+/// arkworks' `Display` for BLS12-381 `Fr` emits an empty string for the
+/// zero element, so serialize via the canonical bigint instead.
+fn fr_to_string(f: &Fr) -> String {
+    f.into_bigint().to_string()
 }
 
 /// Parse decimal field-element strings back into `Fr`.
