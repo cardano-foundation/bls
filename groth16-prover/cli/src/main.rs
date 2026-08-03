@@ -112,6 +112,21 @@ pub enum Command {
     ///   finalize   — convert to `.pk` / `.vk`
     #[command(subcommand)]
     Phase2(cmd::phase2::Phase2Command),
+
+    /// Nova IVC folding + compression flow (Implementation 8)
+    ///
+    /// Splits a computation into N identical step circuits and folds them
+    /// into a single verifiable bundle.  Every step proof is a Groth16 proof
+    /// over a small step circuit; the state chain across steps is bound by a
+    /// BLAKE2b transcript.
+    ///
+    /// Subcommands:
+    ///   params    — inspect a step circuit and emit a JSON descriptor
+    ///   ceremony  — single-party ceremony for a step circuit
+    ///   fold      — fold step witnesses into an IVC bundle
+    ///   verify    — verify a folded IVC bundle
+    #[command(subcommand)]
+    Nova(cmd::nova::NovaCommand),
 }
 
 #[derive(Debug, Parser)]
@@ -137,5 +152,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         Command::Smt(cmd) => cmd::smt::run(cmd),
         Command::Verify(args) => cmd::verify::run(args),
         Command::Phase2(cmd) => cmd::phase2::run(cmd),
+        Command::Nova(cmd) => cmd::nova::run(cmd),
     }
 }
