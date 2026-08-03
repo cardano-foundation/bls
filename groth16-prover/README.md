@@ -1378,62 +1378,17 @@ state_0 ──▶ [step0: f(step_0, state_0)] ──▶ state_1 ──▶ [step1
 
 ### How to run the e2e flow (worked example: `cardano_ed25519_ownership_nova`)
 
-`cardano_ed25519_ownership_nova.circom` (in `circom/CardanoKeyOwnership/`) proves knowledge of a 255-bit scalar `sk` with `[sk]·G = PointA` on Curve25519 and `compress(PointA) = A`. It decomposes the base-point scalar multiplication into **255 identical steps**, each one `BitElementMulAny` on extended Edwards coordinates `[4][3]` (each coordinate as 3 limbs of base 2^85):
+`cardano_ed25519_ownership_nova.circom` (in `circom/CardanoKeyOwnership/`) decomposes the base-point scalar multiplication into **255 identical steps** of 7,724 constraints each (state `(dblIn[4][3], addIn[4][3])` — 24 public inputs / 24 public outputs, 1 private `sel` bit).
 
-- state `(dblIn[4][3], addIn[4][3])` — 24 public inputs / 24 public outputs, 1 private input `sel`.
-- per step: `dblOut = 2·dblIn`, `addOut = addIn + sel·dblOut` (`sel` = scalar bit, LSB-first).
-- after 255 steps: `addOut = 2·[sk]·G`; the final checks `addOut == PointA` (projective) and `PointCompress(PointA) == A` are done by the application *after* the fold (they cannot be folded per-step — the accumulator is only complete after all 255 bits).
-- sizes: 7658 wires, 7724 constraints per step (vs ~1.97M monolithic).
-
-**1. Build the CLI**
+The full step-by-step worked example — building the CLI, compiling the step circuit, the **iterative step-witness generation** that makes the chain invariant hold by construction, and the `nova params` / `ceremony` / `fold` / `verify` run with expected output — is in [`circom/CardanoKeyOwnership/README.md`](../circom/CardanoKeyOwnership/README.md) (Variant B, "End-to-end flow — Implementation 8 (Nova step-chain)"). Quick form:
 
 ```bash
-cargo build --release --manifest-path cli/Cargo.toml
-# binary: groth16-prover/cli/target/release/groth16-prover
-```
-
-**2. Compile the step circuit** (BLS12-381 field, `circomlib` include path as in the header comment)
-
-```bash
-circom --prime bls12381 -l ../Ed25519Verify/node_modules/circomlib/circuits \
-  cardano_ed25519_ownership_nova.circom --r1cs --wasm --sym
-```
-
-**3. Inspect the step circuit** (must report `n_pub_in == n_pub_out == 24`)
-
-```bash
-groth16-prover nova params --circuit cardano_ed25519_ownership_nova.r1cs
-```
-
-**4. One ceremony for the step circuit** (reusable for *any* run of the same step shape)
-
-```bash
+groth16-prover nova params   --circuit cardano_ed25519_ownership_nova.r1cs
 groth16-prover nova ceremony --circuit cardano_ed25519_ownership_nova.r1cs \
   --proving-key cko255.pk --verifying-key cko255.vk
-```
-
-**5. Generate the 255 step witnesses** `step_0000.wtns … step_0254.wtns` in one directory (full witness files, produced by the step circuit's wasm). Generate them **iteratively** so the chain invariant holds by construction:
-
-```
-dblIn := extended(G)          # base point, [4][3] x base-2^85 limbs
-addIn := extended(O)          # identity
-for i in 0..255:
-    inputs = (dblIn, addIn, sel := (sk >> i) & 1)
-    run wasm → full witness step_%04d.wtns
-    read outputs (dblOut, addOut) → next (dblIn, addIn)
-```
-
-**6. Fold** — proves each step, checks the state chain, accumulates the transcript (≈2–4 min for 255 × 7.7K-constraint steps)
-
-```bash
-groth16-prover nova fold --circuit cardano_ed25519_ownership_nova.r1cs \
+groth16-prover nova fold     --circuit cardano_ed25519_ownership_nova.r1cs \
   --proving-key cko255.pk --steps <witness-dir> --out cko255_ivc.json
-```
-
-**7. Verify** — re-checks every Groth16 pairing, the state chain, and the transcript
-
-```bash
-groth16-prover nova verify --ivc cko255_ivc.json --verifying-key cko255.vk
+groth16-prover nova verify   --ivc cko255_ivc.json --verifying-key cko255.vk
 # → Verified 255 steps: 255 pairings OK, state chain OK, transcript OK
 ```
 
@@ -1469,9 +1424,18 @@ The two functional gaps of the POC — it is a proof *chain* (N proofs, N pairin
 | App-level final checks | Checks that need the *complete* output (e.g. `PointCompress(PointA) == A`) are done outside the fold, not enforced per-step. |
 | Overhead | For small circuits (≤ ~10K constraints) Nova overhead exceeds the benefit; it pays off only for large/sequential computations. |
 
+</details>
+
 ---
 
-### Practical recommendation
+## Production innovations
+
+### Pending
+
+<details>
+<summary><b>Click to expand pending items</b></summary>
+
+### Practical recommendation (production roadmap)
 
 For **short-term production on Cardano**:
 1. ✅ Implementation 6 (sparse prover) — **done**
@@ -1487,17 +1451,6 @@ For **long-term research**:
 7. Evaluate FHE-based selective disclosure for quantum resistance (see `aiken/selective-disclosure`).
 
 > **Note on the ownership circuit.** The Cardano Ed25519 key ownership circuit (~1.97M constraints) already has a ceremony of only **~5 min** and proving of **~1.7 min** — a total of ~7 min e2e. This is already acceptable for dev/testnet workflows. The ~16 min Ed25519 full-signature ceremony is the outlier because SHA-512 in-circuit is expensive. If the use case is "prove I own this key" rather than "verify a signature", the bottleneck is already manageable.
-
-</details>
-
----
-
-## Production innovations
-
-### Pending
-
-<details>
-<summary><b>Click to expand pending items</b></summary>
 
 ### (m) Prepared verifier and batched pairing verification (beyond what zeroj supports)
 
