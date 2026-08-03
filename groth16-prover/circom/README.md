@@ -6,18 +6,18 @@ This directory contains Circom circuits that can be loaded by the Rust prover vi
 
 | Directory | What it proves | Constraints | Status |
 |-----------|---------------|-------------|--------|
-| [`SimpleExample/`](SimpleExample/README.md) | 3-gate multiplication chain | 3 | ✅ Complete |
+| [`SimpleExample/`](SimpleExample/README.md) | 3-gate multiplication chain | 3 | ✅ Working e2e |
 | [`SumOfProducts/`](SumOfProducts/sum_of_products.circom) | 4-gate sum-of-products | 5 | ✅ Complete |
-| [`Privacy/`](Privacy/README.md) | Merkle membership — shielded spend with MiMC(x⁷) | 1,107 | ✅ Complete |
-| [`PoseidonPreimage/`](PoseidonPreimage/README.md) | Poseidon hash pre-image knowledge | ~300 | ✅ Complete |
-| [`PoseidonMerkle/`](PoseidonMerkle/README.md) | Merkle membership with PoseidonBLS12_381 hashing | 737 (depth 2) | ✅ Complete |
-| [`RangeProof/`](RangeProof/README.md) | Range proof + Poseidon commitment (`value ∈ [0, 2^n)`) | ~`n + 250` | ✅ Complete |
+| [`Privacy/`](Privacy/README.md) | Merkle membership — shielded spend with MiMC(x⁷) | 1,107 | ✅ Working e2e |
+| [`PoseidonPreimage/`](PoseidonPreimage/README.md) | Poseidon hash pre-image knowledge | ~300 | ✅ Working e2e |
+| [`PoseidonMerkle/`](PoseidonMerkle/README.md) | Merkle membership with PoseidonBLS12_381 hashing | 737 (depth 2) | ✅ Working e2e |
+| [`RangeProof/`](RangeProof/README.md) | Range proof + Poseidon commitment (`value ∈ [0, 2^n)`) | ~`n + 250` | ✅ Working e2e |
 | [`Blake2b224Preimage/`](Blake2b224Preimage/README.md) | Blake2b-224 hash pre-image (Cardano key hash) | ~79K | ✅ Working e2e |
-| [`EdDSAJubJub/`](EdDSAJubJub/README.md) | EdDSA-JubJub signature verification (deterministic nonce, Poseidon challenge) | 12 601 | ✅ Complete |
+| [`EdDSAJubJub/`](EdDSAJubJub/README.md) | EdDSA-JubJub signature verification (deterministic nonce, Poseidon challenge) | 12 601 | ✅ Working e2e |
 | [`Ed25519Verify/`](Ed25519Verify/README.md) | Ed25519 signature verification in-circuit | ~4M | ✅ Working e2e |
-| [`CardanoKeyOwnership/`](CardanoKeyOwnership/README.md) | JubJub key ownership proof | ~4K | ✅ Complete |
-| [`AnonymousAirdrop/`](AnonymousAirdrop/README.md) | **SMT membership + score threshold** — anonymous reputation-gated airdrop | 1,561 (depth 2) | ✅ Complete |
-| [`CardanoKeyOwnership/`](CardanoKeyOwnership/README.md) | **Ed25519 key ownership proof** (real Cardano wallet key) | ~1.97M | ✅ Working e2e |
+| [`CardanoKeyOwnership/`](CardanoKeyOwnership/README.md) | Key ownership: JubJub variant | ~4K | ✅ Working e2e |
+| [`CardanoKeyOwnership/`](CardanoKeyOwnership/README.md) | Key ownership: Ed25519 variant (real Cardano wallet key) | ~1.97M | ✅ Working e2e |
+| [`AnonymousAirdrop/`](AnonymousAirdrop/README.md) | SMT membership + score threshold — anonymous reputation-gated airdrop | 1,561 (depth 2) | ✅ Working e2e |
 
 ---
 
@@ -64,33 +64,13 @@ npm install -g snarkjs
 
 ---
 
-## Interesting Groth16 problems on Cardano
-
-Full pipeline for each item: **Circom → groth16-prover (dev ceremony) → Aiken on-chain validator**.
-
-### Completed & working end-to-end
-
-- **0. SimpleExample Multiplier** (3 constraints, 2 public inputs) — validated the entire toolchain end-to-end.
-- **1. Merkle Membership / Privacy Coin Spend** (1,107 constraints, all-private inputs) — ZCash-style shielded UTXO spending on Cardano. See [`Privacy/README.md`](Privacy/README.md).
-- **2. Poseidon Hash Pre-image** — prove knowledge of a secret whose Poseidon hash equals a public commitment. See [`PoseidonPreimage/README.md`](PoseidonPreimage/README.md).
-- **3. Range Proof / Comparison** — prove a committed value lies in range `[0, 2^n)` without revealing the value. See [`RangeProof/README.md`](RangeProof/README.md).
-- **4. Blake2b-224 Hash Pre-image** (~79K constraints) — prove knowledge of a pre-image that hashes to a given Cardano key hash. The sparse prover keeps RAM at ~280 MiB; h_scalar (Impl 7) cuts prove time from ~5 s → ~4.5 s and halves PK size. See [`Blake2b224Preimage/README.md`](Blake2b224Preimage/README.md).
-- **5. EdDSA-JubJub Signature Verification** (12 601 constraints, 7 public inputs) — deterministic EdDSA-JubJub signature proof over the JubJub curve. See [`EdDSAJubJub/README.md`](EdDSAJubJub/README.md).
-- **6. Private Key → Public Key Ownership Proof** — two variants in [`CardanoKeyOwnership/`](CardanoKeyOwnership/README.md):
-  1. **JubJub ownership** (~4K constraints) — proves `[sk]·G_JubJub == pk`.
-  2. **Ed25519 ownership** (~1.97M constraints) — proves real Cardano Ed25519 wallet key ownership. The sparse prover keeps RAM at ~2.5 GiB; h_scalar cuts prove time from ~1.7 min → ~1.5 min and halves PK size.
-- **7. Anonymous Airdrop with Score Threshold** (1,561 constraints, depth 2) — composite circuit proving SMT membership + `score >= minScore`. Combines `Spend(depth)` with `GreaterEqThan` from circomlib. Perfect for reputation-gated token distribution, anonymous voting weight, or ZK-KYC. See [`AnonymousAirdrop/README.md`](AnonymousAirdrop/README.md).
-- **8. Ed25519 Signature Verification In-Circuit** (~4M constraints) — verify a standard Ed25519 signature inside a Groth16 circuit. The sparse prover keeps RAM at ~3 GiB; h_scalar (Impl 7) is the biggest win here: prove time drops from ~5 min → ~2 min and PK size halves (~2.7 GB → ~1.3 GB). See [`Ed25519Verify/README.md`](Ed25519Verify/README.md).
-
----
-
 ## Compiling a circuit
 
 ```bash
 cd groth16-prover/circom/SimpleExample
 
-# Compile to BLS12-381 (must match the Rust prover curve)
-circom multiplier.circom --r1cs --wasm --sym
+# Compile to BLS12-381 (must match the Rust prover curve; BN254 is not supported)
+circom multiplier.circom --r1cs --wasm --sym --prime bls12381
 
 # This produces:
 #   multiplier.r1cs   — binary R1CS constraint system
@@ -118,3 +98,38 @@ circuit.load_witness("circom/SimpleExample/witness.wtns").unwrap();
 ```
 
 The parsed `L`, `R`, `O` matrices and witness vector are then fed into any `QapEngine` + `Prover` combination, producing a proof.
+
+---
+
+## End-to-end pipeline (CLI)
+
+Each circuit README documents its own full e2e flow. The common CLI steps after compilation and witness generation are:
+
+```bash
+cd groth16-prover/cli
+
+# 1. Single-party trusted setup (dev only). Use --sparse for large circuits.
+cargo run --release -- ceremony-dev \
+  --circuit ../circom/<Circuit>/<circuit>.r1cs \
+  --proving-key /tmp/<circuit>.pk \
+  --verifying-key /tmp/<circuit>.vk
+
+# 2. Produce the proof
+cargo run --release -- prove \
+  --circuit ../circom/<Circuit>/<circuit>.r1cs \
+  --witness ../circom/<Circuit>/witness.wtns \
+  --proving-key /tmp/<circuit>.pk \
+  --out /tmp/<circuit>.proof
+
+# 3. Verify off-chain
+cargo run --release -- verify \
+  --proof /tmp/<circuit>.proof \
+  --public /tmp/<circuit>.pub \
+  --verifying-key /tmp/<circuit>.vk
+# → Verification result: VALID
+
+# 4. Export the verifying key as an Aiken source file (for on-chain verification)
+cargo run --release -- export-vk \
+  --verifying-key /tmp/<circuit>.vk \
+  --out /tmp/<circuit>_vk.ak
+```

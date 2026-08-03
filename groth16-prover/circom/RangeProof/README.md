@@ -1,58 +1,6 @@
 # Range Proof + Poseidon Commitment
 
-> **In one sentence:** Prove a secret number is between 0 and 2^32 — without revealing the number itself.
->
-> **Business angle:** This is the mathematical engine behind confidential transactions. A Cardano user can prove "I am sending a valid amount (non-negative and within the uint32 range)" while keeping the exact amount hidden behind a cryptographic commitment. This enables private DeFi, concealed payroll, and regulatory-compliant stablecoin transfers where balances remain secret but range validity is publicly verifiable on-chain.
-
-Prove that a committed value lies in a range `[0, 2^n)` without revealing the value itself. This is the building block for confidential transaction amounts, sealed-bid auctions, and any zk-SNARK application that needs bounded private inputs.
-
----
-
-## System overview
-
-```mermaid
-flowchart LR
-    subgraph Prover["🧑‍💻 Prover (off-chain)"]
-        direction TB
-        priv["Private Inputs<br/>value, blinding_factor<br/>(committed variant only)"]
-        wit["Witness Generator"]
-    end
-
-    subgraph Circuit["⚡ Circom Circuit"]
-        direction TB
-        n2b["Num2Bits(n)<br/>decompose into n bits"]
-        poseidon["PoseidonBLS12_381<br/>(committed variant only)"]
-        eq["Hash / Range<br/>Equality Check"]
-        zk["Groth16 Proof"]
-    end
-
-    subgraph Verifier["🔍 Verifier (on-chain)"]
-        direction TB
-        pub["Public Inputs<br/>value (simple)<br/>commitment (committed)"]
-        check["Pairing Check"]
-    end
-
-    priv --> wit
-    wit --> n2b
-    n2b --> poseidon
-    poseidon --> eq
-    n2b --> eq
-    eq --> zk
-    pub --> check
-    zk --> check
-    check -->|"✅ VALID"| result["Range Verified"]
-```
-
-**What happens (committed variant):**
-1. **Prover** knows a secret `value` (e.g., transaction amount) and a secret `blinding_factor`, and wants to prove the value is within a valid range.
-2. **Witness generator** decomposes `value` into `n` bits and computes the Poseidon commitment `Poseidon(value, blinding_factor)`.
-3. **Circuit** constrains every bit to `{0,1}` (proving `0 ≤ value < 2^n`) and checks that the commitment matches the public commitment, producing a zk-SNARK proof.
-4. **Verifier** (Aiken smart contract) receives the proof and the public commitment (or public value for the simple variant), confirms validity via pairing check — the exact amount and blinding factor remain completely secret.
-
-
-> **Status:** ✅ **Complete.** Both circuits compile, generate witnesses, and produce valid Groth16 proofs end-to-end on BLS12-381.
-
----
+Prove that a committed value lies in a range `[0, 2^n)` without revealing the value itself.
 
 ## What it proves
 
@@ -64,8 +12,6 @@ Prove:   value ∈ [0, 2^n)
 ```
 
 The circuit decomposes `value` into `n` bits and enforces that each bit is either 0 or 1. If `value >= 2^n`, the decomposition would require more than `n` bits, causing a constraint violation.
-
-**Use case:** Proving a counter, timestamp, or index is within bounds. No commitment — the value itself is public.
 
 ### Circuit B — Committed Range Proof (`RangeProofCommitted`)
 
@@ -79,8 +25,6 @@ The prover reveals only the commitment (a single field element). The actual valu
 1. The commitment was correctly formed from the hidden value and blinding factor.
 2. The hidden value fits within `n` bits (i.e., is non-negative and less than `2^n`).
 
-**Use case:** Confidential transaction amounts. A user can prove "I know an amount `v` such that `0 <= v < 2^32` and `commit = Poseidon(v, r)`" without revealing `v` or `r`.
-
 ---
 
 ## Circuit structure
@@ -92,23 +36,7 @@ The prover reveals only the commitment (a single field element). The actual valu
 | `PoseidonBLS12_381` (imported) | `PoseidonBLS12_381()` | BLS12-381 Poseidon permutation (t=3, alpha=5, RF=8, RP=57) | ~250 |
 | `Num2Bits` (from circomlib) | `Num2Bits(n)` | Decompose signal into `n` bits, each constrained to `{0,1}` | ~`n` |
 
-**Key design decisions:**
-- **Poseidon for commitment:** SNARK-friendly hash (~250 constraints) vs Blake2b (~77K constraints) or SHA-256 (~thousands). We already have `PoseidonBLS12_381` in this repo with BLS12-381 round constants.
-- **Num2Bits for range proof:** Standard, minimal-constraint approach. No curve-specific constants — works on any field.
-- **BLS12-381 safe:** Unlike Ed25519 (which uses chunked Curve25519 arithmetic), `Num2Bits` and Poseidon are fully compatible with BLS12-381.
-
----
-
-## Parameter: n = 32
-
-We instantiate both circuits with `n = 32`, proving a 32-bit unsigned integer range:
-
-| Circuit | Constraints | Wires | Dense matrix RAM | Status |
-|---------|-------------|-------|------------------|--------|
-| `RangeProofSimple(32)` | ~32 | ~35 | ~1 KB | ✅ Working e2e |
-| `RangeProofCommitted(32)` | ~282 | ~669 | ~9 KB | ✅ Working e2e |
-
-Both are **orders of magnitude smaller** than our smallest working end-to-end circuit (`PoseidonPreimage` at ~300 constraints). No memory risk.
+Both circuits are instantiated with `n = 32`.
 
 ---
 
@@ -227,23 +155,6 @@ BLS12-381 field elements are ~255-bit integers (~77 decimal digits). **JavaScrip
 ```
 
 This is a common pitfall when using snarkjs with BLS12-381. Always use strings for field elements larger than `Number.MAX_SAFE_INTEGER`.
-
----
-
-## Comparison with other circuits in this repo
-
-| Circuit | Constraints | Wires | Dense matrix RAM | Status |
-|---------|-------------|-------|------------------|--------|
-| SimpleExample Multiplier | 3 | 8 | ~768 B | ✅ Working e2e |
-| **RangeProofSimple(32)** | **32** | **35** | **~1 KB** | ✅ Working e2e |
-| **RangeProofCommitted(32)** | **275** | **669** | **~9 KB** | ✅ Working e2e |
-| Poseidon Pre-image | ~300 | ~400 | ~5 MB | ✅ Working e2e |
-| Privacy / Spend(depth=2) | 1,107 | 1,110 | ~39 MB | ✅ Working e2e |
-| Blake2b-224 Pre-image | ~79K | ~78K | ~200 GB (dense) / ~280 MiB (sparse) | ✅ Working e2e — ceremony ~18 s, prove ~5 s (Impl 7: ~4.5 s) |
-| Ed25519 Verify | ~4M | ~4M | ~512 TB (dense) / ~3 GiB (sparse) | ✅ Working e2e — ceremony ~16 min, prove ~5 min (Impl 7: ~2 min) |
-| CardanoKeyOwnership (Ed25519) | ~1.97M | ~1.94M | ~15 TB (dense) / ~2.5 GiB (sparse) | ✅ Working e2e — ceremony ~5 min, prove ~1.7 min (Impl 7: ~1.5 min) |
-
-> **Implementation 7 (h_scalar).** The h_scalar fast path eliminates the h_query MSM (the dominant cost for large circuits). Benefit is negligible for tiny circuits (<1K constraints) but grows with circuit size: ~10 % at 79K, ~10–15 % at 1.97M, **>2×** at 4M constraints. Add `--h-scalar` to `ceremony-dev`; the prover auto-detects with no extra flags.
 
 ---
 
