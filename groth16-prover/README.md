@@ -1793,6 +1793,23 @@ The [zeroj](https://github.com/bloxbean/zeroj) toolkit provides a pure-Java Grot
 > - **zeroj** has a `CircuitBuilder` DSL for generating R1CS programmatically; our crate focuses on loading standard Circom `.r1cs` / `.wtns` artifacts.
 > - **zeroj** peak heap on the 4,096-constraint synthetic circuit is **339 MB**; our sparse path uses **0.2 MiB** for the 1,911-constraint PoseidonMerkle circuit.
 
+### Nova IVC step-chain (Implementation 8)
+
+Measured with `cargo run --release --bin benchmark_nova -- --circuit <step.r1cs> --steps <witness-dir>` (single core, keys kept in memory, transcript hashing excluded — it is microseconds per step). Each run performs a fresh single-party ceremony, folds every step witness into a proof (with the state-chain check), and verifies every step proof. All numbers are from the smoke-tested step circuits in the [Implementation 8](#implementation-8-nova-ivc--compression-snark) flow.
+
+| Step circuit | Wires | Constraints | Steps | Ceremony | Fold (total) | Fold (per step) | Verify (total) |
+|--------------|-------|-------------|-------|----------|--------------|-----------------|----------------|
+| `ed25519_verify_nova` | 7,658 | 7,724 | 255 | **1.97 s** | **116.0 s** | **455 ms** | **2.18 s** |
+| `cardano_ed25519_ownership_nova` | 7,658 | 7,724 | 255 | **1.51 s** | **107.8 s** | **423 ms** | **2.09 s** |
+| `eddsa_jubjub_nova` | 15 | 9 | 254 | **17 ms** | **2.19 s** | **8.6 ms** | **2.48 s** |
+| `anonymous_airdrop_nova` | 1,210 | 1,207 | 5 | **0.51 s** | **1.48 s** | **296 ms** | **0.05 s** |
+
+> **What the numbers mean.** The core claim of Implementation 8 holds: a **one-time ceremony of ~2 s** replaces the monolithic Ed25519Verify (~16 min) / CardanoKeyOwnership (~5 min) ceremonies. The cost is moved to the fold: 255 steps × ~0.42–0.46 s ≈ 2 min, with per-step memory (and therefore peak memory) proportional to the 7.7K-constraint step rather than the ~2–4M-constraint whole circuit. Verification is the current weak point, as documented in the Implementation 8 section: each step proof costs a constant ~8–10 ms pairing check, so verifying the full chain is O(N) — ~2.1–2.5 s for 255 steps, and the bundle stores all N proofs (no constant-size compression yet).
+>
+> **Fixed overhead vs. circuit size.** The 9-constraint `eddsa_jubjub_nova` step still costs 8.6 ms to prove and 9.75 ms to verify per step — the entire per-step cost is fixed prover/verifier overhead (FFT-domain setup, witness-polynomial IFFT, MSM, pairing). The 1,207-constraint airdrop step is 296 ms/step for the same reason. Only when step size grows past ~10K constraints does circuit work dominate the fixed cost — which is exactly the regime Nova targets.
+>
+> **Reproducibility.** The step `.r1cs` and `step_XXXX.wtns` files are produced by the `circom --prime bls12381` + witness-generation steps in the [Implementation 8](#implementation-8-nova-ivc--compression-snark) section; the benchmark measures the same cryptographic phases as `nova ceremony` / `nova fold` / `nova verify` but keeps the keys in memory (no `.pk`/`.vk` disk I/O) and skips the transcript hashing.
+
 Run the benchmarks yourself:
 
 ```bash
@@ -1816,6 +1833,11 @@ cargo run --bin benchmark_sparse --release
 
 # Large-circuit unblocking demo (synthetic 20K–50K constraints)
 cargo run --bin benchmark_large_circuit --release
+
+# Nova IVC step-chain (Implementation 8) — ceremony/fold/verify for one step circuit
+# (requires a compiled step .r1cs + a directory of step_XXXX.wtns witnesses, see the
+# Implementation 8 section; --limit N restricts to the first N steps)
+cargo run --release --bin benchmark_nova -- --circuit <step.r1cs> --steps <witness-dir>
 ```
 
 </details>
