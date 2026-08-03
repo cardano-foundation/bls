@@ -1426,6 +1426,89 @@ The two functional gaps of the POC — it is a proof *chain* (N proofs, N pairin
 
 </details>
 
+## Implementation 9 (Relaxed-R1CS folding + single compression SNARK)
+
+<details>
+<summary><b>Implementation 9 — click to expand</b></summary>
+
+> **Status:** 🔨 **Under the work.** Real Nova folding that upgrades the Implementation 8 step-chain (one Groth16 proof per step, bundle O(N), verification O(N) pairings) to a **constant-size** proof: fold N step instances into one Relaxed-R1CS running instance with a NIFS, then compress with a single Groth16 proof verified with one pairing check. The full design, work items, and non-goals are tracked as **Pending item (u)** below.
+>
+> **Goal:** O(1) bundle + O(1) on-chain verification for sequential computations, reusing the Implementation 8 step circuits and the existing `nova` CLI unchanged.
+
+### What changes vs Implementation 8
+
+| | Implementation 8 (POC, ✅ done) | Implementation 9 (🔨 under the work) |
+|---|---|---|
+| Per-step prover work | One full Groth16 proof | Two O(step)-sized MSMs (the NIFS fold) |
+| Proof bundle | N Groth16 proofs → O(N) | One relaxed instance + one compression proof → O(1) |
+| On-chain verification | N pairing checks | One pairing check |
+| Trusted setup | One ceremony per step shape | One small, step-agnostic compression ceremony |
+
+### Scope (full detail in [Pending item (u)](#pending))
+
+1. **NIFS folding module** (in-repo, arkworks BLS12-381): Relaxed-R1CS instance `U=(x,u,W̄,Ē)` with Pedersen G1 commitments; Fiat-Shamir challenge `r=H(acc‖step)` via the existing BLAKE2b512 transcript. Folding runs **off-circuit**, so no curve cycle is needed.
+2. **Compression circuit** (own Circom, `circom/RelaxedR1CS/`): proves the final relaxed instance is satisfiable; size ≈ one step; proved with the existing Groth16 prover.
+3. **CLI:** `nova fold --nifs` → `nova verify` = transcript check + one pairing check; `params / ceremony` and the step circuits unchanged.
+4. **Benchmarks:** extend `benchmark_nova.rs` — bundle O(N)→O(1), verification O(N)→O(1) pairings.
+
+**Non-goals** (details in item (u)): in-circuit IVC recursion (not buildable on BLS12-381 — no 2-cycle) and SuperNova non-uniform steps.
+
+</details>
+
+## Implementation 10 (Post-quantum lattice folding)
+
+<details>
+<summary><b>Implementation 10 — click to expand</b></summary>
+
+> **Status:** 🔨 **Under the work.** Post-quantum counterpart of Implementation 9, tracked as **Pending item (v)** below. Implementation 9's folding is *commitment-agnostic* — swapping its Pedersen commitments (DLOG-based, broken by Shor) for an **SIS/Ajtai lattice commitment** yields a post-quantum folding scheme with the same IVC structure (the LatticeFold / Lova / ProtogaLattice line of the folding survey).
+>
+> **Goal:** a lattice-based IVC chain — lattice folding + PQ compression SNARK + hash-based on-chain verifier — as the long-term quantum-resistance path.
+
+### What gets adapted (full detail in [Pending item (v)](#pending))
+
+1. **Folding layer:** replace the Pedersen commitment with an SIS/Ajtai commitment (Lova's power-of-two modulus q=2⁶⁴ is the easiest fit; the folding math is otherwise unchanged).
+2. **Compression:** Groth16 is equally non-PQ, so the compression SNARK must also go lattice/hash-based (sumcheck/GKR with hash- or lattice-polynomial commitments).
+3. **On-chain verifier:** replace the Aiken Groth16 verifier with a hash-based (STARK-like) verifier — heavier, trading gas for PQ security.
+4. **Steps:** re-arithmetize the step circuits for a small field (circom already supports `--prime goldilocks`).
+
+### Candidate lattice schemes (from [Pending item (v)](#pending))
+
+| Scheme | Assumption | Notes |
+|---|---|---|
+| LatticeFold (Boneh–Chen 2024) | Module-SIS | Sumcheck-heavy → large verifier circuits, bad per-step overhead |
+| **Lova** (ASIACRYPT 2024) | Unstructured SIS, q=2⁶⁴ | Easiest to add; no finite-field modular arithmetic |
+| ProtogaLattice (2026) | SIS, constant-round | Algebraic folding, no sumcheck; supports CCS/Plonkish steps |
+
+**Reality check:** a chain is only as PQ as its weakest link, so partial PQ buys nothing — the compression SNARK must go PQ too. A hybrid dual proof (Groth16 OR lattice IVC) hedges the transition at double cost. Full status and trade-offs are in **item (v)**.
+
+</details>
+
+## Implementation 11 (Batch verification and proof aggregation)
+
+<details>
+<summary><b>Implementation 11 — click to expand</b></summary>
+
+> **Status:** ⏳ **Roadmap item (not started).** On-chain verification economics: turn "N proofs → N pairing checks" into "N proofs → one multi-pairing product or one aggregated proof", plus a one-time `PreparedVerifyingKey` per circuit. Absorbs Pending items **(m)** (prepared verifier + batched pairings) and **(q)** (proof aggregation) as its work items; the Lagrange-basis SRS **item (p)** stays standalone.
+>
+> **Goal:** amortise on-chain verification cost across many proofs — one pairing check per batch — complementing Implementation 9, which folds *sequential* steps, by batching/aggregating *independent* proofs (many users, many transactions).
+
+### Ordering: before Implementation 10
+
+Implementation 11 is **classical, small, and low-risk** — it reuses the existing Groth16 prover, verifier, and Aiken on-chain path end to end, touching only the verification layer. Implementation 10 (post-quantum lattice folding) is long-term research that replaces the entire stack and only pays off if quantum timelines shorten. **Execution order is 9 → 11 → 10**: near-term classical work first, the PQ path as a hedge. (Numbering is thematic — 9 = folding, 10 = PQ, 11 = batch/aggregation — not an execution order.)
+
+### Work items (full detail in [Pending (m)](#m-prepared-verifier-and-batched-pairing-verification-beyond-what-zeroj-supports) and [Pending (q)](#q-proof-aggregation-beyond-what-zeroj-supports))
+
+1. **Prepared verifier** — a `PreparedVerifyingKey` that precomputes and caches the fixed VK data (e.g. G2 line coefficients for the Miller loop) once per circuit, not per proof.
+2. **Batched pairing verification** — a batched verifier that checks multiple proofs with a single multi-pairing product (Groth.jl: N=16 batch 18.212 ms → 13.854 ms on the same fixture).
+3. **Proof aggregation** — roll multiple proofs into a single succinct proof verified with one pairing check (arkworks `groth16::aggregate_proofs`).
+4. **CLI:** extend `verify` with a `--batch` / `aggregate` subcommand over existing `.pk`/`.vk` + proofs; the Aiken on-chain verifier gains the batched/aggregated check.
+
+### Benefit
+
+Cheaper on-chain verification — O(N) pairing checks → one — essential for rollups, batched attestations, and multi-user privacy-pool withdrawals.
+
+</details>
+
 ---
 
 ## Production innovations
@@ -1445,14 +1528,18 @@ For **short-term production on Cardano**:
 For **medium-term** (when ceremony dominates or circuits exceed 4M):
 4. ✅ Implementation 8 (Nova step-chain POC) — **done**
 5. ⏳ Implementation 9 — Relaxed-R1CS folding + compression SNARK — **circuit-agnostic trusted setup + incremental proving (item (u) below)**
+6. ⏳ Implementation 11 — batch verification + proof aggregation — **O(N) pairing checks → one; simple, classical on-chain-verification economics (items (m), (q) below) — lands before Implementation 10 because it is significantly simpler and lower-risk**
 
 For **long-term research**:
-6. Evaluate PLONK / Halo2 only if proof size or verification cost regressions are acceptable.
-7. Evaluate FHE-based selective disclosure for quantum resistance (see `aiken/selective-disclosure`).
+7. ⏳ Implementation 10 — post-quantum lattice folding — **only if quantum timelines shorten; executed after the classical items above (9, 11) (item (v) below)**
+8. Evaluate PLONK / Halo2 only if proof size or verification cost regressions are acceptable.
+9. Evaluate FHE-based selective disclosure for quantum resistance (see `aiken/selective-disclosure`).
 
 > **Note on the ownership circuit.** The Cardano Ed25519 key ownership circuit (~1.97M constraints) already has a ceremony of only **~5 min** and proving of **~1.7 min** — a total of ~7 min e2e. This is already acceptable for dev/testnet workflows. The ~16 min Ed25519 full-signature ceremony is the outlier because SHA-512 in-circuit is expensive. If the use case is "prove I own this key" rather than "verify a signature", the bottleneck is already manageable.
 
 ### (m) Prepared verifier and batched pairing verification (beyond what zeroj supports)
+
+> **Home:** absorbed into [Implementation 11](#implementation-11-batch-verification-and-proof-aggregation) as an on-chain verification work item (batched pairings).
 
 - **Current:** The verifier recomputes every pairing from scratch each time a proof is checked.
 - **Target:** Add a `PreparedVerifyingKey` that precomputes and caches fixed verification-key data (e.g., G2 line coefficients for the Miller loop). Also expose a batched verifier that checks multiple proofs with a single multi-pairing product.
@@ -1470,10 +1557,14 @@ For **long-term research**:
 
 ### (p) Finish the Lagrange-basis SRS
 
+> **Home:** standalone — the only prover-engine pending item (Lagrange-basis SRS), orthogonal to the IVC and verification implementations; no natural host until a prover-path implementation picks it up.
+
 - **Status:** ⚠️ **Partial.** The `QapEngine` trait, `DenseQapEngine`, and `FftQapEngine` are all implemented in `src/engine.rs`. The only remaining gap is building the group-element SRS in the Lagrange basis (`L_i(τ)·G1` instead of `τ^i·G1`) so the FFT path can skip monomial conversion and use the most efficient production pattern.
 - **Benefit:** Completes the FFT production path and removes the last monomial fallback.
 
 ### (q) Proof aggregation (beyond what zeroj supports)
+
+> **Home:** absorbed into [Implementation 11](#implementation-11-batch-verification-and-proof-aggregation) as a proof-aggregation work item.
 
 - **Current:** Each proof is verified individually.
 - **Target:** Support Groth16 proof aggregation (rolling multiple proofs into a single succinct proof that can be verified with one pairing check).
@@ -1482,6 +1573,8 @@ For **long-term research**:
 
 ### (s) Recursive proof composition
 
+> **Home:** absorbed into [Implementation 9](#implementation-9-relaxed-r1cs-folding--single-compression-snark) — approach step 1 is the Implementation 8 step-chain, and its deferred residual (fold + compress) is exactly item (u). Steps 2–3 (in-circuit pairing gadget, Halo2 recursion) remain non-goals on BLS12-381.
+
 - **Current:** Each proof is standalone — the on-chain verifier checks one Groth16 proof per transaction. For use cases requiring many proofs (e.g., rollups, batched attestations), each proof pays full on-chain verification cost. The Nova step-chain POC ([Implementation 8](#implementation-8-nova-ivc--compression-snark)) proves every step as an individual Groth16 proof, so the bundle grows O(N) and verification is O(N) pairings.
 - **Target:** Support proving "I know a valid Groth16 proof π₁ for circuit C₁" inside a second Groth16 circuit C₂, producing a succinct proof π₂ that attests to the correctness of π₁. The on-chain verifier checks only π₂, regardless of how many inner proofs it covers.
 - **Approach:**
@@ -1489,7 +1582,7 @@ For **long-term research**:
   2. **SNARK-friendly verification gadget** — implement the Groth16 pairing check inside a Circom circuit (pairing operations on BLS12-381 can be expressed as R1CS constraints, though at high cost ~100K–500K constraints for the pairing itself).
   3. **Halo2-style recursive aggregation** — **not buildable on BLS12-381.** A 2-cycle requires two curves with comparable field sizes (Pasta, BN254–Grumpkin); BLS12-381's base field (≈2³⁸¹) is ~126 bits larger than its scalar field (≈2²⁵⁵), so no cycle partner can exist (Hasse bound). JubJub has base field `Fr1` but order ≈2²⁵¹ ≠ `Fq1`, so "BLS12-381 + JubJub" is not a cycle. Recursive verification on our curve would need non-native `Fq1`-in-`Fr1` arithmetic (~1M+ gates/scalar mult). The viable alternative is the non-recursive folding of item **(u)** below.
 - **Benefit:** Amortises on-chain verification cost across N proofs — from O(N) pairing checks to O(1). Essential for rollup and batching use cases. Also enables incremental computation where each step's output feeds into the next.
-- **Reference:** [arkworks groth16::aggregate](https://docs.rs/ark-groth16/latest/ark_groth16/), [Nova](https://github.com/microsoft/Nova), [Zcash Halo2](https://github.com/zcash/halo2), [Pacifico](https://github.com/argumentcomputer/pacifico).
+- **Reference:** [arkworks groth16::aggregate](https://docs.rs/ark-groth16/latest/ark_groth16/), [Nova](https://github.com/microsoft/Nova), [Zcash Halo2](https://github.com/zcash/halo2).
 
 ### (t) Shielded cross-chain privacy pool (F5 research direction)
 
@@ -1767,6 +1860,60 @@ cargo run --release --bin benchmark_nova -- --circuit <step.r1cs> --steps <witne
 ```
 
 </details>
+
+---
+
+## References
+
+All works cited across this README and the linked implementation / tutorial documentation.
+
+### Folding schemes, recursive arguments, and SNARKs
+
+1. Jens Groth. *On the Size of Pairing-Based Non-interactive Arguments.* EUROCRYPT 2016. IACR ePrint [2016/260](https://eprint.iacr.org/2016/260).
+2. Abhiram Kothapalli, Srinath Setty, Ioanna Tzialla. *Nova: Recursive Zero-Knowledge Arguments from Folding Schemes.* CRYPTO 2022. IACR ePrint [2021/370](https://eprint.iacr.org/2021/370).
+3. Abhiram Kothapalli, Srinath Setty. *SuperNova: Proving Universal Machine Executions without Universal Circuits.* IACR ePrint [2022/1758](https://eprint.iacr.org/2022/1758).
+4. Abhiram Kothapalli, Srinath Setty. *CycleFold: Folding-Scheme-Based Recursive Arguments over a Cycle of Elliptic Curves.* IACR ePrint [2023/1192](https://eprint.iacr.org/2023/1192).
+5. Abhiram Kothapalli, Srinath Setty. *HyperNova: Recursive Arguments for Customizable Constraint Systems.* CRYPTO 2024. IACR ePrint [2023/573](https://eprint.iacr.org/2023/573).
+6. Dan Boneh, Binyi Chen. *LatticeFold: A Lattice-based Folding Scheme and its Applications to Succinct Proof Systems.* IACR ePrint [2024/257](https://eprint.iacr.org/2024/257).
+7. Giacomo Fenzi, Christian Knabenhans, Ngoc Khanh Nguyen, Duc Tu Pham. *Lova: Lattice-Based Folding Scheme from Unstructured Lattices.* ASIACRYPT 2024. IACR ePrint [2024/1964](https://eprint.iacr.org/2024/1964).
+8. Wilson Nguyen, Srinath Setty. *Neo: Lattice-based Folding Scheme for CCS over Small Fields and Pay-per-Bit Commitments.* IACR ePrint [2025/294](https://eprint.iacr.org/2025/294).
+9. David Balbás, Anca Nitulescu, Maxime Plançon. *ProtogaLattice: Constant-Round Lattice-based Folding for General Polynomial Relations.* IACR ePrint [2026/1317](https://eprint.iacr.org/2026/1317).
+10. Cyprian Omukhwaya Sakwa, Anyembe Andrew Omala, Fagen Li. *A Survey of Folding-Based Zero-Knowledge Proofs.* Information Sciences 724 (2026) 122698. DOI [10.1016/j.ins.2025.122698](https://doi.org/10.1016/j.ins.2025.122698); [SSRN 5293078](https://doi.org/10.2139/ssrn.5293078).
+11. Ryan Lavin, Xuekai Liu, Hardhik Mohanty, Logan Norman, Giovanni Zaarour, Bhaskar Krishnamachari. *A Survey on the Applications of Zero-Knowledge Proofs.* arXiv [2408.00243](https://arxiv.org/abs/2408.00243) (2024).
+12. Sean Bowe, Jack Grigg, Daira Hopwood. *Recursive Proof Composition without a Trusted Setup* (Halo / Halo2). IACR ePrint [2019/1021](https://eprint.iacr.org/2019/1021).
+13. Liam Eagen. *Bulletproofs++: Next Generation Confidential Transactions Based on Proofs of Statement and Knowledge.* IACR ePrint [2022/510](https://eprint.iacr.org/2022/510).
+
+### Hash functions and authenticated data structures
+
+14. Lorenzo Grassi, Dmitry Khovratovich, Christian Rechberger, Arnab Roy, Markus Schofnegger. *POSEIDON: A New Hash Function for Zero-Knowledge Proof Systems.* USENIX Security 2021. IACR ePrint [2019/458](https://eprint.iacr.org/2019/458).
+15. Rasmus Dahlberg, Tobias Pulls, Roel Peeters. *Efficient Sparse Merkle Trees: Caching Strategies and Secure (Non-)Membership Proofs.* NordSec 2016. IACR ePrint [2016/683](https://eprint.iacr.org/2016/683).
+16. Dan Boneh, Henry Corrigan-Gibbs, Stuart Schechter. *Balloon Hashing: A Memory-Hard Function Providing Provable Protection Against Sequential Attacks.* ASIACRYPT 2016. IACR ePrint [2016/027](https://eprint.iacr.org/2016/027).
+
+### Signatures and pairing-friendly curves
+
+17. Dan Boneh, Ben Lynn, Hovav Shacham. *Short Signatures from the Weil Pairing.* ASIACRYPT 2001; *Journal of Cryptology* 17(4):297–319, 2004.
+18. Paulo S. L. M. Barreto, Ben Lynn, Michael Scott. *Constructing Elliptic Curves with Prescribed Embedding Degrees.* SCN 2002. IACR ePrint [2002/088](https://eprint.iacr.org/2002/088).
+
+### Privacy and selective disclosure
+
+19. Andrea De Salve, Paolo Mori, Laura Ricci. *A Fully Homomorphic Encryption Based Scheme for Verifiable Credential Selective Disclosure.* IET Information Security, 2018. DOI [10.1049/iet-ifs.2018.5491](https://dl.acm.org/doi/10.1049/iet-ifs.2018.5491).
+20. Andrea De Salve, Andrea Lisi, Miriam Cascino, Paolo Mori, Laura Ricci. *Selective Disclosure Approaches in Self-Sovereign Identity: An Experimental Comparison.* IEEE Access, 2025. DOI [10.1109/ACCESS.2025.3649167](https://doi.org/10.1109/ACCESS.2025.3649167).
+
+### Software, specifications, and ceremonies
+
+- [arkworks](https://arkworks.rs/) — Rust ecosystem for pairing-based cryptography (R1CS, Groth16, FFT, MSM, `PreparedVerifyingKey`, `groth16::aggregate_proofs`).
+- [circom](https://github.com/iden3/circom) — arithmetic-circuit compiler (R1CS / WASM / C witness generation).
+- [Nova (Microsoft Research)](https://github.com/microsoft/Nova) — Rust implementation of the Nova folding scheme.
+- [Nova-Scotia](https://github.com/nalinbhardwaj/Nova-Scotia) — middleware compiling Circom circuits to the Nova prover.
+- [Sonobe](https://github.com/privacy-scaling-explorations/sonobe) — experimental arkworks-based folding-schemes library (Nova, CycleFold, HyperNova, ProtoGalaxy).
+- [Halo2 (Zcash)](https://github.com/zcash/halo2) — PLONKish recursive proof system.
+- [Groth.jl](https://github.com/0xpantera/Groth.jl) — Julia Groth16 with `prepare_verifying_key` / batched verification.
+- [zeroj](https://github.com/bloxbean/zeroj) — pure-Java Groth16 prover for BLS12-381.
+- [Perpetual Powers of Tau](https://github.com/privacy-scaling-explorations/perpetualpowersoftau) — universal BLS12-381 Phase 1 ceremony (`.ptau`).
+- [Manta trusted setup](https://github.com/Manta-Network/manta-rs) — production arkworks-based Phase 2 MPC ceremony.
+- [F5 PoC](https://f5.primemodulus.com/) — ZK privacy-pool proof of concept.
+- [ERC-5564 Stealth Addresses](https://eips.ethereum.org/EIPS/eip-5564) — Ethereum EIP.
+- [Privacy Pools (Buterin et al., 2023)](https://github.com/a16z/privacy-pools) — private-pools design.
 
 ---
 
