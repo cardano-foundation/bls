@@ -1532,7 +1532,7 @@ For **long-term research**:
 - **Approach:**
   1. ✅ **IVC via Nova/SuperNova — step-chain implemented.** The `nova` CLI (`params / ceremony / fold / verify`) runs an end-to-end step-chain: one Groth16 proof per step, bound by a BLAKE2b512 transcript. ⏳ **Remaining:** the full Relaxed-R1CS folding + compression SNARK, so the accumulator folds to a single **constant-size** Groth16 proof instead of N stored/verified proofs.
   2. **SNARK-friendly verification gadget** — implement the Groth16 pairing check inside a Circom circuit (pairing operations on BLS12-381 can be expressed as R1CS constraints, though at high cost ~100K–500K constraints for the pairing itself).
-  3. **Halo2-style recursive aggregation** — use cycle of curves (BLS12-381 + JubJub) for efficient recursive verification without pairings.
+  3. **Halo2-style recursive aggregation** — **not buildable on BLS12-381.** A 2-cycle requires two curves with comparable field sizes (Pasta, BN254–Grumpkin); BLS12-381's base field (≈2³⁸¹) is ~126 bits larger than its scalar field (≈2²⁵⁵), so no cycle partner can exist (Hasse bound). JubJub has base field `Fr1` but order ≈2²⁵¹ ≠ `Fq1`, so "BLS12-381 + JubJub" is not a cycle. Recursive verification on our curve would need non-native `Fq1`-in-`Fr1` arithmetic (~1M+ gates/scalar mult). The viable alternative is the non-recursive folding of item **(u)** below.
 - **Benefit:** Amortises on-chain verification cost across N proofs — from O(N) pairing checks to O(1). Essential for rollup and batching use cases. Also enables incremental computation where each step's output feeds into the next.
 - **Reference:** [arkworks groth16::aggregate](https://docs.rs/ark-groth16/latest/ark_groth16/), [Nova](https://github.com/microsoft/Nova), [Zcash Halo2](https://github.com/zcash/halo2), [Pacifico](https://github.com/argumentcomputer/pacifico).
 
@@ -1556,6 +1556,18 @@ For **long-term research**:
   3. Integrating with a canonical Cardano bridge (e.g., Milkomeda, Inter-Blockchain Communication, or future canonical L2s).
 - **Reference:** [F5 PoC](https://f5.primemodulus.com/), [merkle-groot/f5](https://github.com/merkle-groot/f5), [ERC-5564 Stealth Addresses](https://eips.ethereum.org/EIPS/eip-5564), [Privacy Pools (Buterin et al., 2023)](https://github.com/a16z/privacy-pools).
 - **Benefit:** If realised, this would be the first ZK-native cross-chain privacy protocol that does not fragment anonymity sets or introduce new bridge trust assumptions. A single large pool on L1 serves all L2s; users withdraw privately to any supported chain with the same anonymity guarantee.
+
+### (u) Implementation 9 — Relaxed-R1CS folding (NIFS) + single Groth16 compression proof
+
+- **Current:** Implementation 8 POC proves every step as its own Groth16 proof, chained by a BLAKE2b512 transcript → bundle size and on-chain verification grow O(N); no real folding, no compression SNARK.
+- **Target:** Fold N step instances into one Relaxed-R1CS running instance, then compress with a single Groth16 proof verified with one pairing check (O(1) bundle, O(1) verify).
+- **Work items:**
+  1. **NIFS folding module (in-repo, arkworks BLS12-381):** Relaxed-R1CS instance `U=(x,u,W̄,Ē)`, witness `W=(W,E)`, relaxed equation `(AZ)∘(BZ)=u(CZ)+E`; Pedersen commitment over G1; Fiat-Shamir challenge `r=H(acc‖step)` via the existing BLAKE2b512 transcript (off-circuit, no Poseidon gadget); fold instances and witnesses in linear time. Native over BLS12-381 — **no curve cycle needed because folding runs outside any verifier circuit**.
+  2. **Compression circuit (own Circom, `circom/RelaxedR1CS/`):** proves the final relaxed instance is satisfiable (`(AZ)∘(BZ)=u(CZ)+E` for folded `Z=(W,x,u)`), reusing the step's A/B/C matrices; size ≈ one step; proved with the existing Groth16 prover.
+  3. **CLI:** extend `nova` subcommand (`nova fold --nifs`): fold N step instances → one relaxed instance → one compression proof; `nova verify` = transcript check + single pairings check. `params / ceremony` and existing step circuits unchanged.
+  4. **Benchmarks:** extend `benchmark_nova.rs` — bundle O(N)→O(1); verify one pairing (constant vs N); prover time = fast folding + one step-sized compression proof.
+  5. **Non-goals (explicitly documented):** true in-circuit IVC (SuperNova-style recursion) is not buildable on BLS12-381 — requires a 2-cycle (Pasta / BN254–Grumpkin) or non-native `Fq1`-in-`Fr1` emulation (~1M+ gates/scalar mult). SuperNova non-uniform steps (different circuit per step) deferred — Implementation 9 assumes one repeated step circuit.
+- **Reference:** Nova (CRYPTO'22, eprint 2021/370), Nova-Scotia (Circom→Nova frontend), Sonobe (arkworks folding), SuperNova (DeepWiki/lurk-beta), arXiv 2408.00243 (ZKP survey, evaluation criteria).
 
 </details>
 
