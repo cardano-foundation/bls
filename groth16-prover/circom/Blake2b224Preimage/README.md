@@ -1,55 +1,6 @@
 # Blake2b-224 Hash Pre-image (Cardano Key Hash)
 
-> **In one sentence:** Prove you know the public key behind a Cardano address — without revealing the public key itself.
->
-> **Business angle:** Cardano addresses are derived from Ed25519 public keys via Blake2b-224 hashing. This circuit lets a user prove "I control the key that hashes to this address" without exposing the key, enabling anonymous identity verification, privacy-preserving KYC, and cross-chain address ownership proofs. A dApp could verify a user's Cardano identity inside a zk-SNARK without ever seeing their wallet public key.
-
 Prove knowledge of a 32-byte pre-image whose Blake2b-224 hash equals a publicly known Cardano key hash — without revealing the pre-image.
-
----
-
-## System overview
-
-```mermaid
-flowchart LR
-    subgraph Prover["🧑‍💻 Prover (off-chain)"]
-        direction TB
-        priv["Private Input<br/>pre_image[32]<br/>(e.g. Ed25519 pubkey)"]
-        wit["Witness Generator"]
-    end
-
-    subgraph Circuit["⚡ Circom Circuit"]
-        direction TB
-        hash["Blake2b-224<br/>(12 rounds, 64-byte blocks)"]
-        zk["Groth16 Proof"]
-    end
-
-    subgraph Verifier["🔍 Verifier (on-chain)"]
-        direction TB
-        pub["Public Input<br/>blake2b_224_hash[28]<br/>(Cardano key hash)"]
-        check["Pairing Check"]
-    end
-
-    priv --> wit
-    wit --> hash
-    hash --> zk
-    pub --> check
-    zk --> check
-    check -->|"✅ VALID"| result["Identity Verified"]
-```
-
-**What happens:**
-1. **Prover** knows a 32-byte pre-image (e.g., an Ed25519 public key) and wants to prove it hashes to a known Cardano address key hash.
-2. **Witness generator** runs the Blake2b-224 compression function across the 12 internal rounds and produces the 28-byte digest.
-3. **Circuit** (79K constraints) constrains every bitwise XOR, rotation, and mixing step, producing a zk-SNARK proof that `Blake2b-224(pre_image) == hash`.
-4. **Verifier** (Aiken smart contract) receives the proof and the public 28-byte key hash, confirms validity via pairing check — the prover's public key remains completely secret.
-
-
-> **Status:** ✅ **Working end-to-end.** Circuit compiles, witness generates (cross-checked against Python `hashlib.blake2b`), sparse dev ceremony runs, proof generates, and verification passes. The sparse prover uses ~280 MiB RAM instead of ~200 GB dense. See [End-to-end pipeline](#end-to-end-pipeline) below for measured timings.
-
----
-
-## What it proves
 
 ```
 Public:  blake2b_224_hash[28]  — the 28-byte Cardano key hash
@@ -100,8 +51,6 @@ circom blake2b224_preimage.circom --r1cs --wasm --sym --prime bls12381
 | **Labels** | 217,394 |
 | **Template instances** | 56 |
 
-The circuit compiles successfully and the WebAssembly witness generator is produced.
-
 ---
 
 ## Witness generation
@@ -124,7 +73,7 @@ hash hex   = 491112dd01155c07dab485f71b572e0cae759e2cd38b1c0e97554297
 
 ## End-to-end pipeline
 
-The full pipeline was executed with the sparse prover (Implementation 6). The dense path would OOM at ~200 GB; the sparse path completes in **under 25 seconds total** using ~280 MiB RAM.
+The pipeline runs with the sparse prover: use `--sparse` on the ceremony (the dense path would OOM at ~200 GB). Total e2e time is **~26 s** with ~280 MiB RAM.
 
 ### 1. Compile
 
@@ -132,15 +81,6 @@ The full pipeline was executed with the sparse prover (Implementation 6). The de
 cd groth16-prover/circom/Blake2b224Preimage
 circom blake2b224_preimage.circom --r1cs --wasm --sym --prime bls12381
 ```
-
-| Metric | Value |
-|--------|-------|
-| Non-linear constraints | 77,312 |
-| Linear constraints | 2,059 |
-| Total constraints | ~79,371 |
-| Public inputs | 28 (`blake2b_224_hash` bytes) |
-| Private inputs | 32 (`pre_image` bytes) |
-| Wires | 78,605 |
 
 ### 2. Generate witness input
 
@@ -165,8 +105,6 @@ snarkjs wtns calculate \
   input.json witness.wtns
 ```
 
-The witness output is cross-checked against Python `hashlib.blake2b` and matches exactly.
-
 ### 4. Sparse dev ceremony
 
 ```bash
@@ -177,7 +115,7 @@ cargo run --release -- ceremony-dev --sparse \
   --verifying-key /tmp/blake2b224.vk
 ```
 
-**Measured:** **~18 s** | Memory: ~280 MiB | PK: ~58 MB uncompressed / ~29 MB compressed
+**Measured:** **~18 s** | Memory: ~280 MiB
 
 ### 5. Prove
 
@@ -189,7 +127,7 @@ cargo run --release -- prove --sparse \
   --out /tmp/blake2b224_proof.bin
 ```
 
-**Measured:** **~5 s** (4.5 s proof generation + 0.15 s PK load + 0.13 s circuit load)
+**Measured:** **~5 s**
 
 ### 6. Verify
 
@@ -213,15 +151,6 @@ cargo run --release -- verify \
 | Verify | **~0.2 s** |
 | **Total** | **~26 s** |
 
-> **Implementation 7 (h_scalar).** At ~79K constraints the h_query MSM is already modest, so the h_scalar fast path yields a small but measurable improvement. Add `--h-scalar` to the `ceremony-dev` command to compress the proving key (halves PK size by omitting the h_query vector). Prove time drops from **~5 s → ~4.5 s** (~10 % faster). The prover auto-detects h_scalar with no extra flags.
->
-> ```bash
-> cargo run --release -- ceremony-dev --sparse --h-scalar \
->   --circuit ../circom/Blake2b224Preimage/blake2b224_preimage.r1cs \
->   --proving-key /tmp/blake2b224.pk \
->   --verifying-key /tmp/blake2b224.vk
-> ```
-
 ### 7. Export VK to Aiken (optional)
 
 ```bash
@@ -231,64 +160,6 @@ cargo run --release -- export-vk \
 ```
 
 The exported Aiken source can be pasted into `aiken/groth16/lib/groth16/verifier.ak` for on-chain verification.
-
----
-
-## Scaling Notes
-
-### Why the ceremony fails on 32 GB RAM
-
-The `circom_adapter` module expands the sparse Circom R1CS matrices into **dense** `Vec<Vec<Fr>>` representations:
-
-```rust
-let mut l = vec![vec![Fr::zero(); n_wires]; n_constraints];
-```
-
-For this circuit:
-- Dense matrix entries: 79,312 constraints × 78,605 wires ≈ **6.2 billion entries**
-- Each `Fr` (BLS12-381 scalar) = 32 bytes
-- Total RAM needed: **~200 GB**
-
-The ceremony also constructs an FFT-based QAP over a domain of size 131,072 (2¹⁷), which allocates additional large vectors. The process is OOM-killed during matrix expansion before any actual proving begins.
-
-### Sparse prover — the chosen approach
-
-> **Why SNARKs prefer Poseidon over Blake2b.** This exercise illustrates a fundamental design tension in zk-SNARKs: arithmetization-friendly hash functions (Poseidon, MiMC) are preferred over traditional ones (Blake2b, SHA-256) because their R1CS constraint count is orders of magnitude smaller. Poseidon on BLS12-381 costs ~250 constraints per permutation (~8 constraints per byte), while Blake2b costs ~77,000 constraints for a single 32-byte block — a **300× difference**. The on-chain verifier cost is constant regardless of circuit size, but the prover's memory and time grow with the number of constraints. This is why every production zk-SNARK system that needs hashing inside the circuit uses Poseidon or a similarly SNARK-friendly construction.
-
-Implementation 6 (sparse-matrix prover) is the approach that unblocked Blake2b-224:
-
-| Approach | Status | Impact |
-|----------|--------|--------|
-| **1. Sparse matrices (Implementation 6)** | ✅ **Done.** `SparseCircomCircuit` keeps the native `.r1cs` sparse representation. `build_witness_polys_sparse` evaluates constraints at FFT domain roots directly, avoiding dense matrix expansion. | Memory drops from ~200 GB to ~280 MiB. |
-| **2. Fast ceremony (`FixedBase::msm`)** | ✅ **Done.** Replaced per-variable scalar multiplication loop with batched `FixedBase::msm` + `normalize_batch`. | Ceremony time drops from hours to minutes for large circuits. |
-| **3. Fast quotient (`l * r` FFT mul)** | ✅ **Done.** Replaced `naive_mul` with FFT-based polynomial multiplication. | Quotient computation drops from O(n²) to O(n log n). |
-| **4. Uncompressed PK/VK** | ✅ **Done.** `serialize_uncompressed` + `deserialize_uncompressed_unchecked` skips 20M+ point decompressions. | PK loading drops from >10 min to ~13 s (Ed25519 scale). |
-
-### For comparison: other circuits in this repo
-
-| Circuit | Constraints | Wires | Dense matrix RAM | Sparse RAM | Status |
-|---------|-------------|-------|-----------------|------------|--------|
-| SimpleExample Multiplier | 3 | 8 | ~768 B | ~360 B | ✅ Working e2e |
-| Privacy / Spend(depth=2) | 1,107 | 1,110 | ~39 MB | ~0.2 MiB | ✅ Working e2e |
-| Poseidon Pre-image | ~300 | ~400 | ~5 MB | ~5 MB | ✅ Working e2e |
-| **Blake2b-224 Pre-image** | **79,312** | **78,605** | **~200 GB** | **~280 MiB** | ✅ **Working e2e — ceremony ~18 s, prove ~5 s** |
-| Ed25519 Verify | ~4M | ~4M | ~512 TB | ~3 GiB | ✅ Working e2e |
-| Ed25519 ownership | ~1.97M | ~1.94M | ~15 TB | ~2.5 GiB | ✅ Working e2e |
-
----
-
-## Use case
-
-**Proving ownership of a Cardano address without revealing the public key.**
-
-Cardano addresses are derived from Ed25519 public keys via Blake2b-224 hashing. A user can prove:
-- "I know the public key that hashes to this address"
-- Without revealing the public key itself
-
-This enables:
-- Anonymous identity verification tied to on-chain addresses
-- Cross-chain identity linking (prove you control a Cardano address from another chain)
-- Privacy-preserving KYC (prove address ownership without doxing the pubkey)
 
 ---
 

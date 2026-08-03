@@ -1,57 +1,6 @@
 # Privacy — Shielded Spend (Merkle Membership) Circuit
 
-> **In one sentence:** Prove that a secret coin exists in a Merkle tree — without revealing which coin, where it sits in the tree, or the path used to find it.
->
-> **Business angle:** This is the core building block for private transactions on Cardano. A user can spend a shielded UTXO by proving "I own a coin whose commitment is in this public Merkle tree" while keeping the coin's identity, the Merkle path, and the spending key completely secret. The on-chain verifier only sees a public Merkle root and a nullifier (preventing double-spends), making the transaction both private and auditable.
-
-A privacy-preserving donation / shielded-spend circuit adapted from **Stanford CS251 Programming Project #4** (Zcash-style Merkle-path verification).
-
----
-
-## System overview
-
-```mermaid
-flowchart LR
-    subgraph Prover["🧑‍💻 Prover (off-chain)"]
-        direction TB
-        priv["Private Inputs<br/>nonce, Merkle path<br/>(siblings + directions)"]
-        wit["Witness Generator"]
-    end
-
-    subgraph Circuit["⚡ Circom Circuit"]
-        direction TB
-        hash["MiMC2(nullifier, nonce)<br/>→ commitment"]
-        walk["Merkle path walk<br/>(depth levels)"]
-        zk["Groth16 Proof"]
-    end
-
-    subgraph Verifier["🔍 Verifier (on-chain)"]
-        direction TB
-        pub["Public Inputs<br/>Merkle root digest<br/>nullifier"]
-        check["Pairing Check"]
-    end
-
-    priv --> wit
-    wit --> hash
-    hash --> walk
-    walk --> zk
-    pub --> check
-    zk --> check
-    check -->|"✅ VALID"| result["Spend Approved"]
-```
-
-**What happens:**
-1. **Prover** knows a secret `nonce` and the private Merkle path (sibling hashes + left/right directions) leading from their coin commitment to the public Merkle root.
-2. **Witness generator** computes the commitment `H(nullifier, nonce)` and walks up the tree level by level.
-3. **Circuit** constrains every hash step and every left/right swap, producing a zk-SNARK proof that the commitment is indeed in the tree.
-4. **Verifier** (Aiken smart contract) receives the proof, the public Merkle root `digest`, and the `nullifier`. It confirms the proof is valid and records the nullifier to prevent double-spending — all without learning the `nonce`, the path, or which leaf was spent.
-
-
-> **What it proves.** Given a public Merkle root `digest` and a public `nullifier`, the prover demonstrates knowledge of a private `nonce` and a valid Merkle path (siblings + directions) showing that `H(nullifier, nonce)` is present in the tree — without revealing the nonce or the path.
-
-> **Pipeline overview.** This example walks through every artifact produced and consumed by each tool in the stack. Only the witness-generation step uses snarkjs; proving and verifying are done by our own Rust CLI and Aiken on-chain verifier respectively.
-
----
+A privacy-preserving shielded-spend circuit (Zcash-style Merkle-path verification, adapted from Stanford CS251 Programming Project #4). It proves that a secret coin commitment is present in a public Merkle tree, without revealing which coin, where it sits in the tree, or the path used to find it.
 
 ## Circuit Templates
 
@@ -145,24 +94,6 @@ cargo run --release -- compute-inputs \
   --transcript ../circom/Privacy/transcript.txt \
   --nullifier 2 \
   --out ../circom/Privacy/input.json
-```
-
-#### Option C — Rust library (from the `groth16-prover` crate)
-
-```rust
-use groth16_prover::privacy_inputs::{
-    compute_spend_inputs, parse_transcript_lines, TranscriptEntry
-};
-
-let lines = std::fs::read_to_string("transcript.txt")?
-    .lines()
-    .map(|s| s.to_string())
-    .collect::<Vec<_>>();
-
-let transcript = parse_transcript_lines(&lines)?;
-let inputs = compute_spend_inputs(2, &transcript, "2")?;
-
-// `inputs.to_json_map()` gives Vec<(String, String)> ready for JSON serialization
 ```
 
 Example `input.json` for depth 2, proving nullifier `2`:
@@ -292,12 +223,6 @@ aiken check
 All tests pass, including the new end-to-end `spend_depth2` test.
 
 ---
-
-## Curve focus
-
-This project is exclusively focused on BLS12-381. We are inspired by prior work on BN254, but we do not support it. All field arithmetic, point serialization, and trusted-setup artifacts target the BLS12-381 curve only.
-
-> **Production note:** For a production deployment, the MiMC round constants should be regenerated specifically for the BLS12-381 field using the standard Iden3 seed procedure.
 
 ## References
 

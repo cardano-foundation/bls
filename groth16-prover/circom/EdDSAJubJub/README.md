@@ -1,9 +1,6 @@
 # EdDSA-JubJub Verifier Circuit
 
-Groth16-provable EdDSA signature verification over the **JubJub** curve
-embedded in BLS12-381's scalar field. Proves knowledge of a secret key
-whose deterministic EdDSA-JubJub signature is valid — without revealing
-the key.
+Groth16-provable EdDSA signature verification over the **JubJub** curve embedded in BLS12-381's scalar field. Proves knowledge of a secret key whose deterministic EdDSA-JubJub signature is valid — without revealing the key.
 
 ## What it proves
 
@@ -13,8 +10,7 @@ I know sk  such that:
   2. [S]·G = R + [k]·pk where k = PoseidonT6(R, pk, msg) mod l
 ```
 
-Knowledge of `pk = [sk]·G` is implicit: the challenge `k` binds `pk`,
-and the verification equation requires knowing `sk` for that `pk`.
+Knowledge of `pk = [sk]·G` is implicit: the challenge `k` binds `pk`, and the verification equation requires knowing `sk` for that `pk`.
 
 ### Signals
 
@@ -30,8 +26,7 @@ and the verification equation requires knowing `sk` for that `pk`.
 
 ## Circuit architecture
 
-The top-level template `EdDSAVerifyJubJub` (`eddsa_jubjub.circom`) performs
-seven steps:
+The top-level template `EdDSAVerifyJubJub` (`eddsa_jubjub.circom`) performs seven steps:
 
 | Step | What | Component |
 |------|------|-----------|
@@ -45,15 +40,9 @@ seven steps:
 
 ### ModuloL template
 
-Reduces a BLS12-381 field element `in` modulo the JubJub subgroup order
-`l = 6554484396890773809930967563523245729705921265872317281365359162392183254199`.
+Reduces a BLS12-381 field element `in` modulo the JubJub subgroup order `l = 6554484396890773809930967563523245729705921265872317281365359162392183254199`.
 
-Since `p ≈ 8·l` (cofactor 8), the quotient `q = in / l` is in [0, 7].
-The template computes `out = in % l` via modular inverse, then range-checks
-`q` by decomposing it into 3 bits: `q = b₀ + 2·b₁ + 4·b₂` with each bit
-constrained to {0, 1}. The "wrong" reduction attack (picking a quotient
-≥ 8) is prevented by the surrounding circuit — for nonce, `R' = [r]·G`
-must equal the public `R`; for challenge, `[S]·G` must equal `R + [k]·pk`.
+Since `p ≈ 8·l` (cofactor 8), the quotient `q = in / l` is in [0, 7]. The template computes `out = in % l` via modular inverse, then range-checks `q` by decomposing it into 3 bits: `q = b₀ + 2·b₁ + 4·b₂` with each bit constrained to {0, 1}. The "wrong" reduction attack (picking a quotient ≥ 8) is prevented by the surrounding circuit — for nonce, `R' = [r]·G` must equal the public `R`; for challenge, `[S]·G` must equal `R + [k]·pk`.
 
 ### Poseidon hashes
 
@@ -64,9 +53,7 @@ Two Poseidon instances are used:
 | `PoseidonBLS12_381` | 3 | 5 | `sk`, `msg` | `r` | Deterministic nonce |
 | `PoseidonBLS12_381_T6` | 6 | 5 | `Ru`, `Rv`, `pku`, `pkv`, `msg` | `k` | Challenge hash |
 
-Constants are generated with `generate_parameters_grain.sage` and
-inlined directly into the `.circom` templates (see `poseidon_bls12_381.circom`
-and `poseidon_bls12_381_t6.circom`).
+Constants are generated with `generate_parameters_grain.sage` and inlined directly into the `.circom` templates (see `poseidon_bls12_381.circom` and `poseidon_bls12_381_t6.circom`).
 
 ### Component files
 
@@ -111,13 +98,11 @@ circom eddsa_jubjub.circom \
 #   eddsa_out/eddsa_jubjub.sym
 ```
 
-> **Important:** Always pass `--prime bls12381`. Without it, circom
-> defaults to BN254 which mismatches the Rust prover's curve.
+> **Important:** Always pass `--prime bls12381`. Without it, circom defaults to BN254 which mismatches the Rust prover's curve.
 
 ### 2. Prepare input
 
-The `input.json` file must contain **string** values (not JSON numbers)
-to avoid JavaScript floating-point truncation of BLS12-381 field elements:
+The `input.json` file must contain **string** values (not JSON numbers) to avoid JavaScript floating-point truncation of BLS12-381 field elements:
 
 ```json
 {
@@ -148,71 +133,46 @@ snarkjs wtns calculate \
   eddsa_out/eddsa_jubjub.wtns
 ```
 
-### 4. Trusted setup (development ceremony)
+### 4. Run the dev ceremony (groth16-prover CLI)
 
 ```bash
 mkdir -p /tmp/eddsa_ceremony
-cd /tmp/eddsa_ceremony
-
-# Generate Powers of Tau (phase 1, 2^17 = 131072 > 12601)
-snarkjs powersoftau new bls12-381 17 pot_0000.ptau -v
-snarkjs powersoftau contribute pot_0000.ptau pot_0001.ptau \
-  --name="dev contribution" -e="random entropy"
-snarkjs powersoftau prepare phase2 pot_0001.ptau pot_final.ptau -v
-
-# Phase 2 (circuit-specific)
-snarkjs groth16 setup \
-  /path/to/eddsa_out/eddsa_jubjub.r1cs \
-  pot_final.ptau \
-  eddsa_jubjub_0000.zkey
-
-snarkjs zkey contribute eddsa_jubjub_0000.zkey eddsa_jubjub_0001.zkey \
-  --name="dev contribution" -e="random entropy"
-snarkjs zkey export verificationkey eddsa_jubjub_0001.zkey eddsa_jubjub.vk.json
-```
-
-**Or** use the Rust prover's built-in single-party ceremony:
-
-```bash
-target/release/groth16-prover ceremony-dev \
-  eddsa_out/eddsa_jubjub.r1cs \
-  /tmp/eddsa_ceremony/eddsa_jubjub.pk \
-  /tmp/eddsa_ceremony/eddsa_jubjub.vk
+cd ../../cli
+cargo run --release -- ceremony-dev \
+  --circuit ../circom/EdDSAJubJub/eddsa_out/eddsa_jubjub.r1cs \
+  --proving-key /tmp/eddsa_ceremony/eddsa_jubjub.pk \
+  --verifying-key /tmp/eddsa_ceremony/eddsa_jubjub.vk
 ```
 
 ### 5. Prove
 
 ```bash
-target/release/groth16-prover prove \
-  --pk /tmp/eddsa_ceremony/eddsa_jubjub.pk \
-  --vk /tmp/eddsa_ceremony/eddsa_jubjub.vk \
-  --r1cs eddsa_out/eddsa_jubjub.r1cs \
-  --wtns eddsa_out/eddsa_jubjub.wtns \
-  --proof /tmp/eddsa_ceremony/eddsa_jubjub.proof \
-  --public-inputs /tmp/eddsa_ceremony/eddsa_jubjub.pub
+cargo run --release -- prove \
+  --circuit ../circom/EdDSAJubJub/eddsa_out/eddsa_jubjub.r1cs \
+  --witness ../circom/EdDSAJubJub/eddsa_out/eddsa_jubjub.wtns \
+  --proving-key /tmp/eddsa_ceremony/eddsa_jubjub.pk \
+  --out /tmp/eddsa_ceremony/eddsa_jubjub.proof
 ```
 
 ### 6. Verify (off-chain)
 
 ```bash
-target/release/groth16-prover verify \
-  --vk /tmp/eddsa_ceremony/eddsa_jubjub.vk \
+cargo run --release -- verify \
+  --verifying-key /tmp/eddsa_ceremony/eddsa_jubjub.vk \
   --proof /tmp/eddsa_ceremony/eddsa_jubjub.proof \
-  --public-inputs /tmp/eddsa_ceremony/eddsa_jubjub.pub
+  --public /tmp/eddsa_ceremony/eddsa_jubjub.pub
 # Expected: "Verification result: VALID"
 ```
 
 ### 7. Export VK for on-chain verification (Aiken)
 
 ```bash
-target/release/groth16-prover export-vk \
-  --vk /tmp/eddsa_ceremony/eddsa_jubjub.vk \
-  --format aiken \
-  --output /tmp/eddsa_ceremony/eddsa_jubjub_vk.ak
+cargo run --release -- export-vk \
+  --verifying-key /tmp/eddsa_ceremony/eddsa_jubjub.vk \
+  --out /tmp/eddsa_ceremony/eddsa_jubjub_vk.ak
 ```
 
-This produces an Aiken source file with 7 public inputs and the VK
-points in compressed form, ready for an on-chain Groth16 verifier.
+This produces an Aiken source file with 7 public inputs and the VK points in compressed form, ready for an on-chain Groth16 verifier.
 
 ## Test vectors
 
@@ -223,84 +183,4 @@ points in compressed form, ready for an on-chain Groth16 verifier.
 | `r` (computed) | `Poseidon(12345, 42) mod l` |
 | `k` (computed) | `PoseidonT6(R, pk, msg) mod l` |
 
-`test_pbk_only.circom` is a minimal test circuit that exercises the
-fixed-base scalar multiplication independently (no Poseidon hashing).
-Its full pipeline also passes end-to-end.
-
-## Future ideas
-
-### Alternative signature schemes to reduce circuit size
-
-The current circuit is dominated by two fixed-base scalar multiplications
-(`[r]·G` and `[S]·G`), each contributing ~6 300 constraints — roughly 98%
-of the total 12 600. Any scheme requiring scalar multiplication in-circuit
-will face this same floor. Two alternative approaches could break through it:
-
-**BLS-style signatures (pairing-based).** Instead of the EdDSA equation
-`[S]·G = R + [k]·pk`, use a BLS-like equation `e([msg]·G, pk) = e(H(msg), [sk]·G)`.
-The verifier checks a pairing product — no scalar multiplication at all.
-Cost: one multi-pairing (~30K constraints for the pairing itself). This is
-higher than the current 12 600 for this circuit size, but becomes competitive
-at larger circuit sizes where the scalar multiplication cost grows linearly
-with bit width while pairing cost is constant. Also requires a signature
-scheme change on the off-chain side (BLS key pairs instead of EdDSA).
-
-**SNARK-friendly signatures.** Design a signature scheme whose verification
-is natively efficient in R1CS. Examples:
-- **Stern-type signatures** —基于零知识证明的签名，verification is a set-membership check (~1K constraints).
-- **Lamport one-time signatures** — hash-only verification, ~500 constraints, but keys are large (~256 hashes).
-- **BLSW (Boneh-Lynn-Shacham with small public keys)** — if JubJub had pairings, this would be ideal; it doesn't, but the BLS12-381 outer curve does.
-
-The practical tradeoff: EdDSA-JubJub is familiar, well-studied, and has
-compact keys/signatures. The 12 600 constraint count is a direct cost of
-R1CS scalar multiplication. If this becomes a bottleneck (e.g., for
-recursive proof composition where verification cost must be minimised),
-switching to a pairing-based or hash-based scheme would be the lever to pull.
-
-### Why further circuit optimisation hits diminishing returns
-
-The current circuit has been optimised from 18 112 wires to 12 601 (–31%).
-Further reductions face fundamental R1CS limits.
-
-**Constraint breakdown.** The 12 600 constraints decompose as:
-
-| Component | Constraints | % of total |
-|-----------|-------------|------------|
-| `[r]·G` fixed-base scalar mul (254-bit) | ~6 300 | ~50% |
-| `[S]·G` fixed-base scalar mul (254-bit) | ~6 300 | ~50% |
-| Poseidon T3 (nonce hash) | ~276 | ~2% |
-| Poseidon T6 (challenge hash) | ~1 632 | ~13% |
-| Num2Bits decompositions (3×254-bit) | ~762 | ~6% |
-| ModuloL (2× 3-bit range check) | ~12 | <1% |
-| JubJubAdd + equality constraints | ~18 | <1% |
-
-The two fixed-base scalar multiplications account for ~98% of constraints.
-Each bit of a 254-bit scalar requires one Montgomery ladder doubling and
-one conditional Edwards addition — roughly 25 constraints per bit per
-multiplication. This is the irreducible cost of scalar multiplication
-in R1CS: there is no sub-linear representation.
-
-**What was already tried and reverted.** An alternative equation
-`S ≡ r + k·sk (mod l)` (replacing `[S]·G = R + [k]·pk` with a scalar
-equation) was implemented and tested. It reduced to 11 427 wires but is
-**fundamentally broken**: `k * sk` in F_p gives `(k * sk) mod p`, not the
-integer product. Since `l² >> p` (~8.2×10⁷⁶), `(k * sk mod p) mod l ≠
-(k * sk) mod l`. The equation does not hold over the field.
-
-**Marginal improvements possible.** Reducing scalar width from 254 to 253
-bits (JubJub subgroup order `l` fits in 253 bits) saves ~256 constraints.
-Removing `ModuloL` (if the signature scheme is secure without it — the
-prover computes `S = r + k*sk` in F_p and verification still holds)
-saves ~12 constraints. Together: ~270 constraints, a ~2% reduction.
-
-**The real bottleneck is architectural, not algebraic.** The R1CS
-constraint count is dominated by scalar multiplication, which is linear
-in bit width and unavoidable for any signature scheme that requires
-discrete-log-based operations in-circuit. Breaking through this floor
-requires either:
-1. A signature scheme that avoids scalar multiplication entirely
-   (pairing-based or hash-based — see above).
-2. Moving out of R1CS into a different proof system (PLONK, Halo2)
-   where custom gates can express scalar multiplication more efficiently.
-3. Recursive composition — prove the signature in a separate circuit and
-   aggregate, amortising the verification cost.
+`test_pbk_only.circom` is a minimal test circuit that exercises the fixed-base scalar multiplication independently (no Poseidon hashing). Its full pipeline also passes end-to-end.

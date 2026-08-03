@@ -1,59 +1,6 @@
 # Poseidon-based Merkle Membership
 
-> **In one sentence:** Prove a secret commitment is in a public Merkle tree without revealing the secret, the leaf, or the path.
->
-> **Business angle:** This is the core building block of private airdrops, anonymous voting, and confidential asset registries. A user can prove their account or credential belongs to a published allow-list while keeping the identifier, the leaf, and the Merkle path completely hidden. On Cardano, this lets smart contracts enforce eligibility checks (e.g., “only approved wallets can claim”) without ever publishing the list of approved wallets.
-
-Prove that `Poseidon(nullifier, nonce)` is a leaf of a public Merkle tree.
-
----
-
-## System overview
-
-```mermaid
-flowchart LR
-    subgraph Prover["🧑‍💻 Prover (off-chain)"]
-        direction TB
-        priv["Private Inputs<br/>nullifier, nonce, sibling[], direction[]"]
-        wit["Witness Generator"]
-    end
-
-    subgraph Circuit["⚡ Circom Circuit"]
-        direction TB
-        leaf["PoseidonBLS12_381<br/>leaf = Poseidon(nullifier, nonce)"]
-        walk["Merkle Path Walk<br/>direction-selective hashing"]
-        zk["Groth16 Proof"]
-    end
-
-    subgraph Verifier["🔍 Verifier (on-chain)"]
-        direction TB
-        pub["Public Input<br/>digest (Merkle root)"]
-        check["Pairing Check"]
-    end
-
-    priv --> wit
-    wit --> leaf
-    leaf --> walk
-    walk --> zk
-    pub --> check
-    zk --> check
-    check -->|"✅ VALID"| result["Membership Verified"]
-```
-
-**What happens:**
-1. **Prover** knows a secret `(nullifier, nonce)` pair and wants to prove it is included in a public Merkle root.
-2. **Witness generator** computes the leaf as `Poseidon(nullifier, nonce)` and the leaf-to-root Merkle path.
-3. **Circuit** constrains the Poseidon leaf computation and walks the Merkle path, at each level selecting the correct order of the current hash and the sibling hash based on the private direction bit.
-4. **Circuit** checks that the final computed root equals the public `digest`.
-5. **Verifier** (Aiken smart contract) receives the proof and the public Merkle root, then runs a pairing check to confirm membership — without any private value being revealed.
-
-> **What it proves.** Given a public Merkle root `digest`, the prover demonstrates knowledge of a private `(nullifier, nonce)` and a valid leaf-to-root path such that `digest` is the root of a tree containing `Poseidon(nullifier, nonce)`.
-
-> **Pipeline overview.** This example walks through every artifact produced and consumed by each tool in the stack. Only the witness-generation step uses snarkjs; proving and verifying are done by our own Rust CLI and Aiken on-chain verifier respectively.
-
----
-
-## Circuit
+Prove that `Poseidon(nullifier, nonce)` is a leaf of a public Merkle tree, without revealing the secret, the leaf, or the path.
 
 ```
 leaf     = PoseidonBLS12_381(nullifier, nonce)

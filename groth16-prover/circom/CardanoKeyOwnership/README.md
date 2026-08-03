@@ -1,8 +1,6 @@
 # Cardano Private Key → Public Key Ownership Proof
 
-> **In one sentence:** Prove knowledge of the private scalar that generates a given public key — without revealing the private key.
->
-> **Business angle:** This is the zk primitive behind wallet ownership proofs. A user can prove *"I own this key"* without exposing their private key, enabling trustless airdrops, KYC-gated DeFi, and proof-of-ownership for off-chain identity binding — all verified on-chain via a Groth16 proof.
+Prove knowledge of the private scalar that generates a given public key — without revealing the private key.
 
 Two variants are provided:
 
@@ -24,17 +22,6 @@ Two variants are provided:
 | `cardano-address` | [IntersectMBO/cardano-addresses releases](https://github.com/IntersectMBO/cardano-addresses/releases) | Derive real Cardano keys from BIP-39 mnemonic |
 | `bech32` (CLI) | [IntersectMBO/bech32 releases](https://github.com/IntersectMBO/bech32/releases) | Decode bech32 key files |
 | `groth16-prover` CLI | `cd cli && cargo build --release` | Ceremony, proof generation, verification |
-
-## Benchmarks (16-core Ryzen 9 7950X, 64 GiB RAM, `--release`)
-
-| Variant | Ceremony | Prove | Verify | Peak RAM | PK (compressed) |
-|---------|----------|-------|--------|----------|-----------------|
-| **JubJub (~4K)** | ~1 s | ~1 s | ~1 s | ~1.5 MiB | ~0.5 MiB |
-| **Ed25519 (~1.97M)** | **~5 min** | **~1.7 min** | **~2 s** | **~2.5 GiB** | **~350 MiB** |
-| **Ed25519 + h_scalar** | **~5 min** | **~1.5 min** | **~2 s** | **~2.5 GiB** | **~180 MiB** |
-
-> ⚠️ **Ed25519 must use `--sparse`** for both `ceremony-dev` and `prove`. Dense path needs ~15 TB RAM and OOMs immediately.
-> Add `--h-scalar` to `ceremony-dev` to halve PK size and cut prove time by ~10–15 %.
 
 ---
 
@@ -151,7 +138,7 @@ snarkjs wtns calculate \
 
 # 3c. Dev ceremony (⚠️ MUST use --sparse)
 #     Add --h-scalar to store a single scalar instead of the full h_query vector.
-#     This halves the PK size (~350 MiB → ~180 MiB) and cuts prove time by ~10–15 %.
+#     This halves the PK size and cuts prove time by ~10–15 %.
 cd ../../cli
 cargo run --release -- ceremony-dev --sparse --h-scalar \
   --circuit ../circom/CardanoKeyOwnership/cardano_ed25519_ownership.r1cs \

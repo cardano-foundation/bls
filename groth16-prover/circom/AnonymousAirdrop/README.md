@@ -1,8 +1,6 @@
 # Anonymous Airdrop — Reputation-Gated Token Distribution
 
-> **In one sentence:** Prove you qualify for an airdrop based on a secret reputation score — without revealing your identity or your exact score.
->
-> **Business angle:** A DAO wants to reward active community members with governance tokens. The DAO publishes a Merkle root of all eligible members. Each member proves off-chain that their reputation score meets a public threshold. The proof is verified on-chain, and the nullifier prevents double-claims. No doxxing, no Sybil attacks.
+Prove you qualify for an airdrop based on a secret reputation score — without revealing your identity or your exact score.
 
 This circuit is a **composite** of three existing building blocks:
 1. **SMT membership** (`Spend(depth)` from `circom/Privacy/`) — prove a credential exists in a Sparse Merkle Tree.
@@ -174,17 +172,6 @@ ERROR: Assert Failed. Error in template AnonymousAirdrop_9 line: 50
 ```
 
 The assertion `gte.out === 1` fails because Bob's score (42) is less than the minimum (100). The witness cannot even be built, let alone a proof generated.
-
----
-
-## Why this is compelling
-
-| Feature | How it works |
-|---|---|
-| **Privacy** | The prover never reveals `nonce`, `score`, or the Merkle path. Only `nullifier` (to prevent double-claims) and `minScore` (public threshold) are exposed. |
-| **Anti-Sybil** | The `nullifier` is recorded on-chain after the first claim. Any attempt to reuse it fails. |
-| **Composability** | The same circuit works for any reputation system — DAO participation, staking history, GitHub contributions, etc. Just change the SMT leaves. |
-| **Efficiency** | 1561 constraints for depth-2. For depth-20 (realistic for 1M members), scale to ~4000 constraints per level + 32-bit range proof = ~1500 constraints. Total ≈ 85,000 constraints — easily provable in < 1s. |
 
 ---
 

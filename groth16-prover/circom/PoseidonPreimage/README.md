@@ -1,57 +1,6 @@
 # Poseidon Hash Pre-image
 
-> **In one sentence:** Prove you know a secret number — without revealing it — by showing its hash matches a public commitment.
->
-> **Business angle:** This is the simplest form of "commit-and-reveal" used in sealed-bid auctions, passwordless authentication, and concealed-vote systems. A bidder can publicly commit to a bid (by posting its hash), then later prove they knew the bid amount all along. On Cardano, this enables fair on-chain auctions and verifiable credential schemes where secrets remain hidden until the right moment.
-
-Prove knowledge of a secret whose Poseidon hash equals a public commitment.
-
----
-
-## System overview
-
-```mermaid
-flowchart LR
-    subgraph Prover["🧑‍💻 Prover (off-chain)"]
-        direction TB
-        priv["Private Input<br/>pre_image (secret number)"]
-        wit["Witness Generator"]
-    end
-
-    subgraph Circuit["⚡ Circom Circuit"]
-        direction TB
-        hash["PoseidonBLS12_381<br/>(t=3, 65 rounds)"]
-        zk["Groth16 Proof"]
-    end
-
-    subgraph Verifier["🔍 Verifier (on-chain)"]
-        direction TB
-        pub["Public Input<br/>hash_commitment"]
-        check["Pairing Check"]
-    end
-
-    priv --> wit
-    wit --> hash
-    hash --> zk
-    pub --> check
-    zk --> check
-    check -->|"✅ VALID"| result["Commitment Verified"]
-```
-
-**What happens:**
-1. **Prover** knows a secret number `pre_image` and wants to prove it matches a public commitment they previously posted.
-2. **Witness generator** feeds `pre_image` into the Poseidon hash function (65 rounds of S-box + MDS matrix on BLS12-381).
-3. **Circuit** constrains every round and checks that the final hash output equals the public `hash_commitment`, producing a zk-SNARK proof.
-4. **Verifier** (Aiken smart contract) receives the proof and the public commitment, then runs a pairing check to confirm the prover knew the secret — without the `pre_image` ever being revealed.
-
-
-> **What it proves.** Given a public `hash_commitment`, the prover demonstrates knowledge of a private `pre_image` such that `hash_commitment = PoseidonBLS12_381(pre_image, 0)` — without revealing the pre-image.
-
-> **Pipeline overview.** This example walks through every artifact produced and consumed by each tool in the stack. Only the witness-generation step uses snarkjs; proving and verifying are done by our own Rust CLI and Aiken on-chain verifier respectively.
-
----
-
-## Circuit
+Prove knowledge of a secret whose Poseidon hash equals a public commitment, without revealing the secret.
 
 ```
 hash_commitment = PoseidonBLS12_381(pre_image, 0)
@@ -229,12 +178,6 @@ Then update `input.json`:
 ```
 
 ---
-
-## Curve focus
-
-This project is exclusively focused on BLS12-381. We are inspired by prior work on BN254, but we do not support it. All field arithmetic, point serialization, and trusted-setup artifacts target the BLS12-381 curve only.
-
-> **Production note:** The Poseidon parameters (t=3, alpha=5, RF=8, RP=57) and round constants were generated specifically for the BLS12-381 scalar field using the standard Grain LFSR procedure from the Poseidon paper.
 
 ## References
 
