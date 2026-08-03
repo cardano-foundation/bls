@@ -1615,12 +1615,44 @@ For **long-term research**:
 - **Current:** Implementation 8 POC proves every step as its own Groth16 proof, chained by a BLAKE2b512 transcript → bundle size and on-chain verification grow O(N); no real folding, no compression SNARK.
 - **Target:** Fold N step instances into one Relaxed-R1CS running instance, then compress with a single Groth16 proof verified with one pairing check (O(1) bundle, O(1) verify).
 - **Work items:**
-  1. **NIFS folding module (in-repo, arkworks BLS12-381):** Relaxed-R1CS instance `U=(x,u,W̄,Ē)`, witness `W=(W,E)`, relaxed equation `(AZ)∘(BZ)=u(CZ)+E`; Pedersen commitment over G1; Fiat-Shamir challenge `r=H(acc‖step)` via the existing BLAKE2b512 transcript (off-circuit, no Poseidon gadget); fold instances and witnesses in linear time. Native over BLS12-381 — **no curve cycle needed because folding runs outside any verifier circuit**.
+  1. **NIFS folding module (in-repo, arkworks BLS12-381):** Relaxed-R1CS instance `U=(x,u,W̄,Ē)`, witness `W=(W,E)`, relaxed equation `(AZ)∘(BZ)=u(CZ)+E`; Pedersen commitment over G1; Fiat-Shamir challenge `r=H(acc‖step)` via the existing BLAKE2b512 transcript (off-circuit, no Poseidon gadget); fold instances and witnesses in linear time. Native over BLS12-381 — **no curve cycle needed because folding runs outside any verifier circuit**. No FFTs, no per-step SNARK: recursion overhead is constant, dominated by two group scalar multiplications in the step circuit (the smallest verifier circuit in the literature), and the prover's per-step work is two MSMs of size O(step).
   2. **Compression circuit (own Circom, `circom/RelaxedR1CS/`):** proves the final relaxed instance is satisfiable (`(AZ)∘(BZ)=u(CZ)+E` for folded `Z=(W,x,u)`), reusing the step's A/B/C matrices; size ≈ one step; proved with the existing Groth16 prover.
   3. **CLI:** extend `nova` subcommand (`nova fold --nifs`): fold N step instances → one relaxed instance → one compression proof; `nova verify` = transcript check + single pairings check. `params / ceremony` and existing step circuits unchanged.
   4. **Benchmarks:** extend `benchmark_nova.rs` — bundle O(N)→O(1); verify one pairing (constant vs N); prover time = fast folding + one step-sized compression proof.
   5. **Non-goals (explicitly documented):** true in-circuit IVC (SuperNova-style recursion) is not buildable on BLS12-381 — requires a 2-cycle (Pasta / BN254–Grumpkin) or non-native `Fq1`-in-`Fr1` emulation (~1M+ gates/scalar mult). SuperNova non-uniform steps (different circuit per step) deferred — Implementation 9 assumes one repeated step circuit.
-- **Reference:** Nova (CRYPTO'22, eprint 2021/370), Nova-Scotia (Circom→Nova frontend), Sonobe (arkworks folding), SuperNova (DeepWiki/lurk-beta), arXiv 2408.00243 (ZKP survey, evaluation criteria).
+- **Design-space position (per the folding survey — Sakwa et al. 2026):** Implementation 9 sits in the **R1CS + elliptic-curve-MSM** quadrant of the folding landscape (the Nova family): the simplest and most mature axis. The survey's other axes are explicitly out of (u) scope and logged as follow-ups:
+  - **CCS/Plonkish folding (HyperNova):** generalizes folding beyond fixed-R1CS (custom gates, lookups) — relevant only if a step must mix constraint shapes.
+  - **AIR folding (Cairo-style):** CPU/trace-based steps; not our model.
+  - **Post-quantum lattice folding (LatticeFold, Lova, Neo, ProtogaLattice):** our Pedersen commitments are DLOG-based and break under Shor; the PQ track replaces EC-MSM with SIS/Ajtai commitments (Lova even runs on power-of-two moduli, no field arithmetic). Long-term only — it would also mean replacing our Groth16 compression (equally non-PQ), and it tracks the existing "FHE/quantum resistance" long-term research item.
+  - **CycleFold** (also surveyed) relaxes the full 2-cycle requirement: only the secondary curve's base field must equal the primary scalar field, and only a single scalar multiplication per fold runs on it. It is the closest published route toward in-circuit recursion *near* BLS12-381 — whether a curve over `Fr1` (e.g. Bandersnatch) instantiates it is an open research question, not (u) scope.
+  - **Memory-bounded proving** is an open engineering problem in the survey; our per-step O(step) memory design is exactly that target.
+  - **ZK layer:** folding itself is not ZK, but our Groth16 compression proof *is* — zero-knowledge for the final proof comes for free, where Nova+Spartan needs a separate ZK add-on.
+- **Reference:** Nova (CRYPTO'22, eprint 2021/370), Nova-Scotia (Circom→Nova frontend), Sonobe (arkworks folding), SuperNova (DeepWiki/lurk-beta), arXiv 2408.00243 (ZKP survey, evaluation criteria), **Sakwa, Omala, Li, "A survey of folding-based zero-knowledge proofs", *Information Sciences* 724 (2026) 122698, [DOI 10.1016/j.ins.2025.122698](https://doi.org/10.1016/j.ins.2025.122698)** ([SSRN preprint](https://doi.org/10.2139/ssrn.5293078)).
+
+### (v) Post-quantum path — lattice folding as the PQ counterpart of Implementation 9
+
+- **Why:** every component of the current stack is broken by Shor's algorithm once large-scale quantum computing arrives — Groth16 is pairing-based (BLS12-381), and the Nova folding commitments are Pedersen over G1 (DLOG-based). Both Implementation 8 and Implementation 9 are classically secure only.
+- **The structural fact that makes a PQ adaptation feasible:** Nova's folding scheme is *commitment-agnostic* — it works with **any additively-homomorphic commitment** with O(1)-sized commitments; Pedersen (EC-MSM) is just the standard instantiation. Swapping in an **SIS/Ajtai lattice commitment** yields a post-quantum folding scheme with the same IVC structure — this is exactly the LatticeFold / Lova line covered in the folding survey (§4).
+- **Candidate instantiations:**
+
+  | Scheme | Assumption | Notes |
+  |---|---|---|
+  | LatticeFold (Boneh–Chen 2024) | Module-SIS (MSIS) | First lattice folding; sumcheck-heavy → large verifier circuits, bad for per-step recursion overhead |
+  | **Lova** (ASIACRYPT 2024) | Unstructured SIS | Power-of-two modulus q=2⁶⁴, no finite-field modular arithmetic at all, simple linear algebra — easiest to add to our Rust repo; decompose-and-fold + exact Euclidean norm proof |
+  | ProtogaLattice (2026) | SIS, constant-round | Protogalaxy-style algebraic folding, no sumcheck, ~1 RO call + range proofs; supports general high-degree relations (→ CCS/Plonkish steps) |
+  | Neo / SuperNeo / Cyclo | ring-SIS / MSIS | Newer variants; simpler arithmetic, larger proofs |
+
+- **What we would adapt (proposed shape):**
+  1. **Folding layer:** replace the Pedersen commitment in the (u) NIFS module with an SIS/Ajtai commitment (Lova-style power-of-two modulus q=2⁶⁴ is the most hardware-friendly; folding math is otherwise unchanged).
+  2. **Compression:** our Groth16 compression proof is equally non-PQ, so a PQ chain needs a PQ compression SNARK (sumcheck/GKR-based, hash- or lattice-polynomial-commitment based). The one-pairing verifier becomes a hash/sumcheck verifier.
+  3. **On-chain verifier:** the Aiken Groth16 verifier is replaced by a hash-based (STARK-like) verifier — on-chain verification gets heavier, trading gas/cost for PQ security.
+  4. **Steps:** lattice folding runs over small moduli/rings, not a 381-bit prime. Our Circom steps must be re-arithmetized for a small field — circom already supports `--prime goldilocks` (a 64-bit prime), and small fields are *faster* (Lova's design exploits this).
+- **Near-term reality check:** a chain is only as PQ as its weakest link, so partial PQ (e.g., folding only) buys nothing — the compression SNARK must also go PQ. Realistic posture:
+  1. **Document the risk** (this item) and keep the classical stack — quantum-safe migration is a research/roadmap question, not today's blocker (consistent with the existing long-term item "Evaluate FHE-based selective disclosure for quantum resistance").
+  2. **Optional hybrid** for high-value use cases: dual proof (Groth16 + lattice IVC) verified as an OR — the survey's "hybrid elliptic-curve–lattice" open problem; doubles cost but hedges the transition.
+  3. **If quantum timelines shorten:** switch the IVC layer to a lattice folding (Lova first) + PQ compression + hash-based on-chain verifier, re-arithmetizing the step circuits for a small field.
+- **Status:** ⏳ **Research direction.** Natural PQ counterpart of Implementation 9 (u); neither is committed.
+- **Reference:** LatticeFold (Boneh, Chen, eprint 2024/257), Lova (Fenzi et al., ASIACRYPT 2024, eprint 2024/1964), ProtogaLattice (eprint 2026/1317), Sakwa et al. survey §4 (quantum-secure folding), [SSRN 5293078](https://doi.org/10.2139/ssrn.5293078).
 
 </details>
 
