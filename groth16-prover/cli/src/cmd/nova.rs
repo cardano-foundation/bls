@@ -382,13 +382,16 @@ fn run_fold(args: FoldArgs) -> Result<(), Box<dyn Error>> {
     let engine = FftQapEngine::new();
     let prover = PippengerProver::new();
 
-    let mut wtns_paths: Vec<PathBuf> = fs::read_dir(&args.steps)
+    let mut wtns_paths: Vec<PathBuf> = Vec::new();
+    for entry in fs::read_dir(&args.steps)
         .map_err(|e| format!("failed to read steps dir {}: {e}", args.steps.display()))?
-        .map(|e| e.map(|e| e.path()).map_err(Box::from))
-        .collect::<Result<Vec<_>, _>>()?
-        .into_iter()
-        .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("wtns"))
-        .collect();
+    {
+        let entry = entry.map_err(|e| format!("failed to read steps dir entry: {e}"))?;
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) == Some("wtns") {
+            wtns_paths.push(path);
+        }
+    }
     wtns_paths.sort();
 
     if wtns_paths.is_empty() {
@@ -515,7 +518,7 @@ fn run_verify(args: VerifyArgs) -> Result<(), Box<dyn Error>> {
         h.update(TRANSCRIPT_PREFIX);
         h.finalize().to_vec()
     };
-    acc_hash = transcript_step(&acc_hash, &frs_from_strings(&bundle.initial_state)?, &[]);
+    acc_hash = transcript_step(&acc_hash, &frs_bytes(&frs_from_strings(&bundle.initial_state)?), &[]);
 
     let mut prev: Option<&Vec<String>> = None;
     for step in &bundle.steps {
@@ -540,7 +543,7 @@ fn run_verify(args: VerifyArgs) -> Result<(), Box<dyn Error>> {
         // 3. Transcript check
         acc_hash = transcript_step(
             &acc_hash,
-            &frs_from_strings(&step.state_out)?,
+            &frs_bytes(&frs_from_strings(&step.state_out)?),
             &proof_bytes(&proof, &public),
         );
         if hex::encode(&acc_hash) != step.transcript {

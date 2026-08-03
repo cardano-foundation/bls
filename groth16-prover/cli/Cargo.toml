@@ -6,6 +6,7 @@ license = "Apache-2.0"
 description = "CLI for Groth16 proof generation over BLS12-381"
 
 [dependencies]
+blake2 = "0.10"
 clap = { version = "4.5", features = ["derive"] }
 hex = "0.4"
 groth16-prover = { path = "..", features = ["privacy"] }
