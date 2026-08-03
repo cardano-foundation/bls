@@ -1836,3 +1836,470 @@ fn anonymous_airdrop_e2e_rejected() {
         "Expected assertion error, got: {}", stderr
     );
 }
+
+// ------------------------------------------------------------------
+// Nova / Implementation 8 — CardanoKeyOwnership step-chain tests
+//
+// Implementation 8 splits the monolithic Ed25519 key-ownership proof into a
+// chain of `BitElementMulAny` steps (one scalar-mul bit per step).  The step
+// circuit `cardano_ed25519_ownership_nova.circom` has `n_pub_in == n_pub_out
+// == 24` (the IVC state = (dblIn[4][3], addIn[4][3])), which `nova` enforces.
+//
+// The committed monolithic circuits (`cardano_ed25519_ownership.r1cs`,
+// `cardano_key_ownership.r1cs`) must be *rejected* by `nova params` because
+// their public-input width does not equal their public-output width.  The
+// step-circuit tests (compile the .circom with
+// `circom --prime bls12381 --r1cs --wasm`) skip when the compiled artifacts
+// are not present, mirroring the AnonymousAirdrop e2e tests.
+// ------------------------------------------------------------------
+
+fn cardano_key_ownership_dir() -> std::path::PathBuf {
+    let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    manifest_dir
+        .parent()
+        .unwrap()
+        .join("circom/CardanoKeyOwnership")
+}
+
+/// True if the user compiled the Nova step circuit (r1cs + wasm).
+fn nova_step_artifacts_present() -> bool {
+    let dir = cardano_key_ownership_dir();
+    dir.join("cardano_ed25519_ownership_nova.r1cs").exists()
+        && dir
+            .join("cardano_ed25519_ownership_nova_js/cardano_ed25519_ownership_nova.wasm")
+            .exists()
+}
+
+fn snarkjs_available() -> bool {
+    std::process::Command::new("snarkjs")
+        .arg("--version")
+        .output()
+        .is_ok()
+}
+
+/// Curve25519 base point G in extended coordinates, base-2^85 limbs
+/// (from `cardano_ed25519_ownership.circom`).
+const ED25519_BASE_POINT_G: [[&str; 3]; 4] = [
+    [
+        "6836562328990639286768922",
+        "21231440843933962135602345",
+        "10097852978535018773096760",
+    ],
+    [
+        "7737125245533626718119512",
+        "23211375736600880154358579",
+        "30948500982134506872478105",
+    ],
+    ["1", "0", "0"],
+    [
+        "20943500354259764865654179",
+        "24722277920680796426601402",
+        "31289658119428895172835987",
+    ],
+];
+
+/// Edwards identity in extended coordinates (X=0, Y=1, Z=1, T=0).
+const EDWARDS_IDENTITY: [[&str; 3]; 4] = [
+    ["0", "0", "0"],
+    ["1", "0", "0"],
+    ["1", "0", "0"],
+    ["0", "0", "0"],
+];
+
+/// Build one step's input JSON from the current (dblIn, addIn) state.
+fn step_input_json(dbl: &[[String; 3]; 4], add: &[[String; 3]; 4], sel: &str) -> String {
+    let mut fields = serde_json::Map::new();
+    for (i, row) in dbl.iter().enumerate() {
+        for (j, v) in row.iter().enumerate() {
+            fields.insert(
+                format!("dbl_in_{i}_{j}"),
+                serde_json::Value::String(v.clone()),
+            );
+        }
+    }
+    for (i, row) in add.iter().enumerate() {
+        for (j, v) in row.iter().enumerate() {
+            fields.insert(
+                format!("add_in_{i}_{j}"),
+                serde_json::Value::String(v.clone()),
+            );
+        }
+    }
+    fields.insert("sel".into(), serde_json::Value::String(sel.into()));
+    serde_json::Value::Object(fields).to_string()
+}
+
+/// Extract a [4][3] block (12 values) starting at witness index `base`.
+fn extract_witness_state(w: &[serde_json::Value], base: usize) -> [[String; 3]; 4] {
+    std::array::from_fn(|i| {
+        std::array::from_fn(|j| w[base + 3 * i + j].as_str().unwrap().to_string())
+    })
+}
+
+/// Generate `count` chained step witnesses with snarkjs into `dir`.
+///
+/// The state starts at (dblIn = G, addIn = identity) and each step's public
+/// outputs (witness indices 1..25) feed the next step's public inputs, so the
+/// `state_in[i+1] == state_out[i]` chain invariant holds by construction.
+fn generate_nova_step_witnesses(
+    dir: &std::path::Path,
+    wasm: &std::path::Path,
+    count: usize,
+) -> Result<(), String> {
+    let mut dbl = ED25519_BASE_POINT_G.map(|r| r.map(String::from));
+    let mut add = EDWARDS_IDENTITY.map(|r| r.map(String::from));
+
+    for i in 0..count {
+        let input_path = dir.join(format!("input_{i}.json"));
+        let wtns_path = dir.join(format!("step_{i:04}.wtns"));
+        let json_path = dir.join(format!("step_{i:04}.json"));
+
+        fs::write(&input_path, step_input_json(&dbl, &add, "1"))
+            .map_err(|e| format!("failed to write {}: {e}", input_path.display()))?;
+
+        let status = std::process::Command::new("snarkjs")
+            .arg("wtns")
+            .arg("calculate")
+            .arg(wasm)
+            .arg(&input_path)
+            .arg(&wtns_path)
+            .status()
+            .map_err(|e| format!("snarkjs failed to start: {e}"))?;
+        if !status.success() {
+            return Err(format!(
+                "snarkjs wtns calculate failed for step {i} ({} != 0)",
+                status.code().unwrap_or(-1)
+            ));
+        }
+
+        let status = std::process::Command::new("snarkjs")
+            .arg("wtns")
+            .arg("export")
+            .arg("json")
+            .arg(&wtns_path)
+            .arg(&json_path)
+            .status()
+            .map_err(|e| format!("snarkjs failed to start: {e}"))?;
+        if !status.success() {
+            return Err(format!(
+                "snarkjs wtns export json failed for step {i} ({} != 0)",
+                status.code().unwrap_or(-1)
+            ));
+        }
+
+        let w: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&json_path).map_err(|e| e.to_string())?)
+                .map_err(|e| e.to_string())?;
+        let w = w.as_array().ok_or("witness JSON is not an array")?;
+        if w.len() < 25 {
+            return Err(format!(
+                "witness JSON has {} elements, expected >= 25",
+                w.len()
+            ));
+        }
+        // Public outputs (24) live at indices 1..25: [dblOut, addOut].
+        dbl = extract_witness_state(w, 1);
+        add = extract_witness_state(w, 13);
+    }
+    Ok(())
+}
+
+/// `nova params` must reject the monolithic Ed25519 ownership circuit:
+/// its 256-bit public input `A` is not an IVC state.
+#[test]
+fn nova_params_rejects_monolithic_ed25519_ownership() {
+    let circuit = cardano_key_ownership_dir().join("cardano_ed25519_ownership.r1cs");
+    assert!(
+        circuit.exists(),
+        "missing committed fixture {}",
+        circuit.display()
+    );
+
+    let mut cmd = Command::cargo_bin("groth16-prover").unwrap();
+    cmd.arg("nova").arg("params").arg("--circuit").arg(&circuit);
+
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("not a valid step circuit"))
+        .stderr(predicate::str::contains("n_pub_in (256) != n_pub_out (1)"));
+}
+
+/// Same invariant for the JubJub ownership circuit (public in = 2, public out = 0).
+#[test]
+fn nova_params_rejects_jubjub_ownership() {
+    let circuit = cardano_key_ownership_dir().join("cardano_key_ownership.r1cs");
+    assert!(
+        circuit.exists(),
+        "missing committed fixture {}",
+        circuit.display()
+    );
+
+    let mut cmd = Command::cargo_bin("groth16-prover").unwrap();
+    cmd.arg("nova").arg("params").arg("--circuit").arg(&circuit);
+
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("not a valid step circuit"))
+        .stderr(predicate::str::contains("n_pub_in (2) != n_pub_out (0)"));
+}
+
+/// The synthetic multiplier circuit (1 pub out, 0 pub in) is not a step circuit.
+#[test]
+fn nova_params_rejects_non_step_circuit() {
+    let r1cs = NamedTempFile::new().unwrap();
+    fs::write(r1cs.path(), build_synthetic_r1cs()).unwrap();
+
+    let mut cmd = Command::cargo_bin("groth16-prover").unwrap();
+    cmd.arg("nova")
+        .arg("params")
+        .arg("--circuit")
+        .arg(r1cs.path());
+
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("not a valid step circuit"))
+        .stderr(predicate::str::contains("n_pub_in (0) != n_pub_out (1)"));
+}
+
+#[test]
+fn nova_params_missing_circuit() {
+    let mut cmd = Command::cargo_bin("groth16-prover").unwrap();
+    cmd.arg("nova")
+        .arg("params")
+        .arg("--circuit")
+        .arg("/tmp/does-not-exist-nova.r1cs");
+
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("failed to load circuit"));
+}
+
+#[test]
+fn nova_params_invalid_circuit() {
+    let bad_r1cs = NamedTempFile::new().unwrap();
+    fs::write(bad_r1cs.path(), b"not_a_valid_r1cs_file").unwrap();
+
+    let mut cmd = Command::cargo_bin("groth16-prover").unwrap();
+    cmd.arg("nova")
+        .arg("params")
+        .arg("--circuit")
+        .arg(bad_r1cs.path());
+
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("failed to load circuit"));
+}
+
+/// `nova params` on the compiled step circuit reports the IVC state shape:
+/// 24 public inputs = 24 public outputs, 1 private `sel` bit.
+#[test]
+fn nova_params_accepts_cardano_ed25519_ownership_step() {
+    if !nova_step_artifacts_present() {
+        eprintln!("Nova step circuit artifacts missing; skipping params test");
+        return;
+    }
+
+    let circuit = cardano_key_ownership_dir().join("cardano_ed25519_ownership_nova.r1cs");
+
+    let mut cmd = Command::cargo_bin("groth16-prover").unwrap();
+    cmd.arg("nova").arg("params").arg("--circuit").arg(&circuit);
+
+    let output = cmd.output().unwrap();
+    assert!(
+        output.status.success(),
+        "nova params failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let desc: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(desc["n_pub_out"], 24);
+    assert_eq!(desc["n_pub_in"], 24);
+    assert_eq!(desc["n_prv_in"], 1);
+    assert!(desc["n_constraints"].as_u64().unwrap() > 0);
+}
+
+/// Run `nova ceremony` + `nova fold` over a chained witness directory and
+/// return the (pk, vk, ivc) temp files.
+fn nova_ceremony_and_fold(
+    circuit: &std::path::Path,
+    steps_dir: &std::path::Path,
+) -> (NamedTempFile, NamedTempFile, NamedTempFile) {
+    let pk = NamedTempFile::new().unwrap();
+    let vk = NamedTempFile::new().unwrap();
+
+    let mut ceremony = Command::cargo_bin("groth16-prover").unwrap();
+    ceremony
+        .arg("nova")
+        .arg("ceremony")
+        .arg("--circuit")
+        .arg(circuit)
+        .arg("--proving-key")
+        .arg(pk.path())
+        .arg("--verifying-key")
+        .arg(vk.path());
+    ceremony.assert().success();
+
+    let ivc = NamedTempFile::new().unwrap();
+    let mut fold = Command::cargo_bin("groth16-prover").unwrap();
+    fold.arg("nova")
+        .arg("fold")
+        .arg("--circuit")
+        .arg(circuit)
+        .arg("--proving-key")
+        .arg(pk.path())
+        .arg("--steps")
+        .arg(steps_dir)
+        .arg("--out")
+        .arg(ivc.path());
+    fold.assert().success();
+
+    (pk, vk, ivc)
+}
+
+/// Full Implementation 8 flow on CardanoKeyOwnership:
+/// ceremony → fold → verify over a 3-step Ed25519 scalar-mul chain.
+#[test]
+fn cardano_ed25519_ownership_nova_fold_verify_e2e() {
+    if !nova_step_artifacts_present() {
+        eprintln!("Nova step circuit artifacts missing; skipping e2e test");
+        return;
+    }
+    if !snarkjs_available() {
+        eprintln!("snarkjs not installed; skipping e2e test");
+        return;
+    }
+
+    let circuit = cardano_key_ownership_dir().join("cardano_ed25519_ownership_nova.r1cs");
+    let wasm = cardano_key_ownership_dir()
+        .join("cardano_ed25519_ownership_nova_js/cardano_ed25519_ownership_nova.wasm");
+
+    let steps_dir = tempfile::tempdir().unwrap();
+    generate_nova_step_witnesses(steps_dir.path(), &wasm, 3).unwrap();
+
+    let (_pk, vk, ivc) = nova_ceremony_and_fold(&circuit, steps_dir.path());
+
+    let mut verify = Command::cargo_bin("groth16-prover").unwrap();
+    verify
+        .arg("nova")
+        .arg("verify")
+        .arg("--ivc")
+        .arg(ivc.path())
+        .arg("--verifying-key")
+        .arg(vk.path());
+    verify
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Verified 3 steps"));
+}
+
+/// `nova fold` isolates the exact step whose `state_in` breaks the chain:
+/// step 1 must be reported when step_0001.wtns does not follow step_0000.wtns.
+#[test]
+fn cardano_ed25519_ownership_nova_fold_rejects_broken_chain() {
+    if !nova_step_artifacts_present() {
+        eprintln!("Nova step circuit artifacts missing; skipping broken-chain test");
+        return;
+    }
+    if !snarkjs_available() {
+        eprintln!("snarkjs not installed; skipping broken-chain test");
+        return;
+    }
+
+    let circuit = cardano_key_ownership_dir().join("cardano_ed25519_ownership_nova.r1cs");
+    let wasm = cardano_key_ownership_dir()
+        .join("cardano_ed25519_ownership_nova_js/cardano_ed25519_ownership_nova.wasm");
+
+    // Generate 3 consecutive witnesses, then drop step 1 from the chain.
+    let full_dir = tempfile::tempdir().unwrap();
+    generate_nova_step_witnesses(full_dir.path(), &wasm, 3).unwrap();
+
+    let broken_dir = tempfile::tempdir().unwrap();
+    fs::copy(
+        full_dir.path().join("step_0000.wtns"),
+        broken_dir.path().join("step_0000.wtns"),
+    )
+    .unwrap();
+    fs::copy(
+        full_dir.path().join("step_0002.wtns"),
+        broken_dir.path().join("step_0001.wtns"),
+    )
+    .unwrap();
+
+    let (_pk, _vk, _ivc) = {
+        let pk = NamedTempFile::new().unwrap();
+        let vk = NamedTempFile::new().unwrap();
+        let mut ceremony = Command::cargo_bin("groth16-prover").unwrap();
+        ceremony
+            .arg("nova")
+            .arg("ceremony")
+            .arg("--circuit")
+            .arg(&circuit)
+            .arg("--proving-key")
+            .arg(pk.path())
+            .arg("--verifying-key")
+            .arg(vk.path());
+        ceremony.assert().success();
+
+        let ivc = NamedTempFile::new().unwrap();
+        let mut fold = Command::cargo_bin("groth16-prover").unwrap();
+        fold.arg("nova")
+            .arg("fold")
+            .arg("--circuit")
+            .arg(&circuit)
+            .arg("--proving-key")
+            .arg(pk.path())
+            .arg("--steps")
+            .arg(broken_dir.path())
+            .arg("--out")
+            .arg(ivc.path());
+        fold.assert()
+            .failure()
+            .stderr(predicate::str::contains(
+                "state_in does not chain to previous state_out",
+            ))
+            .stderr(predicate::str::contains("step_0001.wtns"));
+        (pk, vk, ivc)
+    };
+}
+
+/// Tampering with any part of the IVC bundle is detected at verify time:
+/// a modified final transcript fails the deterministic BLAKE2b512 re-derivation.
+#[test]
+fn cardano_ed25519_ownership_nova_verify_rejects_tampered_bundle() {
+    if !nova_step_artifacts_present() {
+        eprintln!("Nova step circuit artifacts missing; skipping tamper test");
+        return;
+    }
+    if !snarkjs_available() {
+        eprintln!("snarkjs not installed; skipping tamper test");
+        return;
+    }
+
+    let circuit = cardano_key_ownership_dir().join("cardano_ed25519_ownership_nova.r1cs");
+    let wasm = cardano_key_ownership_dir()
+        .join("cardano_ed25519_ownership_nova_js/cardano_ed25519_ownership_nova.wasm");
+
+    let steps_dir = tempfile::tempdir().unwrap();
+    generate_nova_step_witnesses(steps_dir.path(), &wasm, 3).unwrap();
+
+    let (_pk, vk, ivc) = nova_ceremony_and_fold(&circuit, steps_dir.path());
+
+    // Corrupt the final transcript digest in the bundle.
+    let mut bundle: serde_json::Value =
+        serde_json::from_slice(&fs::read(ivc.path()).unwrap()).unwrap();
+    bundle["transcript_final"] = serde_json::Value::String("0".repeat(128));
+    fs::write(ivc.path(), serde_json::to_vec_pretty(&bundle).unwrap()).unwrap();
+
+    let mut verify = Command::cargo_bin("groth16-prover").unwrap();
+    verify
+        .arg("nova")
+        .arg("verify")
+        .arg("--ivc")
+        .arg(ivc.path())
+        .arg("--verifying-key")
+        .arg(vk.path());
+    verify
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("final transcript mismatch"));
+}

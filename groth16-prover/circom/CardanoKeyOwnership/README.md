@@ -90,6 +90,23 @@ The prover knows the **clamped Ed25519 scalar** `a` (derived from a Cardano BIP3
 
 This is a minimal subset of the full `Ed25519Verify` circuit: one scalar multiplication on the base point, plus point compression. No SHA-512, no signature components. It proves ownership of a **real Cardano wallet key**.
 
+> ### ⭐ Recommended for Ed25519: use **Implementation 8** (the Nova step-chain) — it cuts e2e time by ~70 %
+>
+> The monolithic ~1.97M-constraint flow below is bottlenecked by its ceremony: **~5 min ceremony + ~1.7 min prove ≈ ~7 min e2e**. The [Implementation 8](../../README.md#implementation-8-nova-ivc--compression-snark) step-chain decomposes the same ownership proof into **255 × 7.7K-constraint steps** (`cardano_ed25519_ownership_nova.circom`): the ceremony drops to **~1.5 s** and the fold takes **~108 s**, i.e. **~2 min total e2e** — with per-step memory instead of ~3 GiB. The steps, keys, and transcript are all bound by a BLAKE2b512 state chain.
+>
+> ```bash
+> circom --prime bls12381 -l ../Ed25519Verify/node_modules/circomlib/circuits \
+>   cardano_ed25519_ownership_nova.circom --r1cs --wasm --sym
+> groth16-prover nova params --circuit cardano_ed25519_ownership_nova.r1cs
+> groth16-prover nova ceremony --circuit cardano_ed25519_ownership_nova.r1cs \
+>   --proving-key cko255.pk --verifying-key cko255.vk
+> groth16-prover nova fold --circuit cardano_ed25519_ownership_nova.r1cs \
+>   --proving-key cko255.pk --steps <witness-dir> --out cko255_ivc.json
+> groth16-prover nova verify --ivc cko255_ivc.json --verifying-key cko255.vk
+> ```
+>
+> Full worked example (witness generation, flags, expected output): [Implementation 8](../../README.md#implementation-8-nova-ivc--compression-snark). The monolithic flow below remains available as the reference single-proof path.
+
 ### End-to-end flow
 
 #### Step 1: Derive a real Cardano payment key
