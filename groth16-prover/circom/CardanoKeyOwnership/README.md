@@ -105,9 +105,11 @@ This is a minimal subset of the full `Ed25519Verify` circuit: one scalar multipl
 > groth16-prover nova verify --ivc cko255_ivc.json --verifying-key cko255.vk
 > ```
 >
-> Full worked example (witness generation, flags, expected output): [Implementation 8](../../README.md#implementation-8-nova-ivc--compression-snark). The monolithic flow below remains available as the reference single-proof path.
+> Full worked example (witness generation, flags, expected output): the **End-to-end flow — Implementation 8 (Nova step-chain)** section below. The monolithic Implementation 7 flow that follows remains available as the reference single-proof path.
 
-### End-to-end flow
+### End-to-end flow — Implementation 7 (monolithic + h-scalar)
+
+> This is the **single-proof reference path**: one ~1.97M-constraint Groth16 proof, using the Implementation 7 sparse prover (`--sparse`) and h-query scalar compression (`--h-scalar`). Use it when you need one standalone proof for the whole key-ownership statement (e.g. a single on-chain verification). For interactive / step-heavy use, prefer the Implementation 8 step-chain below (~70 % faster e2e).
 
 #### Step 1: Derive a real Cardano payment key
 
@@ -185,6 +187,71 @@ cargo run --release -- export-vk \
   --verifying-key /tmp/cardano_ed25519.vk \
   --out /tmp/cardano_ed25519_vk.ak
 ```
+
+### End-to-end flow — Implementation 8 (Nova step-chain)
+
+[`cardano_ed25519_ownership_nova.circom`](cardano_ed25519_ownership_nova.circom) decomposes the same ownership statement into **255 identical steps**, each one `BitElementMulAny` on extended Edwards coordinates `[4][3]` (each coordinate as 3 limbs of base 2^85):
+
+- state `(dblIn[4][3], addIn[4][3])` — 24 public inputs / 24 public outputs, 1 private input `sel`.
+- per step: `dblOut = 2·dblIn`, `addOut = addIn + sel·dblOut` (`sel` = scalar bit, LSB-first).
+- after 255 steps: `addOut = 2·[sk]·G`; the final checks `addOut == PointA` (projective) and `PointCompress(PointA) == A` are done by the application *after* the fold (they cannot be folded per-step — the accumulator is only complete after all 255 bits).
+- sizes: 7658 wires, 7724 constraints per step (vs ~1.97M monolithic). Same ceremony is reusable for **any** run of this step shape.
+
+**1. Build the CLI**
+
+```bash
+cargo build --release --manifest-path ../../cli/Cargo.toml
+# binary: ../../cli/target/release/groth16-prover (used as `groth16-prover` below)
+```
+
+**2. Compile the step circuit** (once; BLS12-381 field, `circomlib` include path)
+
+```bash
+circom --prime bls12381 -l ../Ed25519Verify/node_modules/circomlib/circuits \
+  cardano_ed25519_ownership_nova.circom --r1cs --wasm --sym
+```
+
+**3. Inspect the step circuit** (must report `n_pub_in == n_pub_out == 24`)
+
+```bash
+groth16-prover nova params --circuit cardano_ed25519_ownership_nova.r1cs
+```
+
+**4. One ceremony for the step circuit** (reusable for *any* run of the same step shape)
+
+```bash
+groth16-prover nova ceremony --circuit cardano_ed25519_ownership_nova.r1cs \
+  --proving-key cko255.pk --verifying-key cko255.vk
+```
+
+**5. Generate the 255 step witnesses** `step_0000.wtns … step_0254.wtns` in one directory (full witness files, produced by the step circuit's wasm). Generate them **iteratively** so the chain invariant holds by construction:
+
+```
+dblIn := extended(G)          # base point, [4][3] x base-2^85 limbs
+addIn := extended(O)          # identity
+for i in 0..255:
+    inputs = (dblIn, addIn, sel := (sk >> i) & 1)
+    run wasm → full witness step_%04d.wtns
+    read outputs (dblOut, addOut) → next (dblIn, addIn)
+```
+
+The `sel` bits come from the same clamped scalar `sk` as in the Implementation 7 flow (`sk[255]` produced by `gen_cardano_address_input.py`). Run each step through the step circuit's wasm (e.g. `snarkjs wtns calculate cardano_ed25519_ownership_nova_js/cardano_ed25519_ownership_nova.wasm`).
+
+**6. Fold** — proves each step, checks the state chain, accumulates the transcript (≈2–4 min for 255 × 7.7K-constraint steps)
+
+```bash
+groth16-prover nova fold --circuit cardano_ed25519_ownership_nova.r1cs \
+  --proving-key cko255.pk --steps <witness-dir> --out cko255_ivc.json
+```
+
+**7. Verify** — re-checks every Groth16 pairing, the state chain, and the transcript
+
+```bash
+groth16-prover nova verify --ivc cko255_ivc.json --verifying-key cko255.vk
+# → Verified 255 steps: 255 pairings OK, state chain OK, transcript OK
+```
+
+> **Note:** `nova` verification is still **O(N)** — it re-checks every step proof. The constant-size compression SNARK (one pairing, O(1) verify) is [Implementation 9 / item (u)](../../README.md#pending) — not yet built.
 
 </details>
 
