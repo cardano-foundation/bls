@@ -367,7 +367,7 @@ git reset --hard bee6039
 
 ## 5. Validation Strategy — End-to-End Checks Without 16-Step Intermediates
 
-Our Rust / Sage stack has been cross-checked at **every intermediate step** for both the dense path (1.1–1.16 in `RustGroth16Correctness.md`) and the FFT path (Steps 2.3–2.12, verified bit-for-bit in [`sage/README.md`](sage/README.md)). This gives us a high-confidence **golden reference** for the entire Groth16 pipeline. The dense path is impractical for a step-by-step coefficient comparison against zeroj because zeroj uses FFT while the dense path uses Lagrange over `{0,1,2}`. The FFT path is now aligned with zeroj's domain convention, so a direct coefficient comparison is feasible and planned as the next step. In the meantime, we validate zeroj through a small set of **end-to-end algebraic checks** that exercise the same formulas without exposing internal data structures.
+Our Rust / Sage stack has been cross-checked at **every intermediate step** for both the dense path (1.1–1.16 in `groth16-prover/docs/RustGroth16Correctness.md`) and the FFT path (Steps 2.3–2.12, verified bit-for-bit in [`sage/README.md`](sage/README.md)). This gives us a high-confidence **golden reference** for the entire Groth16 pipeline. The dense path is impractical for a step-by-step coefficient comparison against zeroj because zeroj uses FFT while the dense path uses Lagrange over `{0,1,2}`. The FFT path is now aligned with zeroj's domain convention, so a direct coefficient comparison is feasible and planned as the next step. In the meantime, we validate zeroj through a small set of **end-to-end algebraic checks** that exercise the same formulas without exposing internal data structures.
 
 ### 5.1 Check 1 — Field modulus agreement
 

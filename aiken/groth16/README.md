@@ -324,7 +324,7 @@ Every intermediate scalar and G1 point in this concrete example has been verifie
 | Codebase | Language | Role | Documentation |
 |----------|----------|------|---------------|
 | **Rust / arkworks** | Rust | Production prover | [`groth16-prover/README.md`](../../groth16-prover/README.md) |
-| **Sage** | Python/Sage | Mathematical reference | [`RustGroth16Correctness.md`](../../RustGroth16Correctness.md) |
+| **Sage** | Python/Sage | Mathematical reference | [`docs/RustGroth16Correctness.md`](../../docs/RustGroth16Correctness.md) |
 | **zeroj** | Java | Production Cardano toolkit | [`ZeroJAudit.md`](../../ZeroJAudit.md) |
 
 The hard-coded compressed points in `lib/groth16/verifier.ak` were generated with the project's own BLS12-381 CLI (`cli/README.md`) and match the uncompressed coordinates printed by the Rust prover bit-for-bit.

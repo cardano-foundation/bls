@@ -479,7 +479,7 @@ cargo run --bin print_quotient
 cargo run --bin print_pairing
 ```
 
-Each binary asserts its own sanity checks (e.g. `print_qap` verifies that every interpolated polynomial evaluates back to the original matrix entry at `x = 0, 1, 2`). A complete step-by-step cross-check table against Sage is recorded in [`RustGroth16Correctness.md`](RustGroth16Correctness.md).
+Each binary asserts its own sanity checks (e.g. `print_qap` verifies that every interpolated polynomial evaluates back to the original matrix entry at `x = 0, 1, 2`). A complete step-by-step cross-check table against Sage is recorded in [`../groth16-prover/docs/RustGroth16Correctness.md`](../groth16-prover/docs/RustGroth16Correctness.md).
 
 ---
 

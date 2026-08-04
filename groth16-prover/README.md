@@ -4,7 +4,7 @@ An **end-to-end Groth16 prover** in Rust over the BLS12-381 curve.
 
 > **Purpose.** This crate implements the full Groth16 pipeline—from R1CS constraints to a valid zero-knowledge proof—using [arkworks](https://arkworks.rs/) primitives. It began as a didactic reference (hard-coded circuit, dense monomial polynomials, deterministic toxic waste) so that every intermediate value could be printed, inspected, and compared against an independent reference implementation. Since then it has grown into a production-capable toolkit with FFT-based QAP construction, Pippenger multi-scalar multiplication, a Circom adapter, a CLI, a Phase 2 multi-party computation ceremony, and a sparse-matrix prover for large circuits.
 
-> **Correctness guarantee.** The entire implementation has been cross-checked line-by-line against a [Sage](https://www.sagemath.org/) script that implements the same mathematics from scratch. See [`RustGroth16Correctness.md`](RustGroth16Correctness.md) for the bit-for-bit comparison of every sub-step.
+> **Correctness guarantee.** The entire implementation has been cross-checked line-by-line against a [Sage](https://www.sagemath.org/) script that implements the same mathematics from scratch. See [`docs/RustGroth16Correctness.md`](docs/RustGroth16Correctness.md) for the bit-for-bit comparison of every sub-step.
 
 ---
 
@@ -359,7 +359,7 @@ The 16 sub-steps are grouped into six phases:
 <details>
 <summary><b>Print and inspect every step — click to expand</b></summary>
 
-Each binary corresponds to a numbered sub-step in [`RustGroth16Correctness.md`](RustGroth16Correctness.md).
+Each binary corresponds to a numbered sub-step in [`docs/RustGroth16Correctness.md`](docs/RustGroth16Correctness.md).
 
 ```bash
 # Step 1.1 — R1CS matrices and witness
