@@ -9,12 +9,31 @@
 //!   verify    — verify a Merkle path hashes back to the stored digest
 //!   export    — export witness input JSON for the Privacy circuit
 //!
-//! Example:
+//! Examples:
 //!
-//!   $ groth16-prover smt insert --depth 2 --items "1 100,2 200" --state smt.json
-//!   $ groth16-prover smt path --state smt.json --leaf <commitment>
-//!   $ groth16-prover smt verify --state smt.json --leaf <commitment>
-//!   $ groth16-prover smt export --state smt.json --nullifier 1 --out input.json
+//!   Insert items into a tree:
+//!
+//!     $ groth16-prover smt insert --depth 2 --items "1 100,2 200" --state smt.json
+//!
+//!   Insert from a transcript file (one item per line):
+//!
+//!     $ groth16-prover smt insert --depth 2 --transcript items.txt --state smt.json
+//!
+//!   Print the current tree digest:
+//!
+//!     $ groth16-prover smt digest --state smt.json
+//!
+//!   Print the Merkle path for a leaf:
+//!
+//!     $ groth16-prover smt path --state smt.json --leaf <commitment>
+//!
+//!   Verify a Merkle path:
+//!
+//!     $ groth16-prover smt verify --state smt.json --leaf <commitment>
+//!
+//!   Export witness input JSON for the Privacy circuit:
+//!
+//!     $ groth16-prover smt export --state smt.json --nullifier 1 --out input.json
 
 use clap::{Parser, Subcommand};
 use groth16_prover::mimc::mimc2;
@@ -29,37 +48,93 @@ use ark_bls12_381::Fr;
 /// SMT subcommands
 #[derive(Debug, Subcommand)]
 pub enum SmtCommand {
-    /// Insert items into the tree
+    /// Insert items into the SMT and persist the updated tree state
+    ///
+    /// Items are specified as a comma-separated list of either:
+    ///   - a single field element (raw commitment), or
+    ///   - two space-separated field elements (`nullifier nonce`)
+    ///
+    /// Alternatively, use `--transcript` to load items from a file
+    /// (one item per line).  The `--items` and `--transcript` flags
+    /// are mutually exclusive.
+    ///
+    /// The tree state (digest + transcript) is saved to `--state`
+    /// so it can be reused by `digest`, `path`, `verify`, and `export`.
+    ///
+    /// Example:
+    ///
+    ///   $ groth16-prover smt insert --depth 2 --items "1 100,2 200" --state smt.json
     Insert(InsertArgs),
-    /// Print the current tree digest
+
+    /// Print the current Merkle root (digest) of a persisted tree
+    ///
+    /// Reads the tree state from `--state` and prints the digest
+    /// (a single field element in decimal string form).
+    ///
+    /// Example:
+    ///
+    ///   $ groth16-prover smt digest --state smt.json
     Digest(DigestArgs),
-    /// Print the Merkle path for a leaf
+
+    /// Print the Merkle authentication path for a given leaf
+    ///
+    /// Rebuilds the tree from the persisted state, computes the path
+    /// from the root to the specified leaf, and prints each sibling
+    /// together with its direction (left or right).
+    ///
+    /// Example:
+    ///
+    ///   $ groth16-prover smt path --state smt.json --leaf <commitment>
     Path(PathArgs),
-    /// Verify a Merkle path for a leaf
+
+    /// Verify that a Merkle path hashes back to the stored digest
+    ///
+    /// Rebuilds the tree from the persisted state, computes the path
+    /// for the given leaf, and checks that re-hashing the path
+    /// reproduces the stored digest.
+    ///
+    /// Example:
+    ///
+    ///   $ groth16-prover smt verify --state smt.json --leaf <commitment>
     Verify(VerifyArgs),
+
     /// Export witness input JSON for the Privacy circuit
+    ///
+    /// Reads the persisted tree state and produces a JSON file
+    /// containing the Merkle-path data needed by the Circom
+    /// witness generator for the Spend circuit.
+    ///
+    /// The output JSON contains: `digest`, `nullifier`, `nonce`,
+    /// `siblings` (list of field elements), and `direction` bits.
+    ///
+    /// Example:
+    ///
+    ///   $ groth16-prover smt export --state smt.json --nullifier 1 --out input.json
     Export(ExportArgs),
 }
 
 /// Arguments for `smt insert`
 #[derive(Debug, Parser)]
 pub struct InsertArgs {
-    /// Merkle tree depth
+    /// Merkle tree depth (number of levels)
     #[arg(long, value_name = "N")]
     depth: usize,
 
-    /// Items to insert. Comma-separated list of:
-    /// - single value (raw commitment), or
-    /// - two space-separated values: "nullifier nonce"
+    /// Comma-separated list of items to insert.
+    /// Each item is either a single field element (raw commitment)
+    /// or two space-separated field elements (`nullifier nonce`).
+    /// Mutually exclusive with `--transcript`.
     #[arg(long, value_name = "ITEMS", conflicts_with = "transcript")]
     items: Option<String>,
 
     /// Path to a transcript file (one item per line) for bulk loading.
     /// Each line is either a single commitment or "nullifier nonce".
+    /// Mutually exclusive with `--items`.
     #[arg(long, value_name = "FILE", conflicts_with = "items")]
     transcript: Option<PathBuf>,
 
-    /// Path to persist / load the tree state (JSON)
+    /// Path to persist / load the tree state (JSON).
+    /// Defaults to `smt.json`.
     #[arg(long, value_name = "FILE", default_value = "smt.json")]
     state: PathBuf,
 }
@@ -67,7 +142,8 @@ pub struct InsertArgs {
 /// Arguments for `smt digest`
 #[derive(Debug, Parser)]
 pub struct DigestArgs {
-    /// Path to the persisted tree state (JSON)
+    /// Path to the persisted tree state (JSON).
+    /// Defaults to `smt.json`.
     #[arg(long, value_name = "FILE", default_value = "smt.json")]
     state: PathBuf,
 }
@@ -75,11 +151,13 @@ pub struct DigestArgs {
 /// Arguments for `smt path`
 #[derive(Debug, Parser)]
 pub struct PathArgs {
-    /// Path to the persisted tree state (JSON)
+    /// Path to the persisted tree state (JSON).
+    /// Defaults to `smt.json`.
     #[arg(long, value_name = "FILE", default_value = "smt.json")]
     state: PathBuf,
 
-    /// Leaf value to compute the path for (string field element)
+    /// Leaf value to compute the Merkle path for
+    /// (a decimal field element string).
     #[arg(long, value_name = "VALUE")]
     leaf: String,
 }
@@ -87,11 +165,12 @@ pub struct PathArgs {
 /// Arguments for `smt verify`
 #[derive(Debug, Parser)]
 pub struct VerifyArgs {
-    /// Path to the persisted tree state (JSON)
+    /// Path to the persisted tree state (JSON).
+    /// Defaults to `smt.json`.
     #[arg(long, value_name = "FILE", default_value = "smt.json")]
     state: PathBuf,
 
-    /// Leaf value to verify (string field element)
+    /// Leaf value to verify (a decimal field element string).
     #[arg(long, value_name = "VALUE")]
     leaf: String,
 }
@@ -99,15 +178,18 @@ pub struct VerifyArgs {
 /// Arguments for `smt export`
 #[derive(Debug, Parser)]
 pub struct ExportArgs {
-    /// Path to the persisted tree state (JSON)
+    /// Path to the persisted tree state (JSON).
+    /// Defaults to `smt.json`.
     #[arg(long, value_name = "FILE", default_value = "smt.json")]
     state: PathBuf,
 
     /// Target nullifier to prove membership for
+    /// (a decimal field element string).
     #[arg(long, value_name = "VALUE")]
     nullifier: String,
 
-    /// Output path for the JSON witness input
+    /// Output path for the JSON witness input file.
+    /// Defaults to `input.json`.
     #[arg(long, value_name = "FILE", default_value = "input.json")]
     out: PathBuf,
 }

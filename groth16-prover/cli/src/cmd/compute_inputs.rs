@@ -25,7 +25,7 @@ pub struct Args {
     #[arg(long, value_name = "N")]
     depth: usize,
 
-    /// Path to the transcript file
+    /// Path to the transcript file (one nullifier-nonce pair per line)
     #[arg(long, value_name = "FILE")]
     transcript: PathBuf,
 

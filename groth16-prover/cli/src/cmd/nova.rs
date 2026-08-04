@@ -17,6 +17,24 @@
 //!   ceremony  — single-party ceremony for a step circuit (per-step Groth16 keys)
 //!   fold      — fold step witnesses into an IVC bundle + transcript
 //!   verify    — verify a folded IVC bundle (pairings + chain + transcript)
+//!
+//! Examples:
+//!
+//!   Inspect a step circuit:
+//!
+//!     $ groth16-prover nova params --circuit step_circuit.r1cs
+//!
+//!   Run a single-party ceremony for a step circuit:
+//!
+//!     $ groth16-prover nova ceremony --circuit step_circuit.r1cs --proving-key step.pk --verifying-key step.vk
+//!
+//!   Fold step witnesses into an IVC bundle:
+//!
+//!     $ groth16-prover nova fold --circuit step_circuit.r1cs --proving-key step.pk --steps ./step_witnesses/ --out bundle.ivc.json
+//!
+//!   Verify a folded IVC bundle:
+//!
+//!     $ groth16-prover nova verify --ivc bundle.ivc.json --verifying-key step.vk
 
 use ark_bls12_381::{Fr, G1Affine, G2Affine};
 use ark_ff::PrimeField;
@@ -42,12 +60,62 @@ const TRANSCRIPT_PREFIX: &[u8] = b"groth16-prover-nova-transcript-v1";
 #[derive(Debug, Subcommand)]
 pub enum NovaCommand {
     /// Inspect a step circuit and emit a JSON descriptor
+    ///
+    /// Loads the step circuit from a `.r1cs` file, validates that it
+    /// satisfies the IVC invariant (`n_pub_in == n_pub_out`), and prints
+    /// or writes a JSON descriptor containing the circuit's wire and
+    /// constraint counts.
+    ///
+    /// Example:
+    ///
+    ///   $ groth16-prover nova params --circuit step_circuit.r1cs
     Params(ParamsArgs),
-    /// Single-party ceremony for a step circuit
+
+    /// Run a single-party ceremony for a step circuit
+    ///
+    /// Loads the step circuit from a `.r1cs` file, generates random toxic
+    /// waste, and produces a per-step proving key (`.pk`) and verifying
+    /// key (`.vk`) in binary format.
+    ///
+    /// This is the **insecure, dev-only** path — use `phase2` for
+    /// production multi-party ceremonies.  The resulting `.pk` contains
+    /// only curve points (no scalars), so the prover uses pure MSM.
+    ///
+    /// Use `--h-scalar` for h-query scalar compression (Implementation 7)
+    /// to reduce proving key size.
+    ///
+    /// Example:
+    ///
+    ///   $ groth16-prover nova ceremony --circuit step_circuit.r1cs --proving-key step.pk --verifying-key step.vk
     Ceremony(CeremonyArgs),
+
     /// Fold step witnesses into an IVC bundle
+    ///
+    /// Loads the step circuit, the per-step proving key, and a directory
+    /// of witness files (`step_0000.wtns`, `step_0001.wtns`, …), then
+    /// produces a Groth16 proof for each step and binds them together
+    /// with a BLAKE2b transcript.
+    ///
+    /// The output bundle (`.ivc.json`) contains all step proofs, the
+    /// initial state, and the final transcript hash.  It is consumed by
+    /// the `verify` subcommand.
+    ///
+    /// Example:
+    ///
+    ///   $ groth16-prover nova fold --circuit step_circuit.r1cs --proving-key step.pk --steps ./step_witnesses/ --out bundle.ivc.json
     Fold(FoldArgs),
+
     /// Verify a folded IVC bundle
+    ///
+    /// Loads an IVC bundle (`.ivc.json`), the step verifying key, and
+    /// checks:
+    ///   1. Each step's Groth16 pairing verification passes
+    ///   2. The state chain is consistent (step[i].state_out == step[i+1].state_in)
+    ///   3. The BLAKE2b transcript hashes match at every step
+    ///
+    /// Example:
+    ///
+    ///   $ groth16-prover nova verify --ivc bundle.ivc.json --verifying-key step.vk
     Verify(VerifyArgs),
 }
 
@@ -58,7 +126,8 @@ pub struct ParamsArgs {
     #[arg(long, value_name = "FILE")]
     circuit: PathBuf,
 
-    /// Optional JSON output path; if omitted, the descriptor is printed
+    /// Optional JSON output path.
+    /// If omitted, the descriptor is printed to stdout.
     #[arg(long, value_name = "FILE")]
     out: Option<PathBuf>,
 }
@@ -70,15 +139,17 @@ pub struct CeremonyArgs {
     #[arg(long, value_name = "FILE")]
     circuit: PathBuf,
 
-    /// Output path for the proving key (.pk extension recommended)
+    /// Output path for the proving key (`.pk` extension recommended)
     #[arg(long, value_name = "FILE")]
     proving_key: PathBuf,
 
-    /// Output path for the verification key (.vk extension recommended)
+    /// Output path for the verifying key (`.vk` extension recommended)
     #[arg(long, value_name = "FILE")]
     verifying_key: PathBuf,
 
-    /// Use h-query scalar compression (Implementation 7)
+    /// Use h-query scalar compression (Implementation 7).
+    /// Stores a single scalar `delta_inv * T(tau)` instead of the full
+    /// `h_query` G1 vector, cutting PK size and eliminating the h MSM.
     #[arg(long)]
     h_scalar: bool,
 }
@@ -94,11 +165,14 @@ pub struct FoldArgs {
     #[arg(long, value_name = "FILE")]
     proving_key: PathBuf,
 
-    /// Directory containing the step witnesses `step_0000.wtns`, ... (sorted)
+    /// Directory containing the step witness files
+    /// (`step_0000.wtns`, `step_0001.wtns`, …).  Files are
+    /// processed in sorted order.
     #[arg(long, value_name = "DIR")]
     steps: PathBuf,
 
-    /// Output path for the IVC bundle JSON (.ivc.json extension recommended)
+    /// Output path for the IVC bundle JSON
+    /// (`.ivc.json` extension recommended).
     #[arg(long, value_name = "FILE")]
     out: PathBuf,
 }
