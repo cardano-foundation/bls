@@ -10,6 +10,7 @@ This CLI covers everything from trusted-setup ceremonies (both dev and multi-par
 
 | Command | Purpose |
 |---------|---------|
+| `ceremony` | Legacy single-party trusted setup (deprecated; use `ceremony-dev` or `phase2`) |
 | `ceremony-dev` | Single-party dev ceremony — instant, insecure, for testing |
 | `phase2` | Multi-party Phase 2 MPC ceremony — for production deployments |
 | `prove` | Generate a Groth16 proof from `.r1cs` + `.wtns` |
@@ -17,6 +18,46 @@ This CLI covers everything from trusted-setup ceremonies (both dev and multi-par
 | `export-vk` | Convert a binary `.vk` to Aiken source code |
 | `compute-inputs` | Build private Merkle-path JSON for the Spend(depth) circuit |
 | `smt` | Sparse Merkle Tree operations (insert, digest, path, verify, export) |
+| `nova` | Nova IVC folding + compression (Implementation 8) |
+
+## Quick reference (`--help`)
+
+Run any command with `--help` for full flag details:
+
+```bash
+groth16-prover --help
+groth16-prover ceremony-dev --help
+groth16-prover prove --help
+groth16-prover phase2 --help
+groth16-prover nova --help
+groth16-prover smt --help
+```
+
+The top-level help output:
+
+```
+Groth16 prover CLI for BLS12-381
+
+Usage: groth16-prover <COMMAND>
+
+Commands:
+  ceremony        Run a trusted-setup ceremony for a circuit
+  ceremony-dev    Run a single-party dev ceremony that outputs a FullProvingKey (group elements only)
+  prove           Generate a Groth16 proof from Circom artifacts
+  verify          Verify a Groth16 proof against its public input
+  export-vk       Export a binary verifying key to Aiken source code
+  compute-inputs  Compute witness inputs for the Spend(depth) circuit
+  smt             Sparse Merkle Tree operations for BLS12-381
+  phase2          Run a Phase-2 multi-party ceremony for a circuit
+  nova            Nova IVC folding + compression flow (Implementation 8)
+  help            Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help     Print help
+  -V, --version  Print version
+```
+
+---
 
 ### Quickest possible workflow (dev ceremony)
 
@@ -47,9 +88,10 @@ cargo run --release -- verify \
 
 ## How it works
 
-1. **Ceremony** (once per circuit) — two switchable paths produce the same `*.pk` / `*.vk` format:
-   - **Dev mode** (`ceremony-dev`) — single-party, instant, insecure. Generates randomness locally, evaluates QAP, and writes pre-computed group elements (`a_query`, `b_g2_query`, `h_query`, etc.).
-   - **Production mode** (`phase2`) — multi-party MPC. Reuses a publicly verified Phase 1 SRS (e.g., Perpetual Powers of Tau). Participants sequentially contribute randomness; the final output is the same group-element-based `*.pk` / `*.vk`.
+1. **Ceremony** (once per circuit) — three switchable paths produce the same `*.pk` / `*.vk` format:
+    - **Legacy** (`ceremony`) — single-party, produces a legacy `ProvingKey` with scalars (deprecated; use `ceremony-dev` instead).
+    - **Dev mode** (`ceremony-dev`) — single-party, instant, insecure. Generates randomness locally, evaluates QAP, and writes pre-computed group elements (`a_query`, `b_g2_query`, `h_query`, etc.).
+    - **Production mode** (`phase2`) — multi-party MPC. Reuses a publicly verified Phase 1 SRS (e.g., Perpetual Powers of Tau). Participants sequentially contribute randomness; the final output is the same group-element-based `*.pk` / `*.vk`.
 2. **Load circuit** — parses the `.r1cs` binary format into dense L/R/O matrices
 3. **Load witness** — parses the `.wtns` binary format into wire values
 4. **Prove** — loads the proving key (group elements only, no scalars) and uses `FftQapEngine` + `PippengerProver` to compute the proof via multi-scalar multiplication; can be switched to `DenseQapEngine` or `NaiveProver` via flags
@@ -63,17 +105,52 @@ cargo run --release -- verify \
 <details>
 <summary><b>Ceremony commands — click to expand</b></summary>
 
-Every Groth16 circuit needs a **trusted setup** that produces a proving key (`.pk`) and a verifying key (`.vk`). The CLI supports two paths that output the **same** binary format; the prover and verifier do not care which path was used.
+Every Groth16 circuit needs a **trusted setup** that produces a proving key (`.pk`) and a verifying key (`.vk`). The CLI supports three paths that output the **same** binary format; the prover and verifier do not care which path was used.
+
+#### `ceremony` — legacy full ceremony (deprecated)
+
+> ⚠️ **Deprecated.** Use `ceremony-dev` (for dev/testing) or `phase2` (for production) instead. This command produces a legacy `ProvingKey` that contains scalar toxic waste, making it unsuitable for production use.
+
+```bash
+groth16-prover ceremony \
+  --circuit circuit.r1cs \
+  --proving-key circuit.pk \
+  --verifying-key circuit.vk
+```
+
+**What happens under the hood:**
+1. Load the circuit from `.r1cs` and count wires / constraints.
+2. Generate random toxic waste (`tau`, `alpha`, `beta`, `gamma`, `delta`).
+3. Evaluate every QAP polynomial at `tau` and multiply the results by the curve generators, producing group-element queries (`a_query`, `b_g2_query`, `h_query`, `l_query`).
+4. Write the legacy `ProvingKey` (group elements **plus** scalars) and the `VerifyingKey`.
+
+The `.pk` contains raw scalars, so the prover must re-evaluate QAP polynomials at `tau` on every proof. This is slower and less secure than the `FullProvingKey` path used by `ceremony-dev` and `phase2`.
 
 #### `ceremony-dev` — development and CI
 
 A single-party ceremony that generates randomness locally, evaluates the QAP polynomials, and writes pre-computed curve points into a `FullProvingKey`. This is **fast** (milliseconds) and **insecure** (the toxic waste lives in one person's RAM), which makes it perfect for development, benchmarking, and CI.
+
+Use `--sparse` for large circuits (Implementation 6) to avoid dense matrix allocation, and `--h-scalar` for h-query scalar compression (Implementation 7) to reduce proving key size.
 
 ```bash
 groth16-prover ceremony-dev \
   --circuit circuit.r1cs \
   --proving-key circuit.pk \
   --verifying-key circuit.vk
+
+# Sparse mode for large circuits (e.g. Blake2b-224, Ed25519)
+groth16-prover ceremony-dev \
+  --circuit circuit.r1cs \
+  --proving-key circuit.pk \
+  --verifying-key circuit.vk \
+  --sparse
+
+# With h-scalar compression (Implementation 7)
+groth16-prover ceremony-dev \
+  --circuit circuit.r1cs \
+  --proving-key circuit.pk \
+  --verifying-key circuit.vk \
+  --h-scalar
 ```
 
 **What happens under the hood:**
@@ -140,10 +217,17 @@ groth16-prover prove \
 
 # Without a proving key (dev only — uses deterministic test values)
 groth16-prover prove --circuit circuit.r1cs --witness witness.wtns --out proof.bin
+
+# Sparse mode for large circuits (Implementation 6)
+groth16-prover prove \
+  --circuit circuit.r1cs \
+  --witness witness.wtns \
+  --sparse \
+  --out proof.bin
 ```
 
 **What happens under the hood:**
-1. Parse the `.r1cs` file into dense L/R/O constraint matrices.
+1. Parse the `.r1cs` file into dense L/R/O constraint matrices (or sparse matrices with `--sparse`).
 2. Parse the `.wtns` file into wire values (the witness).
 3. Build the QAP polynomials. By default this uses `FftQapEngine` (FFT over roots of unity, `O(N log N)`); you can switch to `DenseQapEngine` (classical Lagrange interpolation, `O(N²)`) with `--engine dense`.
 4. Compute the quotient polynomial `h(x) = (l(x)·r(x) - o(x)) / T(x)`.
@@ -211,10 +295,16 @@ groth16-prover prove --circuit c.r1cs --witness w.wtns --engine dense --prover n
 
 | Flag | Values | Default | Description |
 |------|--------|---------|-------------|
+| **Legacy ceremony (`ceremony`)** |
+| `--circuit FILE` | — | *required* | Path to `.r1cs` circuit file |
+| `--proving-key FILE` | — | *required* | Output path for the proving key |
+| `--verifying-key FILE` | — | *required* | Output path for the verification key |
 | **Dev ceremony (`ceremony-dev`)** |
 | `--circuit FILE` | — | *required* | Path to `.r1cs` circuit file |
 | `--proving-key FILE` | — | *required* | Output path for the proving key |
 | `--verifying-key FILE` | — | *required* | Output path for the verification key |
+| `--sparse` | — | — | Use sparse constraint representation (Implementation 6). Avoids dense matrix allocation for large circuits |
+| `--h-scalar` | — | — | Use h-query scalar compression (Implementation 7). Stores a single scalar `delta_inv * T(tau)` instead of the full `h_query` G1 vector |
 | **Production ceremony (`phase2`)** |
 | `--circuit FILE` | — | *required* | Path to `.r1cs` circuit file |
 | `--srs FILE` | — | *required* | Path to universal Phase 1 SRS (`.ptau`) |
@@ -227,11 +317,90 @@ groth16-prover prove --circuit c.r1cs --witness w.wtns --engine dense --prover n
 | `--prover PROVER` | `naive`, `pippenger` | `pippenger` | MSM strategy for proof assembly |
 | `--qap-on-fly` | — | *default* | Use the group-element-only path with on-the-fly QAP construction (Implementation 5) |
 | `--qap-not-on-fly` | — | — | Use the legacy scalar-based QAP path (Implementation 4) |
+| `--sparse` | — | — | Use sparse constraint representation (Implementation 6). Implies `--qap-on-fly` |
 | `--out FILE` | — | — | Output file (raw binary); public input written to `FILE.pub` |
 | **Verify** |
 | `--proof FILE` | — | *required* | Path to proof file (192 bytes) |
 | `--public FILE` | — | *required* | Path to public-input file (48 bytes) |
 | `--verifying-key FILE` | — | — | Verifying key from ceremony (optional, dev fallback) |
+| **Nova** |
+| `--circuit FILE` | — | *required* | Path to step circuit `.r1cs` file |
+| `--proving-key FILE` | — | *required* | Path to step proving key |
+| `--verifying-key FILE` | — | *required* | Path to step verifying key |
+| `--steps DIR` | — | *required* | Directory containing step witness `.wtns` files |
+| `--ivc FILE` | — | *required* | Path to IVC bundle JSON |
+| `--depth N` | — | — | Merkle tree depth (for `compute-inputs` and `smt`) |
+| `--transcript FILE` | — | — | Path to transcript file |
+| `--nullifier VALUE` | — | — | Target nullifier to prove membership for |
+| `--state FILE` | — | — | Path to SMT state file (default: `smt.json`) |
+| `--leaf VALUE` | — | — | Leaf value for `smt path` / `smt verify` |
+| `--items ITEMS` | — | — | Comma-separated items for `smt insert` |
+| `--out FILE` | — | — | Output file path |
+
+</details>
+
+<details>
+<summary><b>Nova IVC folding — click to expand</b></summary>
+
+#### `nova` — Nova IVC folding + compression (Implementation 8)
+
+Splits a long computation into `N` identical step circuits, folds their Groth16 proofs into a single verifiable bundle, and binds the state chain with a BLAKE2b transcript. Every step proof is individually verifiable, and the `verify` subcommand re-checks the entire chain.
+
+The step circuits must satisfy one invariant (checked by `params`): the number of public inputs must equal the number of public outputs (`n_pub_in == n_pub_out`), so the public-input block of step `i+1` equals the public-output block of step `i`. Public inputs ARE the IVC state.
+
+##### `nova params` — inspect a step circuit
+
+```bash
+groth16-prover nova params \
+  --circuit step_circuit.r1cs
+
+# Or write to a file
+groth16-prover nova params \
+  --circuit step_circuit.r1cs \
+  --out descriptor.json
+```
+
+Emits a JSON descriptor with `n_wires`, `n_constraints`, `n_pub_out`, `n_pub_in`, and `n_prv_in`. Validates that the circuit satisfies the step-chain invariant.
+
+##### `nova ceremony` — single-party ceremony for a step circuit
+
+```bash
+groth16-prover nova ceremony \
+  --circuit step_circuit.r1cs \
+  --proving-key step.pk \
+  --verifying-key step.vk
+
+# With h-scalar compression (Implementation 7)
+groth16-prover nova ceremony \
+  --circuit step_circuit.r1cs \
+  --proving-key step.pk \
+  --verifying-key step.vk \
+  --h-scalar
+```
+
+Runs a dev-style ceremony on the step circuit, producing a `FullProvingKey` (group elements only). Supports `--sparse` (Implementation 6) and `--h-scalar` (Implementation 7).
+
+##### `nova fold` — fold step witnesses into an IVC bundle
+
+```bash
+groth16-prover nova fold \
+  --circuit step_circuit.r1cs \
+  --proving-key step.pk \
+  --steps ./step_witnesses/ \
+  --out bundle.ivc.json
+```
+
+Reads all `.wtns` files from the steps directory (sorted), proves each step with the provided proving key, and writes a JSON bundle containing the step proofs, state chain, and BLAKE2b transcript.
+
+##### `nova verify` — verify a folded IVC bundle
+
+```bash
+groth16-prover nova verify \
+  --ivc bundle.ivc.json \
+  --verifying-key step.vk
+```
+
+Re-checks every step's Groth16 pairing, verifies the state chain links correctly, and validates the BLAKE2b transcript. Prints the number of verified steps and the final transcript hash.
 
 </details>
 
@@ -476,7 +645,7 @@ cargo run --release -- verify \
   --public /tmp/proof.pub
 ```
 
-> **Note:** This uses deterministic test values (`tau=3`, `alpha=5`, etc.) and skips the ceremony step. Once `FullProvingKey` serialization lands, this shortcut may be redirected to auto-generate a dev proving key.
+> **Note:** This uses deterministic test values (`tau=3`, `alpha=5`, etc.) and skips the ceremony step. For large circuits, use `--sparse` (Implementation 6) to avoid dense matrix allocation.
 
 ---
 
@@ -585,14 +754,14 @@ For human inspection, use `hexdump -C proof.bin` or `xxd proof.bin`.
 
 ## Proving key format
 
-The CLI produces two formats.  The **preferred** one (group elements only) is what `ceremony-dev` outputs today and what a future MPC `phase2 finalize` will also output.
+The CLI produces two formats.  The **preferred** one (group elements only) is what `ceremony-dev` and `phase2 finalize` output today.
 
 | Property | Legacy `ProvingKey` (scalars) | `FullProvingKey` (group elements) |
 |----------|------------------------------|-----------------------------------|
 | `.pk` size | ~200 bytes | ~MBs (circuit-dependent) |
 | Toxic waste in `.pk` | ❌ Yes — raw scalars | ✅ No — only curve points |
 | Prover work per proof | Re-evaluates QAP at `tau` | Pure MSM over pre-computed points |
-| Dev path | `ceremony-dev` (legacy path, kept for backward compat) | `ceremony-dev` (default since Phase 0) |
+| Dev path | `ceremony` (deprecated) | `ceremony-dev` (default) |
 | Production path | — | `phase2` MPC |
 
 **Backward compatibility.**  The `prove` command auto-detects the format on load: if the file starts with the legacy `ProvingKey` magic it falls back to the scalar-based prover; otherwise it loads a `FullProvingKey` and uses the fast MSM path.  New `.pk` files are always written as `FullProvingKey`.
@@ -638,10 +807,24 @@ The integration tests in `tests/cli.rs` exercise every command via `assert_cmd`.
 | `smt_insert_raw_commitments` | Insert raw field-element commitments |
 | `smt_path_prints_digest` | Query path for a leaf after insertion |
 | `smt_missing_state_file` | Error handling for missing state file |
+| `smt_verify_valid` | `smt verify` reports VALID for a correct path |
+| `smt_verify_invalid` | `smt verify` reports INVALID for a wrong path |
+| `smt_export` | `smt export` produces valid JSON for Privacy circuit |
 | `compute_inputs_basic` | Basic transcript → JSON witness input generation |
 | `compute_inputs_nullifier_not_found` | Error when nullifier is missing from transcript |
 | `compute_inputs_with_raw_commitments` | Correct failure for raw-commitment transcripts |
 | `compute_inputs_missing_transcript` | Error handling for missing transcript file |
+| `nova_params_rejects_monolithic_ed25519_ownership` | `nova params` rejects non-step circuit |
+| `nova_params_rejects_jubjub_ownership` | `nova params` rejects wrong public I/O ratio |
+| `nova_params_rejects_non_step_circuit` | `nova params` rejects circuit where n_pub_in != n_pub_out |
+| `nova_params_missing_circuit` | Required-arg error for `nova params` |
+| `nova_params_invalid_circuit` | Bad file format error for `nova params` |
+| `nova_ceremony_basic` | `nova ceremony` produces a FullProvingKey |
+| `nova_ceremony_h_scalar` | `nova ceremony --h-scalar` works |
+| `nova_fold_basic` | `nova fold` produces a valid IVC bundle JSON |
+| `nova_verify_basic` | `nova verify` passes for a freshly folded bundle |
+| `nova_verify_tampered_proof` | `nova verify` fails for a tampered step proof |
+| `nova_verify_tampered_transcript` | `nova verify` fails for a tampered transcript |
 
 Run the tests:
 
