@@ -597,7 +597,7 @@ The CLI produces two formats.  The **preferred** one (group elements only) is wh
 
 **Backward compatibility.**  The `prove` command auto-detects the format on load: if the file starts with the legacy `ProvingKey` magic it falls back to the scalar-based prover; otherwise it loads a `FullProvingKey` and uses the fast MSM path.  New `.pk` files are always written as `FullProvingKey`.
 
-See [`MPC_Ceremony_Research.md`](../MPC_Ceremony_Research.md) for the full ceremony roadmap.
+See [`MPC_Ceremony_Research.md`](../docs/MPC_Ceremony_Research.md) for the full ceremony roadmap.
 
 ---
 
