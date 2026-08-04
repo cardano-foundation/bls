@@ -893,7 +893,7 @@ If you go this route, the composition is: **predicate proof for identity + ElGam
 
 ## Step 3: Privacy Pools & Shielded Transactions
 
-**Executive summary:** Steps 1 and 2 solve two independent problems: (1) hiding identity via predicate proofs, and (2) hiding amounts via Twisted ElGamal. **Step 3 composes both into a single, usable system: a privacy pool where users can deposit, privately transfer, and withdraw funds without ever revealing their address, identity, or transaction value.** The circuit design for this step is described in detail in [`groth16-prover/F5_RESEARCH_DIRECTION.md`](../../groth16-prover/F5_RESEARCH_DIRECTION.md) under the **F5a — Shielded Amounts** section. This section explains how that circuit fits into the selective-disclosure architecture.
+**Executive summary:** Steps 1 and 2 solve two independent problems: (1) hiding identity via predicate proofs, and (2) hiding amounts via Twisted ElGamal. **Step 3 composes both into a single, usable system: a privacy pool where users can deposit, privately transfer, and withdraw funds without ever revealing their address, identity, or transaction value.** The circuit design for this step is described in detail in [`groth16-prover/docs/F5_RESEARCH_DIRECTION.md`](../../groth16-prover/docs/F5_RESEARCH_DIRECTION.md) under the **F5a — Shielded Amounts** section. This section explains how that circuit fits into the selective-disclosure architecture.
 
 > **Relationship to F5 research.** The `F5` document originally described an Ethereum-centric cross-chain privacy pool. The **F5a** circuit extension is the portable, chain-agnostic core: a Groth16 circuit that proves note ownership, amount range bounds, and value conservation — all using primitives we already have in `groth16-prover/circom/`. On Cardano, this becomes a natural Step 3 because it does not require bridges: a single-chain privacy pool (deposit → shielded transfer → withdraw) is already valuable, and cross-chain extensions can be added later.
 
@@ -949,7 +949,7 @@ Secret:  input_amounts[m], blinding_factors[m+k], merkle_paths[m],
 5. Stealth derivation (optional): derive output viewing keys from stealth_scalar
 ```
 
-See [`groth16-prover/F5_RESEARCH_DIRECTION.md`](../../groth16-prover/F5_RESEARCH_DIRECTION.md) for the full constraint budget (~65K for 2-in/2-out/depth-20) and Cardano-specific range considerations (lovelace vs ADA).
+See [`groth16-prover/docs/F5_RESEARCH_DIRECTION.md`](../../groth16-prover/docs/F5_RESEARCH_DIRECTION.md) for the full constraint budget (~65K for 2-in/2-out/depth-20) and Cardano-specific range considerations (lovelace vs ADA).
 
 ### Why this is the natural next step
 
