@@ -1286,56 +1286,7 @@ Each step is proven and **folded** into a running accumulator using a **Relaxed 
 
 ### What Nova actually invented: recursion you can afford (the friendly version)
 
-The "secret sauce" of Nova is not the step decomposition — splitting a computation into steps is easy. The real innovation is **folding**: a way to make proofs *recursive* that is cheap enough to actually run. Here's the intuition.
-
-**Think of a ZK proof as a sealed envelope** that a verifier is allowed to open and check.
-
-- **Before Nova**, recursion meant putting a proof *inside* a proof: build a circuit that says "I checked this envelope and it was valid", seal *that* inside a bigger envelope, and so on. To check N steps you had to open N nested envelopes, and every nesting level needed its own trusted setup and re-proved everything above it. It worked in theory but was painfully expensive — a Groth16 verifier is ~100K–500K constraints of pairing arithmetic, so embedding it in a circuit N times was out of reach.
-- **Nova's trick is different: it never re-verifies anything.** Instead of sealing proofs inside proofs, it **folds** two statements into one. Folding is a transparent (no trusted setup), linear-time algebraic operation that combines two instances of the *same* step circuit into a single instance that is valid **exactly when both inputs were**. The result is a "relaxed" running accumulator — like a tally you update after every step, without ever re-checking the old steps.
-
-**The difference at a glance:**
-
-```mermaid
-flowchart LR
-    subgraph old["Before Nova — N proofs, verified separately"]
-        P1["proof π₁"] --- P2["proof π₂"] --- PD["⋯"] --- PN["proof π_N"]
-    end
-    subgraph nova["With Nova — one running tally"]
-        A0["acc₀"] --> A1["fold step₁ → acc₁"] --> A2["fold step₂ → acc₂"] --> AD["⋯"] --> AN["fold step_N → acc_N"]
-    end
-```
-
-- **Before:** the verifier checks all N envelopes — verification cost and bundle size grow with N. (This is exactly where our POC stands today: N Groth16 proofs + N pairing checks.)
-- **With Nova:** the verifier opens a single envelope — the final accumulator — and checks one small compression proof. Everything in the middle was *folded*, not re-verified.
-
-```mermaid
-flowchart LR
-    Z0["state z₀"] --> S1["step₁"]
-    S1 --> S2["step₂"] --> SD["⋯"] --> SN["step_N"]
-    A0["running accumulator acc₀"] --> F1["fold₁"]
-    S1 --> F1
-    F1 --> F2["fold₂"]
-    S2 --> F2
-    F2 --> FD["⋯"]
-    FD --> FN["fold_N"]
-    SN --> FN
-    FN --> U["one relaxed instance"]
-    U --> C["compression SNARK — one Groth16 proof"]
-    C --> V["verifier: one pairing"]
-```
-
-**Why folding beats the obvious alternatives:**
-
-| | Naive recursion (verifier-in-circuit) | N independent proofs (our POC) | Nova folding |
-|---|---|---|---|
-| **What each step adds** | A proof that the previous *verifier* ran | A full standalone proof | A linear-time fold of the running accumulator |
-| **Trusted setup** | New for every nesting level | One per circuit | One small, circuit-agnostic, reusable setup (compression) |
-| **Proof size after N steps** | Grows with nesting depth | N proofs — bundle is O(N) | Constant (~500 B IVC + one 192 B compression proof) |
-| **Verifier cost** | Grows with nesting depth | N pairing checks | One pairing check |
-| **Prover memory** | O(total) at the top level | O(N · step) stored | O(step) — only the current step + running instance |
-| **Why it's hard** | Pairing + non-native field arithmetic in a circuit (~100K–500K constraints per level) | Verifier work grows linearly with N | Per-step circuit embeds a small fold verifier (~10K–30K constraints) |
-
-**The one line to remember:** Nova's innovation is that recursion no longer means "prove a proof" — it means **fold two instances into one with a cheap, transparent operation, and run a real verifier only once, at the very end.**
+Nova IVC splits a large computation into small step circuits (~40K constraints each) and proves each step incrementally. The key innovation is **folding** — a transparent, linear-time algebraic operation that combines two instances of the same step circuit into a single "relaxed" accumulator instance, valid exactly when both inputs were, without ever re-verifying previous steps. The current POC proves each step as a standalone Groth16 proof and binds the chain with a BLAKE2b512 transcript (N proofs, N pairing checks, bundle O(N)). The production-grade path (Implementation 9) replaces the chain with a single compression SNARK — folding N step instances into one Relaxed-R1CS running instance, then proving it with one Groth16 proof verified with a single pairing check (O(1) bundle, O(1) verify). The compression SNARK is a standard Groth16 circuit (~100K constraints), so our existing `FftQapEngine`, `PippengerProver`, `FullProvingKey` ceremony, and `aiken/groth16` verifier all apply unchanged. Per-step memory drops from O(total constraints) to O(step size), unlocking circuits that currently OOM on commodity hardware. See [docs/nova-folding-design.md](docs/nova-folding-design.md) for the full Nova explanation, folding mechanics, comparison with alternatives, and design decisions for our stack.
 
 ### Why this is Implementation 8 (not just research)
 
@@ -1517,6 +1468,21 @@ Cheaper on-chain verification — O(N) pairing checks → one — essential for 
 
 <details>
 <summary><b>Click to expand pending items</b></summary>
+
+### Roadmap
+
+| Order | Item | Status | Depends on | Risk |
+|-------|------|--------|------------|------|
+| 1 | (p) Lagrange-basis SRS — complete FFT production path | ⏳ Not started | None | Low |
+| 2 | (m) Prepared verifier + batched pairing verification | ⏳ Not started | None | Low |
+| 3 | (o) Randomized R1CS test fixtures + parity assertions | ⏳ Not started | None | Low |
+| 4 | (q) Proof aggregation (`groth16::aggregate_proofs`) | ⏳ Not started | (m) | Low |
+| 5 | (u) Implementation 9 — Relaxed-R1CS folding + compression SNARK | 🔨 Under work | Step circuits stable | Medium |
+| 6 | (s) Recursive proof composition (in-circuit verification) | ⏳ Not started | (u) | High |
+| 7 | (t) Shielded cross-chain privacy pool (F5) | ⏳ Research | (u), sparse prover | High |
+| 8 | (v) Implementation 10 — Post-quantum lattice folding | 🧪 Research | (u) | High |
+
+> **Ordering rationale:** items 1–4 are classical, small, and low-risk; they unblock on-chain verification economics and testing infrastructure. Item 5 (Nova folding) is the critical path for large-circuit deployment. Items 6–8 are higher-risk and depend on (u) being delivered first.
 
 ### Practical recommendation (production roadmap)
 
