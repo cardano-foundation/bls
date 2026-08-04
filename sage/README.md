@@ -53,7 +53,7 @@ docker run --rm --entrypoint bash \
 <details>
 <summary><b>Steps 1.1–1.16 — click to expand</b></summary>
 
-The script mirrors the numbered sub-steps in [`../groth16-prover/RustGroth16Correctness.md`](../groth16-prover/RustGroth16Correctness.md):
+The script mirrors the numbered sub-steps in [`../groth16-prover/docs/RustGroth16Correctness.md`](../groth16-prover/docs/RustGroth16Correctness.md):
 
 | Step | What it prints |
 |------|---------------|
@@ -164,7 +164,7 @@ Both the Rust crate and the Sage script implement **the same two paths** indepen
 
 | Pairing | Status | Evidence |
 |---------|--------|----------|
-| **Dense Rust ↔ Dense Sage** | ✅ Matched | Already verified in `RustGroth16Correctness.md` — every coefficient and every G1 scalar matches. |
+| **Dense Rust ↔ Dense Sage** | ✅ Matched | Already verified in `../groth16-prover/docs/RustGroth16Correctness.md` — every coefficient and every G1 scalar matches. |
 | **FFT Rust ↔ FFT Sage** | ✅ **Matched** | All QAP coefficients, per-variable evaluations at `τ=3`, witness values `l(τ), r(τ), o(τ)`, quotient `h(τ)`, and target `T(τ)` are identical. See collapsible tables below. |
 | **Dense ↔ FFT (either side)** | ⚠️ **Mismatch (expected)** | Different QAP domains (`{0,1,2}` vs 4-th roots of unity). Same gate values, different interpolating polynomials. |
 
