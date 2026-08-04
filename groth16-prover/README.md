@@ -1375,6 +1375,14 @@ The two functional gaps of the POC — it is a proof *chain* (N proofs, N pairin
 | App-level final checks | Checks that need the *complete* output (e.g. `PointCompress(PointA) == A`) are done outside the fold, not enforced per-step. |
 | Overhead | For small circuits (≤ ~10K constraints) Nova overhead exceeds the benefit; it pays off only for large/sequential computations. |
 
+### Cryptographic remarks
+
+- **Q: Does the BLAKE2b512 transcript need domain separation between the folding hash and the state-chain hash?** The POC uses the same BLAKE2b512 transcript for both the state-chain binding (`acc = BLAKE2b512(acc ‖ state_out ‖ proof_bytes)`) and the Fiat-Shamir challenge in the NIFS fold (`r = H(acc ‖ step)`). If the same hash function is used without domain separation, it could lead to transcript-reuse attacks where a malicious prover reuses a folding challenge in a different context. The production-grade Implementation 9 should use domain-separated hash calls (e.g., `H("fold" ‖ acc ‖ step)` vs. `H("chain" ‖ acc ‖ state_out ‖ proof_bytes)`).
+
+- **Q: Is the POC's proof chain (N proofs, N pairing checks, bundle O(N)) the right intermediate, or should we jump directly to the full Nova folding?** The proof chain is a necessary intermediate — it validates the step-decomposition approach end to end and provides individually verifiable step proofs. However, it does not deliver Nova's key benefit (O(1) bundle, O(1) verification). The full Nova folding (Implementation 9) is the critical next step.
+
+- **Q: Does the `h_scalar` optimization interact with Nova's per-step ceremony?** Yes. Since each Nova step has its own ceremony (on the ~7.7K-constraint step circuit, not the monolithic circuit), `h_scalar` reduces per-step ceremony cost. The `h_scalar` compression eliminates the `h_query` MSM (which is proportional to the step circuit size), directly reducing the one-time ceremony cost per step shape. This synergy should be documented and benchmarked together.
+
 </details>
 
 ## Implementation 9 (Relaxed-R1CS folding + single compression SNARK)
@@ -1404,6 +1412,14 @@ The two functional gaps of the POC — it is a proof *chain* (N proofs, N pairin
 
 **Non-goals** (details in item (u)): in-circuit IVC recursion (not buildable on BLS12-381 — no 2-cycle) and SuperNova non-uniform steps.
 
+### Cryptographic remarks
+
+- **Q: What are the soundness and completeness properties of the NIFS folding scheme, and what is the soundness error per fold and after N folds?** The NIFS fold is computationally sound under the DLOG assumption on BLS12-381. The soundness error per fold is negligible (dominated by the Fiat-Shamir challenge entropy). After N folds, the accumulated soundness error remains negligible as long as the transcript is collision-resistant. This should be explicitly stated in the design doc and the implementation.
+
+- **Q: What is the constraint cost of embedding Pedersen commitments in the compression circuit, and how does this affect the compression SNARK size?** A Pedersen commitment over G1 with a 381-bit scalar requires ~200–400 R1CS constraints in Circom (for the exponentiation). The compression circuit must verify the folded instance's Pedersen commitments as R1CS constraints. The total constraint count of the compression circuit should be estimated and reported, as it directly impacts the compression ceremony cost and the on-chain verification gas.
+
+- **Q: Is the Fiat-Shamir challenge `r=H(acc‖step)` using the same BLAKE2b512 transcript as the state chain, and if so, is domain separation needed?** Yes — the same BLAKE2b512 hash is used for both the state-chain binding and the folding challenge. Without domain separation, a malicious prover could potentially reuse a folding challenge in a different context. Implementation 9 should use domain-separated hash calls (e.g., `H("fold" ‖ acc ‖ step)` vs. `H("chain" ‖ acc ‖ state_out ‖ proof_bytes)`) to prevent transcript-reuse attacks.
+
 </details>
 
 ## Implementation 10 (Post-quantum lattice folding)
@@ -1431,6 +1447,14 @@ The two functional gaps of the POC — it is a proof *chain* (N proofs, N pairin
 | ProtogaLattice (2026) | SIS, constant-round | Algebraic folding, no sumcheck; supports CCS/Plonkish steps |
 
 **Reality check:** a chain is only as PQ as its weakest link, so partial PQ buys nothing — the compression SNARK must go PQ too. A hybrid dual proof (Groth16 OR lattice IVC) hedges the transition at double cost. Full status and trade-offs are in **item (v)**.
+
+### Cryptographic remarks
+
+- **Q: Is replacing Groth16's pairing-based compression SNARK with a sumcheck/GKR-based PQ SNARK a drop-in replacement, or does it require a fundamentally different verification stack?** It is not a drop-in replacement. Groth16 verification is a single pairing check (~2 ms on Aiken/Plutus). A hash-based or sumcheck-based verifier is significantly heavier (hundreds of field operations per round, multiple rounds). The on-chain verification cost will increase, trading gas for PQ security. The Aiken verifier would need a complete rewrite, and the Plutus V3 budget may not accommodate a complex hash-based verification circuit.
+
+- **Q: Does the hybrid dual proof (Groth16 OR lattice IVC) actually provide meaningful PQ security, or is it just a hedge that doubles cost?** The hybrid provides meaningful PQ security only if the lattice IVC path is fully implemented and verified. A dual proof where only one path is PQ-secure and the other is classically secure does not raise the overall security level — an attacker who breaks the classical path still forges proofs via the Groth16 path. The hybrid is only useful as a transition mechanism during a migration period, not as a permanent solution.
+
+- **Q: If partial PQ (folding only) buys nothing, should we commit to the full PQ stack or not start down this path at all?** The current recommendation in the README is correct: document the risk and keep the classical stack as the default. The PQ path should only be pursued if quantum timelines shorten significantly. However, the design work for the PQ compression SNARK (sumcheck/GKR with lattice commitments) should be started early enough to inform the classical stack's design decisions — for example, choosing a compression circuit structure that can be adapted to a hash-based verifier later.
 
 </details>
 
