@@ -18,6 +18,15 @@
 //! 4. groth16-prover phase2 finalize \
 //!       --zkey c_final.zkey --proving-key c.pk --verifying-key c.vk
 //! ```
+//!
+//! # Examples
+//!
+//! Full workflow from SRS to proving key:
+//!
+//!   $ groth16-prover phase2 new --circuit circuit.r1cs --srs universal.ptau --zkey circuit_0000.zkey
+//!   $ groth16-prover phase2 contribute --zkey-in circuit_0000.zkey --zkey-out circuit_0001.zkey --name "Contributor 1"
+//!   $ groth16-prover phase2 verify --zkey circuit_0001.zkey
+//!   $ groth16-prover phase2 finalize --zkey circuit_0001.zkey --proving-key circuit.pk --verifying-key circuit.vk
 
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use clap::{Parser, Subcommand};
@@ -33,15 +42,60 @@ use std::path::PathBuf;
 #[derive(Debug, Subcommand)]
 pub enum Phase2Command {
     /// Create an initial Phase-2 accumulator from a `.ptau` SRS and a circuit
+    ///
+    /// Loads the circuit from a `.r1cs` file and the Phase-1 SRS from a
+    /// `.ptau` file, then runs the Phase-2 initialization protocol to
+    /// produce a circuit-specific accumulator (`.zkey`).
+    ///
+    /// The accumulator contains the toxic waste encrypted under the
+    /// circuit-specific trapdoor.  Keep the `.zkey` file secret — anyone
+    /// with access to it can produce fake proofs.
+    ///
+    /// Example:
+    ///
+    ///   $ groth16-prover phase2 new --circuit circuit.r1cs --srs universal.ptau --zkey circuit_0000.zkey
     New(NewArgs),
 
     /// Contribute randomness to an existing accumulator
+    ///
+    /// Loads an existing accumulator (`.zkey`), applies a fresh
+    /// contribution of random toxic waste, and writes the updated
+    /// accumulator to a new file.  Each contribution binds the
+    /// accumulator to a new secret value, so the ceremony remains
+    /// secure as long as at least one participant honestly discards
+    /// their contribution.
+    ///
+    /// Optionally tag the contribution with a `--name` for audit trails.
+    ///
+    /// Example:
+    ///
+    ///   $ groth16-prover phase2 contribute --zkey-in circuit_0000.zkey --zkey-out circuit_0001.zkey --name "Alice"
     Contribute(ContributeArgs),
 
     /// Verify an accumulator's integrity
+    ///
+    /// Loads an accumulator (`.zkey`) and checks that all contributions
+    /// are valid — i.e. that the accumulated verification key matches
+    /// the expected public parameters.  This ensures no participant
+    /// introduced a malicious trapdoor.
+    ///
+    /// Example:
+    ///
+    ///   $ groth16-prover phase2 verify --zkey circuit_0001.zkey
     Verify(VerifyArgs),
 
     /// Convert a finalized accumulator into `.pk` + `.vk`
+    ///
+    /// Loads a finalized accumulator (`.zkey`) and extracts the
+    /// proving key (`.pk`) and verifying key (`.vk`) in binary format.
+    /// The `.pk` is used by `prove` and the `.vk` is used by `verify`.
+    ///
+    /// After this step the accumulator is consumed and should no longer
+    /// be used directly.
+    ///
+    /// Example:
+    ///
+    ///   $ groth16-prover phase2 finalize --zkey circuit_final.zkey --proving-key circuit.pk --verifying-key circuit.vk
     Finalize(FinalizeArgs),
 }
 
@@ -56,7 +110,7 @@ pub struct NewArgs {
     #[arg(long, value_name = "FILE")]
     srs: PathBuf,
 
-    /// Output path for the initial accumulator (.zkey)
+    /// Output path for the initial accumulator (`.zkey`)
     #[arg(long, value_name = "FILE")]
     zkey: PathBuf,
 }
@@ -64,15 +118,15 @@ pub struct NewArgs {
 /// Arguments for `phase2 contribute`
 #[derive(Debug, Parser)]
 pub struct ContributeArgs {
-    /// Input accumulator (.zkey)
+    /// Input accumulator (`.zkey`) to contribute to
     #[arg(long, value_name = "FILE")]
     zkey_in: PathBuf,
 
-    /// Output accumulator (.zkey)
+    /// Output accumulator (`.zkey`) with the new contribution applied
     #[arg(long, value_name = "FILE")]
     zkey_out: PathBuf,
 
-    /// Optional participant name
+    /// Optional participant name for audit trail
     #[arg(long, value_name = "NAME")]
     name: Option<String>,
 }
@@ -80,7 +134,7 @@ pub struct ContributeArgs {
 /// Arguments for `phase2 verify`
 #[derive(Debug, Parser)]
 pub struct VerifyArgs {
-    /// Accumulator to verify (.zkey)
+    /// Accumulator (`.zkey`) to verify
     #[arg(long, value_name = "FILE")]
     zkey: PathBuf,
 }
@@ -88,15 +142,15 @@ pub struct VerifyArgs {
 /// Arguments for `phase2 finalize`
 #[derive(Debug, Parser)]
 pub struct FinalizeArgs {
-    /// Final accumulator (.zkey)
+    /// Final accumulator (`.zkey`) to extract keys from
     #[arg(long, value_name = "FILE")]
     zkey: PathBuf,
 
-    /// Output path for the proving key (.pk)
+    /// Output path for the proving key (`.pk`)
     #[arg(long, value_name = "FILE")]
     proving_key: PathBuf,
 
-    /// Output path for the verifying key (.vk)
+    /// Output path for the verifying key (`.vk`)
     #[arg(long, value_name = "FILE")]
     verifying_key: PathBuf,
 }
