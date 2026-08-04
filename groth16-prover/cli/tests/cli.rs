@@ -2303,3 +2303,395 @@ fn cardano_ed25519_ownership_nova_verify_rejects_tampered_bundle() {
         .failure()
         .stderr(predicate::str::contains("final transcript mismatch"));
 }
+
+// ------------------------------------------------------------------
+// export-vk command tests
+// ------------------------------------------------------------------
+
+/// `export-vk` produces valid Aiken source from a binary verifying key.
+#[test]
+fn export_vk_produces_aiken_source() {
+    let (r1cs, wtns) = create_test_artifacts();
+    let pk_file = NamedTempFile::new().unwrap();
+    let vk_file = NamedTempFile::new().unwrap();
+    let out_file = NamedTempFile::new().unwrap();
+
+    // Generate a VK via ceremony-dev
+    let mut cmd_ceremony = Command::cargo_bin("groth16-prover").unwrap();
+    cmd_ceremony
+        .arg("ceremony-dev")
+        .arg("--circuit")
+        .arg(r1cs.path())
+        .arg("--proving-key")
+        .arg(pk_file.path())
+        .arg("--verifying-key")
+        .arg(vk_file.path());
+    cmd_ceremony.assert().success();
+
+    // Export to a file
+    let mut cmd_export = Command::cargo_bin("groth16-prover").unwrap();
+    cmd_export
+        .arg("export-vk")
+        .arg("--verifying-key")
+        .arg(vk_file.path())
+        .arg("--out")
+        .arg(out_file.path());
+    cmd_export
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Aiken verification key source written to"));
+
+    // Verify the output is valid Aiken source
+    let aiken_src = fs::read_to_string(out_file.path()).unwrap();
+    assert!(aiken_src.contains("pub fn verification_key()"));
+    assert!(aiken_src.contains("VerificationKey {"));
+    assert!(aiken_src.contains("alpha_g1:"));
+    assert!(aiken_src.contains("beta_g2:"));
+    assert!(aiken_src.contains("gamma_g2:"));
+    assert!(aiken_src.contains("delta_g2:"));
+    assert!(aiken_src.contains("ic:"));
+    assert!(aiken_src.contains("n_public:"));
+}
+
+/// `export-vk` prints Aiken source to stdout when `--out` is omitted.
+#[test]
+fn export_vk_prints_to_stdout() {
+    let (r1cs, _wtns) = create_test_artifacts();
+    let pk_file = NamedTempFile::new().unwrap();
+    let vk_file = NamedTempFile::new().unwrap();
+
+    let mut cmd_ceremony = Command::cargo_bin("groth16-prover").unwrap();
+    cmd_ceremony
+        .arg("ceremony-dev")
+        .arg("--circuit")
+        .arg(r1cs.path())
+        .arg("--proving-key")
+        .arg(pk_file.path())
+        .arg("--verifying-key")
+        .arg(vk_file.path());
+    cmd_ceremony.assert().success();
+
+    let mut cmd_export = Command::cargo_bin("groth16-prover").unwrap();
+    cmd_export
+        .arg("export-vk")
+        .arg("--verifying-key")
+        .arg(vk_file.path());
+    cmd_export
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("pub fn verification_key()"))
+        .stdout(predicate::str::contains("VerificationKey {"));
+}
+
+/// `export-vk` fails when the verifying key file does not exist.
+#[test]
+fn export_vk_missing_file() {
+    let mut cmd = Command::cargo_bin("groth16-prover").unwrap();
+    cmd.arg("export-vk")
+        .arg("--verifying-key")
+        .arg("/nonexistent/does-not-exist.vk");
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("failed to read verifying key"));
+}
+
+/// `export-vk` fails when the file is not a valid verifying key.
+#[test]
+fn export_vk_invalid_file() {
+    let bad_vk = NamedTempFile::new().unwrap();
+    fs::write(bad_vk.path(), b"not_a_valid_vk_file").unwrap();
+
+    let mut cmd = Command::cargo_bin("groth16-prover").unwrap();
+    cmd.arg("export-vk")
+        .arg("--verifying-key")
+        .arg(bad_vk.path());
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("failed to deserialize verifying key"));
+}
+
+// ------------------------------------------------------------------
+// --help output tests
+// ------------------------------------------------------------------
+
+/// Top-level `--help` prints the usage summary.
+#[test]
+fn help_top_level() {
+    let mut cmd = Command::cargo_bin("groth16-prover").unwrap();
+    cmd.arg("--help");
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("Usage: groth16-prover <COMMAND>"))
+        .stdout(predicate::str::contains("Commands:"))
+        .stdout(predicate::str::contains("ceremony"))
+        .stdout(predicate::str::contains("ceremony-dev"))
+        .stdout(predicate::str::contains("prove"))
+        .stdout(predicate::str::contains("verify"))
+        .stdout(predicate::str::contains("export-vk"))
+        .stdout(predicate::str::contains("compute-inputs"))
+        .stdout(predicate::str::contains("smt"))
+        .stdout(predicate::str::contains("phase2"))
+        .stdout(predicate::str::contains("nova"));
+}
+
+/// `smt --help` lists all SMT subcommands.
+#[test]
+fn help_smt() {
+    let mut cmd = Command::cargo_bin("groth16-prover").unwrap();
+    cmd.arg("smt").arg("--help");
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("insert"))
+        .stdout(predicate::str::contains("digest"))
+        .stdout(predicate::str::contains("path"))
+        .stdout(predicate::str::contains("verify"))
+        .stdout(predicate::str::contains("export"));
+}
+
+/// `smt insert --help` shows the --depth, --items, --transcript, and --state options.
+#[test]
+fn help_smt_insert() {
+    let mut cmd = Command::cargo_bin("groth16-prover").unwrap();
+    cmd.arg("smt").arg("insert").arg("--help");
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("--depth"))
+        .stdout(predicate::str::contains("--items"))
+        .stdout(predicate::str::contains("--transcript"))
+        .stdout(predicate::str::contains("--state"))
+        .stdout(predicate::str::contains("Merkle tree depth (number of levels)"))
+        .stdout(predicate::str::contains("Comma-separated list of items to insert"));
+}
+
+/// `phase2 --help` lists all Phase-2 subcommands.
+#[test]
+fn help_phase2() {
+    let mut cmd = Command::cargo_bin("groth16-prover").unwrap();
+    cmd.arg("phase2").arg("--help");
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("new"))
+        .stdout(predicate::str::contains("contribute"))
+        .stdout(predicate::str::contains("verify"))
+        .stdout(predicate::str::contains("finalize"));
+}
+
+/// `phase2 new --help` shows the --circuit, --srs, and --zkey options.
+#[test]
+fn help_phase2_new() {
+    let mut cmd = Command::cargo_bin("groth16-prover").unwrap();
+    cmd.arg("phase2").arg("new").arg("--help");
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("--circuit"))
+        .stdout(predicate::str::contains("--srs"))
+        .stdout(predicate::str::contains("--zkey"))
+        .stdout(predicate::str::contains("Path to the `.r1cs` circuit file"))
+        .stdout(predicate::str::contains("Path to the Phase-1 `.ptau` SRS file"));
+}
+
+/// `nova --help` lists all Nova subcommands.
+#[test]
+fn help_nova() {
+    let mut cmd = Command::cargo_bin("groth16-prover").unwrap();
+    cmd.arg("nova").arg("--help");
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("params"))
+        .stdout(predicate::str::contains("ceremony"))
+        .stdout(predicate::str::contains("fold"))
+        .stdout(predicate::str::contains("verify"));
+}
+
+/// `nova ceremony --help` shows the --h-scalar option.
+#[test]
+fn help_nova_ceremony() {
+    let mut cmd = Command::cargo_bin("groth16-prover").unwrap();
+    cmd.arg("nova").arg("ceremony").arg("--help");
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("--h-scalar"))
+        .stdout(predicate::str::contains("h-query scalar compression"))
+        .stdout(predicate::str::contains("Use h-query scalar compression (Implementation 7)"));
+}
+
+/// `ceremony-dev --help` shows the --sparse and --h-scalar options.
+#[test]
+fn help_ceremony_dev() {
+    let mut cmd = Command::cargo_bin("groth16-prover").unwrap();
+    cmd.arg("ceremony-dev").arg("--help");
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("--sparse"))
+        .stdout(predicate::str::contains("--h-scalar"))
+        .stdout(predicate::str::contains("sparse constraint representation"))
+        .stdout(predicate::str::contains("h-query scalar compression"));
+}
+
+/// `prove --help` shows the --sparse, --engine, and --prover options.
+#[test]
+fn help_prove() {
+    let mut cmd = Command::cargo_bin("groth16-prover").unwrap();
+    cmd.arg("prove").arg("--help");
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("--sparse"))
+        .stdout(predicate::str::contains("--engine"))
+        .stdout(predicate::str::contains("--prover"))
+        .stdout(predicate::str::contains("dense"))
+        .stdout(predicate::str::contains("fft"))
+        .stdout(predicate::str::contains("naive"))
+        .stdout(predicate::str::contains("pippenger"));
+}
+
+/// `verify --help` shows the expected options.
+#[test]
+fn help_verify() {
+    let mut cmd = Command::cargo_bin("groth16-prover").unwrap();
+    cmd.arg("verify").arg("--help");
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("--proof"))
+        .stdout(predicate::str::contains("--public"))
+        .stdout(predicate::str::contains("--verifying-key"));
+}
+
+/// `export-vk --help` shows the expected options.
+#[test]
+fn help_export_vk() {
+    let mut cmd = Command::cargo_bin("groth16-prover").unwrap();
+    cmd.arg("export-vk").arg("--help");
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("--verifying-key"))
+        .stdout(predicate::str::contains("--out"));
+}
+
+/// `compute-inputs --help` shows the expected options.
+#[test]
+fn help_compute_inputs() {
+    let mut cmd = Command::cargo_bin("groth16-prover").unwrap();
+    cmd.arg("compute-inputs").arg("--help");
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("--depth"))
+        .stdout(predicate::str::contains("--transcript"))
+        .stdout(predicate::str::contains("--nullifier"))
+        .stdout(predicate::str::contains("--out"));
+}
+
+// ------------------------------------------------------------------
+// Error cases for new commands
+// ------------------------------------------------------------------
+
+/// `export-vk` fails with a helpful error when no `--verifying-key` is provided.
+#[test]
+fn export_vk_missing_verifying_key() {
+    let mut cmd = Command::cargo_bin("groth16-prover").unwrap();
+    cmd.arg("export-vk");
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("required arguments were not provided"));
+}
+
+/// `phase2 new` fails when the circuit file does not exist.
+#[test]
+fn phase2_new_missing_circuit() {
+    let ptau = NamedTempFile::new().unwrap();
+    fs::write(ptau.path(), build_synthetic_ptau(4)).unwrap();
+    let zkey = NamedTempFile::new().unwrap();
+
+    let mut cmd = Command::cargo_bin("groth16-prover").unwrap();
+    cmd.arg("phase2")
+        .arg("new")
+        .arg("--circuit")
+        .arg("/nonexistent/circuit.r1cs")
+        .arg("--srs")
+        .arg(ptau.path())
+        .arg("--zkey")
+        .arg(zkey.path());
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("failed to load circuit"));
+}
+
+/// `phase2 new` fails when the SRS file does not exist.
+#[test]
+fn phase2_new_missing_srs() {
+    let (r1cs, _wtns) = create_test_artifacts();
+    let zkey = NamedTempFile::new().unwrap();
+
+    let mut cmd = Command::cargo_bin("groth16-prover").unwrap();
+    cmd.arg("phase2")
+        .arg("new")
+        .arg("--circuit")
+        .arg(r1cs.path())
+        .arg("--srs")
+        .arg("/nonexistent/universal.ptau")
+        .arg("--zkey")
+        .arg(zkey.path());
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("failed to open .ptau"));
+}
+
+/// `nova ceremony` fails when the circuit file does not exist.
+#[test]
+fn nova_ceremony_missing_circuit() {
+    let pk = NamedTempFile::new().unwrap();
+    let vk = NamedTempFile::new().unwrap();
+
+    let mut cmd = Command::cargo_bin("groth16-prover").unwrap();
+    cmd.arg("nova")
+        .arg("ceremony")
+        .arg("--circuit")
+        .arg("/nonexistent/step_circuit.r1cs")
+        .arg("--proving-key")
+        .arg(pk.path())
+        .arg("--verifying-key")
+        .arg(vk.path());
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("failed to load circuit"));
+}
+
+/// `nova fold` fails early when the circuit is not a valid step circuit
+/// (n_pub_in != n_pub_out), before even trying to load the proving key.
+#[test]
+fn nova_fold_rejects_non_step_circuit() {
+    let (r1cs, _wtns) = create_test_artifacts();
+    let steps_dir = tempfile::tempdir().unwrap();
+    let ivc = NamedTempFile::new().unwrap();
+
+    let mut cmd = Command::cargo_bin("groth16-prover").unwrap();
+    cmd.arg("nova")
+        .arg("fold")
+        .arg("--circuit")
+        .arg(r1cs.path())
+        .arg("--proving-key")
+        .arg("/nonexistent/step.pk")
+        .arg("--steps")
+        .arg(steps_dir.path())
+        .arg("--out")
+        .arg(ivc.path());
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("not a valid step circuit"));
+}
+
+/// `nova verify` fails when the IVC bundle file does not exist.
+#[test]
+fn nova_verify_missing_ivc() {
+    let vk = NamedTempFile::new().unwrap();
+
+    let mut cmd = Command::cargo_bin("groth16-prover").unwrap();
+    cmd.arg("nova")
+        .arg("verify")
+        .arg("--ivc")
+        .arg("/nonexistent/bundle.ivc.json")
+        .arg("--verifying-key")
+        .arg(vk.path());
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("failed to read IVC bundle"));
+}

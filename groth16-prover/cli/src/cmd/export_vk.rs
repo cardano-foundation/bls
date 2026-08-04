@@ -23,13 +23,17 @@ pub struct Args {
 /// Run the export-vk command
 pub fn run(args: Args) -> Result<(), Box<dyn Error>> {
     // ------------------------------------------------------------------
-    // 1. Load VK
+    // 1. Load VK (try compressed first, then uncompressed)
     // ------------------------------------------------------------------
     let vk_bytes = fs::read(&args.verifying_key)
         .map_err(|e| format!("failed to read verifying key: {e}"))?;
 
-    let vk = VerifyingKey::deserialize_compressed(&vk_bytes[..])
-        .map_err(|e| format!("failed to deserialize verifying key: {e:?}"))?;
+    let vk = if let Ok(vk) = VerifyingKey::deserialize_uncompressed_unchecked(&vk_bytes[..]) {
+        vk
+    } else {
+        VerifyingKey::deserialize_compressed(&vk_bytes[..])
+            .map_err(|e| format!("failed to deserialize verifying key: {e:?}"))?
+    };
 
     // ------------------------------------------------------------------
     // 2. Serialize each point individually to compressed bytes
