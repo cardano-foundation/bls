@@ -1,6 +1,10 @@
 //! Ceremony subcommand — run a trusted-setup ceremony for a circuit.
 //!
 //! Generates random toxic waste and produces a proving key + verification key.
+//!
+//! ⚠️ **Deprecated.** Use `ceremony-dev` (for dev/testing) or `phase2` (for production) instead.
+//! This command produces a legacy `ProvingKey` that contains scalar toxic waste,
+//! making it unsuitable for production use.
 
 use ark_serialize::CanonicalSerialize;
 use clap::Parser;
