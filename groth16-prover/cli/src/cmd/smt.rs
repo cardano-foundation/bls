@@ -15,6 +15,10 @@
 //!
 //!     $ groth16-prover smt insert --depth 2 --items "1 100,2 200" --state smt.json
 //!
+//!   Insert a single item at an explicit leaf index (0-padded tree):
+//!
+//!     $ groth16-prover smt insert --depth 2 --items "42" --index 3 --state smt.json
+//!
 //!   Insert from a transcript file (one item per line):
 //!
 //!     $ groth16-prover smt insert --depth 2 --transcript items.txt --state smt.json
@@ -23,9 +27,10 @@
 //!
 //!     $ groth16-prover smt digest --state smt.json
 //!
-//!   Print the Merkle path for a leaf:
+//!   Print the Merkle path for a leaf (human-readable, or `--json`):
 //!
 //!     $ groth16-prover smt path --state smt.json --leaf <commitment>
+//!     $ groth16-prover smt path --state smt.json --leaf <commitment> --json
 //!
 //!   Verify a Merkle path:
 //!
@@ -44,6 +49,7 @@ use std::path::PathBuf;
 use std::str::FromStr;
 
 use ark_bls12_381::Fr;
+use ark_ff::Zero;
 
 /// SMT subcommands
 #[derive(Debug, Subcommand)]
@@ -81,6 +87,10 @@ pub enum SmtCommand {
     /// Rebuilds the tree from the persisted state, computes the path
     /// from the root to the specified leaf, and prints each sibling
     /// together with its direction (left or right).
+    ///
+    /// With `--json`, emits `{"digest", "siblings", "directions"}`
+    /// where both lists are decimal field-element strings (direction
+    /// `1` = sibling on the left) for machine consumption.
     ///
     /// Example:
     ///
@@ -133,6 +143,13 @@ pub struct InsertArgs {
     #[arg(long, value_name = "FILE", conflicts_with = "items")]
     transcript: Option<PathBuf>,
 
+    /// Place a single `--items` value at this explicit leaf index instead of
+    /// the next open slot (so the rest of the tree stays zero-padded).
+    /// Requires exactly one raw commitment (single field element) item and
+    /// is mutually exclusive with `--transcript`.
+    #[arg(long, value_name = "N", requires = "items", conflicts_with = "transcript")]
+    index: Option<usize>,
+
     /// Path to persist / load the tree state (JSON).
     /// Defaults to `smt.json`.
     #[arg(long, value_name = "FILE", default_value = "smt.json")]
@@ -160,6 +177,10 @@ pub struct PathArgs {
     /// (a decimal field element string).
     #[arg(long, value_name = "VALUE")]
     leaf: String,
+
+    /// Emit machine-readable JSON instead of the human-readable listing.
+    #[arg(long)]
+    json: bool,
 }
 
 /// Arguments for `smt verify`
@@ -221,14 +242,30 @@ fn run_insert(args: InsertArgs) -> Result<(), Box<dyn Error>> {
         return Err("either --items or --transcript is required".into());
     }
 
+    // An explicit leaf index is only valid with a single raw commitment item.
+    let indices: Vec<Option<usize>> = if let Some(index) = args.index {
+        if item_strings.len() != 1 {
+            return Err("--index can only be used with a single --items value".into());
+        }
+        if item_strings[0].split_whitespace().count() != 1 {
+            return Err("--index requires a single field element (raw commitment), not 'nullifier nonce'".into());
+        }
+        vec![Some(index)]
+    } else {
+        vec![None; item_strings.len()]
+    };
+
     // Parse and insert items
-    for item_str in &item_strings {
+    for (item_str, index) in item_strings.iter().zip(&indices) {
         let parts: Vec<&str> = item_str.split_whitespace().collect();
         match parts.len() {
             1 => {
                 let val = Fr::from_str(parts[0])
                     .map_err(|_| format!("invalid field element: {}", parts[0]))?;
-                tree.insert(val);
+                match index {
+                    Some(i) => tree.insert_at(val, *i),
+                    None => tree.insert(val),
+                }
             }
             2 => {
                 let nf = Fr::from_str(parts[0])
@@ -247,6 +284,7 @@ fn run_insert(args: InsertArgs) -> Result<(), Box<dyn Error>> {
         depth: args.depth,
         digest: tree.digest().to_string(),
         items: item_strings.clone(),
+        indices,
     };
     let json = serde_json::to_string_pretty(&state)
         .map_err(|e| format!("failed to serialize state: {e}"))?;
@@ -272,48 +310,59 @@ fn run_path(args: PathArgs) -> Result<(), Box<dyn Error>> {
         .map_err(|_| format!("invalid leaf value: {}", args.leaf))?;
 
     // Rebuild tree from transcript
-    let mut tree = SparseMerkleTree::new(state.depth);
-    for item_str in &state.items {
-        let parts: Vec<&str> = item_str.split_whitespace().collect();
-        match parts.len() {
-            1 => {
-                let val = Fr::from_str(parts[0])
-                    .map_err(|_| format!("invalid field element: {}", parts[0]))?;
-                tree.insert(val);
-            }
-            2 => {
-                let nf = Fr::from_str(parts[0])
-                    .map_err(|_| format!("invalid nullifier: {}", parts[0]))?;
-                let nonce = Fr::from_str(parts[1])
-                    .map_err(|_| format!("invalid nonce: {}", parts[1]))?;
-                tree.insert(mimc2(nf, nonce));
-            }
-            n => return Err(format!("expected 1 or 2 values, got {}: {}", n, item_str).into()),
-        }
-    }
+    let tree = rebuild_tree(&state)?;
 
     let Some(path) = tree.path(leaf) else {
         println!("Leaf {} not found in tree", leaf);
         return Ok(());
     };
-    println!("digest: {}", tree.digest());
-    for (i, (sibling, direction)) in path.iter().enumerate() {
-        println!("  level {}: sibling={}  direction={}",
-            i, sibling, if *direction { "left (sibling on left)" } else { "right (sibling on right)" });
+
+    if args.json {
+        let siblings: Vec<String> = path.iter().map(|(s, _)| field_to_string(*s)).collect();
+        let directions: Vec<String> = path
+            .iter()
+            .map(|(_, d)| (if *d { "1" } else { "0" }).to_string())
+            .collect();
+        let out = serde_json::json!({
+            "digest": field_to_string(tree.digest()),
+            "siblings": siblings,
+            "directions": directions,
+        });
+        println!("{}", serde_json::to_string(&out)?);
+    } else {
+        println!("digest: {}", field_to_string(tree.digest()));
+        for (i, (sibling, direction)) in path.iter().enumerate() {
+            println!("  level {}: sibling={}  direction={}",
+                i, field_to_string(*sibling), if *direction { "left (sibling on left)" } else { "right (sibling on right)" });
+        }
     }
 
     Ok(())
 }
 
+/// Render a field element as a decimal string, mapping zero to `"0"`
+/// (ark-ff's `Display` prints zero as an empty string).
+fn field_to_string(fr: Fr) -> String {
+    if fr == Fr::zero() {
+        "0".to_string()
+    } else {
+        fr.to_string()
+    }
+}
+
 fn rebuild_tree(state: &SmtState) -> Result<SparseMerkleTree, Box<dyn Error>> {
     let mut tree = SparseMerkleTree::new(state.depth);
-    for item_str in &state.items {
+    for (i, item_str) in state.items.iter().enumerate() {
+        let explicit_index = state.indices.get(i).copied().flatten();
         let parts: Vec<&str> = item_str.split_whitespace().collect();
         match parts.len() {
             1 => {
                 let val = Fr::from_str(parts[0])
                     .map_err(|_| format!("invalid field element: {}", parts[0]))?;
-                tree.insert(val);
+                match explicit_index {
+                    Some(index) => tree.insert_at(val, index),
+                    None => tree.insert(val),
+                }
             }
             2 => {
                 let nf = Fr::from_str(parts[0])
@@ -417,4 +466,8 @@ struct SmtState {
     /// Each entry is either a single commitment or "nullifier nonce".
     #[serde(default)]
     items: Vec<String>,
+    /// Optional explicit leaf index per item (parallel to `items`).
+    /// `None` means the item was inserted sequentially.
+    #[serde(default)]
+    indices: Vec<Option<usize>>,
 }

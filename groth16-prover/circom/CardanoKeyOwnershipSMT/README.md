@@ -107,6 +107,24 @@ standard 32-byte compressed public key.
 python3 gen_smt_input.py --xsk pay.xsk --vk pay.vk -o input.json --depth 4
 ```
 
+The SMT part of the tree is built with the **`groth16-prover smt` CLI**
+— this is the primary, supported path. The script runs these commands
+under the hood:
+
+```bash
+groth16-prover smt insert --depth 4 --items <leaf> --index 0 --state smt.json
+groth16-prover smt path --state smt.json --leaf <leaf> --json   # proof
+groth16-prover smt verify --state smt.json --leaf <leaf>        # self-check
+```
+
+> **The in-Python `build_merkle_tree` is a fallback only.** It reproduces
+> the identical zero-padding scheme and is used *solely* when the CLI is
+> missing or fails (a `WARNING:` is printed to stderr). It is not the
+> intended path — always run with a `groth16-prover` binary available.
+
+Use `--smt-cli <path>` to point at a binary that is not on `PATH`, e.g.
+`--smt-cli groth16-prover/cli/target/release/groth16-prover`.
+
 This produces `input.json` with:
 - `A[256]` — compressed public key bits (from `pay.vk`)
 - `sk[255]` — clamped scalar bits (from `pay.xsk`)
@@ -354,10 +372,11 @@ the field circom targets with `--prime bls12381`). Empty leaves default to `0`
 and hash up as `mimc2(default, default)`, matching the padding scheme of
 `SparseMerkleTree` in `groth16-prover/src/sparse_merkle_tree.rs`.
 
-> Note: the Rust `groth16-prover smt` CLI (`insert`/`export`) targets the
-> separate `Privacy` spend circuit, not this one. Its exports produce
-> `digest/nullifier/nonce/siblings/directions`, which differ from the
-> `CardanoKeyOwnershipSMT` input format.
+> Note: `groth16-prover smt insert --index <N>` is what lets `gen_smt_input.py`
+> place the single leaf at an arbitrary index while keeping the rest of the
+> tree zero-padded. The `smt export` subcommand targets the separate `Privacy`
+> spend circuit instead: it produces `digest/nullifier/nonce/siblings/directions`,
+> which differ from the `CardanoKeyOwnershipSMT` input format.
 
 ### Input/Output Specification
 
