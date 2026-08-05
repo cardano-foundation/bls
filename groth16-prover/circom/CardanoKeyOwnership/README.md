@@ -90,9 +90,11 @@ The prover knows the **clamped Ed25519 scalar** `a` (derived from a Cardano BIP3
 
 This is a minimal subset of the full `Ed25519Verify` circuit: one scalar multiplication on the base point, plus point compression. No SHA-512, no signature components. It proves ownership of a **real Cardano wallet key**.
 
-> ### ⭐ Recommended for Ed25519: use **Implementation 8** (the Nova step-chain) — it cuts e2e time by ~70 %
+> ### ⭐ Recommended for Ed25519: use **Implementation 8** (the Nova step-chain) — ~47 % faster first run, 240× smaller proving key
 >
-> The monolithic ~1.97M-constraint flow below is bottlenecked by its ceremony: **~5 min ceremony + ~1.7 min prove ≈ ~7 min e2e**. The [Implementation 8](../../README.md#implementation-8-nova-ivc--compression-snark) step-chain decomposes the same ownership proof into **255 × 7.7K-constraint steps** (`cardano_ed25519_ownership_nova.circom`): the ceremony drops to **~1.5 s** and the fold takes **~108 s**, i.e. **~2 min total e2e** — with per-step memory instead of ~3 GiB. The steps, keys, and transcript are all bound by a BLAKE2b512 state chain.
+> The monolithic ~1.97M-constraint flow below is bottlenecked by its ceremony:
+> **~8 min ceremony + ~74 s prove + ~10 s witness ≈ ~9.7 min e2e on first run**.
+> The [Implementation 8](../../README.md#implementation-8-nova-ivc--compression-snark) step-chain decomposes the same ownership proof into **255 × 7.7K-constraint steps** (`cardano_ed25519_ownership_nova.circom`): the ceremony drops to **~3 s** and the fold takes **~167 s**, i.e. **~5.1 min total e2e on first run** — with per-step memory instead of ~4.5 GiB peak, and a 5 MB pk instead of 1.2 GB. The steps, keys, and transcript are all bound by a BLAKE2b512 state chain. (Note: once the ceremony is amortized across many keys, the monolithic path is ~3.5× faster per key — see the [Benchmarks](#benchmarks--pre-nova-vs-nova) section below.)
 >
 > ```bash
 > circom --prime bls12381 -l ../Ed25519Verify/node_modules/circomlib/circuits \
@@ -252,6 +254,32 @@ groth16-prover nova verify --ivc cko255_ivc.json --verifying-key cko255.vk
 ```
 
 > **Note:** `nova` verification is still **O(N)** — it re-checks every step proof. The constant-size compression SNARK (one pairing, O(1) verify) is [Implementation 9 / item (u)](../../README.md#pending) — not yet built.
+
+### Benchmarks — pre-Nova vs Nova
+
+Measured on the same machine (4 × 31 GB) with the `groth16-prover` release binary, `snarkjs` for witness generation, one shared key, single runs.
+
+| Phase | Pre-Nova (monolithic) | Nova (step-chain) |
+|---|---|---|
+| circuit | 1,967,405 constraints | 255 × 7,724 constraints |
+| key + circuit input | 0.3 s | (shared) |
+| witness generation | 9.8 s | 255 steps: 133.0 s |
+| ceremony (one-time, reusable) | 496.4 s | 2.8 s |
+| prove / fold | 73.9 s | 166.7 s |
+| verify | 1.5 s | 3.7 s |
+| **e2e, first run (incl. ceremony)** | **582 s** | **306 s** |
+| **e2e, steady (ceremony amortized)** | **86 s** | **304 s** |
+| proving key | 1.2 GB | 5.0 MB |
+| verifying key | 178 MB | 719 KB |
+
+Reading the table:
+
+- **First run** (fresh key + ceremony): Nova is **~47 % faster** — the ~8 min monolithic ceremony dominates, while the Nova ceremony is ~3 s. The proving-key footprint drops from 1.2 GB to 5 MB and peak memory from ~4.5 GiB to per-step.
+- **Steady state** (ceremony reused, per additional key): pre-Nova is **~3.5× faster** (86 s vs 304 s). Nova re-derives 255 step witnesses and folds them per key; the monolithic prover only redoes one witness + one proof. (The step chain is inherently sequential — each step feeds the next.)
+- Both flows prove the **same** Ed25519 ownership statement; the point-compression and `addOut == 2·PointA` checks are done outside the Nova fold.
+
+Reproduce: `python3 ../benchmarks_compare.py --family cko --workdir <dir>`
+(see `../benchmarks_compare.py` header for the full CLI; the same harness covers `--family smt`).
 
 </details>
 

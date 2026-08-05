@@ -164,7 +164,8 @@ groth16-prover export-vk --verifying-key smt.vk --out smt_vk.ak
 > The monolithic path is the reference single-proof flow. The
 > `cardano_key_ownership_smt_nova.circom` step-chain (Implementation 8) folds
 > the scalar multiplication into 255 small steps so the ceremony drops to
-> ~2.5 s; the step-chain flow is documented below.
+> ~2.8 s; the step-chain flow is documented below, and the two flows are
+> benchmarked in the [Benchmarks](#benchmarks--pre-nova-vs-nova) section.
 
 ### End-to-end flow — Implementation 8 (Nova step-chain)
 
@@ -272,6 +273,41 @@ EOF
 > **Note:** `nova` verification is still **O(N)** — it re-checks every step
 > proof. The constant-size compression SNARK (one pairing, O(1) verify) is
 > [Implementation 9](../../README.md#pending) — not yet built.
+
+### Benchmarks — pre-Nova vs Nova
+
+Measured on the same machine (4 × 31 GB) with the `groth16-prover` release
+binary, `snarkjs` for witness generation, one shared key, single runs.
+
+| Phase | Pre-Nova (monolithic) | Nova (step-chain) |
+|---|---|---|
+| circuit | 1,971,079 constraints | 255 × 7,724 constraints |
+| key + circuit input | 0.3 s | (shared) |
+| witness generation | 9.4 s | 255 steps: 125.9 s |
+| ceremony (one-time, reusable) | 491.3 s | 2.8 s |
+| prove / fold | 70.8 s | 164.8 s |
+| verify | 1.2 s | 3.3 s |
+| **e2e, first run (incl. ceremony)** | **573 s** | **297 s** |
+| **e2e, steady (ceremony amortized)** | **82 s** | **294 s** |
+| proving key | 1.2 GB | 5.0 MB |
+| verifying key | 178 MB | 719 KB |
+
+Reading the table:
+
+- **First run** (fresh key + ceremony): Nova is **~48 % faster** — the
+  ~8 min monolithic ceremony dwarfs everything, while the Nova ceremony is
+  ~3 s. The proving-key footprint drops from 1.2 GB to 5 MB.
+- **Steady state** (ceremony reused, per additional key): pre-Nova is
+  **~3.5× faster** (82 s vs 294 s). Nova re-derives 255 step witnesses and
+  folds them per key; the monolithic prover only redoes one witness + one
+  proof. (The step chain is inherently sequential — each step feeds the next.)
+- Both flows prove the **same** key-ownership statement; the SMT-membership
+  half of the statement is only proven by the monolithic circuit (the Nova
+  fold covers the scalar multiplication only, with the `addOut == 2·PointA`
+  equality checked outside the fold).
+
+Reproduce: `python3 ../benchmarks_compare.py --family smt --workdir <dir>`
+(see `../benchmarks_compare.py` header for the full CLI).
 
 ## Design
 
