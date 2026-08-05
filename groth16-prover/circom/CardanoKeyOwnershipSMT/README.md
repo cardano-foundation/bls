@@ -20,8 +20,81 @@ compact, verifiable commitment to such a set.
    - The prover knows `sk` such that `A = [sk]·G` (Ed25519 ownership)
    - The public key `A` is a member of the SMT (Merkle path verification)
 
-This enables privacy-preserving key authorization: the proof verifies that the
-signer owns *some* key in the authorized set, without revealing *which* key.
+The **root — not the individual keys — is what the verifier must trust and
+store.** The proof shows the signer owns a public key `A` and that `A` is
+authorized by the root, without the verifier ever seeing the key list. (Note: `A`
+is a public input of the circuit, so this hides *how* a key is authorized, not
+*which* key — see [Drawbacks](#drawbacks).)
+
+### Why not just use `CardanoKeyOwnership`?
+
+`CardanoKeyOwnership` answers one question: *"do you own this specific key `A`?"*.
+It does **not** answer *"is `A` authorized?"* — that is a policy decision left to
+the verifier. With the plain circuit the verifier must know the authorized keys
+itself: it has to store the list (or check every key against on-chain state), and
+the key list is exposed to it. For `N` authorized keys that is `O(N)` state and
+`O(N)` work per check.
+
+The SMT version moves authorization from **a list of keys** to **a single root**:
+
+- **Constant-size trust anchor.** The verifier stores one field element (the
+  root) no matter how many keys are authorized. On-chain state stays fixed as the
+  set grows to thousands or millions of keys.
+- **Set-based authorization in one proof.** One circuit, one proof shape — "the
+  signer owns a key in the set" — regardless of `N`. The natural fit for
+  multi-sig, recovery keys, and key-rotation committees.
+- **Keys are committed, not stored.** The tree holds only one-way MiMC
+  commitments of the public keys, never the raw keys. The authorized key list can
+  live off-chain (a registry); the verifier never sees or stores it.
+- **Rotation and revocation are root updates.** Rebuild the tree without the key
+  and publish a new root. Old proofs still verify against the old root.
+
+### Drawbacks
+
+- **An extra trust anchor.** The root becomes the single point of authorization:
+  whoever can publish a root defines the authorized set. In the plain circuit
+  each key authenticates itself and there is no such party. The root must be
+  maintained by a trusted registry and its publication secured.
+- **Slightly larger circuit.** The SMT membership adds `depth` selective-switch +
+  MiMC2 constraints: here 1,971,079 vs 1,967,405 constraints (~0.2 % more at
+  depth 4). The cost grows with depth and hash rounds.
+- **The prover needs the registry.** To prove membership the prover must know the
+  current root and fetch its Merkle path from the registry — off-chain
+  infrastructure the plain flow does not need.
+- **Membership is snapshot-bound.** A proof is only valid for the specific root it
+  was generated against. When the set changes, proofs must be re-issued against
+  the new root.
+- **Privacy is partial.** `A` is a **public input** (`main { public [A, smt_root] }`);
+  only `sk`, `PointA`, and the path (siblings/directions) are private. The
+  verifier sees exactly which public key is being proven; the proof hides how the
+  key is authorized (leaf index / path), not which key it is. True key-hiding
+  would require a design that does not publish `A`.
+
+### What happens with the keys after the SMT is used?
+
+1. **Key derivation is unchanged.** You still hold a normal Cardano key pair
+   (`pay.xsk` / `pay.vk`, i.e. `sk` and `A`). The SMT does not replace keys or
+   change how they are generated.
+2. **The registry inserts a commitment, not the key.** The leaf is
+   `leaf = MultiMiMC7(PointA)` — a one-way hash of the decompressed public key.
+   The raw public key is never written into the tree. The registry keeps the
+   `leaf ↔ public key` mapping and the tree structure off-chain so a prover can
+   later be handed the path for its own key.
+3. **The verifier stores only the root.** The trust anchor (on-chain, or in the
+   checking application) is the single Merkle root. Authorizing a signer means
+   checking its proof against this one value — no key list is stored or shipped.
+4. **Set changes are root updates.** Add a key: compute its leaf, insert it,
+   publish the new root. Revoke a key: rebuild the tree without its leaf, publish
+   the new root. Nothing else about the proof machinery changes.
+5. **Signing.** The prover fetches its Merkle path from the registry, computes
+   the witness, and produces a proof with public inputs `(A, smt_root)`. The
+   verifier checks ownership *and* membership against the single root in one
+   proof.
+
+**Why not just use the keys directly?** Because that forces the verifier to know,
+store, and check against the whole key list — and to receive the keys in the
+first place. With the SMT the authorized set is committed: the verifier needs only
+the root, and the keys never have to be revealed to it.
 
 ### Workflow
 
@@ -433,10 +506,11 @@ and `ROUND_CONSTANTS` in `gen_smt_input.py`).
    compromises all keys in the set.
 2. **Key rotation**: To add/remove keys, rebuild the SMT and update the root.
    Old proofs remain valid for the old root.
-3. **Privacy**: The SMT stores only the MiMC commitment of the key (not the raw
-   key), so the proof hides which key in the set is used — but the public key
-   `A` is still visible on-chain. For full privacy, consider using a Pedersen
-   commitment instead of MiMC.
+3. **Privacy (partial)**: The SMT stores only the MiMC commitment of the key (not
+   the raw key), so the tree data leaks nothing about the keys. However `A` is a
+   public input of the circuit, so the proof itself reveals the public key and
+   only hides how it is authorized (leaf index / Merkle path). True key-hiding
+   would require not publishing `A` (e.g. committing to a hidden key).
 4. **Circuit size**: The combined circuit is larger than either component alone.
    The `nova` IVC folding approach (Implementation 8) splits the scalar
    multiplication into 255 small steps, dropping the ceremony from ~6 min to
@@ -450,7 +524,11 @@ and `ROUND_CONSTANTS` in `gen_smt_input.py`).
 |---------|---------------------|------------------------|
 | Proves key ownership | ✓ | ✓ |
 | Proves set membership | ✗ | ✓ |
-| Privacy (which key) | ✗ (key is public) | ✓ (with Hash approach) |
-| Trust model | Single key | SMT root = set of keys |
-| Circuit size | Smaller | Larger (SMT path included) |
+| Verifier trust / state | Per public key `A` | Single SMT root |
+| Authorized set size | 1 | Any `N` (constant verification state) |
+| Public inputs | `A[256]` | `A[256]`, `smt_root` |
+| Hides which key | ✗ (`A` public) | ✗ (`A` public) — hides path/index only |
+| Circuit size | 1,967,405 | 1,971,079 (+0.2 % at depth 4) |
+| Set rotation / revocation | n/a (per-key proof) | Root update (rebuild SMT) |
+| Needs a key registry | ✗ | ✓ (path + root) |
 | SMT CLI integration | ✗ | ✓ |
