@@ -205,15 +205,17 @@ def to_chunks(val, bits=85, n=3):
 
 def mimc7(x, k, round_constants):
     """MiMC(x^7) permutation over BLS12-381 scalar field."""
-    state = (x + k) % p
-    for i in range(1, len(round_constants)):
-        state = (pow(state, 7, p) + round_constants[i] + k) % p
+    state = x
+    for i in range(len(round_constants)):
+        state = (state + k + round_constants[i]) % p
+        state = pow(state, 7, p)
+    state = (state + k) % p
     return state
 
 
 def mimc2(x, y):
-    """MiMC compression: H(x, y) = MiMC7(x, y) + x + y."""
-    return (mimc7(x, y, ROUND_CONSTANTS) + x + y) % p
+    """MiMC compression: H(x, y) = MiMC7(y, x) + x + y."""
+    return (mimc7(y, x, ROUND_CONSTANTS) + x + y) % p
 
 
 def build_merkle_tree(leaf, depth, all_leaves):
