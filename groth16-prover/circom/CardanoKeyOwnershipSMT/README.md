@@ -63,6 +63,18 @@ signer owns *some* key in the authorized set, without revealing *which* key.
    $ groth16-prover verify --proof proof.bin --public proof.pub \
        --verifying-key smt.vk
    # → Verification result: VALID
+
+   (or, for the Nova step-chain alternative — see Implementation 8 below:)
+
+   $ groth16-prover nova ceremony --circuit cardano_key_ownership_smt_nova.r1cs \
+       --proving-key smt_nova.pk --verifying-key smt_nova.vk
+   $ python3 gen_smt_nova_steps.py --input input.json \
+       --wasm cardano_key_ownership_smt_nova_js/cardano_key_ownership_smt_nova.wasm \
+       --dir steps
+   $ groth16-prover nova fold --circuit cardano_key_ownership_smt_nova.r1cs \
+       --proving-key smt_nova.pk --steps steps --out smt_nova_ivc.json
+   $ groth16-prover nova verify --ivc smt_nova_ivc.json --verifying-key smt_nova.vk
+   # → Verified 255 steps: 255 pairings OK, state chain OK, transcript OK
 ```
 
 ### End-to-end flow — Implementation 7 (monolithic + h-scalar)
@@ -152,8 +164,114 @@ groth16-prover export-vk --verifying-key smt.vk --out smt_vk.ak
 > The monolithic path is the reference single-proof flow. The
 > `cardano_key_ownership_smt_nova.circom` step-chain (Implementation 8) folds
 > the scalar multiplication into 255 small steps so the ceremony drops to
-> ~1.5 s; see the `CardanoKeyOwnership` README for the analogous step-chain
-> workflow.
+> ~2.5 s; the step-chain flow is documented below.
+
+### End-to-end flow — Implementation 8 (Nova step-chain)
+
+[`cardano_key_ownership_smt_nova.circom`](cardano_key_ownership_smt_nova.circom)
+decomposes the scalar-multiplication part of the ownership statement into
+**255 identical steps**, each one `BitElementMulAny` on extended Edwards
+coordinates `[4][3]` (each coordinate as 3 limbs of base 2^85):
+
+- state `(dblIn[4][3], addIn[4][3])` — 24 public inputs / 24 public outputs,
+  1 private input `sel`.
+- per step: `dblOut = 2·dblIn`, `addOut = addIn + sel·dblOut`
+  (`sel` = scalar bit, LSB-first).
+- after 255 steps: `addOut = 2·[sk]·G`; the final check `addOut == 2·PointA`
+  is done by the application *after* the fold (the accumulator is only
+  complete after all 255 bits). The SMT membership part stays in the
+  monolithic circuit — the fold proves key ownership only.
+- sizes: 7658 wires, 7724 constraints per step (vs ~1.97M monolithic). The
+  ceremony is reusable for **any** run of this step shape.
+
+**1. Build the CLI**
+
+```bash
+cargo build --release --manifest-path ../../cli/Cargo.toml
+# binary: ../../cli/target/release/groth16-prover (used as `groth16-prover` below)
+```
+
+**2. Compile the step circuit** (once; BLS12-381 field, `circomlib` include path)
+
+```bash
+circom --prime bls12381 -l ../Ed25519Verify/node_modules/circomlib/circuits \
+  cardano_key_ownership_smt_nova.circom --r1cs --wasm --sym
+```
+
+**3. Inspect the step circuit** (must report `n_pub_in == n_pub_out == 24`)
+
+```bash
+groth16-prover nova params --circuit cardano_key_ownership_smt_nova.r1cs
+```
+
+**4. One ceremony for the step circuit** (reusable for *any* run of the same step shape)
+
+```bash
+groth16-prover nova ceremony --circuit cardano_key_ownership_smt_nova.r1cs \
+  --proving-key smt_nova.pk --verifying-key smt_nova.vk
+```
+
+**5. Generate the 255 step witnesses** `step_0000.wtns … step_0254.wtns` in
+one directory. The chain invariant is enforced by construction:
+
+```
+dblIn := extended(G)          # circuit base point (same constants as the monolithic circuit)
+addIn := extended(O)          # identity
+for i in 0..254:
+    inputs = (dblIn, addIn, sel := (sk >> i) & 1)   # LSB-first
+    run step wasm → full witness step_%04d.wtns
+    read outputs (dblOut, addOut) → next (dblIn, addIn)
+```
+
+The `sel` bits come from the same clamped scalar as the Implementation 7
+flow (`sk[255]` in the monolithic `input.json`). A helper exists:
+
+```bash
+python3 gen_smt_nova_steps.py \
+  --input input.json \
+  --wasm cardano_key_ownership_smt_nova_js/cardano_key_ownership_smt_nova.wasm \
+  --dir steps
+```
+
+It runs each step through the step circuit's wasm, feeds the outputs
+forward, sanity-checks every step against a pure-Python model, and asserts
+`addOut == 2·PointA` at the end. (~2.5 min for 255 steps.)
+
+**6. Fold** — proves each step, checks the state chain, accumulates the
+transcript (~3 min for 255 × 7.7K-constraint steps)
+
+```bash
+groth16-prover nova fold --circuit cardano_key_ownership_smt_nova.r1cs \
+  --proving-key smt_nova.pk --steps steps --out smt_nova_ivc.json
+```
+
+**7. Verify** — re-checks every Groth16 pairing, the state chain, and the
+transcript
+
+```bash
+groth16-prover nova verify --ivc smt_nova_ivc.json \
+  --verifying-key smt_nova.vk
+# → Verified 255 steps: 255 pairings OK, state chain OK, transcript OK
+```
+
+**8. Application-level final check** (outside the fold)
+
+```bash
+# final addOut (from step_0254.wtns) must equal 2·PointA projectively
+python3 - <<'EOF'
+from gen_smt_nova_steps import read_wtns, limbs_to_int, ext_add, projective_eq
+n8, w = read_wtns("steps/step_0254.wtns")
+add_out = tuple(limbs_to_int([w[13 + c*3 + l] for l in range(3)]) for c in range(4))
+import json; d = json.load(open("input.json"))
+point_a = tuple(limbs_to_int([int(v) for v in limb]) for limb in d["PointA"])
+assert projective_eq(add_out, ext_add(point_a, point_a))
+print("addOut == 2*PointA: OK")
+EOF
+```
+
+> **Note:** `nova` verification is still **O(N)** — it re-checks every step
+> proof. The constant-size compression SNARK (one pairing, O(1) verify) is
+> [Implementation 9](../../README.md#pending) — not yet built.
 
 ## Design
 
@@ -222,11 +340,14 @@ and hash up as `mimc2(default, default)`, matching the padding scheme of
 ```text
 CardanoKeyOwnershipSMT/
 ├── README.md                    # This file
-├── cardano_key_ownership_smt.circom   # Combined circuit
+├── cardano_key_ownership_smt.circom   # Combined circuit (monolithic)
 ├── cardano_key_ownership_smt.r1cs       # Compiled R1CS
 ├── cardano_key_ownership_smt.wasm       # Witness generator
 ├── cardano_key_ownership_smt_js/        # JS witness gen directory
+├── cardano_key_ownership_smt_nova.circom # Nova step circuit (scalar mul only)
+├── cardano_key_ownership_smt_nova.r1cs   # Compiled step R1CS
 ├── gen_smt_input.py                     # Input generator (cardano-address keys)
+├── gen_smt_nova_steps.py                # Nova step-witness generator (255 steps)
 ├── test_e2e.py                          # Self-contained e2e input generator
 ├── test_smt_simple.py                   # Fixed-seed simple input generator
 ├── test_smt.sh                          # Input + witness + R1CS check
@@ -238,7 +359,7 @@ CardanoKeyOwnershipSMT/
 
 - `circom` compiler (≥ 2.0.0) for compiling `cardano_key_ownership_smt.circom`
 - `snarkjs` for witness generation
-- `groth16-prover` CLI for ceremony, proving, and verification
+- `groth16-prover` CLI for ceremony, proving, and verification (incl. `nova`)
 - `cardano-address` CLI for real-world key derivation (optional)
 - `pynacl` for the self-contained `test_e2e.py` key generation
 
@@ -262,8 +383,11 @@ and `ROUND_CONSTANTS` in `gen_smt_input.py`).
    `A` is still visible on-chain. For full privacy, consider using a Pedersen
    commitment instead of MiMC.
 4. **Circuit size**: The combined circuit is larger than either component alone.
-   For large SMT depths, consider using the `nova` IVC folding approach to
-   batch multiple proofs.
+   The `nova` IVC folding approach (Implementation 8) splits the scalar
+   multiplication into 255 small steps, dropping the ceremony from ~6 min to
+   ~2.5 s and the proof from one 1.97M-constraint proof to 255 × 7.7K-constraint
+   proofs — at the cost of O(N) verification. The SMT membership part remains
+   in the monolithic circuit.
 
 ## Comparison with Existing Approaches
 
