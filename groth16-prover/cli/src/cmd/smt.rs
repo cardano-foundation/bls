@@ -299,7 +299,7 @@ fn run_path(args: PathArgs) -> Result<(), Box<dyn Error>> {
     println!("digest: {}", tree.digest());
     for (i, (sibling, direction)) in path.iter().enumerate() {
         println!("  level {}: sibling={}  direction={}",
-            i, sibling, if *direction { "right (leaf is left)" } else { "left (leaf is right)" });
+            i, sibling, if *direction { "left (sibling on left)" } else { "right (sibling on right)" });
     }
 
     Ok(())
@@ -344,11 +344,11 @@ fn run_verify(args: VerifyArgs) -> Result<(), Box<dyn Error>> {
     let mut current = leaf;
     for (sibling, direction) in &path {
         current = if *direction {
-            // leaf was on the left, sibling on the right
-            mimc2(current, *sibling)
-        } else {
-            // leaf was on the right, sibling on the left
+            // sibling is on the left
             mimc2(*sibling, current)
+        } else {
+            // sibling is on the right
+            mimc2(current, *sibling)
         };
     }
 
