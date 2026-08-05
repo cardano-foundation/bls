@@ -8,7 +8,7 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from gen_smt_input import (
-    p, ROUND_CONSTANTS, mimc2, build_merkle_tree,
+    P_BLS, P_ED, ROUND_CONSTANTS, mimc2, multi_mimc7, build_merkle_tree,
     bytes_to_bits_le, decompress_point, to_chunks, clamp_ed25519_scalar,
 )
 
@@ -31,7 +31,7 @@ def generate_test_input(depth=4, index=0, output_file="test_smt_input.json"):
     PointA = decompress_point(pk_bytes)
     PointA_chunks = [to_chunks(c) for c in PointA]
 
-    leaf = mimc2(PointA[0], PointA[1])
+    leaf = multi_mimc7(PointA_chunks[0] + PointA_chunks[1])
 
     other_leaves = [12345, 67890, 11111, 22222, 33333, 44444, 55555, 66666, 77777, 88888, 99999, 10101, 20202, 30303, 40404]
     all_leaves = [0] * (1 << depth)
@@ -65,4 +65,10 @@ def generate_test_input(depth=4, index=0, output_file="test_smt_input.json"):
 
 
 if __name__ == "__main__":
-    generate_test_input()
+    import argparse
+    parser = argparse.ArgumentParser(description="End-to-end test input for CardanoKeyOwnershipSMT.")
+    parser.add_argument("--depth", type=int, default=4)
+    parser.add_argument("--index", type=int, default=0)
+    parser.add_argument("--output", default="test_smt_input.json")
+    args = parser.parse_args()
+    generate_test_input(depth=args.depth, index=args.index, output_file=args.output)

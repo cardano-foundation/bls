@@ -26,25 +26,33 @@ signer owns *some* key in the authorized set, without revealing *which* key.
 ### Workflow
 
 ```text
-1. Build the SMT of authorized key commitments
+1. Generate witness inputs from an Ed25519 key pair
 
-   $ groth16-prover smt insert --depth 4 \
-       --items "commit1,commit2,commit3,commit4" \
-       --state auth_keys.json
+   $ python3 test_e2e.py --depth 4 --index 0 --output witness.json
 
-2. Export the SMT witness data for a specific nullifier
+   (or, from a real Cardano key:)
 
-   $ groth16-prover smt export --state auth_keys.json \
-       --nullifier <nullifier> --out witness.json
+   $ cardano-address key public --without-chain-code < pay.xsk > pay.vk
+   $ python3 gen_smt_input.py --xsk pay.xsk --vk pay.vk -o witness.json --depth 4
 
-3. Generate the combined proof (Ed25519 + SMT membership)
+2. Generate the witness
 
-   $ groth16-prover prove --circuit cardano_key_ownership_smt.r1cs \
-       --witness witness.wtns --proving-key circuit.pk --out proof.bin
+   $ snarkjs wc cardano_key_ownership_smt_js/cardano_key_ownership_smt.wasm \
+       witness.json witness.wtns
 
-4. Verify the combined proof
+3. Check the witness satisfies the R1CS
 
-   $ groth16-prover verify --proof proof.bin --public proof.pub --verifying-key circuit.vk
+   $ snarkjs wchk cardano_key_ownership_smt.r1cs witness.wtns
+
+4. Generate the combined proof (Ed25519 + SMT membership)
+
+   $ snarkjs groth16 prove cardano_key_ownership_smt_final.zkey \
+       witness.json proof.json public.json
+
+5. Verify the combined proof
+
+   $ snarkjs groth16 verify cardano_key_ownership_smt_verification_key.json \
+       public.json proof.json
 ```
 
 ## Design
@@ -73,32 +81,40 @@ Proves `A` is in the SMT:
 
 The Ed25519 public key `A` (256 bits) is committed into the SMT. The commitment
 scheme must be consistent between:
-- **Insertion**: `smt insert` uses MiMC(x^7) to hash items into the tree
-- **Verification**: The circuit must compute the same commitment from `A`
+- **Insertion**: `gen_smt_input.py` / `test_e2e.py` compute the leaf commitment
+- **Verification**: The circuit must compute the same commitment from `PointA`
 
-Two approaches for the bridge:
+The implemented bridge hashes the **full decompressed coordinates** of `A`:
 
-| Approach | Description | Trade-off |
-|----------|-------------|-----------|
-| **Direct** | Use `A` (or a hash of `A`) as the SMT leaf value directly | Simple, but leaks key identity to SMT |
-| **Hash** | Commit to `H(A)` where `H` is MiMC(x^7), store `H(A)` in SMT | More privacy, requires matching hash in circuit |
+```
+leaf = MultiMiMC7([x0, x1, x2, y0, y1, y2], k=0)
+```
 
-The **Hash** approach is recommended: the SMT stores `MiMC(A)` and the circuit
-computes the same MiMC hash as part of the proof, then verifies membership of
-`MiMC(A)` in the tree.
+where `x_i`/`y_i` are the base-2^85 chunks of the X and Y coordinates of the
+Ed25519 public key point. The circuit computes the same `MultiMimc7(6, 91)`
+over its `PointA[2][3]` input, then walks the Merkle path to `smt_root`.
+
+The SMT uses MiMC(x⁷) over the **BLS12-381 scalar field** (`0x73eda7...0001`,
+the field circom targets with `--prime bls12381`). Empty leaves default to `0`
+and hash up as `mimc2(default, default)`, matching the padding scheme of
+`SparseMerkleTree` in `groth16-prover/src/sparse_merkle_tree.rs`.
+
+> Note: the Rust `groth16-prover smt` CLI (`insert`/`export`) targets the
+> separate `Privacy` spend circuit, not this one. Its exports produce
+> `digest/nullifier/nonce/siblings/directions`, which differ from the
+> `CardanoKeyOwnershipSMT` input format.
 
 ### Input/Output Specification
 
 #### Public Inputs
 - `A[256]` — compressed Ed25519 public key bits
-- `digest` — SMT root (field element)
-- `MiMC(A)` — MiMC hash of the public key (field element)
+- `smt_root` — SMT root (field element)
 
 #### Private Inputs
 - `sk[255]` — Ed25519 scalar bits
 - `PointA[4][3]` — decompressed public key in extended coordinates
-- `siblings[]` — Merkle path sibling field elements
-- `direction[]` — Merkle path direction bits (0=left, 1=right)
+- `smt_siblings[]` — Merkle path sibling field elements
+- `smt_directions[]` — Merkle path direction bits (0=leaf on left, 1=leaf on right)
 
 ### File Layout
 
@@ -109,11 +125,12 @@ CardanoKeyOwnershipSMT/
 ├── cardano_key_ownership_smt.r1cs       # Compiled R1CS
 ├── cardano_key_ownership_smt.wasm       # Witness generator
 ├── cardano_key_ownership_smt_js/        # JS witness gen directory
-├── setup_cardano_address_smt.sh         # Setup script
-├── gen_cardano_address_smt_input.py     # Input generator (extended)
-├── test_cardano_address_smt_e2e.sh      # E2E test script
-├── test_ownership_smt_input.json        # Test input
-└── witness_ownership_smt.wtns           # Test witness
+├── gen_smt_input.py                     # Input generator (cardano-address keys)
+├── test_e2e.py                          # Self-contained e2e input generator
+├── test_smt_simple.py                   # Fixed-seed simple input generator
+├── test_smt.sh                          # Input + witness + R1CS check
+├── demo.sh                              # End-to-end demo
+└── benchmarks.py                        # Witness/proof/verify timings
 ```
 
 ### Dependencies
@@ -121,15 +138,16 @@ CardanoKeyOwnershipSMT/
 - `circom` compiler (≥ 2.0.0)
 - `snarkjs` for witness generation and proof verification
 - `cardano-addresses` CLI for key generation (optional, for real-world use)
-- `groth16-prover` CLI for proving and verification
+- `pynacl` for the self-contained `test_e2e.py` key generation
 
 ### MiMC Hashing in the Circuit
 
-The SMT uses MiMC(x^7) as its hash function. The circuit must implement the
-same MiMC round function to compute the Merkle path. The number of rounds
-depends on the security level:
-- 91 rounds for 128-bit security (BLS12-381 base field)
-- The `mimc` module in `groth16-prover` provides the `mimc2` function
+The SMT uses MiMC(x^7) over the BLS12-381 **scalar field** as its hash
+function. The circuit and the Python generators must use the same round
+constants (see `groth16-prover/src/mimc.rs`, `circom/Privacy/mimc.circom`,
+and `ROUND_CONSTANTS` in `gen_smt_input.py`).
+- 91 rounds for 128-bit security
+- `MultiMimc7(6, 91)` commits the public key coordinates to the leaf
 
 ### Security Considerations
 
@@ -137,9 +155,10 @@ depends on the security level:
    compromises all keys in the set.
 2. **Key rotation**: To add/remove keys, rebuild the SMT and update the root.
    Old proofs remain valid for the old root.
-3. **Privacy**: The Hash approach hides which specific key is being used, but
-   the public key `A` is still visible on-chain. For full privacy, consider
-   using a Pedersen commitment instead of MiMC.
+3. **Privacy**: The SMT stores only the MiMC commitment of the key (not the raw
+   key), so the proof hides which key in the set is used — but the public key
+   `A` is still visible on-chain. For full privacy, consider using a Pedersen
+   commitment instead of MiMC.
 4. **Circuit size**: The combined circuit is larger than either component alone.
    For large SMT depths, consider using the `nova` IVC folding approach to
    batch multiple proofs.

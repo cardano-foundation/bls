@@ -86,9 +86,14 @@ template CardanoKeyOwnershipSMT(depth) {
     }
 
     signal leaf;
-    component leafHasher = Mimc2();
-    leafHasher.in0 <== PointA[0][0];
-    leafHasher.in1 <== PointA[1][0];
+    component leafHasher = MultiMimc7(6, 91);
+    for(i=0; i<3; i++) {
+        leafHasher.in[i] <== PointA[0][i];
+    }
+    for(i=0; i<3; i++) {
+        leafHasher.in[i + 3] <== PointA[1][i];
+    }
+    leafHasher.k <== 0;
     leaf <== leafHasher.out;
 
     component hashers[depth];
