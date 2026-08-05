@@ -18,19 +18,25 @@ The script:
   3. Decompresses the point
   4. Computes the MiMC leaf = MultiMiMC7(x_chunks, y_chunks) over the 85-bit
      chunks of both coordinates (matching the circuit's leaf commitment)
-  5. Builds a Merkle tree of the given depth with the leaf at the given index
+  5. Builds the zero-padded Merkle tree of the given depth with the leaf at
+     the given index via the `groth16-prover smt` CLI (`smt insert --index`,
+     `smt path --json`, `smt verify`) — with an equivalent in-Python builder
+     as fallback when the CLI is not available
   6. Generates the Merkle proof (siblings and directions)
   7. Emits the JSON input expected by the CardanoKeyOwnershipSMT circuit
 
 Usage:
-  python3 gen_smt_input.py --xsk pay.xsk --vk pay.vk -o input.json [--depth 4] [--index 0]
+  python3 gen_smt_input.py --xsk pay.xsk --vk pay.vk -o input.json [--depth 4] [--index 0] [--smt-cli groth16-prover]
 """
 
 import argparse
 import json
 import hashlib
+import os
+import shutil
 import subprocess
 import sys
+import tempfile
 
 
 # Ed25519 field prime (used for public key decompression)
@@ -285,6 +291,58 @@ def build_merkle_tree(leaf_index, depth, all_leaves):
     return root, proof, directions
 
 
+def build_merkle_tree_cli(leaf, index, depth, smt_cli):
+    """Build the zero-padded SMT via the `groth16-prover smt` CLI.
+
+    This is the primary, supported path. Uses `smt insert --index` to place
+    the single leaf at `index`, `smt path --json` for the proof, and
+    `smt verify` as a self-check. Returns `(root, siblings, directions, used_cli)`.
+
+    The in-Python `build_merkle_tree` is a **fallback only** (identical
+    padding scheme). It is used solely when the CLI is unavailable or errors
+    (e.g. binary not built with the `privacy` feature or not on PATH), and a
+    `WARNING:` is always printed when that happens.
+    """
+    if smt_cli:
+        tmp = tempfile.mkdtemp(prefix="smt_cli_")
+        try:
+            state = os.path.join(tmp, "smt.json")
+            subprocess.run(
+                [smt_cli, "smt", "insert", "--depth", str(depth),
+                 "--items", str(leaf), "--index", str(index), "--state", state],
+                check=True, capture_output=True, text=True,
+            )
+            out = subprocess.run(
+                [smt_cli, "smt", "path", "--state", state, "--leaf", str(leaf), "--json"],
+                check=True, capture_output=True, text=True,
+            )
+            data = json.loads(out.stdout)
+            subprocess.run(
+                [smt_cli, "smt", "verify", "--state", state, "--leaf", str(leaf)],
+                check=True, capture_output=True, text=True,
+            )
+            return (
+                str(data["digest"]),
+                [str(s) for s in data["siblings"]],
+                [str(d) for d in data["directions"]],
+                True,
+            )
+        except FileNotFoundError as e:
+            print(f"WARNING: smt CLI '{smt_cli}' not found ({e}); "
+                  "falling back to the in-Python Merkle builder (fallback only)")
+        except (subprocess.CalledProcessError, json.JSONDecodeError) as e:
+            print(f"WARNING: smt CLI failed ({e}); "
+                  "falling back to the in-Python Merkle builder (fallback only)")
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    # Fallback (not the intended path): equivalent zero-padded tree in Python.
+    all_leaves = [0] * (1 << depth)
+    all_leaves[index] = leaf
+    root, siblings, directions = build_merkle_tree(index, depth, all_leaves)
+    return str(root), [str(s) for s in siblings], [str(d) for d in directions], False
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Generate CardanoKeyOwnershipSMT circuit input from cardano-address keys."
@@ -296,6 +354,13 @@ def main():
     parser.add_argument("-o", "--output", default="input.json", help="Output JSON file (default: input.json)")
     parser.add_argument("--depth", type=int, default=4, help="SMT depth (default: 4)")
     parser.add_argument("--index", type=int, default=0, help="Leaf index in the SMT (default: 0)")
+    parser.add_argument(
+        "--smt-cli",
+        default="groth16-prover",
+        help="Path to the 'groth16-prover' binary used to build the SMT "
+             "(must expose the 'smt' subcommand, i.e. be built with the "
+             "'privacy' feature). Default: 'groth16-prover' (looked up on PATH).",
+    )
     args = parser.parse_args()
 
     xsk_bytes, xsk_hrp = decode_bech32_file(args.xsk)
@@ -332,10 +397,7 @@ def main():
     # same order as the circuit's MultiMimc7(6, 91) template.
     leaf = multi_mimc7(PointA_chunks[0] + PointA_chunks[1])
 
-    all_leaves = [0] * (1 << args.depth)
-    all_leaves[args.index] = leaf
-
-    smt_root, siblings, directions = build_merkle_tree(args.index, args.depth, all_leaves)
+    smt_root, siblings, directions, used_cli = build_merkle_tree_cli(leaf, args.index, args.depth, args.smt_cli)
 
     circuit_input = {
         "A": [str(b) for b in A_bits],
@@ -356,6 +418,10 @@ def main():
     print(f"  Scalar (hex):   {scalar.hex()}")
     print(f"  SMT depth:      {args.depth}")
     print(f"  SMT leaf index: {args.index}")
+    if used_cli:
+        print(f"  SMT builder:    groth16-prover smt CLI (--smt-cli {args.smt_cli})")
+    else:
+        print(f"  SMT builder:    PYTHON FALLBACK (smt CLI '{args.smt_cli}' unavailable)")
     print(f"  SMT root:       {smt_root}")
     print(f"  MiMC leaf:      {leaf}")
     print("Input generated successfully for CardanoKeyOwnershipSMT circuit.")

@@ -43,16 +43,34 @@ impl SparseMerkleTree {
     /// Insert an item into the next open leaf.
     /// Panics if the item already exists or the tree is full.
     pub fn insert(&mut self, item: Fr) {
-        let item_key = fr_to_key(item);
-        if self.leaf_indices.contains_key(&item_key) {
-            panic!("Item {} already exists in tree", item);
-        }
         if self.next_index >= (1usize << self.depth) {
             panic!("Tree is full");
         }
         let index = self.next_index;
         self.next_index += 1;
-        self.leaf_indices.insert(item_key.clone(), index);
+        self.insert_at(item, index);
+    }
+
+    /// Place a single item at an explicit leaf index in an otherwise default
+    /// (empty) tree.
+    ///
+    /// This is the way to reproduce trees whose empty leaves stay zero-padded
+    /// (e.g. a single-leaf tree where the leaf sits at index `> 0`).  Unlike
+    /// [`Self::insert`], this does not advance the next-open index, so mixing
+    /// it with later sequential `insert` calls can cause leaf collisions.
+    /// Panics if the item already exists.
+    pub fn insert_at(&mut self, item: Fr, index: usize) {
+        assert!(
+            index < (1usize << self.depth),
+            "index {} out of range for depth {}",
+            index,
+            self.depth
+        );
+        let item_key = fr_to_key(item);
+        if self.leaf_indices.contains_key(&item_key) {
+            panic!("Item {} already exists in tree", item);
+        }
+        self.leaf_indices.insert(item_key, index);
         self.nodes.insert(node_key(self.depth, index), item);
 
         let mut level = self.depth;
@@ -125,6 +143,20 @@ mod tests {
         tree.insert(item);
         let path = tree.path(item).unwrap();
         assert_eq!(path.len(), 2);
+    }
+
+    #[test]
+    fn test_insert_at_offset_path_hashes_to_root() {
+        // Single leaf at index 3 (0-padded tree), depth 2.
+        let mut tree = SparseMerkleTree::new(2);
+        let item = Fr::from(42u64);
+        tree.insert_at(item, 3);
+        let path = tree.path(item).unwrap();
+        // Index 3 = 0b11: both directions are "sibling on left" (true).
+        // Level-0 sibling is the empty left subtree parent mimc2(0, 0).
+        assert_eq!(path, vec![(Fr::zero(), true), (mimc2(Fr::zero(), Fr::zero()), true)]);
+        let root = recompute_root(item, &path);
+        assert_eq!(root, tree.digest());
     }
 
     /// Recompute the root from a leaf and its Merkle path.
