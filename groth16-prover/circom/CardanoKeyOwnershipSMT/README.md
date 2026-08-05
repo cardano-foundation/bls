@@ -26,34 +26,134 @@ signer owns *some* key in the authorized set, without revealing *which* key.
 ### Workflow
 
 ```text
-1. Generate witness inputs from an Ed25519 key pair
+1. Derive a real Cardano payment key (cardano-address CLI)
 
-   $ python3 test_e2e.py --depth 4 --index 0 --output witness.json
-
-   (or, from a real Cardano key:)
-
+   $ cardano-address recovery-phrase generate --size 15 > phrase.prv
+   $ cardano-address key from-recovery-phrase Shelley < phrase.prv > root.xsk
+   $ cardano-address key child 1852H/1815H/0H/0/0 < root.xsk > pay.xsk
    $ cardano-address key public --without-chain-code < pay.xsk > pay.vk
-   $ python3 gen_smt_input.py --xsk pay.xsk --vk pay.vk -o witness.json --depth 4
 
-2. Generate the witness
+2. Generate witness inputs from the key pair
+
+   $ python3 gen_smt_input.py --xsk pay.xsk --vk pay.vk -o input.json --depth 4
+
+   (or, self-contained with no cardano-address dependency:)
+
+   $ python3 test_e2e.py --depth 4 --index 0 --output input.json
+
+3. Generate the witness
 
    $ snarkjs wc cardano_key_ownership_smt_js/cardano_key_ownership_smt.wasm \
-       witness.json witness.wtns
+       input.json witness.wtns
 
-3. Check the witness satisfies the R1CS
+4. Single-party dev ceremony (one-time per circuit, ~6 min)
 
-   $ snarkjs wchk cardano_key_ownership_smt.r1cs witness.wtns
+   $ groth16-prover ceremony-dev --sparse --h-scalar \
+       --circuit cardano_key_ownership_smt.r1cs \
+       --proving-key smt.pk --verifying-key smt.vk
 
-4. Generate the combined proof (Ed25519 + SMT membership)
+5. Generate the combined proof (Ed25519 + SMT membership)
 
-   $ snarkjs groth16 prove cardano_key_ownership_smt_final.zkey \
-       witness.json proof.json public.json
+   $ groth16-prover prove --sparse \
+       --circuit cardano_key_ownership_smt.r1cs \
+       --witness witness.wtns --proving-key smt.pk --out proof.bin
 
-5. Verify the combined proof
+6. Verify the combined proof
 
-   $ snarkjs groth16 verify cardano_key_ownership_smt_verification_key.json \
-       public.json proof.json
+   $ groth16-prover verify --proof proof.bin --public proof.pub \
+       --verifying-key smt.vk
+   # → Verification result: VALID
 ```
+
+### End-to-end flow — Implementation 7 (monolithic + h-scalar)
+
+> This is the **single-proof reference path**: one ~1.97M-constraint Groth16
+> proof over the full key-ownership + SMT-membership statement, using the
+> Implementation 7 sparse prover (`--sparse`) and h-query scalar compression
+> (`--h-scalar`). The ceremony is circuit-specific and one-time (~6 min);
+> after that, proofs for any key in the SMT take ~40 s each.
+
+#### Step 1: Derive a real Cardano payment key
+
+```bash
+cd groth16-prover/circom/CardanoKeyOwnershipSMT
+
+cardano-address recovery-phrase generate --size 15 > phrase.prv
+cardano-address key from-recovery-phrase Shelley < phrase.prv > root.xsk
+cardano-address key child 1852H/1815H/0H/0/0 < root.xsk > pay.xsk
+cardano-address key public --without-chain-code < pay.xsk > pay.vk
+```
+
+**Key insight:** In Cardano's BIP32-Ed25519, the payment signing key `pay.xsk`
+encodes the Ed25519 scalar in its first 32 bytes (`kL`), already clamped —
+exactly the private witness `sk[255]` the circuit needs. `pay.vk` holds the
+standard 32-byte compressed public key.
+
+#### Step 2: Generate circuit input from bech32 keys
+
+```bash
+python3 gen_smt_input.py --xsk pay.xsk --vk pay.vk -o input.json --depth 4
+```
+
+This produces `input.json` with:
+- `A[256]` — compressed public key bits (from `pay.vk`)
+- `sk[255]` — clamped scalar bits (from `pay.xsk`)
+- `PointA[4][3]` — decompressed public key in extended coordinates
+- `smt_siblings[4]`, `smt_directions[4]`, `smt_root` — Merkle path and root
+
+#### Step 3: Generate the witness
+
+```bash
+snarkjs wc cardano_key_ownership_smt_js/cardano_key_ownership_smt.wasm \
+  input.json witness.wtns
+
+# Optional: confirm the witness satisfies the R1CS (~1.5 min)
+snarkjs wchk cardano_key_ownership_smt.r1cs witness.wtns
+# → WITNESS IS CORRECT (1,970,791 constraints)
+```
+
+#### Step 4: Single-party dev ceremony (one-time per circuit, ~6 min)
+
+```bash
+groth16-prover ceremony-dev --sparse --h-scalar \
+  --circuit cardano_key_ownership_smt.r1cs \
+  --proving-key smt.pk --verifying-key smt.vk
+```
+
+> ⚠️ `--sparse` is mandatory at this scale (1.97M constraints) to avoid dense
+> matrix allocation; `--h-scalar` (Implementation 7) stores a single
+> `delta_inv·T(tau)` scalar instead of the full h-query G1 vector. Outputs:
+> `smt.pk` ≈ 1.3 GiB (uncompressed), `smt.vk` ≈ 187 MiB. The ceremony is
+> circuit-specific — run it once, reuse the keys for every proof.
+
+#### Step 5: Prove
+
+```bash
+groth16-prover prove --sparse \
+  --circuit cardano_key_ownership_smt.r1cs \
+  --witness witness.wtns --proving-key smt.pk --out proof.bin
+# → Proof generation (sparse) took ~32 s
+```
+
+#### Step 6: Verify
+
+```bash
+groth16-prover verify --proof proof.bin --public proof.pub \
+  --verifying-key smt.vk
+# → Verification result: VALID
+```
+
+#### Step 7 (optional): Export the verification key for on-chain use
+
+```bash
+groth16-prover export-vk --verifying-key smt.vk --out smt_vk.ak
+```
+
+> The monolithic path is the reference single-proof flow. The
+> `cardano_key_ownership_smt_nova.circom` step-chain (Implementation 8) folds
+> the scalar multiplication into 255 small steps so the ceremony drops to
+> ~1.5 s; see the `CardanoKeyOwnership` README for the analogous step-chain
+> workflow.
 
 ## Design
 
@@ -72,10 +172,11 @@ Proves `A = [sk]·G` on Curve25519:
 #### 2. SMT Merkle Path Verification (from `smt.rs` / MiMC hashing)
 
 Proves `A` is in the SMT:
-- Private input: `siblings[]` (Merkle path siblings), `direction[]` (left/right bits)
-- Public input: `digest` (SMT root), `leaf` (the key commitment)
+- Private input: `smt_siblings[]` (Merkle path siblings), `smt_directions[]` (left/right bits)
+- Public input: `smt_root` (the SMT root)
+- The leaf is derived in-circuit via `MultiMimc7(6, 91)` over the decompressed `PointA`
 - Uses MiMC(x^7) hashing for the path computation
-- Verifies that `hash(leaf, siblings, directions) == digest`
+- Verifies that `hash(leaf, siblings, directions) == smt_root`
 
 #### 3. Bridge: Key Commitment
 
@@ -135,9 +236,10 @@ CardanoKeyOwnershipSMT/
 
 ### Dependencies
 
-- `circom` compiler (≥ 2.0.0)
-- `snarkjs` for witness generation and proof verification
-- `cardano-addresses` CLI for key generation (optional, for real-world use)
+- `circom` compiler (≥ 2.0.0) for compiling `cardano_key_ownership_smt.circom`
+- `snarkjs` for witness generation
+- `groth16-prover` CLI for ceremony, proving, and verification
+- `cardano-address` CLI for real-world key derivation (optional)
 - `pynacl` for the self-contained `test_e2e.py` key generation
 
 ### MiMC Hashing in the Circuit
