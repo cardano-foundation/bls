@@ -1,5 +1,8 @@
 use ark_bls12_381::Fr;
+use ark_ff::UniformRand;
 use ark_std::vec::Vec;
+use ark_std::Zero;
+use rand::RngCore;
 
 /// A circuit descriptor: R1CS matrices + witness + metadata.
 /// Generic over constraint/variable counts so it works with both
@@ -20,6 +23,71 @@ impl Circuit {
     }
     pub fn n_vars(&self) -> usize {
         self.witness.len()
+    }
+}
+
+/// Generate a random R1CS circuit where every constraint is satisfied
+/// by construction.
+///
+/// Strategy (Approach B — witness-first):
+/// 1. Wire 0 is the constant wire (value 1).
+/// 2. For each constraint i, three fresh wires are allocated:
+///    L_wire = 3*i+1, R_wire = 3*i+2, O_wire = 3*i+3.
+/// 3. Random non-zero values are drawn for L_wire and R_wire.
+/// 4. O_wire is set to L_wire * R_wire so the constraint L·w * R·w = O·w
+///    holds trivially (all other entries in each row are zero).
+///
+/// This guarantees a valid R1CS relation for every constraint without
+/// any witness-search or backtracking.
+pub fn random_r1cs_circuit(rng: &mut impl RngCore, n_constraints: usize) -> Circuit {
+    let n_vars = 3 * n_constraints + 1;
+    let mut witness = vec![Fr::from(0u64); n_vars];
+    witness[0] = Fr::from(1u64);
+
+    let mut l = Vec::with_capacity(n_constraints);
+    let mut r = Vec::with_capacity(n_constraints);
+    let mut o = Vec::with_capacity(n_constraints);
+
+    for i in 0..n_constraints {
+        let l_wire = 3 * i + 1;
+        let r_wire = 3 * i + 2;
+        let o_wire = 3 * i + 3;
+
+        let l_val = random_nonzero_fr(rng);
+        let r_val = random_nonzero_fr(rng);
+        witness[l_wire] = l_val;
+        witness[r_wire] = r_val;
+        witness[o_wire] = l_val * r_val;
+
+        let mut l_row = vec![Fr::from(0u64); n_vars];
+        l_row[l_wire] = Fr::from(1u64);
+        let mut r_row = vec![Fr::from(0u64); n_vars];
+        r_row[r_wire] = Fr::from(1u64);
+        let mut o_row = vec![Fr::from(0u64); n_vars];
+        o_row[o_wire] = Fr::from(1u64);
+
+        l.push(l_row);
+        r.push(r_row);
+        o.push(o_row);
+    }
+
+    Circuit {
+        name: "random",
+        witness,
+        l,
+        r,
+        o,
+        n_public: 1,
+    }
+}
+
+/// Generate a random non-zero field element.
+fn random_nonzero_fr(rng: &mut impl RngCore) -> Fr {
+    loop {
+        let val = Fr::rand(rng);
+        if !val.is_zero() {
+            return val;
+        }
     }
 }
 

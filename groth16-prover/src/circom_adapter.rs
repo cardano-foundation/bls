@@ -6,6 +6,7 @@
 
 use ark_bls12_381::Fr;
 use ark_ff::PrimeField;
+use ark_serialize::CanonicalSerialize;
 use ark_std::vec::Vec;
 use ark_std::Zero;
 use nom::{
@@ -852,4 +853,118 @@ mod tests {
             "Sparse prover must produce a valid proof"
         );
     }
+}
+
+// ------------------------------------------------------------------
+// Randomized R1CS / WTNS binary format generators
+// ------------------------------------------------------------------
+
+/// Serialize a field element to 32-byte little-endian (Circom binary format).
+fn fr_to_le_bytes(val: &Fr) -> [u8; 32] {
+    let mut buf = Vec::new();
+    val.serialize_compressed(&mut buf).expect("Fr serialize");
+    let mut bytes = [0u8; 32];
+    // serialize_compressed writes big-endian canonical bytes; reverse for little-endian.
+    bytes.copy_from_slice(&buf);
+    bytes.reverse();
+    bytes
+}
+
+/// Serialize a `Circuit` to a valid Circom `.r1cs` binary blob.
+pub fn r1cs_to_bytes(circuit: &super::r1cs::Circuit) -> Vec<u8> {
+    let n_wires = circuit.witness.len() as u32;
+    let n_constraints = circuit.l.len() as u32;
+    let n_pub_out = circuit.n_public as u32;
+    let n_pub_in = 0u32;
+    let n_prv_in = (n_wires - n_pub_out - 1) as u32; // exclude constant wire
+    let n_labels = n_wires as u64;
+    let field_size = 32u32;
+
+    let mut out = Vec::new();
+    out.extend_from_slice(b"r1cs");
+    out.extend_from_slice(&1u32.to_le_bytes()); // version
+    out.extend_from_slice(&2u32.to_le_bytes()); // n_sections
+
+    // Section 1: header
+    let mut header = Vec::new();
+    header.extend_from_slice(&field_size.to_le_bytes());
+    header.extend_from_slice(&[0u8; 32]); // prime placeholder
+    header.extend_from_slice(&n_wires.to_le_bytes());
+    header.extend_from_slice(&n_pub_out.to_le_bytes());
+    header.extend_from_slice(&n_pub_in.to_le_bytes());
+    header.extend_from_slice(&n_prv_in.to_le_bytes());
+    header.extend_from_slice(&n_labels.to_le_bytes());
+    header.extend_from_slice(&n_constraints.to_le_bytes());
+
+    out.extend_from_slice(&1u32.to_le_bytes()); // section type
+    out.extend_from_slice(&(header.len() as u64).to_le_bytes());
+    out.extend_from_slice(&header);
+
+    // Section 2: constraints (sparse)
+    let mut constraints = Vec::new();
+    for i in 0..n_constraints as usize {
+        let n_terms = circuit.l[i].iter().filter(|&&v| !v.is_zero()).count() as u32;
+        constraints.extend_from_slice(&n_terms.to_le_bytes());
+        for (j, &val) in circuit.l[i].iter().enumerate() {
+            if !val.is_zero() {
+                constraints.extend_from_slice(&(j as u32).to_le_bytes());
+                constraints.extend_from_slice(&fr_to_le_bytes(&val));
+            }
+        }
+        let n_terms = circuit.r[i].iter().filter(|&&v| !v.is_zero()).count() as u32;
+        constraints.extend_from_slice(&n_terms.to_le_bytes());
+        for (j, &val) in circuit.r[i].iter().enumerate() {
+            if !val.is_zero() {
+                constraints.extend_from_slice(&(j as u32).to_le_bytes());
+                constraints.extend_from_slice(&fr_to_le_bytes(&val));
+            }
+        }
+        let n_terms = circuit.o[i].iter().filter(|&&v| !v.is_zero()).count() as u32;
+        constraints.extend_from_slice(&n_terms.to_le_bytes());
+        for (j, &val) in circuit.o[i].iter().enumerate() {
+            if !val.is_zero() {
+                constraints.extend_from_slice(&(j as u32).to_le_bytes());
+                constraints.extend_from_slice(&fr_to_le_bytes(&val));
+            }
+        }
+    }
+
+    out.extend_from_slice(&2u32.to_le_bytes()); // section type
+    out.extend_from_slice(&(constraints.len() as u64).to_le_bytes());
+    out.extend_from_slice(&constraints);
+
+    out
+}
+
+/// Serialize a witness slice to a valid Circom `.wtns` binary blob.
+pub fn wtns_to_bytes(witness: &[Fr]) -> Vec<u8> {
+    let n_wires = witness.len() as u32;
+    let field_size = 32u32;
+
+    let mut out = Vec::new();
+    out.extend_from_slice(b"wtns");
+    out.extend_from_slice(&1u32.to_le_bytes()); // version
+    out.extend_from_slice(&2u32.to_le_bytes()); // n_sections
+
+    // Section 1: header
+    let mut header = Vec::new();
+    header.extend_from_slice(&field_size.to_le_bytes());
+    header.extend_from_slice(&[0u8; 32]); // prime placeholder
+    header.extend_from_slice(&n_wires.to_le_bytes());
+
+    out.extend_from_slice(&1u32.to_le_bytes()); // section type
+    out.extend_from_slice(&(header.len() as u64).to_le_bytes());
+    out.extend_from_slice(&header);
+
+    // Section 2: witness data
+    let mut data = Vec::new();
+    for val in witness {
+        data.extend_from_slice(&fr_to_le_bytes(val));
+    }
+
+    out.extend_from_slice(&2u32.to_le_bytes()); // section type
+    out.extend_from_slice(&(data.len() as u64).to_le_bytes());
+    out.extend_from_slice(&data);
+
+    out
 }

@@ -2695,3 +2695,46 @@ fn nova_verify_missing_ivc() {
         .failure()
         .stderr(predicate::str::contains("failed to read IVC bundle"));
 }
+
+// ------------------------------------------------------------------
+// Randomized R1CS fixture library-level tests
+// ------------------------------------------------------------------
+
+/// Randomized R1CS circuits produce valid proofs (library-level test).
+#[test]
+fn random_circuit_library_roundtrip() {
+    use groth16_prover::prover::Prover;
+
+    let mut rng = rand::thread_rng();
+    let circuit = groth16_prover::r1cs::random_r1cs_circuit(&mut rng, 3);
+    let r1cs_bytes = groth16_prover::circom_adapter::r1cs_to_bytes(&circuit);
+    let wtns_bytes = groth16_prover::circom_adapter::wtns_to_bytes(&circuit.witness);
+
+    // Verify the binary format can be parsed back
+    let mut parsed_circuit = groth16_prover::circom_adapter::CircomCircuit::from_bytes(&r1cs_bytes)
+        .expect("random R1CS bytes should parse");
+    parsed_circuit.load_witness_from_bytes(&wtns_bytes, 32)
+        .expect("random WTNS bytes should parse");
+
+    // Prove and verify
+    let engine = groth16_prover::engine::FftQapEngine::new();
+    let tw = groth16_prover::ceremony::ToxicWaste::deterministic();
+    let n_public = circuit.n_public;
+
+    let (pk, vk) = groth16_prover::ceremony::single_party_ceremony_full_from_tw(
+        &engine, &circuit.l, &circuit.r, &circuit.o,
+        n_public, tw, false,
+    );
+
+    let prover = groth16_prover::prover::PippengerProver::new();
+    let (proof, public_input) = prover.prove_with_full_pk(
+        &engine, &pk,
+        &circuit.l, &circuit.r, &circuit.o,
+        &circuit.witness,
+    );
+
+    assert!(
+        groth16_prover::prover::verify_proof(&proof, &public_input, &vk.alpha_g1, &vk.beta_g2, &vk.gamma_g2, &vk.delta_g2),
+        "proof must be valid for random 3-constraint circuit"
+    );
+}

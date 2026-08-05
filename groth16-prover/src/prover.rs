@@ -963,4 +963,165 @@ mod tests {
             "h_scalar prover must produce a valid proof"
         );
     }
+
+    // ------------------------------------------------------------------
+    // Parity assertion helpers for randomized R1CS fixtures
+    // ------------------------------------------------------------------
+
+    /// Assert that two proofs are bit-for-bit identical and both pass verification.
+    fn assert_proof_parity(
+        proof_a: &Proof,
+        proof_b: &Proof,
+        public_a: &PublicInput,
+        public_b: &PublicInput,
+        vk: &crate::ceremony::VerifyingKey,
+    ) {
+        assert_eq!(proof_a.a, proof_b.a, "A must match between provers");
+        assert_eq!(proof_a.b, proof_b.b, "B must match between provers");
+        assert_eq!(proof_a.c, proof_b.c, "C must match between provers");
+        assert_eq!(public_a.v, public_b.v, "V must match between provers");
+        assert!(
+            verify_proof(proof_a, public_a, &vk.alpha_g1, &vk.beta_g2, &vk.gamma_g2, &vk.delta_g2),
+            "proof A must pass verification"
+        );
+        assert!(
+            verify_proof(proof_b, public_b, &vk.alpha_g1, &vk.beta_g2, &vk.gamma_g2, &vk.delta_g2),
+            "proof B must pass verification"
+        );
+    }
+
+    /// Run both dense and sparse prover paths on the same circuit and assert parity.
+    fn assert_dense_sparse_parity(
+        circuit: &crate::r1cs::Circuit,
+        pk: &crate::ceremony::FullProvingKey,
+        vk: &crate::ceremony::VerifyingKey,
+    ) {
+        let engine = FftQapEngine::new();
+        let prover = PippengerProver::new();
+
+        // Dense path
+        let (proof_dense, public_dense) = prover.prove_with_full_pk(
+            &engine, pk,
+            &circuit.l, &circuit.r, &circuit.o,
+            &circuit.witness,
+        );
+
+        // Sparse path
+        let n_constraints = circuit.l.len();
+        let sparse_l: Vec<Vec<(u32, Fr)>> = circuit.l.iter().enumerate().map(|(_j, row)| {
+            row.iter().enumerate().filter_map(|(i, &v)| {
+                if v.is_zero() { None } else { Some((i as u32, v)) }
+            }).collect()
+        }).collect();
+        let sparse_r: Vec<Vec<(u32, Fr)>> = circuit.r.iter().enumerate().map(|(_j, row)| {
+            row.iter().enumerate().filter_map(|(i, &v)| {
+                if v.is_zero() { None } else { Some((i as u32, v)) }
+            }).collect()
+        }).collect();
+        let sparse_o: Vec<Vec<(u32, Fr)>> = circuit.o.iter().enumerate().map(|(_j, row)| {
+            row.iter().enumerate().filter_map(|(i, &v)| {
+                if v.is_zero() { None } else { Some((i as u32, v)) }
+            }).collect()
+        }).collect();
+
+        let (proof_sparse, public_sparse) = prover.prove_with_full_pk_sparse(
+            &engine, pk, n_constraints,
+            &sparse_l, &sparse_r, &sparse_o,
+            &circuit.witness,
+        );
+
+        assert_proof_parity(&proof_dense, &proof_sparse, &public_dense, &public_sparse, vk);
+    }
+
+    // ------------------------------------------------------------------
+    // Randomized R1CS fixture parity tests
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn random_circuit_1_constraint_prove_verify() {
+        let mut rng = rand::thread_rng();
+        let circuit = crate::r1cs::random_r1cs_circuit(&mut rng, 1);
+
+        let engine = FftQapEngine::new();
+        let tw = crate::ceremony::ToxicWaste::deterministic();
+        let n_public = circuit.n_public;
+
+        let (pk, vk) = crate::ceremony::single_party_ceremony_full_from_tw(
+            &engine, &circuit.l, &circuit.r, &circuit.o,
+            n_public, tw, false,
+        );
+
+        let prover = PippengerProver::new();
+        let (proof, public_input) = prover.prove_with_full_pk(
+            &engine, &pk,
+            &circuit.l, &circuit.r, &circuit.o,
+            &circuit.witness,
+        );
+
+        assert!(
+            verify_proof(&proof, &public_input, &vk.alpha_g1, &vk.beta_g2, &vk.gamma_g2, &vk.delta_g2),
+            "proof must be valid for 1-constraint random circuit"
+        );
+    }
+
+    #[test]
+    fn random_circuit_5_constraints_prove_verify() {
+        let mut rng = rand::thread_rng();
+        let circuit = crate::r1cs::random_r1cs_circuit(&mut rng, 5);
+
+        let engine = FftQapEngine::new();
+        let tw = crate::ceremony::ToxicWaste::deterministic();
+        let n_public = circuit.n_public;
+
+        let (pk, vk) = crate::ceremony::single_party_ceremony_full_from_tw(
+            &engine, &circuit.l, &circuit.r, &circuit.o,
+            n_public, tw, false,
+        );
+
+        let prover = PippengerProver::new();
+        let (proof, public_input) = prover.prove_with_full_pk(
+            &engine, &pk,
+            &circuit.l, &circuit.r, &circuit.o,
+            &circuit.witness,
+        );
+
+        assert!(
+            verify_proof(&proof, &public_input, &vk.alpha_g1, &vk.beta_g2, &vk.gamma_g2, &vk.delta_g2),
+            "proof must be valid for 5-constraint random circuit"
+        );
+    }
+
+    #[test]
+    fn random_circuit_dense_sparse_parity_1_constraint() {
+        let mut rng = rand::thread_rng();
+        let circuit = crate::r1cs::random_r1cs_circuit(&mut rng, 1);
+
+        let engine = FftQapEngine::new();
+        let tw = crate::ceremony::ToxicWaste::deterministic();
+        let n_public = circuit.n_public;
+
+        let (pk, vk) = crate::ceremony::single_party_ceremony_full_from_tw(
+            &engine, &circuit.l, &circuit.r, &circuit.o,
+            n_public, tw, false,
+        );
+
+        assert_dense_sparse_parity(&circuit, &pk, &vk);
+    }
+
+    #[test]
+    fn random_circuit_dense_sparse_parity_5_constraints() {
+        let mut rng = rand::thread_rng();
+        let circuit = crate::r1cs::random_r1cs_circuit(&mut rng, 5);
+
+        let engine = FftQapEngine::new();
+        let tw = crate::ceremony::ToxicWaste::deterministic();
+        let n_public = circuit.n_public;
+
+        let (pk, vk) = crate::ceremony::single_party_ceremony_full_from_tw(
+            &engine, &circuit.l, &circuit.r, &circuit.o,
+            n_public, tw, false,
+        );
+
+        assert_dense_sparse_parity(&circuit, &pk, &vk);
+    }
 }
