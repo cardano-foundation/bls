@@ -25,7 +25,7 @@ if [ ! -f "$WASM" ]; then
 fi
 
 echo "=== Step 1: Generate test input ==="
-python3 "${CIRCUIT_DIR}/gen_smt_input.py" --depth 2 --index 0 -o "$INPUT"
+python3 "${CIRCUIT_DIR}/test_e2e.py" --depth 4 --index 0 --output "$INPUT"
 echo "   Input generated: $INPUT"
 
 echo ""

@@ -42,13 +42,23 @@ echo "   Witness check passed!"
 
 echo ""
 echo "=== Step 4: Generate proof ==="
-snarkjs groth16 prove "${CIRCUIT_DIR}/cardano_key_ownership_smt_final.zkey" "$INPUT" "$PROOF" "$PUBLIC" 2>&1 | tail -3
-echo "   Proof generated: $PROOF"
+ZKEY="${CIRCUIT_DIR}/cardano_key_ownership_smt_final.zkey"
+VK="${CIRCUIT_DIR}/cardano_key_ownership_smt_verification_key.json"
+if [ ! -f "$ZKEY" ] || [ ! -f "$VK" ]; then
+    echo "   Skipped: trusted setup artifacts not present."
+    echo "   To enable proof generation/verification, run a trusted setup for"
+    echo "   ${R1CS} (e.g. snarkjs powersoftau + groth16 setup) and place:"
+    echo "     - cardano_key_ownership_smt_final.zkey"
+    echo "     - cardano_key_ownership_smt_verification_key.json"
+else
+    snarkjs groth16 prove "$ZKEY" "$INPUT" "$PROOF" "$PUBLIC" 2>&1 | tail -3
+    echo "   Proof generated: $PROOF"
 
-echo ""
-echo "=== Step 5: Verify proof ==="
-snarkjs groth16 verify "${CIRCUIT_DIR}/cardano_key_ownership_smt_verification_key.json" "$PUBLIC" "$PROOF" 2>&1 | tail -3
-echo "   Proof verified!"
+    echo ""
+    echo "=== Step 5: Verify proof ==="
+    snarkjs groth16 verify "$VK" "$PUBLIC" "$PROOF" 2>&1 | tail -3
+    echo "   Proof verified!"
+fi
 
 echo ""
 echo "=== Demo complete ==="
