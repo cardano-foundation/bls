@@ -14,3 +14,5 @@ pub mod mimc;
 pub mod sparse_merkle_tree;
 #[cfg(feature = "privacy")]
 pub mod privacy_inputs;
+#[cfg(feature = "privacy")]
+pub mod ed25519;

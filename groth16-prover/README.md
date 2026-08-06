@@ -286,6 +286,10 @@ This concept was formalised by Dahlberg, Pulls, and Peeters in *"Efficient Spars
 The CLI includes an insert-only sparse Merkle tree backed by MiMC(x⁷) over BLS12-381:
 
 ```bash
+# Derive CardanoKeyOwnershipSMT witness data from a key (Ed25519 decompress,
+# base-2^85 chunking, MiMC leaf, A/sk bit decomposition)
+cargo run --release -- smt key --vk <pk-hex> --xsk <scalar-hex> --json
+
 # Compute a MiMC leaf commitment (MultiMiMC7 over 6 limbs, k = 0)
 cargo run --release -- smt leaf --items "x0,x1,x2,y0,y1,y2"
 
@@ -306,6 +310,9 @@ cargo run --release -- smt verify --state /tmp/smt.json --leaf <commitment>
 
 # Export witness input.json for the Privacy circuit
 cargo run --release -- smt export --state /tmp/smt.json --nullifier 1 --out input.json
+
+# Assemble the full CardanoKeyOwnershipSMT circuit input (key record + tree)
+cargo run --release -- smt cardano-input --state /tmp/smt.json --key key.json --out input.json
 ```
 
 See [`cli/README.md`](cli/README.md) for full CLI documentation, including proof serialization format, proving key structure, and complete end-to-end examples.

@@ -3,14 +3,22 @@
 //! Provides insert-only SMT commands backed by MiMC(x^7) hashing.
 //!
 //! Subcommands:
-//!   leaf      — compute a MiMC leaf commitment (MultiMiMC7 over 6 limbs)
-//!   insert    — insert items into the tree and print the new digest
-//!   digest    — print the current digest of a persisted tree
-//!   path      — print the Merkle path for a given leaf
-//!   verify    — verify a Merkle path hashes back to the stored digest
-//!   export    — export witness input JSON for the Privacy circuit
+//!   key           — derive CardanoKeyOwnershipSMT witness data from a key
+//!   leaf          — compute a MiMC leaf commitment (MultiMiMC7 over 6 limbs)
+//!   insert        — insert items into the tree and print the new digest
+//!   digest        — print the current digest of a persisted tree
+//!   path          — print the Merkle path for a given leaf
+//!   verify        — verify a Merkle path hashes back to the stored digest
+//!   export        — export witness input JSON for the Privacy circuit
+//!   cardano-input — assemble the full CardanoKeyOwnershipSMT circuit input
 //!
 //! Examples:
+//!
+//!   Derive the witness data for a Cardano payment key (decompress the
+//!   Ed25519 public key, split into base-2^85 limbs, compute the MiMC leaf
+//!   commitment, and bit-decompose `A` / `sk`):
+//!
+//!     $ groth16-prover smt key --vk <pk-hex> --xsk <scalar-hex> --json
 //!
 //!   Compute a MiMC leaf commitment (the CardanoKeyOwnershipSMT leaf, from
 //!   the six base-2^85 limbs x0,x1,x2,y0,y1,y2 of the decompressed key):
@@ -46,8 +54,14 @@
 //!   Export witness input JSON for the Privacy circuit:
 //!
 //!     $ groth16-prover smt export --state smt.json --nullifier 1 --out input.json
+//!
+//!   Assemble the full CardanoKeyOwnershipSMT circuit input from a tree state
+//!   and a `smt key --json` file:
+//!
+//!     $ groth16-prover smt cardano-input --state smt.json --key key.json --out input.json
 
 use clap::{Parser, Subcommand};
+use groth16_prover::ed25519::{bits_le, clamp_scalar, decompress_point, to_chunks};
 use groth16_prover::mimc::{mimc2, mimc_hash};
 use groth16_prover::sparse_merkle_tree::SparseMerkleTree;
 use std::error::Error;
@@ -61,6 +75,25 @@ use ark_ff::Zero;
 /// SMT subcommands
 #[derive(Debug, Subcommand)]
 pub enum SmtCommand {
+    /// Derive CardanoKeyOwnershipSMT witness data from a payment key
+    ///
+    /// Decompresses the compressed Ed25519 public key `--vk` to extended
+    /// coordinates, splits each coordinate into three base-2^85 limbs, and
+    /// computes the MiMC leaf commitment over the `x` and `y` limbs — exactly
+    /// what the circuit re-derives in-circuit. With `--xsk` (the 32-byte
+    /// scalar from the extended signing key) it additionally emits the
+    /// little-endian bits of the clamped scalar (`sk`).
+    ///
+    /// `--json` emits the machine-readable record consumed by `smt
+    /// cardano-input`:
+    ///
+    ///   {"vk", "PointA", "leaf", "A", "sk"}
+    ///
+    /// Example:
+    ///
+    ///   $ groth16-prover smt key --vk <pk-hex> --xsk <scalar-hex> --json
+    Key(KeyArgs),
+
     /// Compute a MiMC leaf commitment (MultiMiMC7 over 6 limbs, k = 0)
     ///
     /// Hashes the six base-2^85 limbs `x0,x1,x2,y0,y1,y2` of a decompressed
@@ -143,6 +176,39 @@ pub enum SmtCommand {
     ///
     ///   $ groth16-prover smt export --state smt.json --nullifier 1 --out input.json
     Export(ExportArgs),
+
+    /// Assemble the full CardanoKeyOwnershipSMT circuit input
+    ///
+    /// Combines a persisted tree (`--state`) with a key record produced by
+    /// `smt key --json` (`--key`) into the complete witness input for the
+    /// CardanoKeyOwnershipSMT circuit: `A`, `sk`, `PointA`, `smt_root`,
+    /// `smt_siblings`, and `smt_directions`.
+    ///
+    /// The key's MiMC leaf is looked up in the tree by value and its Merkle
+    /// path becomes the proof. The key record must contain `sk` (i.e. it must
+    /// have been generated with `--xsk`).
+    ///
+    /// Example:
+    ///
+    ///   $ groth16-prover smt cardano-input --state smt.json --key key.json --out input.json
+    CardanoInput(CardanoInputArgs),
+}
+
+/// Arguments for `smt key`
+#[derive(Debug, Parser)]
+pub struct KeyArgs {
+    /// Compressed Ed25519 public key as 64 hex chars (32 bytes).
+    #[arg(long, value_name = "HEX")]
+    vk: String,
+
+    /// 32-byte Ed25519 scalar (first 32 bytes of the extended signing key)
+    /// as 64 hex chars. Optional: without it the `sk` bits are omitted.
+    #[arg(long, value_name = "HEX")]
+    xsk: Option<String>,
+
+    /// Emit machine-readable JSON (`{"vk", "PointA", "leaf", "A", "sk"}`).
+    #[arg(long)]
+    json: bool,
 }
 
 /// Arguments for `smt leaf`
@@ -250,16 +316,169 @@ pub struct ExportArgs {
     out: PathBuf,
 }
 
+/// Arguments for `smt cardano-input`
+#[derive(Debug, Parser)]
+pub struct CardanoInputArgs {
+    /// Path to the persisted tree state (JSON).
+    /// Defaults to `smt.json`.
+    #[arg(long, value_name = "FILE", default_value = "smt.json")]
+    state: PathBuf,
+
+    /// Path to the `smt key --json` output record.
+    #[arg(long, value_name = "FILE")]
+    key: PathBuf,
+
+    /// Output path for the JSON witness input file.
+    /// Defaults to `input.json`.
+    #[arg(long, value_name = "FILE", default_value = "input.json")]
+    out: PathBuf,
+}
+
 /// Run the SMT command
 pub fn run(cmd: SmtCommand) -> Result<(), Box<dyn Error>> {
     match cmd {
+        SmtCommand::Key(cmd_args) => run_key(cmd_args),
         SmtCommand::Leaf(cmd_args) => run_leaf(cmd_args),
         SmtCommand::Insert(cmd_args) => run_insert(cmd_args),
         SmtCommand::Digest(cmd_args) => run_digest(cmd_args),
         SmtCommand::Path(cmd_args) => run_path(cmd_args),
         SmtCommand::Verify(cmd_args) => run_verify(cmd_args),
         SmtCommand::Export(cmd_args) => run_export(cmd_args),
+        SmtCommand::CardanoInput(cmd_args) => run_cardano_input(cmd_args),
     }
+}
+
+/// The `smt key` output record, also consumed by `smt cardano-input`.
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+struct KeyOutput {
+    /// Compressed public key as hex.
+    vk: String,
+    /// Decompressed extended coordinates `[X, Y, Z, T]`, each split into
+    /// three base-2^85 limbs.
+    PointA: Vec<Vec<String>>,
+    /// MiMC leaf commitment `MultiMiMC7(6, 91)` over the `x` and `y` limbs.
+    leaf: String,
+    /// Little-endian bits of the compressed public key (256 bits).
+    A: Vec<String>,
+    /// Little-endian bits of the clamped scalar (255 bits), when `--xsk` was
+    /// given.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sk: Option<Vec<String>>,
+}
+
+fn run_key(args: KeyArgs) -> Result<(), Box<dyn Error>> {
+    let pk: [u8; 32] = decode_hex32(&args.vk, "--vk")?;
+    let point = decompress_point(&pk).ok_or("failed to decompress Ed25519 public key")?;
+
+    let chunks: Vec<[u128; 3]> = point.iter().map(|c| to_chunks(*c)).collect();
+    let point_a: Vec<Vec<String>> = chunks
+        .iter()
+        .map(|row| row.iter().map(|c| c.to_string()).collect())
+        .collect();
+
+    let mut leaf_inputs = Vec::with_capacity(6);
+    for c in &chunks[0] {
+        leaf_inputs.push(Fr::from(*c));
+    }
+    for c in &chunks[1] {
+        leaf_inputs.push(Fr::from(*c));
+    }
+    let leaf = mimc_hash(&leaf_inputs, Fr::zero());
+
+    let a_bits: Vec<String> = bits_le(&pk).iter().map(|b| b.to_string()).collect();
+
+    let sk_bits: Option<Vec<String>> = match &args.xsk {
+        Some(xsk_hex) => {
+            let scalar: [u8; 32] = decode_hex32(xsk_hex, "--xsk")?;
+            let clamped = clamp_scalar(scalar);
+            Some(
+                bits_le(&clamped)[..255]
+                    .iter()
+                    .map(|b| b.to_string())
+                    .collect(),
+            )
+        }
+        None => None,
+    };
+
+    let out = KeyOutput {
+        vk: args.vk,
+        PointA: point_a,
+        leaf: field_to_string(leaf),
+        A: a_bits,
+        sk: sk_bits,
+    };
+
+    if args.json {
+        println!("{}", serde_json::to_string(&out)?);
+    } else {
+        println!("Public key:  {}", out.vk);
+        println!("MiMC leaf:   {}", out.leaf);
+        for (name, row) in ["X", "Y", "Z", "T"].iter().zip(&out.PointA) {
+            println!("  PointA[{name}]:  {}", row.join(", "));
+        }
+        println!("A bits:      {}", out.A.len());
+        match &out.sk {
+            Some(sk) => println!("sk bits:     {} (clamped scalar)", sk.len()),
+            None => println!("sk bits:     (omitted — pass --xsk to include)"),
+        }
+    }
+    Ok(())
+}
+
+fn run_cardano_input(args: CardanoInputArgs) -> Result<(), Box<dyn Error>> {
+    let state: SmtState = load_state(&args.state)?;
+    let tree = rebuild_tree(&state)?;
+
+    let text = fs::read_to_string(&args.key)
+        .map_err(|e| format!("failed to read key file: {e}"))?;
+    let key: KeyOutput = serde_json::from_str(&text)
+        .map_err(|e| format!("failed to parse key file (expected `smt key --json` output): {e}"))?;
+    let sk = key
+        .sk
+        .ok_or("key record has no `sk` — regenerate it with `smt key --xsk ...`")?;
+
+    let leaf = Fr::from_str(&key.leaf)
+        .map_err(|_| format!("invalid leaf in key record: {}", key.leaf))?;
+    let Some(path) = tree.path(leaf) else {
+        return Err(format!(
+            "leaf {} not found in tree — insert it first with `smt insert`",
+            key.leaf
+        )
+        .into());
+    };
+
+    let siblings: Vec<String> = path.iter().map(|(s, _)| field_to_string(*s)).collect();
+    let directions: Vec<String> = path
+        .iter()
+        .map(|(_, d)| (if *d { "1" } else { "0" }).to_string())
+        .collect();
+
+    let mut json_map = serde_json::Map::new();
+    json_map.insert("A".into(), serde_json::json!(key.A));
+    json_map.insert("sk".into(), serde_json::json!(sk));
+    json_map.insert("PointA".into(), serde_json::json!(key.PointA));
+    json_map.insert("smt_root".into(), serde_json::json!(field_to_string(tree.digest())));
+    json_map.insert("smt_siblings".into(), serde_json::json!(siblings));
+    json_map.insert("smt_directions".into(), serde_json::json!(directions));
+    let json = serde_json::to_string_pretty(&json_map)
+        .map_err(|e| format!("failed to serialize JSON: {e}"))?;
+
+    fs::write(&args.out, json)
+        .map_err(|e| format!("failed to write output: {e}"))?;
+
+    eprintln!("Witness input written to {}", args.out.display());
+    eprintln!("  vk:           {}", key.vk);
+    eprintln!("  leaf:         {}", key.leaf);
+    eprintln!("  smt_root:     {}", field_to_string(tree.digest()));
+    eprintln!("  smt_siblings: {}", siblings.len());
+    Ok(())
+}
+
+fn decode_hex32(hex_str: &str, flag: &str) -> Result<[u8; 32], Box<dyn Error>> {
+    let bytes = hex::decode(hex_str)
+        .map_err(|e| format!("invalid {flag} hex: {e}"))?;
+    bytes.try_into().map_err(|_| format!("{flag} must be exactly 32 bytes (64 hex chars)").into())
 }
 
 fn run_leaf(args: LeafArgs) -> Result<(), Box<dyn Error>> {

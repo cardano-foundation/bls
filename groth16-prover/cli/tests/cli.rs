@@ -1426,6 +1426,197 @@ fn smt_leaf_rejects_wrong_item_count() {
         .stderr(predicate::str::contains("expected exactly 6 field elements"));
 }
 
+// Fixed-seed test key from test_smt_simple.py (PyNaCl SigningKey with seed
+// a54554e8...). The expected values are cross-checked against the Python
+// Ed25519 math that previously lived in gen_smt_input.py.
+const TEST_PK_HEX: &str = "6f1aefc3c897385b1f65d663ab3bddc449ed2c47221c6b6c8a0650eb9791fd15";
+const TEST_XSK_HEX: &str = "07ac47da43d59cdb54f1478e9b4423017a50ee1b9395abc485f6fb503e636c76";
+const TEST_LEAF: &str = "27961596706507914158623253209230753532538365366985401348575292741777463643887";
+
+#[test]
+fn smt_key_computes_witness_data() {
+    let mut cmd = Command::cargo_bin("groth16-prover").unwrap();
+    cmd.arg("smt")
+        .arg("key")
+        .arg("--vk")
+        .arg(TEST_PK_HEX)
+        .arg("--xsk")
+        .arg(TEST_XSK_HEX);
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("MiMC leaf:"))
+        .stdout(predicate::str::contains(TEST_LEAF))
+        .stdout(predicate::str::contains("sk bits:     255"));
+}
+
+#[test]
+fn smt_key_json_output_matches_python() {
+    let mut cmd = Command::cargo_bin("groth16-prover").unwrap();
+    cmd.arg("smt")
+        .arg("key")
+        .arg("--vk")
+        .arg(TEST_PK_HEX)
+        .arg("--xsk")
+        .arg(TEST_XSK_HEX)
+        .arg("--json");
+    let out = cmd.output().unwrap();
+    assert!(out.status.success());
+    let key: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+
+    assert_eq!(key["vk"], TEST_PK_HEX);
+    assert_eq!(key["leaf"], TEST_LEAF);
+    assert_eq!(key["PointA"][0], serde_json::json!(["2399581124961290996361902", "2009628761619076154966489", "30339864015231051762033261"]));
+    assert_eq!(key["PointA"][1], serde_json::json!(["27073905468528505689938543", "1294987332572946710223646", "6646221664223807267347143"]));
+    assert_eq!(key["PointA"][2], serde_json::json!(["1", "0", "0"]));
+    assert_eq!(key["PointA"][3], serde_json::json!(["13481680252249361442501028", "27476611588222441719674700", "30361843228047889970922690"]));
+    assert_eq!(key["A"].as_array().unwrap().len(), 256);
+    assert_eq!(key["sk"].as_array().unwrap().len(), 255);
+    assert_eq!(key["A"][0], "1");
+}
+
+#[test]
+fn smt_key_rejects_bad_hex() {
+    let mut cmd = Command::cargo_bin("groth16-prover").unwrap();
+    cmd.arg("smt")
+        .arg("key")
+        .arg("--vk")
+        .arg("zz")
+        .arg("--xsk")
+        .arg(TEST_XSK_HEX);
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("invalid --vk hex"));
+
+    let mut cmd = Command::cargo_bin("groth16-prover").unwrap();
+    cmd.arg("smt")
+        .arg("key")
+        .arg("--vk")
+        .arg(TEST_PK_HEX)
+        .arg("--xsk")
+        .arg("00"); // 1 byte, not 32
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("--xsk must be exactly 32 bytes"));
+}
+
+#[test]
+fn smt_cardano_input_assembles_full_input() {
+    let state_file = NamedTempFile::new().unwrap();
+    let key_file = NamedTempFile::new().unwrap();
+    let input_file = NamedTempFile::new().unwrap();
+
+    let mut cmd_key = Command::cargo_bin("groth16-prover").unwrap();
+    cmd_key
+        .arg("smt")
+        .arg("key")
+        .arg("--vk")
+        .arg(TEST_PK_HEX)
+        .arg("--xsk")
+        .arg(TEST_XSK_HEX)
+        .arg("--json");
+    let key_out = cmd_key.output().unwrap();
+    assert!(key_out.status.success());
+    fs::write(key_file.path(), &key_out.stdout).unwrap();
+
+    let mut cmd_insert = Command::cargo_bin("groth16-prover").unwrap();
+    cmd_insert
+        .arg("smt")
+        .arg("insert")
+        .arg("--depth")
+        .arg("2")
+        .arg("--items")
+        .arg(format!("{TEST_LEAF},12345,67890"))
+        .arg("--state")
+        .arg(state_file.path());
+    cmd_insert.assert().success();
+
+    let mut cmd_input = Command::cargo_bin("groth16-prover").unwrap();
+    cmd_input
+        .arg("smt")
+        .arg("cardano-input")
+        .arg("--state")
+        .arg(state_file.path())
+        .arg("--key")
+        .arg(key_file.path())
+        .arg("--out")
+        .arg(input_file.path());
+    cmd_input
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Witness input written to"));
+
+    let input_json: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(input_file.path()).unwrap()).unwrap();
+    assert_eq!(input_json["A"].as_array().unwrap().len(), 256);
+    assert_eq!(input_json["sk"].as_array().unwrap().len(), 255);
+    assert_eq!(input_json["PointA"][0][0], "2399581124961290996361902");
+    assert_eq!(input_json["smt_siblings"].as_array().unwrap().len(), 2);
+    assert_eq!(input_json["smt_directions"].as_array().unwrap().len(), 2);
+    assert!(input_json["smt_root"].as_str().unwrap().len() > 0);
+
+    // Re-hashing the path must reproduce the stored root: the witness root
+    // is the tree digest itself.
+    let digest_cmd = Command::cargo_bin("groth16-prover").unwrap();
+    let mut cmd_digest = digest_cmd;
+    cmd_digest
+        .arg("smt")
+        .arg("digest")
+        .arg("--state")
+        .arg(state_file.path());
+    let digest_out = cmd_digest.output().unwrap();
+    assert!(digest_out.status.success());
+    let digest = String::from_utf8(digest_out.stdout).unwrap().trim().to_string();
+    assert_eq!(input_json["smt_root"], digest);
+}
+
+#[test]
+fn smt_cardano_input_requires_sk_bits() {
+    let state_file = NamedTempFile::new().unwrap();
+    let key_file = NamedTempFile::new().unwrap();
+    let input_file = NamedTempFile::new().unwrap();
+
+    // key record without --xsk (no `sk` bits)
+    let mut cmd_key = Command::cargo_bin("groth16-prover").unwrap();
+    cmd_key
+        .arg("smt")
+        .arg("key")
+        .arg("--vk")
+        .arg(TEST_PK_HEX)
+        .arg("--json");
+    let key_out = cmd_key.output().unwrap();
+    assert!(key_out.status.success());
+    let key_json: serde_json::Value = serde_json::from_slice(&key_out.stdout).unwrap();
+    assert!(key_json.get("sk").is_none());
+    fs::write(key_file.path(), &key_out.stdout).unwrap();
+
+    let mut cmd_insert = Command::cargo_bin("groth16-prover").unwrap();
+    cmd_insert
+        .arg("smt")
+        .arg("insert")
+        .arg("--depth")
+        .arg("2")
+        .arg("--items")
+        .arg(TEST_LEAF)
+        .arg("--state")
+        .arg(state_file.path());
+    cmd_insert.assert().success();
+
+    let mut cmd_input = Command::cargo_bin("groth16-prover").unwrap();
+    cmd_input
+        .arg("smt")
+        .arg("cardano-input")
+        .arg("--state")
+        .arg(state_file.path())
+        .arg("--key")
+        .arg(key_file.path())
+        .arg("--out")
+        .arg(input_file.path());
+    cmd_input
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("regenerate it with `smt key --xsk"));
+}
+
 // ------------------------------------------------------------------
 // Sparse mode CLI tests (Implementation 6)
 // ------------------------------------------------------------------
@@ -2480,12 +2671,14 @@ fn help_smt() {
     cmd.arg("smt").arg("--help");
     cmd.assert()
         .success()
+        .stdout(predicate::str::contains("key"))
         .stdout(predicate::str::contains("leaf"))
         .stdout(predicate::str::contains("insert"))
         .stdout(predicate::str::contains("digest"))
         .stdout(predicate::str::contains("path"))
         .stdout(predicate::str::contains("verify"))
-        .stdout(predicate::str::contains("export"));
+        .stdout(predicate::str::contains("export"))
+        .stdout(predicate::str::contains("cardano-input"));
 }
 
 /// `smt insert --help` shows the --depth, --items, --transcript, and --state options.

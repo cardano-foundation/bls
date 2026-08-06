@@ -142,21 +142,25 @@ pub enum Command {
     /// Provides insert-only SMT commands backed by MiMC(x^7) hashing.
     ///
     /// Subcommands:
-    ///   leaf    — compute a MiMC leaf commitment (MultiMiMC7 over 6 limbs)
-    ///   insert  — insert items into the tree and persist tree state
-    ///   digest  — print the current tree digest (Merkle root)
-    ///   path    — print the Merkle path for a given leaf
-    ///   verify  — verify a Merkle path hashes back to the stored digest
-    ///   export  — export witness input JSON for the Privacy circuit
+    ///   key           — derive CardanoKeyOwnershipSMT witness data from a key
+    ///   leaf          — compute a MiMC leaf commitment (MultiMiMC7 over 6 limbs)
+    ///   insert        — insert items into the tree and persist tree state
+    ///   digest        — print the current tree digest (Merkle root)
+    ///   path          — print the Merkle path for a given leaf
+    ///   verify        — verify a Merkle path hashes back to the stored digest
+    ///   export        — export witness input JSON for the Privacy circuit
+    ///   cardano-input — assemble the full CardanoKeyOwnershipSMT circuit input
     ///
     /// Example:
     ///
+    ///   $ groth16-prover smt key --vk <pk-hex> --xsk <scalar-hex> --json
     ///   $ groth16-prover smt leaf --items "x0,x1,x2,y0,y1,y2"
     ///   $ groth16-prover smt insert --depth 2 --items "1 100,2 200,3 300" --state smt.json
     ///   $ groth16-prover smt digest --state smt.json
     ///   $ groth16-prover smt path --state smt.json --leaf <commitment>
     ///   $ groth16-prover smt verify --state smt.json --leaf <commitment>
     ///   $ groth16-prover smt export --state smt.json --nullifier 1 --out input.json
+    ///   $ groth16-prover smt cardano-input --state smt.json --key key.json --out input.json
     #[command(subcommand)]
     Smt(cmd::smt::SmtCommand),
 

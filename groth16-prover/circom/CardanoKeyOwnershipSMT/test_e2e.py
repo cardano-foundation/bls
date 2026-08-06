@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""End-to-end test for CardanoKeyOwnershipSMT circuit with valid Ed25519 keys."""
+"""End-to-end test for CardanoKeyOwnershipSMT circuit with valid Ed25519 keys.
+
+All cryptography is delegated to the `groth16-prover smt` CLI (`smt key` for
+the Ed25519 decompression / MiMC leaf / bit decomposition, `smt insert` for
+the tree, `smt cardano-input` for the final circuit input). Python only
+generates a fresh Ed25519 key pair with PyNaCl and orchestrates the CLI.
+"""
 
 import json
 import hashlib
@@ -7,11 +13,7 @@ import sys
 import os
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from gen_smt_input import (
-    P_BLS, P_ED, ROUND_CONSTANTS, mimc2, multi_mimc7, compute_leaf_cli,
-    build_merkle_tree_cli_multi, build_merkle_tree_cli,
-    bytes_to_bits_le, decompress_point, to_chunks, clamp_ed25519_scalar,
-)
+from gen_smt_input import key_record_cli, build_smt_and_input_cli
 
 import nacl.signing
 
@@ -22,52 +24,24 @@ def generate_test_input(depth=4, index=0, output_file="test_smt_input.json", smt
 
     seed = bytes(sk)
     pk_bytes = pk.encode()
-
     scalar_bytes = hashlib.sha512(seed).digest()[:32]
-    scalar = clamp_ed25519_scalar(scalar_bytes)
 
-    A_bits = bytes_to_bits_le(pk_bytes)
-    sk_bits = bytes_to_bits_le(scalar)[:255]
-
-    PointA = decompress_point(pk_bytes)
-    PointA_chunks = [to_chunks(c) for c in PointA]
-
-    leaf, used_leaf_cli = compute_leaf_cli(PointA_chunks, smt_cli)
+    key_record = key_record_cli(pk_bytes.hex(), scalar_bytes.hex(), smt_cli)
 
     other_leaves = [12345, 67890, 11111, 22222, 33333, 44444, 55555, 66666, 77777, 88888, 99999, 10101, 20202, 30303, 40404]
-    if index == 0:
-        smt_root, siblings, directions, used_cli = build_merkle_tree_cli_multi(
-            [leaf] + other_leaves, index, depth, smt_cli)
-    else:
-        smt_root, siblings, directions, used_cli = build_merkle_tree_cli(
-            leaf, index, depth, smt_cli)
-
-    circuit_input = {
-        "A": [str(b) for b in A_bits],
-        "sk": [str(b) for b in sk_bits],
-        "PointA": [[str(c) for c in row] for row in PointA_chunks],
-        "smt_root": str(smt_root),
-        "smt_siblings": [str(s) for s in siblings],
-        "smt_directions": [str(d) for d in directions],
-    }
-
-    with open(output_file, "w") as f:
-        json.dump(circuit_input, f, indent=2)
+    leaves = [int(key_record["leaf"])] + other_leaves
+    circuit_input = build_smt_and_input_cli(
+        leaves, index, depth, key_record, output_file, smt_cli
+    )
 
     print(f"Generated {output_file}")
     print(f"  Public key: {pk_bytes.hex()}")
-    print(f"  Scalar (hex): {scalar.hex()}")
+    print(f"  Scalar (hex): {scalar_bytes.hex()}")
     print(f"  SMT depth: {depth}")
     print(f"  SMT leaf index: {index}")
-    if used_cli:
-        print(f"  SMT builder: groth16-prover smt CLI (--smt-cli {smt_cli})")
-    else:
-        print(f"  SMT builder: PYTHON FALLBACK (smt CLI '{smt_cli}' unavailable)")
-    print(f"  SMT root: {smt_root}")
-    if used_leaf_cli:
-        print(f"  MiMC leaf: {leaf} (smt leaf CLI)")
-    else:
-        print(f"  MiMC leaf: {leaf} (PYTHON FALLBACK)")
+    print(f"  SMT builder: groth16-prover smt CLI (--smt-cli {smt_cli})")
+    print(f"  SMT root: {circuit_input['smt_root']}")
+    print(f"  MiMC leaf: {key_record['leaf']} (smt key CLI)")
 
     return circuit_input
 
@@ -81,7 +55,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--smt-cli",
         default="groth16-prover",
-        help="Path to the 'groth16-prover' binary used to build the SMT "
+        help="Path to the 'groth16-prover' binary used for all crypto "
              "(must expose the 'smt' subcommand, i.e. be built with the "
              "'privacy' feature). Default: 'groth16-prover' (looked up on PATH).",
     )
