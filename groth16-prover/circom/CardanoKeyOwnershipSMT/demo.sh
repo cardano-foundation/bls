@@ -10,12 +10,12 @@ WITNESS="${CIRCUIT_DIR}/test_smt_witness.wtns"
 PROOF="${CIRCUIT_DIR}/test_smt_proof.json"
 PUBLIC="${CIRCUIT_DIR}/test_smt_public.json"
 
-# Path to the groth16-prover binary used to build the SMT (must expose the
-# 'smt' subcommand). Defaults to the release binary if present, else PATH.
-if [ -z "${SMT_CLI:-}" ] && [ -x "${SCRIPT_DIR}/../../cli/target/release/groth16-prover" ]; then
-    SMT_CLI="${SCRIPT_DIR}/../../cli/target/release/groth16-prover"
+# Path to the standalone `smt` CLI binary used to build the SMT. Defaults to
+# the release binary in clis/smt if present, else PATH.
+if [ -z "${SMT_CLI:-}" ] && [ -x "${SCRIPT_DIR}/../../../clis/smt/target/release/smt" ]; then
+    SMT_CLI="${SCRIPT_DIR}/../../../clis/smt/target/release/smt"
 fi
-SMT_CLI="${SMT_CLI:-groth16-prover}"
+SMT_CLI="${SMT_CLI:-smt}"
 
 echo "========================================"
 echo "CardanoKeyOwnershipSMT End-to-End Demo"

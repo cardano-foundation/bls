@@ -113,16 +113,16 @@ the root, and the keys never have to be revealed to it.
    (or, self-contained with a fixed deterministic key, no cardano-address
    or bech32 dependency:)
 
-   $ ./gen_input.sh --fixed --depth 4 --index 0 --output input.json --smt-cli groth16-prover
+   $ ./gen_input.sh --fixed --depth 4 --index 0 --output input.json --smt-cli smt
 
    All the crypto — Ed25519 key decompression and base-2^85 chunking, the
    MiMC leaf commitment, the SMT insert/path, and the full circuit-input
-   assembly — is done by the `groth16-prover smt` CLI (`smt key`, `smt leaf`,
+   assembly — is done by the standalone `smt` CLI (`smt key`, `smt leaf`,
    `smt insert`, `smt cardano-input`). `gen_input.sh` only chooses the key
    source (fixed test key, or `bech32` decoding of real `pay.xsk`/`pay.vk`)
    and drives the CLI. See [CLI vs shell/Python](#cli-vs-shellpython) below.
    Use `--smt-cli <path>` to point at a binary not on `PATH`, e.g.
-   `groth16-prover/cli/target/release/groth16-prover`.
+   `clis/smt/target/release/smt`.
 
 3. Generate the witness
 
@@ -190,27 +190,27 @@ standard 32-byte compressed public key.
 ./gen_input.sh --xsk pay.xsk --vk pay.vk --depth 4 --output input.json
 ```
 
-The SMT part of the tree is built with the **`groth16-prover smt` CLI**
-— this is the primary, supported path, and now the *only* path. The
-**MiMC leaf commitment** is computed by `smt key` (which decompresses the
+The SMT part of the tree is built with the **standalone `smt` CLI**
+(`clis/smt`) — this is the primary, supported path, and now the *only* path.
+The **MiMC leaf commitment** is computed by `smt key` (which decompresses the
 Ed25519 public key, splits it into the six base-2^85 limbs, and hashes them
 exactly as the circuit does). `gen_input.sh` runs these commands under the hood:
 
 ```bash
-groth16-prover smt key --vk <pk-hex> --xsk <scalar-hex> --json        # PointA, A, sk, leaf
-groth16-prover smt insert --depth 4 --items <leaf> --index 0 --state smt.json
-groth16-prover smt cardano-input --state smt.json --key key.json --out input.json
+smt key --vk <pk-hex> --xsk <scalar-hex> --json        # PointA, A, sk, leaf
+smt insert --depth 4 --items <leaf> --index 0 --state smt.json
+smt cardano-input --state smt.json --key key.json --out input.json
 ```
 
 > **There is no in-Python crypto fallback.** The old `multi_mimc7` /
 > `build_merkle_tree` / `decompress` implementations were removed. If the
-> `groth16-prover` binary is missing, `gen_input.sh` fails with a hard error
+> `smt` binary is missing, `gen_input.sh` fails with a hard error
 > and instructions to build it — it never silently falls back to Python math.
 > (`gen_smt_input.py` remains as a Python-based orchestrator for the
 > benchmark harness `benchmarks_compare.py`.)
 
 Use `--smt-cli <path>` to point at a binary that is not on `PATH`, e.g.
-`--smt-cli groth16-prover/cli/target/release/groth16-prover`.
+`--smt-cli clis/smt/target/release/smt`.
 
 This produces `input.json` with:
 - `A[256]` — compressed public key bits (from `pay.vk`)
@@ -382,7 +382,7 @@ EOF
 ## CLI vs shell/Python
 
 All cryptographic and Merkle-tree work for the circuit input lives in the
-`groth16-prover smt` CLI; the shell/Python scripts are pure orchestration.
+standalone `smt` CLI (`clis/smt`); the shell/Python scripts are pure orchestration.
 This guarantees the input generation uses exactly the same field arithmetic,
 round constants, and padding scheme as the circuit itself.
 
@@ -403,8 +403,8 @@ round constants, and padding scheme as the circuit itself.
 The CLI is built with:
 
 ```bash
-cargo build --release --manifest-path ../../cli/Cargo.toml
-# binary: ../../cli/target/release/groth16-prover
+cargo build --release --manifest-path ../../../clis/smt/Cargo.toml
+# binary: ../../../clis/smt/target/release/smt
 ```
 
 If the CLI (or `bech32`, for the real-key mode) is missing, the scripts stop
@@ -491,7 +491,7 @@ the field circom targets with `--prime bls12381`). Empty leaves default to `0`
 and hash up as `mimc2(default, default)`, matching the padding scheme of
 `SparseMerkleTree` in `groth16-prover/src/sparse_merkle_tree.rs`.
 
-> Note: `groth16-prover smt insert --index <N>` is what lets `gen_input.sh` /
+> Note: `smt insert --index <N>` is what lets `gen_input.sh` /
 > `gen_smt_input.py` place the single leaf at an arbitrary index while keeping
 > the rest of the tree zero-padded. The `smt export` subcommand targets the
 > separate `Privacy` spend circuit instead: it produces

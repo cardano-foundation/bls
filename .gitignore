@@ -11,7 +11,7 @@ Cargo.lock
 # Build output
 target/
 */target/
-cli/interoperability/aiken/build/
+clis/bls12-381/interoperability/aiken/build/
 
 # IDE
 .idea/

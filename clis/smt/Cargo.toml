@@ -1,0 +1,24 @@
+[package]
+name = "smt"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Sparse Merkle Tree CLI backed by MiMC(x^7) for BLS12-381"
+
+[dependencies]
+clap = { version = "4.5", features = ["derive"] }
+hex = "0.4"
+groth16-prover = { path = "../../groth16-prover", features = ["privacy"] }
+ark-bls12-381 = "0.4"
+ark-ff = "0.4"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+[dev-dependencies]
+assert_cmd = "2.0"
+predicates = "3.1"
+tempfile = "3"
+
+[[bin]]
+name = "smt"
+path = "src/main.rs"

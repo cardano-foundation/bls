@@ -9,7 +9,7 @@ description = "CLI for Groth16 proof generation over BLS12-381"
 blake2 = "0.10"
 clap = { version = "4.5", features = ["derive"] }
 hex = "0.4"
-groth16-prover = { path = "..", features = ["privacy"] }
+groth16-prover = { path = ".." }
 ark-bls12-381 = "0.4"
 ark-ff = "0.4"
 ark-serialize = "0.4"

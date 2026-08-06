@@ -6,7 +6,7 @@
 //!
 //! Example:
 //!
-//!   $ groth16-prover compute-inputs \
+//!   $ smt compute-inputs \
 //!       --depth 2 \
 //!       --transcript transcript.txt \
 //!       --nullifier 2 \

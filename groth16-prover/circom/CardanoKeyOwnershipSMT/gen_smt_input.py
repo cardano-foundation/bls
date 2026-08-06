@@ -16,19 +16,19 @@ The script is a **thin orchestration layer**. All cryptography is performed
 by external CLIs, never in Python:
 
   1. `bech32` decodes the extended signing key and public key files
-  2. `groth16-prover smt key`   decompresses the Ed25519 public key, splits it
+  2. `smt key`   decompresses the Ed25519 public key, splits it
      into base-2^85 limbs, computes the MiMC leaf commitment, and
      bit-decomposes `A` / `sk` (see groth16-prover/src/ed25519.rs)
-  3. `groth16-prover smt insert` builds the zero-padded Merkle tree
-  4. `groth16-prover smt cardano-input` assembles the full circuit input JSON
+  3. `smt insert` builds the zero-padded Merkle tree
+  4. `smt cardano-input` assembles the full circuit input JSON
      (Merkle root + proof + key witness data)
 
 Python only parses the key files (byte slicing of the bech32-decoded blobs)
-and drives the CLI commands. The `groth16-prover` binary must be built with
-the `privacy` feature so the `smt` subcommand is available.
+and drives the CLI commands. All crypto lives in the standalone `smt` CLI
+(clis/smt, which enables the `privacy` feature of the groth16-prover lib).
 
 Usage:
-  python3 gen_smt_input.py --xsk pay.xsk --vk pay.vk -o input.json [--depth 4] [--index 0] [--smt-cli groth16-prover]
+  python3 gen_smt_input.py --xsk pay.xsk --vk pay.vk -o input.json [--depth 4] [--index 0] [--smt-cli smt]
 """
 
 import argparse
@@ -67,19 +67,19 @@ def decode_bech32_file(path):
 
 
 def run_smt_cli(smt_cli, subcommand, *args):
-    """Run `groth16-prover smt <subcommand> [args]` and return stdout.
+    """Run `smt <subcommand> [args]` and return stdout.
 
     All cryptography lives in the CLI, so there is no Python fallback: a
     missing or failing binary is a hard error.
     """
-    cmd = [smt_cli, "smt", subcommand, *args]
+    cmd = [smt_cli, subcommand, *args]
     try:
         result = subprocess.run(cmd, check=True, capture_output=True, text=True)
     except FileNotFoundError:
         print(
             f"ERROR: smt CLI '{smt_cli}' not found.\n"
-            "  All cryptography is handled by the groth16-prover CLI.\n"
-            "  Build it with:  cargo build --release  (in groth16-prover/cli)\n"
+            "  All cryptography is handled by the standalone smt CLI.\n"
+            "  Build it with:  cargo build --release  (in clis/smt)\n"
             "  and pass its path via --smt-cli if it is not on PATH.",
             file=sys.stderr,
         )
@@ -136,10 +136,9 @@ def main():
     parser.add_argument("--index", type=int, default=0, help="Leaf index in the SMT (default: 0)")
     parser.add_argument(
         "--smt-cli",
-        default="groth16-prover",
-        help="Path to the 'groth16-prover' binary used for all crypto "
-             "(must expose the 'smt' subcommand, i.e. be built with the "
-             "'privacy' feature). Default: 'groth16-prover' (looked up on PATH).",
+        default="smt",
+        help="Path to the standalone 'smt' CLI binary (clis/smt) used for all "
+             "crypto. Default: 'smt' (looked up on PATH).",
     )
     args = parser.parse_args()
 
@@ -181,7 +180,7 @@ def main():
     print(f"  Scalar (hex):   {xsk_bytes[:32].hex()}")
     print(f"  SMT depth:      {args.depth}")
     print(f"  SMT leaf index: {args.index}")
-    print(f"  SMT builder:    groth16-prover smt CLI (--smt-cli {args.smt_cli})")
+    print(f"  SMT builder:    smt CLI (--smt-cli {args.smt_cli})")
     print(f"  SMT root:       {circuit_input['smt_root']}")
     print(f"  MiMC leaf:      {key_record['leaf']} (smt key CLI)")
     print("Input generated successfully for CardanoKeyOwnershipSMT circuit.")

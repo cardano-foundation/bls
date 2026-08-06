@@ -8,9 +8,10 @@
 //!   2. Proof generation from circuit + witness files
 //!   3. Proof verification against a verifying key
 //!   4. Exporting verifying keys to Aiken source code
-//!   5. Computing witness inputs for shielded-spend circuits
-//!   6. Sparse Merkle tree operations for privacy-preserving circuits
-//!   7. Nova IVC folding for batching multiple step proofs
+//!   5. Nova IVC folding for batching multiple step proofs
+//!
+//! Sparse Merkle tree operations and privacy-circuit witness-input
+//! generation live in the standalone `smt` CLI (`clis/smt`).
 //!
 //! All outputs use arkworks' canonical compressed serialization so they
 //! are directly consumable by on-chain Aiken verifiers.
@@ -122,48 +123,6 @@ pub enum Command {
     ///   $ groth16-prover export-vk --verifying-key circuit.vk --out circuit_vk.ak
     ExportVk(cmd::export_vk::Args),
 
-    /// Compute witness inputs for the Spend(depth) circuit
-    ///
-    /// Reads a transcript file (one nullifier-nonce pair per line) and
-    /// produces a JSON file with the private Merkle-path data needed by
-    /// the Circom witness generator for the Spend(depth) circuit.
-    ///
-    /// The transcript format: each line contains either one field element
-    /// (raw commitment) or two space-separated field elements
-    /// (`nullifier nonce`). Empty lines are skipped.
-    ///
-    /// Example:
-    ///
-    ///   $ groth16-prover compute-inputs --depth 2 --transcript transcript.txt --nullifier 2 --out input.json
-    ComputeInputs(cmd::compute_inputs::Args),
-
-    /// Sparse Merkle Tree operations for BLS12-381
-    ///
-    /// Provides insert-only SMT commands backed by MiMC(x^7) hashing.
-    ///
-    /// Subcommands:
-    ///   key           — derive CardanoKeyOwnershipSMT witness data from a key
-    ///   leaf          — compute a MiMC leaf commitment (MultiMiMC7 over 6 limbs)
-    ///   insert        — insert items into the tree and persist tree state
-    ///   digest        — print the current tree digest (Merkle root)
-    ///   path          — print the Merkle path for a given leaf
-    ///   verify        — verify a Merkle path hashes back to the stored digest
-    ///   export        — export witness input JSON for the Privacy circuit
-    ///   cardano-input — assemble the full CardanoKeyOwnershipSMT circuit input
-    ///
-    /// Example:
-    ///
-    ///   $ groth16-prover smt key --vk <pk-hex> --xsk <scalar-hex> --json
-    ///   $ groth16-prover smt leaf --items "x0,x1,x2,y0,y1,y2"
-    ///   $ groth16-prover smt insert --depth 2 --items "1 100,2 200,3 300" --state smt.json
-    ///   $ groth16-prover smt digest --state smt.json
-    ///   $ groth16-prover smt path --state smt.json --leaf <commitment>
-    ///   $ groth16-prover smt verify --state smt.json --leaf <commitment>
-    ///   $ groth16-prover smt export --state smt.json --nullifier 1 --out input.json
-    ///   $ groth16-prover smt cardano-input --state smt.json --key key.json --out input.json
-    #[command(subcommand)]
-    Smt(cmd::smt::SmtCommand),
-
     /// Run a Phase-2 multi-party ceremony for a circuit
     ///
     /// Consumes a Phase-1 SRS (`.ptau`) and a circuit (`.r1cs`) to produce
@@ -224,7 +183,7 @@ pub enum Command {
 #[clap(version = env!("CARGO_PKG_VERSION"))]
 #[clap(about = "Groth16 prover CLI for BLS12-381",
        long_about = "A command-line interface for the full Groth16 zero-knowledge proof lifecycle on BLS12-381.\n\n\
-This CLI covers everything from trusted-setup ceremonies (both dev and multi-party MPC) through proof \ngeneration and verification, plus auxiliary tools for privacy-preserving circuits: witness-input \ncomputation for shielded spends and sparse Merkle tree operations.\n\n\
+This CLI covers everything from trusted-setup ceremonies (both dev and multi-party MPC) through proof \ngeneration and verification, plus Nova IVC folding for batched step proofs.\n\n\
 All outputs use arkworks' canonical compressed serialization so they are directly consumable by \non-chain Aiken verifiers.")]
 pub struct Cli {
     #[command(subcommand)]
@@ -237,10 +196,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     match args.command {
         Command::Ceremony(args) => cmd::ceremony::run(args),
         Command::CeremonyDev(args) => cmd::ceremony_dev::run(args),
-        Command::ComputeInputs(args) => cmd::compute_inputs::run(args),
         Command::ExportVk(args) => cmd::export_vk::run(args),
         Command::Prove(args) => cmd::prove::run(args),
-        Command::Smt(cmd) => cmd::smt::run(cmd),
         Command::Verify(args) => cmd::verify::run(args),
         Command::Phase2(cmd) => cmd::phase2::run(cmd),
         Command::Nova(cmd) => cmd::nova::run(cmd),

@@ -2,7 +2,7 @@
 
 Command-line interface for the full Groth16 zero-knowledge proof lifecycle on BLS12-381.
 
-This CLI covers everything from trusted-setup ceremonies (both dev and multi-party MPC) through proof generation and verification, plus auxiliary tools for privacy-preserving circuits: witness-input computation for shielded spends and sparse Merkle tree operations. All outputs use arkworks' canonical compressed serialization so they are directly consumable by on-chain Aiken verifiers.
+This CLI covers everything from trusted-setup ceremonies (both dev and multi-party MPC) through proof generation and verification, plus Nova IVC folding for batched step proofs. Sparse Merkle tree operations and privacy-circuit witness-input generation live in the standalone `smt` CLI (`clis/smt`). All outputs use arkworks' canonical compressed serialization so they are directly consumable by on-chain Aiken verifiers.
 
 ---
 
@@ -16,7 +16,7 @@ groth16-prover ceremony-dev --help
 groth16-prover prove --help
 groth16-prover phase2 --help
 groth16-prover nova --help
-groth16-prover smt --help
+smt --help
 ```
 
 Top-level help output:
@@ -32,8 +32,6 @@ Commands:
   prove           Generate a Groth16 proof from Circom artifacts
   verify          Verify a Groth16 proof against its public input
   export-vk       Export a binary verifying key to Aiken source code
-  compute-inputs  Compute witness inputs for the Spend(depth) circuit
-  smt             Sparse Merkle Tree operations for BLS12-381
   phase2          Run a Phase-2 multi-party ceremony for a circuit
   nova            Nova IVC folding + compression flow (Implementation 8)
   help            Print this message or the help of the given subcommand(s)
@@ -366,184 +364,6 @@ groth16-prover export-vk \
 The output contains the `alpha_g1`, `beta_g2`, `gamma_g2`, `delta_g2`, `ic` list, and `n_public` fields. Paste it directly into an Aiken validator or library.
 
 ---
-
-### `compute-inputs` — witness generation for Spend(depth)
-
-Reads a transcript file (one nullifier-nonce pair per line) and produces a JSON file with the private Merkle-path data needed by the Circom witness generator for the Spend(depth) circuit.
-
-**Options:**
-
-| Flag | Values | Default | Description |
-|------|--------|---------|-------------|
-| `--depth N` | — | *required* | Merkle tree depth |
-| `--transcript FILE` | — | *required* | Path to the transcript file |
-| `--nullifier VALUE` | — | *required* | Target nullifier to prove membership for |
-| `--out FILE` | — | `input.json` | Output path for the JSON witness input |
-
-**Transcript format:** each line contains either one field element (raw commitment) or two space-separated field elements (`nullifier nonce`). Empty lines are skipped.
-
-**Example transcript:**
-
-```
-1 100
-2 200
-3 300
-```
-
-**Examples:**
-
-```bash
-# Basic usage
-groth16-prover compute-inputs \
-  --depth 2 \
-  --transcript transcript.txt \
-  --nullifier 2 \
-  --out input.json
-
-# With default output path (input.json in current directory)
-groth16-prover compute-inputs \
-  --depth 2 \
-  --transcript transcript.txt \
-  --nullifier 2
-```
-
----
-
-### `smt` — Sparse Merkle Tree operations
-
-Provides insert-only SMT commands backed by MiMC(x⁷) hashing, plus Ed25519 key-derivation helpers for the CardanoKeyOwnershipSMT circuit. Subcommands: `key`, `leaf`, `insert`, `digest`, `path`, `verify`, `export`, `cardano-input`.
-
-#### `smt key` — derive CardanoKeyOwnershipSMT witness data from a key
-
-Decompresses an Ed25519 public key into the extended coordinates `[X, Y, Z, T]`, splits each coordinate into three base-2^85 limbs, computes the MiMC leaf commitment, and bit-decomposes `A` (the 256 compressed-key bits) and optionally `sk` (the 255 clamped-scalar bits). This is the full witness-generation pipeline for the `CardanoKeyOwnershipSMT` circuit — previously done in Python.
-
-| Flag | Values | Default | Description |
-|------|--------|---------|-------------|
-| `--vk HEX` | 64 hex chars | *required* | Compressed Ed25519 public key |
-| `--xsk HEX` | 64 hex chars | — | 32-byte scalar (clamped to the 255-bit `sk` witness input). Omitted from the output when not given |
-| `--json` | — | off | Emit a machine-readable key record consumed by `smt cardano-input` |
-
-```bash
-# Human-readable (PointA limbs, MiMC leaf, A and sk bit counts)
-groth16-prover smt key --vk <pk-hex> --xsk <scalar-hex>
-
-# Machine-readable record for `smt cardano-input`
-groth16-prover smt key --vk <pk-hex> --xsk <scalar-hex> --json
-```
-
-The `--json` record contains `vk`, `PointA` (`[X,Y,Z,T]` × 3 limbs each), `leaf`, `A` (256 bits), and `sk` (255 bits, only with `--xsk`).
-
-#### `smt leaf` — compute a MiMC leaf commitment (MultiMiMC7 over 6 limbs, k = 0)
-
-Hashes the six base-2^85 limbs `x0,x1,x2,y0,y1,y2` of a decompressed Ed25519 public key via `MultiMiMC7(6, 91)` with `k = 0` — exactly the `leaf` commitment the `CardanoKeyOwnershipSMT` circuit re-derives in-circuit from `PointA`. The output is what you insert with `smt insert`.
-
-| Flag | Values | Default | Description |
-|------|--------|---------|-------------|
-| `--items ITEMS` | — | *required* | Six comma-separated limbs: `x0,x1,x2,y0,y1,y2` |
-| `--json` | — | off | Emit machine-readable `{"leaf": "..."}` |
-
-```bash
-# Human-readable (prints the leaf field element)
-groth16-prover smt leaf --items "x0,x1,x2,y0,y1,y2"
-
-# Machine-readable
-groth16-prover smt leaf --items "x0,x1,x2,y0,y1,y2" --json
-```
-
-#### `smt insert` — insert items and persist tree state
-
-| Flag | Values | Default | Description |
-|------|--------|---------|-------------|
-| `--depth N` | — | *required* | Merkle tree depth |
-| `--items ITEMS` | — | — | Comma-separated items (single value or `nullifier nonce` pairs). Conflicts with `--transcript` |
-| `--transcript FILE` | — | — | Path to transcript file (one item per line). Conflicts with `--items` |
-| `--state FILE` | — | `smt.json` | Path to persist/load the tree state (JSON) |
-
-**Item syntax:** each item is either a single field element (raw commitment) or two space-separated values (`nullifier nonce`).
-
-**Examples:**
-
-```bash
-# Insert items via --items
-groth16-prover smt insert \
-  --depth 2 \
-  --items "1 100,2 200,3 300" \
-  --state smt.json
-
-# Bulk insert from a transcript file
-groth16-prover smt insert \
-  --depth 2 \
-  --transcript transcript.txt \
-  --state smt.json
-```
-
-#### `smt digest` — print the current Merkle root
-
-| Flag | Values | Default | Description |
-|------|--------|---------|-------------|
-| `--state FILE` | — | `smt.json` | Path to the persisted tree state |
-
-```bash
-groth16-prover smt digest --state smt.json
-```
-
-#### `smt path` — print the Merkle path for a leaf
-
-| Flag | Values | Default | Description |
-|------|--------|---------|-------------|
-| `--state FILE` | — | `smt.json` | Path to the persisted tree state |
-| `--leaf VALUE` | — | *required* | Leaf value to compute the path for (string field element) |
-
-```bash
-groth16-prover smt path --state smt.json --leaf <commitment>
-```
-
-#### `smt verify` — verify a Merkle path hashes back to the stored digest
-
-| Flag | Values | Default | Description |
-|------|--------|---------|-------------|
-| `--state FILE` | — | `smt.json` | Path to the persisted tree state |
-| `--leaf VALUE` | — | *required* | Leaf value to verify (string field element) |
-
-```bash
-groth16-prover smt verify --state smt.json --leaf <commitment>
-```
-
-#### `smt export` — export witness input JSON for the Privacy circuit
-
-| Flag | Values | Default | Description |
-|------|--------|---------|-------------|
-| `--state FILE` | — | `smt.json` | Path to the persisted tree state |
-| `--nullifier VALUE` | — | *required* | Target nullifier to prove membership for |
-| `--out FILE` | — | `input.json` | Output path for the JSON witness input |
-
-```bash
-groth16-prover smt export \
-  --state smt.json \
-  --nullifier 1 \
-  --out input.json
-```
-
-#### `smt cardano-input` — assemble the full CardanoKeyOwnershipSMT circuit input
-
-Combines a `smt key` record and a persisted tree state into the complete witness-input JSON for the `CardanoKeyOwnershipSMT` circuit: `A[256]`, `sk[255]`, `PointA[4][3]`, `smt_root`, `smt_siblings`, `smt_directions`. Locates the leaf's Merkle path inside the tree state automatically.
-
-| Flag | Values | Default | Description |
-|------|--------|---------|-------------|
-| `--state FILE` | — | `smt.json` | Path to the persisted tree state |
-| `--key FILE` | — | *required* | Key record JSON produced by `smt key --json` |
-| `--out FILE` | — | `input.json` | Output path for the JSON witness input |
-
-```bash
-groth16-prover smt key --vk <pk-hex> --xsk <scalar-hex> --json > key.json
-groth16-prover smt insert --depth 4 --items "<leaf>,40404" --state smt.json
-groth16-prover smt cardano-input --state smt.json --key key.json --out input.json
-```
-
-The record must contain `sk` bits — re-run `smt key --xsk` if it was generated without them.
-
----
-
 ### `nova` — Nova IVC folding + compression (Implementation 8)
 
 Splits a long computation into `N` identical step circuits, folds their Groth16 proofs into a single verifiable bundle, and binds the state chain with a BLAKE2b transcript. Every step proof is individually verifiable, and the `verify` subcommand re-checks the entire chain.
@@ -726,9 +546,9 @@ cargo run --release -- verify \
 
 ### Privacy example (SMT + compute-inputs + prove)
 
-```bash
-cd groth16-prover/cli
+The SMT tree and witness inputs come from the standalone `smt` CLI; the proof lifecycle stays in this CLI.
 
+```bash
 # 1. Build a transcript and compute the Merkle root
 cat > /tmp/transcript.txt << 'EOF'
 1 100
@@ -736,21 +556,22 @@ cat > /tmp/transcript.txt << 'EOF'
 3 300
 EOF
 
-# 2. Insert commitments into the SMT
-cargo run --release -- smt insert \
+# 2. Insert commitments into the SMT (standalone `smt` CLI)
+cd clis/smt
+smt insert \
   --depth 2 \
   --items "1 100,2 200,3 300" \
   --state /tmp/smt.json
 
 # 3. Compute witness inputs for nullifier = 2
-cargo run --release -- compute-inputs \
+smt compute-inputs \
   --depth 2 \
   --transcript /tmp/transcript.txt \
   --nullifier 2 \
   --out /tmp/input.json
 
 # 4. Generate the Circom witness (requires snarkjs)
-cd ../circom/Privacy
+cd ../../groth16-prover/circom/Privacy
 snarkjs wtns calculate spend_depth2.wasm /tmp/input.json /tmp/witness.wtns
 
 # 5. Dev ceremony for the Spend circuit
@@ -898,23 +719,6 @@ The integration tests in `tests/cli.rs` exercise every command via `assert_cmd`.
 | `phase2_new_creates_accumulator` | `phase2 new` writes a non-empty accumulator |
 | `phase2_contribute_and_verify` | `contribute` + `verify` passes for one participant |
 | `phase2_full_roundtrip_prove_verify` | Full `new → contribute → finalize → prove → verify` |
-| `smt_insert_and_digest` | Insert items, verify state JSON, digest output matches |
-| `smt_insert_raw_commitments` | Insert raw field-element commitments |
-| `smt_path_prints_digest` | Query path for a leaf after insertion |
-| `smt_missing_state_file` | Error handling for missing state file |
-| `smt_verify_valid` | `smt verify` reports VALID for a correct path |
-| `smt_verify_invalid` | `smt verify` reports INVALID for a wrong path |
-| `smt_export` | `smt export` produces valid JSON for Privacy circuit |
-| `smt_leaf_computes_mimc_commitment` | MiMC leaf matches the Python `multi_mimc7` reference |
-| `smt_key_computes_witness_data` | `smt key` decompresses, chunks, and bit-decomposes a key |
-| `smt_key_json_output_matches_python` | `smt key --json` PointA/leaf match the Python reference |
-| `smt_key_rejects_bad_hex` | Non-hex or wrong-length `--vk` / `--xsk` are rejected |
-| `smt_cardano_input_assembles_full_input` | `key` + `insert` → full circuit input; root matches `smt digest` |
-| `smt_cardano_input_requires_sk_bits` | Missing `--xsk` is caught with a helpful error |
-| `compute_inputs_basic` | Basic transcript → JSON witness input generation |
-| `compute_inputs_nullifier_not_found` | Error when nullifier is missing from transcript |
-| `compute_inputs_with_raw_commitments` | Correct failure for raw-commitment transcripts |
-| `compute_inputs_missing_transcript` | Error handling for missing transcript file |
 | `nova_params_rejects_monolithic_ed25519_ownership` | `nova params` rejects non-step circuit |
 | `nova_params_rejects_jubjub_ownership` | `nova params` rejects wrong public I/O ratio |
 | `nova_params_rejects_non_step_circuit` | `nova params` rejects circuit where `n_pub_in != n_pub_out` |

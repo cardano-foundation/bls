@@ -85,15 +85,15 @@ node helpers_js/compute_spend_inputs.js 2 transcript.txt 2 input.json
 # arguments: <depth> <transcript-file> <target-nullifier> [output-file]
 ```
 
-#### Option B — Rust CLI (installed `groth16-prover` binary)
+#### Option B — Rust CLI (standalone `smt` CLI, `clis/smt`)
 
 ```bash
-cd ../../cli
+cd ../../../clis/smt
 cargo run --release -- compute-inputs \
   --depth 2 \
-  --transcript ../circom/Privacy/transcript.txt \
+  --transcript ../../../groth16-prover/circom/Privacy/transcript.txt \
   --nullifier 2 \
-  --out ../circom/Privacy/input.json
+  --out ../../../groth16-prover/circom/Privacy/input.json
 ```
 
 Example `input.json` for depth 2, proving nullifier `2`:
