@@ -112,7 +112,12 @@ the root, and the keys never have to be revealed to it.
 
    (or, self-contained with no cardano-address dependency:)
 
-   $ python3 test_e2e.py --depth 4 --index 0 --output input.json
+   $ python3 test_e2e.py --depth 4 --index 0 --output input.json --smt-cli groth16-prover
+
+   Both scripts build the SMT with the `groth16-prover smt` CLI (`smt insert
+   --index` + `smt path --json` + `smt verify`); an equivalent in-Python
+   builder is a fallback only (see below). Use `--smt-cli <path>` to point at
+   a binary not on `PATH`, e.g. `groth16-prover/cli/target/release/groth16-prover`.
 
 3. Generate the witness
 
@@ -194,6 +199,9 @@ groth16-prover smt verify --state smt.json --leaf <leaf>        # self-check
 > the identical zero-padding scheme and is used *solely* when the CLI is
 > missing or fails (a `WARNING:` is printed to stderr). It is not the
 > intended path — always run with a `groth16-prover` binary available.
+> `test_e2e.py` and `test_smt_simple.py` follow the same CLI-first pattern
+> (they insert all leaves in one `smt insert` call when the target leaf is
+> at index 0, or a single `smt insert --index` otherwise).
 
 Use `--smt-cli <path>` to point at a binary that is not on `PATH`, e.g.
 `--smt-cli groth16-prover/cli/target/release/groth16-prover`.
@@ -476,8 +484,8 @@ CardanoKeyOwnershipSMT/
 ├── cardano_key_ownership_smt_nova.r1cs   # Compiled step R1CS
 ├── gen_smt_input.py                     # Input generator (cardano-address keys)
 ├── gen_smt_nova_steps.py                # Nova step-witness generator (255 steps)
-├── test_e2e.py                          # Self-contained e2e input generator
-├── test_smt_simple.py                   # Fixed-seed simple input generator
+├── test_e2e.py                          # Self-contained e2e input generator (CLI-first)
+├── test_smt_simple.py                   # Fixed-seed simple input generator (CLI-first)
 ├── test_smt.sh                          # Input + witness + R1CS check
 ├── demo.sh                              # End-to-end demo
 └── benchmarks.py                        # Witness/proof/verify timings
@@ -488,6 +496,9 @@ CardanoKeyOwnershipSMT/
 - `circom` compiler (≥ 2.0.0) for compiling `cardano_key_ownership_smt.circom`
 - `snarkjs` for witness generation
 - `groth16-prover` CLI for ceremony, proving, and verification (incl. `nova`)
+- `groth16-prover` **`smt` subcommand** to build the SMT / Merkle path for the
+  circuit input (`gen_smt_input.py`, `test_e2e.py`, `test_smt_simple.py`) —
+  an in-Python builder is a fallback only
 - `cardano-address` CLI for real-world key derivation (optional)
 - `pynacl` for the self-contained `test_e2e.py` key generation
 

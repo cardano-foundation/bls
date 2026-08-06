@@ -291,6 +291,48 @@ def build_merkle_tree(leaf_index, depth, all_leaves):
     return root, proof, directions
 
 
+def _smt_cli_insert_and_path(insert_args, leaf, depth, smt_cli):
+    """Run `smt insert` + `smt path --json` + `smt verify` via the CLI.
+
+    `insert_args` is the argument list after `smt insert` (e.g. `--depth 4
+    --items <leaf> --index 0`). Returns `(root, siblings, directions)` on
+    success, or `None` when the CLI is unavailable or errors (a `WARNING:`
+    is always printed then — the in-Python builder is the fallback).
+    """
+    if not smt_cli:
+        return None
+    tmp = tempfile.mkdtemp(prefix="smt_cli_")
+    try:
+        state = os.path.join(tmp, "smt.json")
+        subprocess.run(
+            [smt_cli, "smt", "insert"] + insert_args + ["--state", state],
+            check=True, capture_output=True, text=True,
+        )
+        out = subprocess.run(
+            [smt_cli, "smt", "path", "--state", state, "--leaf", str(leaf), "--json"],
+            check=True, capture_output=True, text=True,
+        )
+        data = json.loads(out.stdout)
+        subprocess.run(
+            [smt_cli, "smt", "verify", "--state", state, "--leaf", str(leaf)],
+            check=True, capture_output=True, text=True,
+        )
+        return (
+            str(data["digest"]),
+            [str(s) for s in data["siblings"]],
+            [str(d) for d in data["directions"]],
+        )
+    except FileNotFoundError as e:
+        print(f"WARNING: smt CLI '{smt_cli}' not found ({e}); "
+              "falling back to the in-Python Merkle builder (fallback only)")
+    except (subprocess.CalledProcessError, json.JSONDecodeError) as e:
+        print(f"WARNING: smt CLI failed ({e}); "
+              "falling back to the in-Python Merkle builder (fallback only)")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    return None
+
+
 def build_merkle_tree_cli(leaf, index, depth, smt_cli):
     """Build the zero-padded SMT via the `groth16-prover smt` CLI.
 
@@ -304,41 +346,46 @@ def build_merkle_tree_cli(leaf, index, depth, smt_cli):
     `WARNING:` is always printed when that happens.
     """
     if smt_cli:
-        tmp = tempfile.mkdtemp(prefix="smt_cli_")
-        try:
-            state = os.path.join(tmp, "smt.json")
-            subprocess.run(
-                [smt_cli, "smt", "insert", "--depth", str(depth),
-                 "--items", str(leaf), "--index", str(index), "--state", state],
-                check=True, capture_output=True, text=True,
-            )
-            out = subprocess.run(
-                [smt_cli, "smt", "path", "--state", state, "--leaf", str(leaf), "--json"],
-                check=True, capture_output=True, text=True,
-            )
-            data = json.loads(out.stdout)
-            subprocess.run(
-                [smt_cli, "smt", "verify", "--state", state, "--leaf", str(leaf)],
-                check=True, capture_output=True, text=True,
-            )
-            return (
-                str(data["digest"]),
-                [str(s) for s in data["siblings"]],
-                [str(d) for d in data["directions"]],
-                True,
-            )
-        except FileNotFoundError as e:
-            print(f"WARNING: smt CLI '{smt_cli}' not found ({e}); "
-                  "falling back to the in-Python Merkle builder (fallback only)")
-        except (subprocess.CalledProcessError, json.JSONDecodeError) as e:
-            print(f"WARNING: smt CLI failed ({e}); "
-                  "falling back to the in-Python Merkle builder (fallback only)")
-        finally:
-            shutil.rmtree(tmp, ignore_errors=True)
+        result = _smt_cli_insert_and_path(
+            ["--depth", str(depth), "--items", str(leaf), "--index", str(index)],
+            leaf, depth, smt_cli,
+        )
+        if result is not None:
+            return (*result, True)
 
     # Fallback (not the intended path): equivalent zero-padded tree in Python.
     all_leaves = [0] * (1 << depth)
     all_leaves[index] = leaf
+    root, siblings, directions = build_merkle_tree(index, depth, all_leaves)
+    return str(root), [str(s) for s in siblings], [str(d) for d in directions], False
+
+
+def build_merkle_tree_cli_multi(leaves, index, depth, smt_cli):
+    """Build an SMT with several leaves via the `groth16-prover smt` CLI.
+
+    Inserts all `leaves` in one `smt insert` call (sequential slots, so the
+    first leaf lands at index 0) when `index == 0`; a single leaf at an
+    explicit `--index` (zero-padded tree) otherwise. `smt path --json` gives
+    the proof for `leaves[0]` and `smt verify` self-checks it.
+
+    The in-Python `build_merkle_tree` is a **fallback only** (identical
+    padding scheme). It is used solely when the CLI is unavailable or errors
+    (e.g. binary not built with the `privacy` feature or not on PATH), and a
+    `WARNING:` is always printed when that happens.
+    """
+    if smt_cli and index == 0:
+        result = _smt_cli_insert_and_path(
+            ["--depth", str(depth), "--items", ",".join(str(l) for l in leaves)],
+            leaves[0], depth, smt_cli,
+        )
+        if result is not None:
+            return (*result, True)
+
+    # Fallback (not the intended path): equivalent zero-padded tree in Python.
+    all_leaves = [0] * (1 << depth)
+    all_leaves[index] = leaves[0]
+    for i, other in enumerate(leaves[1:]):
+        all_leaves[i + 1] = other
     root, siblings, directions = build_merkle_tree(index, depth, all_leaves)
     return str(root), [str(s) for s in siblings], [str(d) for d in directions], False
 

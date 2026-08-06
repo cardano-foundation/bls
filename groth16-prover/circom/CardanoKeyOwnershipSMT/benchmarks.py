@@ -14,11 +14,16 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 WASM = os.path.join(SCRIPT_DIR, "cardano_key_ownership_smt_js/cardano_key_ownership_smt.wasm")
 R1CS = os.path.join(SCRIPT_DIR, "cardano_key_ownership_smt.r1cs")
 
+# groth16-prover binary used to build the SMT (default: release binary, else PATH).
+SMT_CLI = os.path.join(SCRIPT_DIR, "../../cli/target/release/groth16-prover")
+if not os.path.exists(SMT_CLI):
+    SMT_CLI = "groth16-prover"
+
 
 def benchmark_witness_generation(depth=4, iterations=5):
     times = []
     for i in range(iterations):
-        generate_test_input(depth=depth, output_file=f"/tmp/bench_input_{i}.json")
+        generate_test_input(depth=depth, output_file=f"/tmp/bench_input_{i}.json", smt_cli=SMT_CLI)
         start = time.time()
         result = subprocess.run(
             ["snarkjs", "wc", WASM, f"/tmp/bench_input_{i}.json", f"/tmp/bench_witness_{i}.wtns"],
@@ -43,7 +48,7 @@ def benchmark_proof_generation(depth=4, iterations=5):
         return
     times = []
     for i in range(iterations):
-        generate_test_input(depth=depth, output_file=f"/tmp/bench_input_{i}.json")
+        generate_test_input(depth=depth, output_file=f"/tmp/bench_input_{i}.json", smt_cli=SMT_CLI)
         start = time.time()
         result = subprocess.run(
             ["snarkjs", "groth16", "prove", zkey, f"/tmp/bench_input_{i}.json",
@@ -69,7 +74,7 @@ def benchmark_verification(depth=4, iterations=10):
         return
     times = []
     for i in range(iterations):
-        generate_test_input(depth=depth, output_file=f"/tmp/bench_input_{i}.json")
+        generate_test_input(depth=depth, output_file=f"/tmp/bench_input_{i}.json", smt_cli=SMT_CLI)
         start = time.time()
         result = subprocess.run(
             ["snarkjs", "groth16", "verify", vk, f"/tmp/bench_public_{i}.json", f"/tmp/bench_proof_{i}.json"],
