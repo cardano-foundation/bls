@@ -411,7 +411,27 @@ groth16-prover compute-inputs \
 
 ### `smt` — Sparse Merkle Tree operations
 
-Provides insert-only SMT commands backed by MiMC(x⁷) hashing. Subcommands: `leaf`, `insert`, `digest`, `path`, `verify`, `export`.
+Provides insert-only SMT commands backed by MiMC(x⁷) hashing, plus Ed25519 key-derivation helpers for the CardanoKeyOwnershipSMT circuit. Subcommands: `key`, `leaf`, `insert`, `digest`, `path`, `verify`, `export`, `cardano-input`.
+
+#### `smt key` — derive CardanoKeyOwnershipSMT witness data from a key
+
+Decompresses an Ed25519 public key into the extended coordinates `[X, Y, Z, T]`, splits each coordinate into three base-2^85 limbs, computes the MiMC leaf commitment, and bit-decomposes `A` (the 256 compressed-key bits) and optionally `sk` (the 255 clamped-scalar bits). This is the full witness-generation pipeline for the `CardanoKeyOwnershipSMT` circuit — previously done in Python.
+
+| Flag | Values | Default | Description |
+|------|--------|---------|-------------|
+| `--vk HEX` | 64 hex chars | *required* | Compressed Ed25519 public key |
+| `--xsk HEX` | 64 hex chars | — | 32-byte scalar (clamped to the 255-bit `sk` witness input). Omitted from the output when not given |
+| `--json` | — | off | Emit a machine-readable key record consumed by `smt cardano-input` |
+
+```bash
+# Human-readable (PointA limbs, MiMC leaf, A and sk bit counts)
+groth16-prover smt key --vk <pk-hex> --xsk <scalar-hex>
+
+# Machine-readable record for `smt cardano-input`
+groth16-prover smt key --vk <pk-hex> --xsk <scalar-hex> --json
+```
+
+The `--json` record contains `vk`, `PointA` (`[X,Y,Z,T]` × 3 limbs each), `leaf`, `A` (256 bits), and `sk` (255 bits, only with `--xsk`).
 
 #### `smt leaf` — compute a MiMC leaf commitment (MultiMiMC7 over 6 limbs, k = 0)
 
@@ -503,6 +523,24 @@ groth16-prover smt export \
   --nullifier 1 \
   --out input.json
 ```
+
+#### `smt cardano-input` — assemble the full CardanoKeyOwnershipSMT circuit input
+
+Combines a `smt key` record and a persisted tree state into the complete witness-input JSON for the `CardanoKeyOwnershipSMT` circuit: `A[256]`, `sk[255]`, `PointA[4][3]`, `smt_root`, `smt_siblings`, `smt_directions`. Locates the leaf's Merkle path inside the tree state automatically.
+
+| Flag | Values | Default | Description |
+|------|--------|---------|-------------|
+| `--state FILE` | — | `smt.json` | Path to the persisted tree state |
+| `--key FILE` | — | *required* | Key record JSON produced by `smt key --json` |
+| `--out FILE` | — | `input.json` | Output path for the JSON witness input |
+
+```bash
+groth16-prover smt key --vk <pk-hex> --xsk <scalar-hex> --json > key.json
+groth16-prover smt insert --depth 4 --items "<leaf>,40404" --state smt.json
+groth16-prover smt cardano-input --state smt.json --key key.json --out input.json
+```
+
+The record must contain `sk` bits — re-run `smt key --xsk` if it was generated without them.
 
 ---
 
@@ -867,6 +905,12 @@ The integration tests in `tests/cli.rs` exercise every command via `assert_cmd`.
 | `smt_verify_valid` | `smt verify` reports VALID for a correct path |
 | `smt_verify_invalid` | `smt verify` reports INVALID for a wrong path |
 | `smt_export` | `smt export` produces valid JSON for Privacy circuit |
+| `smt_leaf_computes_mimc_commitment` | MiMC leaf matches the Python `multi_mimc7` reference |
+| `smt_key_computes_witness_data` | `smt key` decompresses, chunks, and bit-decomposes a key |
+| `smt_key_json_output_matches_python` | `smt key --json` PointA/leaf match the Python reference |
+| `smt_key_rejects_bad_hex` | Non-hex or wrong-length `--vk` / `--xsk` are rejected |
+| `smt_cardano_input_assembles_full_input` | `key` + `insert` → full circuit input; root matches `smt digest` |
+| `smt_cardano_input_requires_sk_bits` | Missing `--xsk` is caught with a helpful error |
 | `compute_inputs_basic` | Basic transcript → JSON witness input generation |
 | `compute_inputs_nullifier_not_found` | Error when nullifier is missing from transcript |
 | `compute_inputs_with_raw_commitments` | Correct failure for raw-commitment transcripts |
