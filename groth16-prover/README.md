@@ -254,12 +254,13 @@ cargo run --release -- export-vk \
 
 #### Compute witness inputs for the Spend circuit
 
-The `compute-inputs` command reads a transcript and produces the private Merkle-path JSON needed by the Circom witness generator for the shielded-spend (`Spend(depth)`) circuit:
+The `compute-inputs` command (in the standalone `smt` CLI, `clis/smt`) reads a transcript and produces the private Merkle-path JSON needed by the Circom witness generator for the shielded-spend (`Spend(depth)`) circuit:
 
 ```bash
+cd ../clis/smt
 cargo run --release -- compute-inputs \
   --depth 2 \
-  --transcript ../circom/Privacy/transcript.txt \
+  --transcript ../../groth16-prover/circom/Privacy/transcript.txt \
   --nullifier 2 \
   --out /tmp/input.json
 ```
@@ -283,39 +284,47 @@ This concept was formalised by Dahlberg, Pulls, and Peeters in *"Efficient Spars
 
 #### CLI commands
 
-The CLI includes an insert-only sparse Merkle tree backed by MiMC(x⁷) over BLS12-381:
+The SMT functionality lives in the standalone `smt` CLI (`clis/smt`) — an insert-only sparse Merkle tree backed by MiMC(x⁷) over BLS12-381:
 
 ```bash
 # Derive CardanoKeyOwnershipSMT witness data from a key (Ed25519 decompress,
 # base-2^85 chunking, MiMC leaf, A/sk bit decomposition)
-cargo run --release -- smt key --vk <pk-hex> --xsk <scalar-hex> --json
+smt key --vk <pk-hex> --xsk <scalar-hex> --json
 
 # Compute a MiMC leaf commitment (MultiMiMC7 over 6 limbs, k = 0)
-cargo run --release -- smt leaf --items "x0,x1,x2,y0,y1,y2"
+smt leaf --items "x0,x1,x2,y0,y1,y2"
 
 # Insert items and persist tree state
-cargo run --release -- smt insert --depth 2 --items "1,2,3" --state /tmp/smt.json
+smt insert --depth 2 --items "1,2,3" --state /tmp/smt.json
 
 # Bulk insert from a transcript file
-cargo run --release -- smt insert --depth 2 --transcript transcript.txt --state /tmp/smt.json
+smt insert --depth 2 --transcript transcript.txt --state /tmp/smt.json
 
 # Print the current Merkle root
-cargo run --release -- smt digest --state /tmp/smt.json
+smt digest --state /tmp/smt.json
 
 # Print the Merkle path for a leaf
-cargo run --release -- smt path --state /tmp/smt.json --leaf <commitment>
+smt path --state /tmp/smt.json --leaf <commitment>
 
 # Verify a Merkle path hashes back to the stored digest
-cargo run --release -- smt verify --state /tmp/smt.json --leaf <commitment>
+smt verify --state /tmp/smt.json --leaf <commitment>
 
 # Export witness input.json for the Privacy circuit
-cargo run --release -- smt export --state /tmp/smt.json --nullifier 1 --out input.json
+smt export --state /tmp/smt.json --nullifier 1 --out input.json
 
 # Assemble the full CardanoKeyOwnershipSMT circuit input (key record + tree)
-cargo run --release -- smt cardano-input --state /tmp/smt.json --key key.json --out input.json
+smt cardano-input --state /tmp/smt.json --key key.json --out input.json
 ```
 
-See [`cli/README.md`](cli/README.md) for full CLI documentation, including proof serialization format, proving key structure, and complete end-to-end examples.
+Build the `smt` CLI from the repository root with:
+
+```bash
+cd clis/smt
+cargo build --release
+# binary: clis/smt/target/release/smt
+```
+
+See [`cli/README.md`](cli/README.md) for the `groth16-prover` CLI documentation, including proof serialization format, proving key structure, and complete end-to-end examples.
 
 </details>
 

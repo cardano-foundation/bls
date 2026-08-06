@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """End-to-end test for CardanoKeyOwnershipSMT circuit with valid Ed25519 keys.
 
-All cryptography is delegated to the `groth16-prover smt` CLI (`smt key` for
+All cryptography is delegated to the standalone `smt` CLI (`smt key` for
 the Ed25519 decompression / MiMC leaf / bit decomposition, `smt insert` for
 the tree, `smt cardano-input` for the final circuit input). Python only
 generates a fresh Ed25519 key pair with PyNaCl and orchestrates the CLI.
@@ -18,7 +18,7 @@ from gen_smt_input import key_record_cli, build_smt_and_input_cli
 import nacl.signing
 
 
-def generate_test_input(depth=4, index=0, output_file="test_smt_input.json", smt_cli="groth16-prover"):
+def generate_test_input(depth=4, index=0, output_file="test_smt_input.json", smt_cli="smt"):
     sk = nacl.signing.SigningKey.generate()
     pk = sk.verify_key
 
@@ -39,7 +39,7 @@ def generate_test_input(depth=4, index=0, output_file="test_smt_input.json", smt
     print(f"  Scalar (hex): {scalar_bytes.hex()}")
     print(f"  SMT depth: {depth}")
     print(f"  SMT leaf index: {index}")
-    print(f"  SMT builder: groth16-prover smt CLI (--smt-cli {smt_cli})")
+    print(f"  SMT builder: smt CLI (--smt-cli {smt_cli})")
     print(f"  SMT root: {circuit_input['smt_root']}")
     print(f"  MiMC leaf: {key_record['leaf']} (smt key CLI)")
 
@@ -54,10 +54,9 @@ if __name__ == "__main__":
     parser.add_argument("--output", default="test_smt_input.json")
     parser.add_argument(
         "--smt-cli",
-        default="groth16-prover",
-        help="Path to the 'groth16-prover' binary used for all crypto "
-             "(must expose the 'smt' subcommand, i.e. be built with the "
-             "'privacy' feature). Default: 'groth16-prover' (looked up on PATH).",
+        default="smt",
+        help="Path to the standalone 'smt' CLI binary (clis/smt) used for all "
+             "crypto. Default: 'smt' (looked up on PATH).",
     )
     args = parser.parse_args()
     generate_test_input(depth=args.depth, index=args.index,

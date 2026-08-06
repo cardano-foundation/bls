@@ -14,10 +14,10 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 WASM = os.path.join(SCRIPT_DIR, "cardano_key_ownership_smt_js/cardano_key_ownership_smt.wasm")
 R1CS = os.path.join(SCRIPT_DIR, "cardano_key_ownership_smt.r1cs")
 
-# groth16-prover binary used to build the SMT (default: release binary, else PATH).
-SMT_CLI = os.path.join(SCRIPT_DIR, "../../cli/target/release/groth16-prover")
+# Standalone `smt` CLI used to build the SMT (default: release binary, else PATH).
+SMT_CLI = os.path.join(SCRIPT_DIR, "../../../clis/smt/target/release/smt")
 if not os.path.exists(SMT_CLI):
-    SMT_CLI = "groth16-prover"
+    SMT_CLI = "smt"
 
 
 def benchmark_witness_generation(depth=4, iterations=5):

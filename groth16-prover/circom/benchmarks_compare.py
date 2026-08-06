@@ -28,6 +28,11 @@ import time
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_BIN = os.path.join(SCRIPT_DIR, "../cli/target/release/groth16-prover")
+# The SMT input generator shells out to the standalone `smt` CLI (clis/smt)
+# for all SMT/Ed25519 crypto; default to its release binary if present.
+DEFAULT_SMT_CLI = os.path.join(SCRIPT_DIR, "../../clis/smt/target/release/smt")
+if not os.path.exists(DEFAULT_SMT_CLI):
+    DEFAULT_SMT_CLI = "smt"
 
 FAMILIES = {
     "cko": {
@@ -101,6 +106,9 @@ def main():
     ap.add_argument("--xsk")
     ap.add_argument("--vk")
     ap.add_argument("--bin", default=DEFAULT_BIN)
+    ap.add_argument("--smt-cli", default=DEFAULT_SMT_CLI,
+                    help="Path to the standalone 'smt' CLI (clis/smt) used for "
+                         "SMT/Ed25519 crypto in the CardanoKeyOwnershipSMT family.")
     ap.add_argument("--snarkjs", default="snarkjs")
     ap.add_argument("--cardano-address", default="cardano-address")
     ap.add_argument("--force", action="store_true")
@@ -154,12 +162,12 @@ def main():
         if os.path.exists(input_json) and not args.force:
             print("    circuit input: reused")
         else:
-            # The SMT input generator shells out to the `groth16-prover smt`
-            # CLI for all crypto; point it at the same binary used below.
+            # The SMT input generator shells out to the standalone `smt` CLI
+            # for all crypto.
             input_cmd = fam["input_gen"] + ["--xsk", pay_xsk, "--vk", pay_vk,
                                             "-o", input_json] + fam["input_extra"]
             if fname == "smt":
-                input_cmd += ["--smt-cli", args.bin]
+                input_cmd += ["--smt-cli", args.smt_cli]
             dt = run_timed(input_cmd, cwd=fdir)
             store[f"{fname}_input"] = dt
             print(f"    circuit input: {dt:.1f}s")

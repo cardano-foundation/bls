@@ -331,7 +331,7 @@ The implementation of signature aggregation case using [aiken primitves](https:/
 
 ## BLS12-381 curve primitives in aiken
 
-The curve primitives and low-level operations are available through [Aiken BLS12-381 CLI](./cli/README.md)
+The curve primitives and low-level operations are available through [Aiken BLS12-381 CLI](./clis/bls12-381/README.md)
 
 ## VRF using BLS12-381 curve primitives
 

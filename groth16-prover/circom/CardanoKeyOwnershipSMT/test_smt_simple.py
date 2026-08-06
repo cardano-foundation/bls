@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generate a simple test input for CardanoKeyOwnershipSMT without cardano-addresses CLI.
 
-All cryptography is delegated to the `groth16-prover smt` CLI (see
+All cryptography is delegated to the standalone `smt` CLI (see
 gen_smt_input.py); Python only derives a fixed-seed Ed25519 key pair with
 PyNaCl and orchestrates the CLI commands.
 """
@@ -18,7 +18,7 @@ from gen_smt_input import key_record_cli, build_smt_and_input_cli
 import nacl.signing
 
 
-def generate_simple_input(depth=2, index=0, output_file="test_smt_input.json", smt_cli="groth16-prover"):
+def generate_simple_input(depth=2, index=0, output_file="test_smt_input.json", smt_cli="smt"):
     # Fixed seed for reproducibility (32 bytes)
     seed = bytes.fromhex("a54554e8a11746a75e6c1e6e8e0e8e0e8e0e8e0e8e0e8e0e8e0e8e0e8e0e8e0e")
     sk = nacl.signing.SigningKey(seed)
@@ -40,7 +40,7 @@ def generate_simple_input(depth=2, index=0, output_file="test_smt_input.json", s
     print(f"  SMT root: {circuit_input['smt_root']}")
     print(f"  MiMC leaf: {key_record['leaf']} (smt key CLI)")
     print(f"  Depth: {depth}")
-    print(f"  SMT builder: groth16-prover smt CLI (--smt-cli {smt_cli})")
+    print(f"  SMT builder: smt CLI (--smt-cli {smt_cli})")
 
     return circuit_input
 
@@ -52,10 +52,9 @@ if __name__ == "__main__":
     parser.add_argument("--output", default="test_smt_input.json")
     parser.add_argument(
         "--smt-cli",
-        default="groth16-prover",
-        help="Path to the 'groth16-prover' binary used for all crypto "
-             "(must expose the 'smt' subcommand, i.e. be built with the "
-             "'privacy' feature). Default: 'groth16-prover' (looked up on PATH).",
+        default="smt",
+        help="Path to the standalone 'smt' CLI binary (clis/smt) used for all "
+             "crypto. Default: 'smt' (looked up on PATH).",
     )
     args = parser.parse_args()
     generate_simple_input(depth=args.depth, index=args.index,

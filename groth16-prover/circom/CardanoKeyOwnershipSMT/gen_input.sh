@@ -1,9 +1,9 @@
 #!/bin/bash
 # gen_input.sh — pure-shell circuit-input generator for CardanoKeyOwnershipSMT.
 #
-# All cryptography is performed by the `groth16-prover smt` CLI (`smt key`,
-# `smt insert`, `smt cardano-input`); this script only chooses the key source
-# and orchestrates those commands. No Python, PyNaCl, or in-script crypto.
+# All cryptography is performed by the `smt` CLI (`smt key`, `smt insert`,
+# `smt cardano-input`); this script only chooses the key source and
+# orchestrates those commands. No Python, PyNaCl, or in-script crypto.
 #
 # Two key sources:
 #   --fixed                 fixed deterministic test key (no external deps)
@@ -11,9 +11,9 @@
 #
 # Usage:
 #   gen_input.sh --fixed --depth 4 --index 0 --output input.json \
-#                [--leaves "11111 22222 33333"] [--smt-cli groth16-prover]
+#                [--leaves "11111 22222 33333"] [--smt-cli smt]
 #   gen_input.sh --xsk pay.xsk --vk pay.vk --depth 4 --output input.json \
-#                [--leaves "11111 22222 33333"] [--smt-cli groth16-prover]
+#                [--leaves "11111 22222 33333"] [--smt-cli smt]
 #
 # With `--index 0` the leaves are inserted sequentially (leaf first); with a
 # non-zero `--index` a single leaf is placed at that index (zero-padded tree).
@@ -30,7 +30,7 @@ FIXED_XSK_HEX="07ac47da43d59cdb54f1478e9b4423017a50ee1b9395abc485f6fb503e636c76"
 DEPTH=4
 INDEX=0
 OUTPUT="input.json"
-SMT_CLI="groth16-prover"
+SMT_CLI="smt"
 LEAVES=""
 MODE=""
 
@@ -86,7 +86,7 @@ trap 'rm -rf "$TMP"' EXIT
 KEY_FILE="$TMP/key.json"
 STATE="$TMP/smt.json"
 
-"$SMT_CLI" smt key --vk "$PK_HEX" --xsk "$XSK_HEX" --json > "$KEY_FILE"
+"$SMT_CLI" key --vk "$PK_HEX" --xsk "$XSK_HEX" --json > "$KEY_FILE"
 LEAF=$(grep -oP '"leaf":\s*"\K[0-9]+' "$KEY_FILE")
 
 if [[ "$INDEX" == "0" ]]; then
@@ -94,18 +94,18 @@ if [[ "$INDEX" == "0" ]]; then
     if [[ -n "$LEAVES" ]]; then
         ITEMS="$LEAF,$(echo "$LEAVES" | tr ' ' ',' | tr -d '\n')"
     fi
-    "$SMT_CLI" smt insert --depth "$DEPTH" --items "$ITEMS" --state "$STATE" > /dev/null
+    "$SMT_CLI" insert --depth "$DEPTH" --items "$ITEMS" --state "$STATE" > /dev/null
 else
-    "$SMT_CLI" smt insert --depth "$DEPTH" --items "$LEAF" --index "$INDEX" --state "$STATE" > /dev/null
+    "$SMT_CLI" insert --depth "$DEPTH" --items "$LEAF" --index "$INDEX" --state "$STATE" > /dev/null
 fi
 
-"$SMT_CLI" smt cardano-input --state "$STATE" --key "$KEY_FILE" --out "$OUTPUT"
+"$SMT_CLI" cardano-input --state "$STATE" --key "$KEY_FILE" --out "$OUTPUT"
 
 echo "Generated $OUTPUT"
 echo "  Public key:     $PK_HEX"
 echo "  Scalar (hex):   $XSK_HEX"
 echo "  SMT depth:      $DEPTH"
 echo "  SMT leaf index: $INDEX"
-echo "  SMT builder:    groth16-prover smt CLI (--smt-cli $SMT_CLI)"
+echo "  SMT builder:    smt CLI (--smt-cli $SMT_CLI)"
 echo "  SMT root:       $(grep -oP '"smt_root":\s*"\K[0-9]+' "$OUTPUT")"
 echo "  MiMC leaf:      $LEAF (smt key CLI)"

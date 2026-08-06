@@ -18,49 +18,49 @@
 //!   Ed25519 public key, split into base-2^85 limbs, compute the MiMC leaf
 //!   commitment, and bit-decompose `A` / `sk`):
 //!
-//!     $ groth16-prover smt key --vk <pk-hex> --xsk <scalar-hex> --json
+//!     $ smt key --vk <pk-hex> --xsk <scalar-hex> --json
 //!
 //!   Compute a MiMC leaf commitment (the CardanoKeyOwnershipSMT leaf, from
 //!   the six base-2^85 limbs x0,x1,x2,y0,y1,y2 of the decompressed key):
 //!
-//!     $ groth16-prover smt leaf --items "x0,x1,x2,y0,y1,y2"
-//!     $ groth16-prover smt leaf --items "x0,x1,x2,y0,y1,y2" --json
+//!     $ smt leaf --items "x0,x1,x2,y0,y1,y2"
+//!     $ smt leaf --items "x0,x1,x2,y0,y1,y2" --json
 //!
 //!   Insert items into a tree:
 //!
-//!     $ groth16-prover smt insert --depth 2 --items "1 100,2 200" --state smt.json
+//!     $ smt insert --depth 2 --items "1 100,2 200" --state smt.json
 //!
 //!   Insert a single item at an explicit leaf index (0-padded tree):
 //!
-//!     $ groth16-prover smt insert --depth 2 --items "42" --index 3 --state smt.json
+//!     $ smt insert --depth 2 --items "42" --index 3 --state smt.json
 //!
 //!   Insert from a transcript file (one item per line):
 //!
-//!     $ groth16-prover smt insert --depth 2 --transcript items.txt --state smt.json
+//!     $ smt insert --depth 2 --transcript items.txt --state smt.json
 //!
 //!   Print the current tree digest:
 //!
-//!     $ groth16-prover smt digest --state smt.json
+//!     $ smt digest --state smt.json
 //!
 //!   Print the Merkle path for a leaf (human-readable, or `--json`):
 //!
-//!     $ groth16-prover smt path --state smt.json --leaf <commitment>
-//!     $ groth16-prover smt path --state smt.json --leaf <commitment> --json
+//!     $ smt path --state smt.json --leaf <commitment>
+//!     $ smt path --state smt.json --leaf <commitment> --json
 //!
 //!   Verify a Merkle path:
 //!
-//!     $ groth16-prover smt verify --state smt.json --leaf <commitment>
+//!     $ smt verify --state smt.json --leaf <commitment>
 //!
 //!   Export witness input JSON for the Privacy circuit:
 //!
-//!     $ groth16-prover smt export --state smt.json --nullifier 1 --out input.json
+//!     $ smt export --state smt.json --nullifier 1 --out input.json
 //!
 //!   Assemble the full CardanoKeyOwnershipSMT circuit input from a tree state
 //!   and a `smt key --json` file:
 //!
-//!     $ groth16-prover smt cardano-input --state smt.json --key key.json --out input.json
+//!     $ smt cardano-input --state smt.json --key key.json --out input.json
 
-use clap::{Parser, Subcommand};
+use clap::Parser;
 use groth16_prover::ed25519::{bits_le, clamp_scalar, decompress_point, to_chunks};
 use groth16_prover::mimc::{mimc2, mimc_hash};
 use groth16_prover::sparse_merkle_tree::SparseMerkleTree;
@@ -71,128 +71,6 @@ use std::str::FromStr;
 
 use ark_bls12_381::Fr;
 use ark_ff::Zero;
-
-/// SMT subcommands
-#[derive(Debug, Subcommand)]
-pub enum SmtCommand {
-    /// Derive CardanoKeyOwnershipSMT witness data from a payment key
-    ///
-    /// Decompresses the compressed Ed25519 public key `--vk` to extended
-    /// coordinates, splits each coordinate into three base-2^85 limbs, and
-    /// computes the MiMC leaf commitment over the `x` and `y` limbs — exactly
-    /// what the circuit re-derives in-circuit. With `--xsk` (the 32-byte
-    /// scalar from the extended signing key) it additionally emits the
-    /// little-endian bits of the clamped scalar (`sk`).
-    ///
-    /// `--json` emits the machine-readable record consumed by `smt
-    /// cardano-input`:
-    ///
-    ///   {"vk", "PointA", "leaf", "A", "sk"}
-    ///
-    /// Example:
-    ///
-    ///   $ groth16-prover smt key --vk <pk-hex> --xsk <scalar-hex> --json
-    Key(KeyArgs),
-
-    /// Compute a MiMC leaf commitment (MultiMiMC7 over 6 limbs, k = 0)
-    ///
-    /// Hashes the six base-2^85 limbs `x0,x1,x2,y0,y1,y2` of a decompressed
-    /// Ed25519 public key via `MultiMiMC7(6, 91)` with `k = 0` — exactly the
-    /// `leaf` commitment the CardanoKeyOwnershipSMT circuit re-derives
-    /// in-circuit from `PointA`. The leaf is what `smt insert` stores.
-    ///
-    /// `--items` is a comma-separated list of exactly six field elements in
-    /// the order `x0,x1,x2,y0,y1,y2`.
-    ///
-    /// Example:
-    ///
-    ///   $ groth16-prover smt leaf --items "x0,x1,x2,y0,y1,y2"
-    Leaf(LeafArgs),
-
-    /// Insert items into the SMT and persist the updated tree state
-    ///
-    /// Items are specified as a comma-separated list of either:
-    ///   - a single field element (raw commitment), or
-    ///   - two space-separated field elements (`nullifier nonce`)
-    ///
-    /// Alternatively, use `--transcript` to load items from a file
-    /// (one item per line).  The `--items` and `--transcript` flags
-    /// are mutually exclusive.
-    ///
-    /// The tree state (digest + transcript) is saved to `--state`
-    /// so it can be reused by `digest`, `path`, `verify`, and `export`.
-    ///
-    /// Example:
-    ///
-    ///   $ groth16-prover smt insert --depth 2 --items "1 100,2 200" --state smt.json
-    Insert(InsertArgs),
-
-    /// Print the current Merkle root (digest) of a persisted tree
-    ///
-    /// Reads the tree state from `--state` and prints the digest
-    /// (a single field element in decimal string form).
-    ///
-    /// Example:
-    ///
-    ///   $ groth16-prover smt digest --state smt.json
-    Digest(DigestArgs),
-
-    /// Print the Merkle authentication path for a given leaf
-    ///
-    /// Rebuilds the tree from the persisted state, computes the path
-    /// from the root to the specified leaf, and prints each sibling
-    /// together with its direction (left or right).
-    ///
-    /// With `--json`, emits `{"digest", "siblings", "directions"}`
-    /// where both lists are decimal field-element strings (direction
-    /// `1` = sibling on the left) for machine consumption.
-    ///
-    /// Example:
-    ///
-    ///   $ groth16-prover smt path --state smt.json --leaf <commitment>
-    Path(PathArgs),
-
-    /// Verify that a Merkle path hashes back to the stored digest
-    ///
-    /// Rebuilds the tree from the persisted state, computes the path
-    /// for the given leaf, and checks that re-hashing the path
-    /// reproduces the stored digest.
-    ///
-    /// Example:
-    ///
-    ///   $ groth16-prover smt verify --state smt.json --leaf <commitment>
-    Verify(VerifyArgs),
-
-    /// Export witness input JSON for the Privacy circuit
-    ///
-    /// Reads the persisted tree state and produces a JSON file
-    /// containing the Merkle-path data needed by the Circom
-    /// witness generator for the Spend circuit.
-    ///
-    /// The output JSON contains: `digest`, `nullifier`, `nonce`,
-    /// `siblings` (list of field elements), and `direction` bits.
-    ///
-    /// Example:
-    ///
-    ///   $ groth16-prover smt export --state smt.json --nullifier 1 --out input.json
-    Export(ExportArgs),
-
-    /// Assemble the full CardanoKeyOwnershipSMT circuit input
-    ///
-    /// Combines a persisted tree (`--state`) with a key record produced by
-    /// `smt key --json` (`--key`) into the complete witness input for the
-    /// CardanoKeyOwnershipSMT circuit: `A`, `sk`, `PointA`, `smt_root`,
-    /// `smt_siblings`, and `smt_directions`.
-    ///
-    /// The key's MiMC leaf is looked up in the tree by value and its Merkle
-    /// path becomes the proof. The key record must contain `sk` (i.e. it must
-    /// have been generated with `--xsk`).
-    ///
-    /// Example:
-    ///
-    ///   $ groth16-prover smt cardano-input --state smt.json --key key.json --out input.json
-    CardanoInput(CardanoInputArgs),
-}
 
 /// Arguments for `smt key`
 #[derive(Debug, Parser)]
@@ -334,20 +212,6 @@ pub struct CardanoInputArgs {
     out: PathBuf,
 }
 
-/// Run the SMT command
-pub fn run(cmd: SmtCommand) -> Result<(), Box<dyn Error>> {
-    match cmd {
-        SmtCommand::Key(cmd_args) => run_key(cmd_args),
-        SmtCommand::Leaf(cmd_args) => run_leaf(cmd_args),
-        SmtCommand::Insert(cmd_args) => run_insert(cmd_args),
-        SmtCommand::Digest(cmd_args) => run_digest(cmd_args),
-        SmtCommand::Path(cmd_args) => run_path(cmd_args),
-        SmtCommand::Verify(cmd_args) => run_verify(cmd_args),
-        SmtCommand::Export(cmd_args) => run_export(cmd_args),
-        SmtCommand::CardanoInput(cmd_args) => run_cardano_input(cmd_args),
-    }
-}
-
 /// The `smt key` output record, also consumed by `smt cardano-input`.
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 struct KeyOutput {
@@ -366,7 +230,7 @@ struct KeyOutput {
     sk: Option<Vec<String>>,
 }
 
-fn run_key(args: KeyArgs) -> Result<(), Box<dyn Error>> {
+pub fn run_key(args: KeyArgs) -> Result<(), Box<dyn Error>> {
     let pk: [u8; 32] = decode_hex32(&args.vk, "--vk")?;
     let point = decompress_point(&pk).ok_or("failed to decompress Ed25519 public key")?;
 
@@ -426,7 +290,7 @@ fn run_key(args: KeyArgs) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn run_cardano_input(args: CardanoInputArgs) -> Result<(), Box<dyn Error>> {
+pub fn run_cardano_input(args: CardanoInputArgs) -> Result<(), Box<dyn Error>> {
     let state: SmtState = load_state(&args.state)?;
     let tree = rebuild_tree(&state)?;
 
@@ -481,7 +345,7 @@ fn decode_hex32(hex_str: &str, flag: &str) -> Result<[u8; 32], Box<dyn Error>> {
     bytes.try_into().map_err(|_| format!("{flag} must be exactly 32 bytes (64 hex chars)").into())
 }
 
-fn run_leaf(args: LeafArgs) -> Result<(), Box<dyn Error>> {
+pub fn run_leaf(args: LeafArgs) -> Result<(), Box<dyn Error>> {
     let parts: Vec<&str> = args
         .items
         .split(',')
@@ -514,7 +378,7 @@ fn run_leaf(args: LeafArgs) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn run_insert(args: InsertArgs) -> Result<(), Box<dyn Error>> {
+pub fn run_insert(args: InsertArgs) -> Result<(), Box<dyn Error>> {
     let mut tree = SparseMerkleTree::new(args.depth);
 
     // Collect items from --items or --transcript
@@ -586,13 +450,13 @@ fn run_insert(args: InsertArgs) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn run_digest(args: DigestArgs) -> Result<(), Box<dyn Error>> {
+pub fn run_digest(args: DigestArgs) -> Result<(), Box<dyn Error>> {
     let state: SmtState = load_state(&args.state)?;
     println!("{}", state.digest);
     Ok(())
 }
 
-fn run_path(args: PathArgs) -> Result<(), Box<dyn Error>> {
+pub fn run_path(args: PathArgs) -> Result<(), Box<dyn Error>> {
     let state: SmtState = load_state(&args.state)?;
     let leaf = Fr::from_str(&args.leaf)
         .map_err(|_| format!("invalid leaf value: {}", args.leaf))?;
@@ -665,7 +529,7 @@ fn rebuild_tree(state: &SmtState) -> Result<SparseMerkleTree, Box<dyn Error>> {
     Ok(tree)
 }
 
-fn run_verify(args: VerifyArgs) -> Result<(), Box<dyn Error>> {
+pub fn run_verify(args: VerifyArgs) -> Result<(), Box<dyn Error>> {
     let state: SmtState = load_state(&args.state)?;
     let leaf = Fr::from_str(&args.leaf)
         .map_err(|_| format!("invalid leaf value: {}", args.leaf))?;
@@ -702,7 +566,7 @@ fn run_verify(args: VerifyArgs) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn run_export(args: ExportArgs) -> Result<(), Box<dyn Error>> {
+pub fn run_export(args: ExportArgs) -> Result<(), Box<dyn Error>> {
     use groth16_prover::privacy_inputs::{compute_spend_inputs, parse_transcript_lines};
 
     let state: SmtState = load_state(&args.state)?;
