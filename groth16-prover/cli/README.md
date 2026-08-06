@@ -411,7 +411,24 @@ groth16-prover compute-inputs \
 
 ### `smt` — Sparse Merkle Tree operations
 
-Provides insert-only SMT commands backed by MiMC(x⁷) hashing. Subcommands: `insert`, `digest`, `path`, `verify`, `export`.
+Provides insert-only SMT commands backed by MiMC(x⁷) hashing. Subcommands: `leaf`, `insert`, `digest`, `path`, `verify`, `export`.
+
+#### `smt leaf` — compute a MiMC leaf commitment (MultiMiMC7 over 6 limbs, k = 0)
+
+Hashes the six base-2^85 limbs `x0,x1,x2,y0,y1,y2` of a decompressed Ed25519 public key via `MultiMiMC7(6, 91)` with `k = 0` — exactly the `leaf` commitment the `CardanoKeyOwnershipSMT` circuit re-derives in-circuit from `PointA`. The output is what you insert with `smt insert`.
+
+| Flag | Values | Default | Description |
+|------|--------|---------|-------------|
+| `--items ITEMS` | — | *required* | Six comma-separated limbs: `x0,x1,x2,y0,y1,y2` |
+| `--json` | — | off | Emit machine-readable `{"leaf": "..."}` |
+
+```bash
+# Human-readable (prints the leaf field element)
+groth16-prover smt leaf --items "x0,x1,x2,y0,y1,y2"
+
+# Machine-readable
+groth16-prover smt leaf --items "x0,x1,x2,y0,y1,y2" --json
+```
 
 #### `smt insert` — insert items and persist tree state
 

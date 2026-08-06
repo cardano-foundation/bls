@@ -19,9 +19,10 @@ The script:
   4. Computes the MiMC leaf = MultiMiMC7(x_chunks, y_chunks) over the 85-bit
      chunks of both coordinates (matching the circuit's leaf commitment)
   5. Builds the zero-padded Merkle tree of the given depth with the leaf at
-     the given index via the `groth16-prover smt` CLI (`smt insert --index`,
-     `smt path --json`, `smt verify`) — with an equivalent in-Python builder
-     as fallback when the CLI is not available
+     the given index via the `groth16-prover smt` CLI (`smt leaf` for the
+     MiMC leaf commitment, `smt insert --index`, `smt path --json`,
+     `smt verify`) — with an equivalent in-Python builder as fallback when
+     the CLI is not available
   6. Generates the Merkle proof (siblings and directions)
   7. Emits the JSON input expected by the CardanoKeyOwnershipSMT circuit
 
@@ -291,6 +292,35 @@ def build_merkle_tree(leaf_index, depth, all_leaves):
     return root, proof, directions
 
 
+def compute_leaf_cli(PointA_chunks, smt_cli):
+    """Compute the MiMC leaf commitment via the `groth16-prover smt leaf` CLI.
+
+    `PointA_chunks` is the `[4][3]` base-2^85 chunked extended coordinates of
+    the decompressed Ed25519 public key; the leaf is `MultiMiMC7(6, 91)` over
+    the x and y chunks (`k = 0`), exactly what the circuit re-derives
+    in-circuit. Returns `(leaf, used_cli)` where `leaf` is an int.
+
+    The in-Python `multi_mimc7` is a **fallback only**. It is used solely when
+    the CLI is unavailable or errors, and a `WARNING:` is always printed then.
+    """
+    if smt_cli:
+        try:
+            items = ",".join(str(c) for c in PointA_chunks[0] + PointA_chunks[1])
+            out = subprocess.run(
+                [smt_cli, "smt", "leaf", "--items", items, "--json"],
+                check=True, capture_output=True, text=True,
+            )
+            data = json.loads(out.stdout)
+            return int(data["leaf"]), True
+        except FileNotFoundError as e:
+            print(f"WARNING: smt CLI '{smt_cli}' not found ({e}); "
+                  "falling back to the in-Python MiMC leaf (fallback only)")
+        except (subprocess.CalledProcessError, json.JSONDecodeError) as e:
+            print(f"WARNING: smt CLI failed ({e}); "
+                  "falling back to the in-Python MiMC leaf (fallback only)")
+    return multi_mimc7(PointA_chunks[0] + PointA_chunks[1]), False
+
+
 def _smt_cli_insert_and_path(insert_args, leaf, depth, smt_cli):
     """Run `smt insert` + `smt path --json` + `smt verify` via the CLI.
 
@@ -441,8 +471,8 @@ def main():
     PointA_chunks = [to_chunks(c) for c in PointA]
 
     # Leaf commitment: hash the full (x, y) coordinates, 85-bit chunks in the
-    # same order as the circuit's MultiMimc7(6, 91) template.
-    leaf = multi_mimc7(PointA_chunks[0] + PointA_chunks[1])
+    # same order as the circuit's MultiMimc7(6, 91) template (via `smt leaf`).
+    leaf, used_leaf_cli = compute_leaf_cli(PointA_chunks, args.smt_cli)
 
     smt_root, siblings, directions, used_cli = build_merkle_tree_cli(leaf, args.index, args.depth, args.smt_cli)
 
@@ -470,7 +500,10 @@ def main():
     else:
         print(f"  SMT builder:    PYTHON FALLBACK (smt CLI '{args.smt_cli}' unavailable)")
     print(f"  SMT root:       {smt_root}")
-    print(f"  MiMC leaf:      {leaf}")
+    if used_leaf_cli:
+        print(f"  MiMC leaf:      {leaf} (smt leaf CLI)")
+    else:
+        print(f"  MiMC leaf:      {leaf} (PYTHON FALLBACK)")
     print("Input generated successfully for CardanoKeyOwnershipSMT circuit.")
 
 

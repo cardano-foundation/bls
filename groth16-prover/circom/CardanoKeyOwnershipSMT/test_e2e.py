@@ -8,7 +8,7 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from gen_smt_input import (
-    P_BLS, P_ED, ROUND_CONSTANTS, mimc2, multi_mimc7,
+    P_BLS, P_ED, ROUND_CONSTANTS, mimc2, multi_mimc7, compute_leaf_cli,
     build_merkle_tree_cli_multi, build_merkle_tree_cli,
     bytes_to_bits_le, decompress_point, to_chunks, clamp_ed25519_scalar,
 )
@@ -32,7 +32,7 @@ def generate_test_input(depth=4, index=0, output_file="test_smt_input.json", smt
     PointA = decompress_point(pk_bytes)
     PointA_chunks = [to_chunks(c) for c in PointA]
 
-    leaf = multi_mimc7(PointA_chunks[0] + PointA_chunks[1])
+    leaf, used_leaf_cli = compute_leaf_cli(PointA_chunks, smt_cli)
 
     other_leaves = [12345, 67890, 11111, 22222, 33333, 44444, 55555, 66666, 77777, 88888, 99999, 10101, 20202, 30303, 40404]
     if index == 0:
@@ -64,7 +64,10 @@ def generate_test_input(depth=4, index=0, output_file="test_smt_input.json", smt
     else:
         print(f"  SMT builder: PYTHON FALLBACK (smt CLI '{smt_cli}' unavailable)")
     print(f"  SMT root: {smt_root}")
-    print(f"  MiMC leaf: {leaf}")
+    if used_leaf_cli:
+        print(f"  MiMC leaf: {leaf} (smt leaf CLI)")
+    else:
+        print(f"  MiMC leaf: {leaf} (PYTHON FALLBACK)")
 
     return circuit_input
 

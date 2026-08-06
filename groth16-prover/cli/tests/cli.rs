@@ -1387,6 +1387,45 @@ fn smt_insert_from_transcript_file() {
     assert_eq!(state_json["items"].as_array().unwrap().len(), 3);
 }
 
+#[test]
+fn smt_leaf_computes_mimc_commitment() {
+    // Known value cross-checked against the in-Python `multi_mimc7`:
+    //   leaf([1,2,3,4,5,6]) = 16125901014162640262929794406980070057269520862577327302420520588219082534074
+    let mut cmd = Command::cargo_bin("groth16-prover").unwrap();
+    cmd.arg("smt")
+        .arg("leaf")
+        .arg("--items")
+        .arg("1,2,3,4,5,6");
+    cmd.assert()
+        .success()
+        .stdout("16125901014162640262929794406980070057269520862577327302420520588219082534074\n");
+}
+
+#[test]
+fn smt_leaf_json_output() {
+    let mut cmd = Command::cargo_bin("groth16-prover").unwrap();
+    cmd.arg("smt")
+        .arg("leaf")
+        .arg("--items")
+        .arg("1,2,3,4,5,6")
+        .arg("--json");
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("\"leaf\":\"16125901014162640262929794406980070057269520862577327302420520588219082534074\""));
+}
+
+#[test]
+fn smt_leaf_rejects_wrong_item_count() {
+    let mut cmd = Command::cargo_bin("groth16-prover").unwrap();
+    cmd.arg("smt")
+        .arg("leaf")
+        .arg("--items")
+        .arg("1,2,3");
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("expected exactly 6 field elements"));
+}
+
 // ------------------------------------------------------------------
 // Sparse mode CLI tests (Implementation 6)
 // ------------------------------------------------------------------
@@ -2441,6 +2480,7 @@ fn help_smt() {
     cmd.arg("smt").arg("--help");
     cmd.assert()
         .success()
+        .stdout(predicate::str::contains("leaf"))
         .stdout(predicate::str::contains("insert"))
         .stdout(predicate::str::contains("digest"))
         .stdout(predicate::str::contains("path"))

@@ -9,7 +9,8 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from gen_smt_input import (
-    P_BLS, P_ED, ROUND_CONSTANTS, mimc2, multi_mimc7, build_merkle_tree_cli_multi,
+    P_BLS, P_ED, ROUND_CONSTANTS, mimc2, multi_mimc7, compute_leaf_cli,
+    build_merkle_tree_cli_multi,
     bytes_to_bits_le, decompress_point, to_chunks, clamp_ed25519_scalar,
 )
 
@@ -35,8 +36,8 @@ def generate_simple_input(depth=2, index=0, output_file="test_smt_input.json", s
     # Scalar bits (255 bits)
     sk_bits = bytes_to_bits_le(scalar)[:255]
 
-    # Compute MiMC leaf over the full (x, y) coordinates
-    leaf = multi_mimc7(PointA_chunks[0] + PointA_chunks[1])
+    # Compute the MiMC leaf over the full (x, y) coordinates via the CLI
+    leaf, used_leaf_cli = compute_leaf_cli(PointA_chunks, smt_cli)
 
     # Build the SMT via the groth16-prover smt CLI (Python fallback if missing)
     other_leaves = [12345, 67890, 11111]
@@ -58,7 +59,10 @@ def generate_simple_input(depth=2, index=0, output_file="test_smt_input.json", s
     print(f"Generated {output_file}")
     print(f"  Public key: {pk_bytes.hex()}")
     print(f"  SMT root: {smt_root}")
-    print(f"  MiMC leaf: {leaf}")
+    if used_leaf_cli:
+        print(f"  MiMC leaf: {leaf} (smt leaf CLI)")
+    else:
+        print(f"  MiMC leaf: {leaf} (PYTHON FALLBACK)")
     print(f"  Depth: {depth}")
     if used_cli:
         print(f"  SMT builder: groth16-prover smt CLI (--smt-cli {smt_cli})")

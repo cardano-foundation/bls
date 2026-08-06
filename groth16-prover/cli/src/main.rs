@@ -142,6 +142,7 @@ pub enum Command {
     /// Provides insert-only SMT commands backed by MiMC(x^7) hashing.
     ///
     /// Subcommands:
+    ///   leaf    — compute a MiMC leaf commitment (MultiMiMC7 over 6 limbs)
     ///   insert  — insert items into the tree and persist tree state
     ///   digest  — print the current tree digest (Merkle root)
     ///   path    — print the Merkle path for a given leaf
@@ -150,6 +151,7 @@ pub enum Command {
     ///
     /// Example:
     ///
+    ///   $ groth16-prover smt leaf --items "x0,x1,x2,y0,y1,y2"
     ///   $ groth16-prover smt insert --depth 2 --items "1 100,2 200,3 300" --state smt.json
     ///   $ groth16-prover smt digest --state smt.json
     ///   $ groth16-prover smt path --state smt.json --leaf <commitment>

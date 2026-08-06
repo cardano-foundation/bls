@@ -3,6 +3,7 @@
 //! Provides insert-only SMT commands backed by MiMC(x^7) hashing.
 //!
 //! Subcommands:
+//!   leaf      — compute a MiMC leaf commitment (MultiMiMC7 over 6 limbs)
 //!   insert    — insert items into the tree and print the new digest
 //!   digest    — print the current digest of a persisted tree
 //!   path      — print the Merkle path for a given leaf
@@ -10,6 +11,12 @@
 //!   export    — export witness input JSON for the Privacy circuit
 //!
 //! Examples:
+//!
+//!   Compute a MiMC leaf commitment (the CardanoKeyOwnershipSMT leaf, from
+//!   the six base-2^85 limbs x0,x1,x2,y0,y1,y2 of the decompressed key):
+//!
+//!     $ groth16-prover smt leaf --items "x0,x1,x2,y0,y1,y2"
+//!     $ groth16-prover smt leaf --items "x0,x1,x2,y0,y1,y2" --json
 //!
 //!   Insert items into a tree:
 //!
@@ -41,7 +48,7 @@
 //!     $ groth16-prover smt export --state smt.json --nullifier 1 --out input.json
 
 use clap::{Parser, Subcommand};
-use groth16_prover::mimc::mimc2;
+use groth16_prover::mimc::{mimc2, mimc_hash};
 use groth16_prover::sparse_merkle_tree::SparseMerkleTree;
 use std::error::Error;
 use std::fs;
@@ -54,6 +61,21 @@ use ark_ff::Zero;
 /// SMT subcommands
 #[derive(Debug, Subcommand)]
 pub enum SmtCommand {
+    /// Compute a MiMC leaf commitment (MultiMiMC7 over 6 limbs, k = 0)
+    ///
+    /// Hashes the six base-2^85 limbs `x0,x1,x2,y0,y1,y2` of a decompressed
+    /// Ed25519 public key via `MultiMiMC7(6, 91)` with `k = 0` — exactly the
+    /// `leaf` commitment the CardanoKeyOwnershipSMT circuit re-derives
+    /// in-circuit from `PointA`. The leaf is what `smt insert` stores.
+    ///
+    /// `--items` is a comma-separated list of exactly six field elements in
+    /// the order `x0,x1,x2,y0,y1,y2`.
+    ///
+    /// Example:
+    ///
+    ///   $ groth16-prover smt leaf --items "x0,x1,x2,y0,y1,y2"
+    Leaf(LeafArgs),
+
     /// Insert items into the SMT and persist the updated tree state
     ///
     /// Items are specified as a comma-separated list of either:
@@ -121,6 +143,19 @@ pub enum SmtCommand {
     ///
     ///   $ groth16-prover smt export --state smt.json --nullifier 1 --out input.json
     Export(ExportArgs),
+}
+
+/// Arguments for `smt leaf`
+#[derive(Debug, Parser)]
+pub struct LeafArgs {
+    /// Six comma-separated base-2^85 limbs of the decompressed point:
+    /// `x0,x1,x2,y0,y1,y2` (in that order).
+    #[arg(long, value_name = "ITEMS")]
+    items: String,
+
+    /// Emit machine-readable JSON (`{"leaf": "..."}`).
+    #[arg(long)]
+    json: bool,
 }
 
 /// Arguments for `smt insert`
@@ -218,12 +253,46 @@ pub struct ExportArgs {
 /// Run the SMT command
 pub fn run(cmd: SmtCommand) -> Result<(), Box<dyn Error>> {
     match cmd {
+        SmtCommand::Leaf(cmd_args) => run_leaf(cmd_args),
         SmtCommand::Insert(cmd_args) => run_insert(cmd_args),
         SmtCommand::Digest(cmd_args) => run_digest(cmd_args),
         SmtCommand::Path(cmd_args) => run_path(cmd_args),
         SmtCommand::Verify(cmd_args) => run_verify(cmd_args),
         SmtCommand::Export(cmd_args) => run_export(cmd_args),
     }
+}
+
+fn run_leaf(args: LeafArgs) -> Result<(), Box<dyn Error>> {
+    let parts: Vec<&str> = args
+        .items
+        .split(',')
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .collect();
+    if parts.len() != 6 {
+        return Err(format!(
+            "expected exactly 6 field elements (x0,x1,x2,y0,y1,y2), got {}: {}",
+            parts.len(),
+            args.items
+        )
+        .into());
+    }
+
+    let mut inputs = Vec::with_capacity(6);
+    for p in &parts {
+        let fr = Fr::from_str(p)
+            .map_err(|_| format!("invalid field element: {}", p))?;
+        inputs.push(fr);
+    }
+
+    let leaf = mimc_hash(&inputs, Fr::zero());
+    if args.json {
+        let out = serde_json::json!({ "leaf": field_to_string(leaf) });
+        println!("{}", serde_json::to_string(&out)?);
+    } else {
+        println!("{}", field_to_string(leaf));
+    }
+    Ok(())
 }
 
 fn run_insert(args: InsertArgs) -> Result<(), Box<dyn Error>> {

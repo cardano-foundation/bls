@@ -114,10 +114,11 @@ the root, and the keys never have to be revealed to it.
 
    $ python3 test_e2e.py --depth 4 --index 0 --output input.json --smt-cli groth16-prover
 
-   Both scripts build the SMT with the `groth16-prover smt` CLI (`smt insert
-   --index` + `smt path --json` + `smt verify`); an equivalent in-Python
-   builder is a fallback only (see below). Use `--smt-cli <path>` to point at
-   a binary not on `PATH`, e.g. `groth16-prover/cli/target/release/groth16-prover`.
+   Both scripts build the SMT with the `groth16-prover smt` CLI (`smt leaf`
+   for the MiMC leaf commitment, `smt insert --index` + `smt path --json` +
+   `smt verify` for the tree and proof); an equivalent in-Python builder is
+   a fallback only (see below). Use `--smt-cli <path>` to point at a binary
+   not on `PATH`, e.g. `groth16-prover/cli/target/release/groth16-prover`.
 
 3. Generate the witness
 
@@ -186,22 +187,26 @@ python3 gen_smt_input.py --xsk pay.xsk --vk pay.vk -o input.json --depth 4
 ```
 
 The SMT part of the tree is built with the **`groth16-prover smt` CLI**
-— this is the primary, supported path. The script runs these commands
-under the hood:
+— this is the primary, supported path. The **MiMC leaf commitment** is
+computed with `smt leaf` (hashing the six base-2^85 limbs of the
+decompressed key, exactly as the circuit does), then inserted. The script
+runs these commands under the hood:
 
 ```bash
+groth16-prover smt leaf --items "<x0>,<x1>,<x2>,<y0>,<y1>,<y2>"        # leaf
 groth16-prover smt insert --depth 4 --items <leaf> --index 0 --state smt.json
 groth16-prover smt path --state smt.json --leaf <leaf> --json   # proof
 groth16-prover smt verify --state smt.json --leaf <leaf>        # self-check
 ```
 
-> **The in-Python `build_merkle_tree` is a fallback only.** It reproduces
-> the identical zero-padding scheme and is used *solely* when the CLI is
-> missing or fails (a `WARNING:` is printed to stderr). It is not the
-> intended path — always run with a `groth16-prover` binary available.
-> `test_e2e.py` and `test_smt_simple.py` follow the same CLI-first pattern
-> (they insert all leaves in one `smt insert` call when the target leaf is
-> at index 0, or a single `smt insert --index` otherwise).
+> **The in-Python `multi_mimc7` and `build_merkle_tree` are fallbacks only.**
+> They reproduce the identical commitment / zero-padding scheme and are used
+> *solely* when the CLI is missing or fails (a `WARNING:` is printed to
+> stderr). They are not the intended path — always run with a
+> `groth16-prover` binary available. `test_e2e.py` and `test_smt_simple.py`
+> follow the same CLI-first pattern (they compute the leaf via `smt leaf`
+> and insert all leaves in one `smt insert` call when the target leaf is at
+> index 0, or a single `smt insert --index` otherwise).
 
 Use `--smt-cli <path>` to point at a binary that is not on `PATH`, e.g.
 `--smt-cli groth16-prover/cli/target/release/groth16-prover`.
@@ -435,7 +440,8 @@ Proves `A` is in the SMT:
 
 The Ed25519 public key `A` (256 bits) is committed into the SMT. The commitment
 scheme must be consistent between:
-- **Insertion**: `gen_smt_input.py` / `test_e2e.py` compute the leaf commitment
+- **Insertion**: `smt leaf` (`gen_smt_input.py` / `test_e2e.py` shell out to
+  it, with the in-Python `multi_mimc7` as a fallback) computes the leaf commitment
 - **Verification**: The circuit must compute the same commitment from `PointA`
 
 The implemented bridge hashes the **full decompressed coordinates** of `A`:
