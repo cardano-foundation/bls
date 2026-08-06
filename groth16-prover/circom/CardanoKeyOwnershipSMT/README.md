@@ -108,19 +108,21 @@ the root, and the keys never have to be revealed to it.
 
 2. Generate witness inputs from the key pair
 
-   $ python3 gen_smt_input.py --xsk pay.xsk --vk pay.vk -o input.json --depth 4
+   $ ./gen_input.sh --xsk pay.xsk --vk pay.vk --depth 4 --output input.json
 
-   (or, self-contained with no cardano-address dependency:)
+   (or, self-contained with a fixed deterministic key, no cardano-address
+   or bech32 dependency:)
 
-   $ python3 test_e2e.py --depth 4 --index 0 --output input.json --smt-cli groth16-prover
+   $ ./gen_input.sh --fixed --depth 4 --index 0 --output input.json --smt-cli groth16-prover
 
    All the crypto — Ed25519 key decompression and base-2^85 chunking, the
    MiMC leaf commitment, the SMT insert/path, and the full circuit-input
    assembly — is done by the `groth16-prover smt` CLI (`smt key`, `smt leaf`,
-   `smt insert`, `smt cardano-input`). The Python scripts only drive the CLI
-   and decode the bech32 key files (via the `bech32` CLI). See
-   [CLI vs Python](#cli-vs-python) below. Use `--smt-cli <path>` to point at
-   a binary not on `PATH`, e.g. `groth16-prover/cli/target/release/groth16-prover`.
+   `smt insert`, `smt cardano-input`). `gen_input.sh` only chooses the key
+   source (fixed test key, or `bech32` decoding of real `pay.xsk`/`pay.vk`)
+   and drives the CLI. See [CLI vs shell/Python](#cli-vs-shellpython) below.
+   Use `--smt-cli <path>` to point at a binary not on `PATH`, e.g.
+   `groth16-prover/cli/target/release/groth16-prover`.
 
 3. Generate the witness
 
@@ -185,14 +187,14 @@ standard 32-byte compressed public key.
 #### Step 2: Generate circuit input from bech32 keys
 
 ```bash
-python3 gen_smt_input.py --xsk pay.xsk --vk pay.vk -o input.json --depth 4
+./gen_input.sh --xsk pay.xsk --vk pay.vk --depth 4 --output input.json
 ```
 
 The SMT part of the tree is built with the **`groth16-prover smt` CLI**
 — this is the primary, supported path, and now the *only* path. The
 **MiMC leaf commitment** is computed by `smt key` (which decompresses the
 Ed25519 public key, splits it into the six base-2^85 limbs, and hashes them
-exactly as the circuit does). The script runs these commands under the hood:
+exactly as the circuit does). `gen_input.sh` runs these commands under the hood:
 
 ```bash
 groth16-prover smt key --vk <pk-hex> --xsk <scalar-hex> --json        # PointA, A, sk, leaf
@@ -201,10 +203,11 @@ groth16-prover smt cardano-input --state smt.json --key key.json --out input.jso
 ```
 
 > **There is no in-Python crypto fallback.** The old `multi_mimc7` /
-> `build_merkle_tree` / `decompress` implementations were removed from
-> `gen_smt_input.py`, `test_e2e.py`, and `test_smt_simple.py`. If the
-> `groth16-prover` binary is missing, the scripts fail with a hard error and
-> instructions to build it — they never silently fall back to Python math.
+> `build_merkle_tree` / `decompress` implementations were removed. If the
+> `groth16-prover` binary is missing, `gen_input.sh` fails with a hard error
+> and instructions to build it — it never silently falls back to Python math.
+> (`gen_smt_input.py` remains as a Python-based orchestrator for the
+> benchmark harness `benchmarks_compare.py`.)
 
 Use `--smt-cli <path>` to point at a binary that is not on `PATH`, e.g.
 `--smt-cli groth16-prover/cli/target/release/groth16-prover`.
@@ -376,17 +379,17 @@ EOF
 > proof. The constant-size compression SNARK (one pairing, O(1) verify) is
 > [Implementation 9](../../README.md#pending) — not yet built.
 
-## CLI vs Python
+## CLI vs shell/Python
 
 All cryptographic and Merkle-tree work for the circuit input lives in the
-`groth16-prover smt` CLI; the Python scripts are pure orchestration. This
-guarantees the input generation uses exactly the same field arithmetic,
+`groth16-prover smt` CLI; the shell/Python scripts are pure orchestration.
+This guarantees the input generation uses exactly the same field arithmetic,
 round constants, and padding scheme as the circuit itself.
 
 | Step | Where | Commands / functions |
 |------|-------|----------------------|
-| Key generation (random seeds) | Python | PyNaCl `SigningKey` (test-only) |
-| bech32 key-file decoding (`pay.xsk`/`pay.vk`) | external `bech32` CLI | `bech32` decode (invoked by `gen_smt_input.py`) |
+| Key generation (random seeds) | Python | PyNaCl `SigningKey` (test-only, `test_e2e.py`) |
+| bech32 key-file decoding (`pay.xsk`/`pay.vk`) | external `bech32` CLI | `bech32` decode (invoked by `gen_input.sh --xsk/--vk` and `gen_smt_input.py`) |
 | Ed25519 point decompression (X, Y, Z, T) | Rust CLI | `smt key` → `groth16-prover/src/ed25519.rs` `decompress_point` |
 | base-2^85 limb chunking of `PointA` | Rust CLI | `smt key` → `to_chunks` |
 | MiMC leaf commitment `MultiMiMC7(6,91)` | Rust CLI | `smt key` / `smt leaf` → `groth16-prover/src/mimc.rs` |
@@ -394,7 +397,8 @@ round constants, and padding scheme as the circuit itself.
 | SMT insert / root / Merkle path | Rust CLI | `smt insert`, `smt digest`, `smt path`, `smt verify` |
 | Full circuit-input assembly | Rust CLI | `smt cardano-input` → `{A, sk, PointA, smt_root, smt_siblings, smt_directions}` |
 | Witness generation + proof + verify | Rust CLI / snarkjs | `snarkjs wc`/`wchk`, `groth16-prover prove`/`verify` |
-| Orchestration, temp files, e2e flow | Python | `gen_smt_input.py`, `test_e2e.py`, `test_smt_simple.py` |
+| Orchestration of `test_smt.sh` / `demo.sh` | shell | `gen_input.sh` (no Python) |
+| Orchestration for the benchmark harness | Python | `gen_smt_input.py` (called by `benchmarks_compare.py`) |
 
 The CLI is built with:
 
@@ -403,8 +407,8 @@ cargo build --release --manifest-path ../../cli/Cargo.toml
 # binary: ../../cli/target/release/groth16-prover
 ```
 
-If the CLI (or `bech32`) is missing, the scripts stop with a clear error —
-there is no Python crypto fallback.
+If the CLI (or `bech32`, for the real-key mode) is missing, the scripts stop
+with a clear error — there is no Python crypto fallback.
 
 ### Benchmarks — pre-Nova vs Nova
 
@@ -468,8 +472,8 @@ Proves `A` is in the SMT:
 
 The Ed25519 public key `A` (256 bits) is committed into the SMT. The commitment
 scheme must be consistent between:
-- **Insertion**: `smt key` (`gen_smt_input.py` / `test_e2e.py` shell out to
-  it) computes the leaf commitment
+- **Insertion**: `smt key` (`gen_input.sh` / `gen_smt_input.py` /
+  `test_e2e.py` shell out to it) computes the leaf commitment
 - **Verification**: The circuit must compute the same commitment from `PointA`
 
 The implemented bridge hashes the **full decompressed coordinates** of `A`:
@@ -487,11 +491,12 @@ the field circom targets with `--prime bls12381`). Empty leaves default to `0`
 and hash up as `mimc2(default, default)`, matching the padding scheme of
 `SparseMerkleTree` in `groth16-prover/src/sparse_merkle_tree.rs`.
 
-> Note: `groth16-prover smt insert --index <N>` is what lets `gen_smt_input.py`
-> place the single leaf at an arbitrary index while keeping the rest of the
-> tree zero-padded. The `smt export` subcommand targets the separate `Privacy`
-> spend circuit instead: it produces `digest/nullifier/nonce/siblings/directions`,
-> which differ from the `CardanoKeyOwnershipSMT` input format.
+> Note: `groth16-prover smt insert --index <N>` is what lets `gen_input.sh` /
+> `gen_smt_input.py` place the single leaf at an arbitrary index while keeping
+> the rest of the tree zero-padded. The `smt export` subcommand targets the
+> separate `Privacy` spend circuit instead: it produces
+> `digest/nullifier/nonce/siblings/directions`, which differ from the
+> `CardanoKeyOwnershipSMT` input format.
 
 ### Input/Output Specification
 
@@ -516,13 +521,14 @@ CardanoKeyOwnershipSMT/
 ├── cardano_key_ownership_smt_js/        # JS witness gen directory
 ├── cardano_key_ownership_smt_nova.circom # Nova step circuit (scalar mul only)
 ├── cardano_key_ownership_smt_nova.r1cs   # Compiled step R1CS
-├── gen_smt_input.py                     # Input generator (cardano-address keys)
-├── gen_smt_nova_steps.py                # Nova step-witness generator (255 steps)
-├── test_e2e.py                          # Self-contained e2e input generator (CLI-first)
-├── test_smt_simple.py                   # Fixed-seed simple input generator (CLI-first)
-├── test_smt.sh                          # Input + witness + R1CS check
-├── demo.sh                              # End-to-end demo
-└── benchmarks.py                        # Witness/proof/verify timings
+├── gen_input.sh                        # Pure-shell input generator (CLI-only)
+├── gen_smt_input.py                    # Python orchestrator (benchmark harness)
+├── gen_smt_nova_steps.py               # Nova step-witness generator (255 steps)
+├── test_e2e.py                         # Self-contained e2e input generator (PyNaCl)
+├── test_smt_simple.py                  # Fixed-seed simple input generator (PyNaCl)
+├── test_smt.sh                         # Input + witness + R1CS check (uses gen_input.sh)
+├── demo.sh                             # End-to-end demo (uses gen_input.sh)
+└── benchmarks.py                       # Witness/proof/verify timings
 ```
 
 ### Dependencies
@@ -532,11 +538,13 @@ CardanoKeyOwnershipSMT/
 - `groth16-prover` CLI for ceremony, proving, and verification (incl. `nova`)
 - `groth16-prover` **`smt` subcommand** for all circuit-input crypto
   (`smt key`, `smt leaf`, `smt insert`, `smt cardano-input`) —
-  `gen_smt_input.py`, `test_e2e.py`, `test_smt_simple.py` shell out to it
-- `bech32` CLI to decode `pay.xsk`/`pay.vk` bech32 files
-  (`gen_smt_input.py`)
-- `cardano-address` CLI for real-world key derivation (optional)
-- `pynacl` for the self-contained `test_e2e.py` key generation
+  `gen_input.sh`, `test_e2e.py`, `test_smt_simple.py` shell out to it
+- `bech32` CLI to decode `pay.xsk`/`pay.vk` bech32 files (needed by
+  `gen_input.sh --xsk/--vk` and `gen_smt_input.py`; not needed for
+  `gen_input.sh --fixed`)
+- `cardano-address` CLI for real-world key derivation (optional — needed by
+  `demo.sh` and the benchmark harness)
+- `pynacl` for the self-contained `test_e2e.py` key generation (optional)
 
 ### MiMC Hashing in the Circuit
 

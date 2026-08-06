@@ -32,7 +32,9 @@ if [ ! -f "$WASM" ]; then
 fi
 
 echo "=== Step 1: Generate test input ==="
-python3 "${CIRCUIT_DIR}/test_e2e.py" --depth 4 --index 0 --output "$INPUT" --smt-cli "$SMT_CLI"
+"${CIRCUIT_DIR}/gen_input.sh" --fixed --depth 4 --index 0 \
+    --leaves "12345 67890 11111 22222 33333 44444 55555 66666 77777 88888 99999 10101 20202 30303 40404" \
+    --output "$INPUT" --smt-cli "$SMT_CLI"
 echo "   Input generated: $INPUT"
 
 echo ""

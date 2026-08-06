@@ -154,9 +154,13 @@ def main():
         if os.path.exists(input_json) and not args.force:
             print("    circuit input: reused")
         else:
-            dt = run_timed(fam["input_gen"] + ["--xsk", pay_xsk, "--vk", pay_vk,
-                                               "-o", input_json] + fam["input_extra"],
-                           cwd=fdir)
+            # The SMT input generator shells out to the `groth16-prover smt`
+            # CLI for all crypto; point it at the same binary used below.
+            input_cmd = fam["input_gen"] + ["--xsk", pay_xsk, "--vk", pay_vk,
+                                            "-o", input_json] + fam["input_extra"]
+            if fname == "smt":
+                input_cmd += ["--smt-cli", args.bin]
+            dt = run_timed(input_cmd, cwd=fdir)
             store[f"{fname}_input"] = dt
             print(f"    circuit input: {dt:.1f}s")
 
