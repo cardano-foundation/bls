@@ -10,9 +10,9 @@
 
 use ark_serialize::CanonicalSerialize;
 use clap::Parser;
-use groth16_prover::ceremony::{single_party_ceremony_full, single_party_ceremony_full_from_tw_sparse};
-use groth16_prover::circom_adapter::{CircomCircuit, SparseCircomCircuit};
-use groth16_prover::engine::FftQapEngine;
+use crate::ceremony::{single_party_ceremony_full, single_party_ceremony_full_from_tw_sparse};
+use crate::circom_adapter::{CircomCircuit, SparseCircomCircuit};
+use crate::engine::FftQapEngine;
 use std::error::Error;
 use std::fs;
 use std::path::PathBuf;
@@ -70,7 +70,7 @@ pub fn run(args: Args) -> Result<(), Box<dyn Error>> {
         let n_public = 1 + circuit.n_pub_out as usize + circuit.n_pub_in as usize;
         let mut rng = rand::thread_rng();
         let engine = FftQapEngine::new();
-        let tw = groth16_prover::ceremony::ToxicWaste::random(&mut rng);
+        let tw = crate::ceremony::ToxicWaste::random(&mut rng);
 
         let (full_pk, vk) = single_party_ceremony_full_from_tw_sparse(
             &engine,

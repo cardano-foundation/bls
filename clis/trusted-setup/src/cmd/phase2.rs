@@ -6,16 +6,16 @@
 //! # Workflow
 //!
 //! ```text
-//! 1. groth16-prover phase2 new \
+//! 1. trusted-setup phase2 new \
 //!       --circuit c.r1cs --srs universal.ptau --zkey c_0000.zkey
 //!
-//! 2. groth16-prover phase2 contribute \
+//! 2. trusted-setup phase2 contribute \
 //!       --zkey-in c_0000.zkey --zkey-out c_0001.zkey
 //!
-//! 3. groth16-prover phase2 verify \
+//! 3. trusted-setup phase2 verify \
 //!       --zkey c_0001.zkey --circuit c.r1cs --srs universal.ptau
 //!
-//! 4. groth16-prover phase2 finalize \
+//! 4. trusted-setup phase2 finalize \
 //!       --zkey c_final.zkey --proving-key c.pk --verifying-key c.vk
 //! ```
 //!
@@ -23,17 +23,17 @@
 //!
 //! Full workflow from SRS to proving key:
 //!
-//!   $ groth16-prover phase2 new --circuit circuit.r1cs --srs universal.ptau --zkey circuit_0000.zkey
-//!   $ groth16-prover phase2 contribute --zkey-in circuit_0000.zkey --zkey-out circuit_0001.zkey --name "Contributor 1"
-//!   $ groth16-prover phase2 verify --zkey circuit_0001.zkey
-//!   $ groth16-prover phase2 finalize --zkey circuit_0001.zkey --proving-key circuit.pk --verifying-key circuit.vk
+//!   $ trusted-setup phase2 new --circuit circuit.r1cs --srs universal.ptau --zkey circuit_0000.zkey
+//!   $ trusted-setup phase2 contribute --zkey-in circuit_0000.zkey --zkey-out circuit_0001.zkey --name "Contributor 1"
+//!   $ trusted-setup phase2 verify --zkey circuit_0001.zkey
+//!   $ trusted-setup phase2 finalize --zkey circuit_0001.zkey --proving-key circuit.pk --verifying-key circuit.vk
 
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use clap::{Parser, Subcommand};
-use groth16_prover::circom_adapter::CircomCircuit;
-use groth16_prover::engine::FftQapEngine;
-use groth16_prover::phase2::Phase2Accumulator;
-use groth16_prover::ptau::PtauFile;
+use crate::circom_adapter::CircomCircuit;
+use crate::engine::FftQapEngine;
+use crate::phase2::Phase2Accumulator;
+use crate::ptau::PtauFile;
 use std::error::Error;
 use std::fs;
 use std::path::PathBuf;
@@ -53,7 +53,7 @@ pub enum Phase2Command {
     ///
     /// Example:
     ///
-    ///   $ groth16-prover phase2 new --circuit circuit.r1cs --srs universal.ptau --zkey circuit_0000.zkey
+    ///   $ trusted-setup phase2 new --circuit circuit.r1cs --srs universal.ptau --zkey circuit_0000.zkey
     New(NewArgs),
 
     /// Contribute randomness to an existing accumulator
@@ -69,7 +69,7 @@ pub enum Phase2Command {
     ///
     /// Example:
     ///
-    ///   $ groth16-prover phase2 contribute --zkey-in circuit_0000.zkey --zkey-out circuit_0001.zkey --name "Alice"
+    ///   $ trusted-setup phase2 contribute --zkey-in circuit_0000.zkey --zkey-out circuit_0001.zkey --name "Alice"
     Contribute(ContributeArgs),
 
     /// Verify an accumulator's integrity
@@ -81,7 +81,7 @@ pub enum Phase2Command {
     ///
     /// Example:
     ///
-    ///   $ groth16-prover phase2 verify --zkey circuit_0001.zkey
+    ///   $ trusted-setup phase2 verify --zkey circuit_0001.zkey
     Verify(VerifyArgs),
 
     /// Convert a finalized accumulator into `.pk` + `.vk`
@@ -95,7 +95,7 @@ pub enum Phase2Command {
     ///
     /// Example:
     ///
-    ///   $ groth16-prover phase2 finalize --zkey circuit_final.zkey --proving-key circuit.pk --verifying-key circuit.vk
+    ///   $ trusted-setup phase2 finalize --zkey circuit_final.zkey --proving-key circuit.pk --verifying-key circuit.vk
     Finalize(FinalizeArgs),
 }
 

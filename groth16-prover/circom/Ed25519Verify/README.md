@@ -99,7 +99,7 @@ Witness generation works for valid signatures (`out = 1`). Invalid signatures pr
 ```bash
 cd groth16-prover/cli
 
-cargo run --release -- ceremony-dev --sparse \
+../../clis/trusted-setup/target/release/trusted-setup ceremony-dev --sparse \
   --circuit ../circom/Ed25519Verify/ed25519_verify.r1cs \
   --proving-key /tmp/ed25519.pk \
   --verifying-key /tmp/ed25519.vk

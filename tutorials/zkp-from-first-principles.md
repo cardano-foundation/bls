@@ -299,7 +299,7 @@ where `G1` and `G2` are base points on the BLS12-381 curve. The scalar `τ` itse
 
 **Why is this necessary?** The SRS lets the prover evaluate polynomials at the secret point `τ` without learning `τ` itself — it works "in the exponent" on the curve. Without the SRS, the prover would have to send the full QAP polynomials to the verifier (destroying succinctness) and the polynomials would leak the witness (destroying zero-knowledge). And if `τ` were known — even if the SRS were otherwise correct — an attacker could pick any fake witness and compute a `h(τ)` that makes the pairing equation balance, forging a valid-looking proof for a false statement. We walk through both failure modes in detail in [The Groth16 workflow at a glance](#the-groth16-workflow-at-a-glance).
 
-In our pedagogical `Implementation 1` ([`groth16-prover/src/r1cs.rs`](https://github.com/cardano-foundation/bls/blob/main/groth16-prover/src/r1cs.rs) and [`src/bin/print_toxic_waste.rs`](https://github.com/cardano-foundation/bls/blob/main/groth16-prover/src/bin/print_toxic_waste.rs)), we use small deterministic scalars so that every intermediate value is reproducible:
+In our pedagogical `Implementation 1` ([`clis/trusted-setup/src/r1cs.rs`](https://github.com/cardano-foundation/bls/blob/main/clis/trusted-setup/src/r1cs.rs) and [`groth16-prover/src/bin/print_toxic_waste.rs`](https://github.com/cardano-foundation/bls/blob/main/groth16-prover/src/bin/print_toxic_waste.rs)), we use small deterministic scalars so that every intermediate value is reproducible:
 
 | Parameter | Value | Role | Knowledge | Risk if leaked |
 |-----------|-------|------|-----------|----------------|
@@ -598,7 +598,7 @@ snarkjs wtns calculate sum_of_products.wasm input.json witness.wtns
 
 # 3. Dev ceremony → pk + vk
 cd ../../cli
-cargo run --release -- ceremony-dev \
+../../clis/trusted-setup/target/release/trusted-setup ceremony-dev \
   --circuit ../circom/SumOfProducts/sum_of_products.r1cs \
   --proving-key /tmp/sum_of_products.pk \
   --verifying-key /tmp/sum_of_products.vk

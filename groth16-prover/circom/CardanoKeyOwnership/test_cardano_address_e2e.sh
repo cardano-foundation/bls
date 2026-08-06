@@ -12,12 +12,14 @@ set -euo pipefail
 #   - bech32 CLI in $PATH  (install from https://github.com/IntersectMBO/bech32/releases)
 #   - snarkjs  in $PATH
 #   - groth16-prover CLI built in release mode
+#   - trusted-setup CLI built in release mode (ceremony step)
 #
 # Usage:
 #   ./test_cardano_address_e2e.sh
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CLI_DIR="${SCRIPT_DIR}/../../cli"
+TRUSTED_SETUP_DIR="${SCRIPT_DIR}/../../../clis/trusted-setup"
 CIRCUIT="${SCRIPT_DIR}/cardano_ed25519_ownership.r1cs"
 WASM="${SCRIPT_DIR}/cardano_ed25519_ownership_js/cardano_ed25519_ownership.wasm"
 
@@ -45,6 +47,10 @@ if ! command -v snarkjs &> /dev/null; then
 fi
 if [ ! -f "${CLI_DIR}/target/release/groth16-prover" ]; then
     echo "ERROR: groth16-prover CLI not built. Run: cd ${CLI_DIR} && cargo build --release"
+    exit 1
+fi
+if [ ! -f "${TRUSTED_SETUP_DIR}/target/release/trusted-setup" ]; then
+    echo "ERROR: trusted-setup CLI not built. Run: cd ${TRUSTED_SETUP_DIR} && cargo build --release"
     exit 1
 fi
 if [ ! -f "$CIRCUIT" ]; then
@@ -115,7 +121,7 @@ echo "   bob_witness.wtns    generated"
 # 5. Dev ceremony (once per circuit)
 # ------------------------------------------------------------------
 echo "=== Step 5: Dev ceremony ==="
-"${CLI_DIR}/target/release/groth16-prover" ceremony-dev --sparse \
+"${TRUSTED_SETUP_DIR}/target/release/trusted-setup" ceremony-dev --sparse \
     --circuit "$CIRCUIT" \
     --proving-key /tmp/cardano_addr_test.pk \
     --verifying-key /tmp/cardano_addr_test.vk \

@@ -131,7 +131,7 @@ the root, and the keys never have to be revealed to it.
 
 4. Single-party dev ceremony (one-time per circuit, ~6 min)
 
-   $ groth16-prover ceremony-dev --sparse --h-scalar \
+   $ ../../../clis/trusted-setup/target/release/trusted-setup ceremony-dev --sparse --h-scalar \
        --circuit cardano_key_ownership_smt.r1cs \
        --proving-key smt.pk --verifying-key smt.vk
 
@@ -232,7 +232,7 @@ snarkjs wchk cardano_key_ownership_smt.r1cs witness.wtns
 #### Step 4: Single-party dev ceremony (one-time per circuit, ~6 min)
 
 ```bash
-groth16-prover ceremony-dev --sparse --h-scalar \
+../../../clis/trusted-setup/target/release/trusted-setup ceremony-dev --sparse --h-scalar \
   --circuit cardano_key_ownership_smt.r1cs \
   --proving-key smt.pk --verifying-key smt.vk
 ```
@@ -295,6 +295,8 @@ coordinates `[4][3]` (each coordinate as 3 limbs of base 2^85):
 ```bash
 cargo build --release --manifest-path ../../cli/Cargo.toml
 # binary: ../../cli/target/release/groth16-prover (used as `groth16-prover` below)
+cargo build --release --manifest-path ../../../clis/trusted-setup/Cargo.toml
+# binary: ../../../clis/trusted-setup/target/release/trusted-setup (used for the ceremony)
 ```
 
 **2. Compile the step circuit** (once; BLS12-381 field, `circomlib` include path)
@@ -535,7 +537,8 @@ CardanoKeyOwnershipSMT/
 
 - `circom` compiler (≥ 2.0.0) for compiling `cardano_key_ownership_smt.circom`
 - `snarkjs` for witness generation
-- `groth16-prover` CLI for ceremony, proving, and verification (incl. `nova`)
+- `trusted-setup` CLI (`clis/trusted-setup`) for the single-party ceremony
+- `groth16-prover` CLI for proving, and verification (incl. `nova`)
 - `groth16-prover` **`smt` subcommand** for all circuit-input crypto
   (`smt key`, `smt leaf`, `smt insert`, `smt cardano-input`) —
   `gen_input.sh`, `test_e2e.py`, `test_smt_simple.py` shell out to it

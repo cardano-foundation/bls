@@ -55,7 +55,7 @@ snarkjs wtns calculate range_proof_simple_js/range_proof_simple.wasm input.json 
 
 # 3. Dev ceremony (run from cli/)
 cd ../../cli
-cargo run --release -- ceremony-dev \
+../../clis/trusted-setup/target/release/trusted-setup ceremony-dev \
   --circuit ../circom/RangeProof/range_proof_simple.r1cs \
   --proving-key /tmp/rp_simple.pk \
   --verifying-key /tmp/rp_simple.vk
@@ -105,7 +105,7 @@ snarkjs wtns calculate range_proof_committed_js/range_proof_committed.wasm input
 
 # 4. Dev ceremony (run from cli/)
 cd ../../cli
-cargo run --release -- ceremony-dev \
+../../clis/trusted-setup/target/release/trusted-setup ceremony-dev \
   --circuit ../circom/RangeProof/range_proof_committed.r1cs \
   --proving-key /tmp/rp_committed.pk \
   --verifying-key /tmp/rp_committed.vk

@@ -2,7 +2,7 @@
 
 Command-line interface for the full Groth16 zero-knowledge proof lifecycle on BLS12-381.
 
-This CLI covers everything from trusted-setup ceremonies (both dev and multi-party MPC) through proof generation and verification, plus Nova IVC folding for batched step proofs. Sparse Merkle tree operations and privacy-circuit witness-input generation live in the standalone `smt` CLI (`clis/smt`). All outputs use arkworks' canonical compressed serialization so they are directly consumable by on-chain Aiken verifiers.
+This CLI covers proof generation and verification, plus Nova IVC folding for batched step proofs. Trusted-setup ceremonies (both the single-party dev ceremony and the multi-party Phase-2 MPC) live in the standalone `trusted-setup` CLI (`clis/trusted-setup`), and sparse Merkle tree operations plus privacy-circuit witness-input generation live in the standalone `smt` CLI (`clis/smt`). All outputs use arkworks' canonical compressed serialization so they are directly consumable by on-chain Aiken verifiers.
 
 ---
 
@@ -12,10 +12,11 @@ Run any command with `--help` for full flag details:
 
 ```bash
 groth16-prover --help
-groth16-prover ceremony-dev --help
 groth16-prover prove --help
-groth16-prover phase2 --help
+groth16-prover verify --help
+groth16-prover export-vk --help
 groth16-prover nova --help
+trusted-setup --help     # ceremony / ceremony-dev / phase2 commands
 smt --help
 ```
 
@@ -27,12 +28,9 @@ Groth16 prover CLI for BLS12-381
 Usage: groth16-prover <COMMAND>
 
 Commands:
-  ceremony        Run a trusted-setup ceremony for a circuit
-  ceremony-dev    Run a single-party dev ceremony that outputs a FullProvingKey (group elements only)
   prove           Generate a Groth16 proof from Circom artifacts
   verify          Verify a Groth16 proof against its public input
   export-vk       Export a binary verifying key to Aiken source code
-  phase2          Run a Phase-2 multi-party ceremony for a circuit
   nova            Nova IVC folding + compression flow (Implementation 8)
   help            Print this message or the help of the given subcommand(s)
 
@@ -45,184 +43,21 @@ Options:
 
 ## Command reference
 
-### `ceremony` — legacy trusted setup (deprecated)
+### `trusted-setup` — ceremonies (separate CLI)
 
-> ⚠️ **Deprecated.** Use `ceremony-dev` (for dev/testing) or `phase2` (for production) instead. Produces a legacy `ProvingKey` that contains scalar toxic waste, making it unsuitable for production use.
-
-**Options:**
-
-| Flag | Values | Default | Description |
-|------|--------|---------|-------------|
-| `--circuit FILE` | — | *required* | Path to `.r1cs` circuit file |
-| `--proving-key FILE` | — | *required* | Output path for the proving key |
-| `--verifying-key FILE` | — | *required* | Output path for the verification key |
-
-**Examples:**
+Trusted-setup ceremonies moved to the standalone `trusted-setup` CLI (`clis/trusted-setup`):
 
 ```bash
-# Basic usage
-groth16-prover ceremony \
-  --circuit circuit.r1cs \
-  --proving-key circuit.pk \
-  --verifying-key circuit.vk
+trusted-setup --help
 ```
 
----
+- `trusted-setup ceremony` — legacy single-party ceremony (deprecated; produces a legacy `ProvingKey` with scalar toxic waste)
+- `trusted-setup ceremony-dev` — single-party dev ceremony producing a `FullProvingKey` (group elements only); supports `--sparse` (Implementation 6) and `--h-scalar` (Implementation 7)
+- `trusted-setup phase2 new|contribute|verify|finalize` — multi-party Phase-2 MPC on top of a public Phase-1 SRS (`.ptau`)
 
-### `ceremony-dev` — single-party dev ceremony
+Run `trusted-setup ceremony-dev --help` or `trusted-setup phase2 --help` for full flag details. See [`clis/trusted-setup/README.md`](../../clis/trusted-setup/README.md).
 
-A single-party ceremony that generates randomness locally, evaluates the QAP polynomials, and writes a `FullProvingKey` (group elements only, no scalars). Fast (milliseconds) and insecure — perfect for development, benchmarking, and CI.
-
-**Options:**
-
-| Flag | Values | Default | Description |
-|------|--------|---------|-------------|
-| `--circuit FILE` | — | *required* | Path to `.r1cs` circuit file |
-| `--proving-key FILE` | — | *required* | Output path for the proving key |
-| `--verifying-key FILE` | — | *required* | Output path for the verification key |
-| `--sparse` | — | — | Use sparse constraint representation (Implementation 6). Avoids dense matrix allocation for large circuits (e.g. Blake2b-224, Ed25519) |
-| `--h-scalar` | — | — | Use h-query scalar compression (Implementation 7). Stores a single scalar `delta_inv * T(tau)` instead of the full `h_query` G1 vector, cutting PK size and eliminating the h MSM |
-
-**Examples:**
-
-```bash
-# Basic dev ceremony
-groth16-prover ceremony-dev \
-  --circuit circuit.r1cs \
-  --proving-key circuit.pk \
-  --verifying-key circuit.vk
-
-# Sparse mode for large circuits
-groth16-prover ceremony-dev \
-  --circuit circuit.r1cs \
-  --proving-key circuit.pk \
-  --verifying-key circuit.vk \
-  --sparse
-
-# With h-scalar compression (Implementation 7)
-groth16-prover ceremony-dev \
-  --circuit circuit.r1cs \
-  --proving-key circuit.pk \
-  --verifying-key circuit.vk \
-  --h-scalar
-
-# Sparse + h-scalar combined
-groth16-prover ceremony-dev \
-  --circuit circuit.r1cs \
-  --proving-key circuit.pk \
-  --verifying-key circuit.vk \
-  --sparse \
-  --h-scalar
-```
-
----
-
-### `phase2` — production MPC ceremony
-
-A multi-party Phase 2 ceremony that reuses a publicly verified Phase 1 SRS (e.g., Perpetual Powers of Tau). Each participant contributes randomness locally; the coordinator is just a passive file host. Even if `N-1` participants collude, the ceremony remains secure as long as at least one participant honestly discards their contribution.
-
-**Subcommands:**
-
-| Subcommand | Purpose |
-|------------|---------|
-| `new` | Create initial accumulator from `.ptau` SRS + `.r1cs` |
-| `contribute` | Add your randomness contribution |
-| `verify` | Check all contributions are valid |
-| `finalize` | Convert accumulator to `.pk` / `.vk` |
-
-#### `phase2 new`
-
-| Flag | Values | Default | Description |
-|------|--------|---------|-------------|
-| `--circuit FILE` | — | *required* | Path to `.r1cs` circuit file |
-| `--srs FILE` | — | *required* | Path to universal Phase 1 SRS (`.ptau`) |
-| `--zkey FILE` | — | *required* | Output path for the intermediate `.zkey` |
-
-```bash
-groth16-prover phase2 new \
-  --circuit circuit.r1cs \
-  --srs universal.ptau \
-  --zkey circuit_0000.zkey
-```
-
-#### `phase2 contribute`
-
-| Flag | Values | Default | Description |
-|------|--------|---------|-------------|
-| `--zkey-in FILE` | — | *required* | Input accumulator (.zkey) |
-| `--zkey-out FILE` | — | *required* | Output accumulator (.zkey) |
-| `--name NAME` | — | — | Optional participant name |
-
-```bash
-# Participant 1 contributes
-groth16-prover phase2 contribute \
-  --zkey-in circuit_0000.zkey \
-  --zkey-out circuit_0001.zkey \
-  --name "Alice"
-
-# Participant 2 contributes
-groth16-prover phase2 contribute \
-  --zkey-in circuit_0001.zkey \
-  --zkey-out circuit_final.zkey \
-  --name "Bob"
-```
-
-#### `phase2 verify`
-
-| Flag | Values | Default | Description |
-|------|--------|---------|-------------|
-| `--zkey FILE` | — | *required* | Accumulator to verify (.zkey) |
-
-```bash
-groth16-prover phase2 verify --zkey circuit_final.zkey
-```
-
-#### `phase2 finalize`
-
-| Flag | Values | Default | Description |
-|------|--------|---------|-------------|
-| `--zkey FILE` | — | *required* | Final accumulator (.zkey) |
-| `--proving-key FILE` | — | *required* | Output path for the proving key (.pk) |
-| `--verifying-key FILE` | — | *required* | Output path for the verification key (.vk) |
-
-```bash
-groth16-prover phase2 finalize \
-  --zkey circuit_final.zkey \
-  --proving-key circuit.pk \
-  --verifying-key circuit.vk
-```
-
-**Full workflow:**
-
-```bash
-# 1. Initialize from universal SRS
-groth16-prover phase2 new \
-  --circuit circuit.r1cs \
-  --srs universal.ptau \
-  --zkey circuit_0000.zkey
-
-# 2. Participants contribute sequentially
-groth16-prover phase2 contribute \
-  --zkey-in circuit_0000.zkey \
-  --zkey-out circuit_0001.zkey \
-  --name "Alice"
-
-groth16-prover phase2 contribute \
-  --zkey-in circuit_0001.zkey \
-  --zkey-out circuit_final.zkey \
-  --name "Bob"
-
-# 3. Verify the accumulator
-groth16-prover phase2 verify --zkey circuit_final.zkey
-
-# 4. Finalize to .pk / .vk
-groth16-prover phase2 finalize \
-  --zkey circuit_final.zkey \
-  --proving-key circuit.pk \
-  --verifying-key circuit.vk
-```
-
----
+The `prove` command below consumes the `.pk` / `.vk` files produced by any of these ceremonies.
 
 ### `prove` — generate a Groth16 proof
 
@@ -474,13 +309,14 @@ circom multiplier.circom --r1cs --wasm
 snarkjs wtns calculate multiplier.wasm input.json witness.wtns
 
 # 3. Dev ceremony (run once per circuit — instant, single-party)
-cd ../../cli
+cd ../../../clis/trusted-setup
 cargo run --release -- ceremony-dev \
-  --circuit ../circom/SimpleExample/multiplier.r1cs \
+  --circuit ../../groth16-prover/circom/SimpleExample/multiplier.r1cs \
   --proving-key /tmp/multiplier.pk \
   --verifying-key /tmp/multiplier.vk
 
 # 4. Prove (uses the proving key — group elements, no scalars)
+cd ../../groth16-prover/cli
 cargo run --release -- prove \
   --circuit ../circom/SimpleExample/multiplier.r1cs \
   --witness ../circom/SimpleExample/witness.wtns \
@@ -497,18 +333,18 @@ cargo run --release -- verify \
 ### Production ceremony workflow
 
 ```bash
-cd groth16-prover/cli
+cd clis/trusted-setup
 
 # 1. Compile the Circom circuit
-cd ../circom/SimpleExample
+cd ../../groth16-prover/circom/SimpleExample
 circom multiplier.circom --r1cs --wasm
 snarkjs wtns calculate multiplier.wasm input.json witness.wtns
-cd ../../cli
+cd ../../../clis/trusted-setup
 
 # 2. Initialize from a universal Phase 1 SRS
 cargo run --release -- phase2 new \
-  --circuit ../circom/SimpleExample/multiplier.r1cs \
-  --srs ../universal.ptau \
+  --circuit ../../groth16-prover/circom/SimpleExample/multiplier.r1cs \
+  --srs ../../groth16-prover/circom/universal.ptau \
   --zkey /tmp/multiplier_0000.zkey
 
 # 3. Participants contribute sequentially
@@ -532,6 +368,7 @@ cargo run --release -- phase2 finalize \
   --verifying-key /tmp/multiplier.vk
 
 # 6. Prove and verify (same as dev ceremony)
+cd ../../groth16-prover/cli
 cargo run --release -- prove \
   --circuit ../circom/SimpleExample/multiplier.r1cs \
   --witness ../circom/SimpleExample/witness.wtns \
@@ -575,13 +412,14 @@ cd ../../groth16-prover/circom/Privacy
 snarkjs wtns calculate spend_depth2.wasm /tmp/input.json /tmp/witness.wtns
 
 # 5. Dev ceremony for the Spend circuit
-cd ../../cli
+cd ../../../clis/trusted-setup
 cargo run --release -- ceremony-dev \
-  --circuit ../circom/Privacy/spend_depth2.r1cs \
+  --circuit ../../groth16-prover/circom/Privacy/spend_depth2.r1cs \
   --proving-key /tmp/spend.pk \
   --verifying-key /tmp/spend.vk
 
 # 6. Prove
+cd ../../groth16-prover/cli
 cargo run --release -- prove \
   --circuit ../circom/Privacy/spend_depth2.r1cs \
   --witness /tmp/witness.wtns \
@@ -597,7 +435,7 @@ cargo run --release -- verify \
 
 ### Dev-only shortcut (no proving key — deterministic test values)
 
-For the quickest possible testing you can skip even the `ceremony-dev` step. The prover and verifier fall back to hard-coded deterministic toxic waste (`tau=3, alpha=5, beta=7, gamma=11, delta=13`). No `.pk` or `.vk` files are needed:
+For the quickest possible testing you can skip even the ceremony step. The prover and verifier fall back to hard-coded deterministic toxic waste (`tau=3, alpha=5, beta=7, gamma=11, delta=13`). No `.pk` or `.vk` files are needed:
 
 ```bash
 # Prove (no --proving-key)
@@ -624,6 +462,15 @@ cargo build --release
 ```
 
 The binary will be at `target/release/groth16-prover`.
+
+The `trusted-setup` binary (ceremony commands) builds separately:
+
+```bash
+cd clis/trusted-setup
+cargo build --release
+```
+
+The binary will be at `target/release/trusted-setup`.
 
 ---
 
@@ -671,15 +518,15 @@ For human inspection, use `hexdump -C proof.bin` or `xxd proof.bin`.
 
 ## Proving key format
 
-The CLI produces two formats. The **preferred** one (group elements only) is what `ceremony-dev` and `phase2 finalize` output today.
+The trusted-setup CLI produces two formats. The **preferred** one (group elements only) is what `trusted-setup ceremony-dev` and `trusted-setup phase2 finalize` output today.
 
 | Property | Legacy `ProvingKey` (scalars) | `FullProvingKey` (group elements) |
 |----------|------------------------------|-----------------------------------|
 | `.pk` size | ~200 bytes | ~MBs (circuit-dependent) |
 | Toxic waste in `.pk` | ❌ Yes — raw scalars | ✅ No — only curve points |
 | Prover work per proof | Re-evaluates QAP at `tau` | Pure MSM over pre-computed points |
-| Dev path | `ceremony` (deprecated) | `ceremony-dev` (default) |
-| Production path | — | `phase2` MPC |
+| Dev path | `trusted-setup ceremony` (deprecated) | `trusted-setup ceremony-dev` (default) |
+| Production path | — | `trusted-setup phase2` MPC |
 
 **Backward compatibility.** The `prove` command auto-detects the format on load: if the file starts with the legacy `ProvingKey` magic it falls back to the scalar-based prover; otherwise it loads a `FullProvingKey` and uses the fast MSM path. New `.pk` files are always written as `FullProvingKey`.
 
@@ -695,8 +542,6 @@ The integration tests in `tests/cli.rs` exercise every command via `assert_cmd`.
 
 | Test | What it checks |
 |------|----------------|
-| `full_ceremony_prove_verify_roundtrip` | Legacy `ceremony` → `prove` → `verify` with generated keys |
-| `full_ceremony_dev_prove_verify_roundtrip` | `ceremony-dev` → `prove` → `verify` with `FullProvingKey` |
 | `prove_default_stdout` | `prove` without `--out` prints 384 hex chars to stdout |
 | `prove_to_file` | `prove --out` writes 192-byte proof + 48-byte public input |
 | `prove_dense_engine` | `--engine dense` produces valid hex output |
@@ -716,20 +561,25 @@ The integration tests in `tests/cli.rs` exercise every command via `assert_cmd`.
 | `prove_missing_circuit` / `prove_missing_witness` | Required-arg errors |
 | `verify_missing_proof` / `verify_missing_public` | Required-arg errors |
 | `prove_invalid_circuit_file` / `prove_invalid_witness_file` | Bad file format errors |
-| `phase2_new_creates_accumulator` | `phase2 new` writes a non-empty accumulator |
-| `phase2_contribute_and_verify` | `contribute` + `verify` passes for one participant |
-| `phase2_full_roundtrip_prove_verify` | Full `new → contribute → finalize → prove → verify` |
+| `prove_sparse_stdout` / `prove_sparse_to_file` / `prove_sparse_naive` | `--sparse` proof paths (Implementation 6) |
+| `prove_sparse_rejects_qap_not_on_fly` | `--sparse` with `--qap-not-on-fly` is rejected |
+| `anonymous_airdrop_e2e_accepted` / `anonymous_airdrop_e2e_rejected` | E2E prove/verify with dev-ceremony keys |
+| `nova_params_accepts_cardano_ed25519_ownership_step` | `nova params` accepts a valid step circuit |
 | `nova_params_rejects_monolithic_ed25519_ownership` | `nova params` rejects non-step circuit |
 | `nova_params_rejects_jubjub_ownership` | `nova params` rejects wrong public I/O ratio |
 | `nova_params_rejects_non_step_circuit` | `nova params` rejects circuit where `n_pub_in != n_pub_out` |
 | `nova_params_missing_circuit` | Required-arg error for `nova params` |
 | `nova_params_invalid_circuit` | Bad file format error for `nova params` |
-| `nova_ceremony_basic` | `nova ceremony` produces a `FullProvingKey` |
-| `nova_ceremony_h_scalar` | `nova ceremony --h-scalar` works |
-| `nova_fold_basic` | `nova fold` produces a valid IVC bundle JSON |
+| `nova_ceremony_and_fold` | `nova ceremony` + `nova fold` produces a valid IVC bundle |
 | `nova_verify_basic` | `nova verify` passes for a freshly folded bundle |
-| `nova_verify_tampered_proof` | `nova verify` fails for a tampered step proof |
-| `nova_verify_tampered_transcript` | `nova verify` fails for a tampered transcript |
+| `cardano_ed25519_ownership_nova_fold_verify_e2e` | Full Nova IVC fold + verify e2e |
+| `cardano_ed25519_ownership_nova_fold_rejects_broken_chain` | `nova verify` fails for a broken state chain |
+| `cardano_ed25519_ownership_nova_verify_rejects_tampered_bundle` | `nova verify` fails for a tampered bundle |
+| `export_vk_produces_aiken_source` / `export_vk_prints_to_stdout` | `export-vk` Aiken codegen |
+| `export_vk_missing_file` / `export_vk_invalid_file` | `export-vk` error handling |
+| `random_circuit_library_roundtrip` | Library-level roundtrip via `single_party_ceremony_full` + `prove_with_full_pk` |
+
+Ceremony commands (`ceremony`, `ceremony-dev`, `phase2`) and their tests live in `clis/trusted-setup/tests/cli.rs`.
 
 Run the tests:
 

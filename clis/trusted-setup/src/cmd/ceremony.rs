@@ -8,9 +8,9 @@
 
 use ark_serialize::CanonicalSerialize;
 use clap::Parser;
-use groth16_prover::ceremony::ceremony;
-use groth16_prover::circom_adapter::CircomCircuit;
-use groth16_prover::engine::FftQapEngine;
+use crate::ceremony::ceremony;
+use crate::circom_adapter::CircomCircuit;
+use crate::engine::FftQapEngine;
 use std::error::Error;
 use std::fs;
 use std::path::PathBuf;

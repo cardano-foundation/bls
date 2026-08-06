@@ -79,7 +79,7 @@ snarkjs wtns calculate poseidon_preimage.wasm input.json witness.wtns
 
 ```bash
 cd ../../cli
-cargo run --release -- ceremony-dev \
+../../clis/trusted-setup/target/release/trusted-setup ceremony-dev \
   --circuit ../circom/PoseidonPreimage/poseidon_preimage.r1cs \
   --proving-key /tmp/poseidon_preimage.pk \
   --verifying-key /tmp/poseidon_preimage.vk

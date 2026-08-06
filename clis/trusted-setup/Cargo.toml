@@ -1,0 +1,36 @@
+[package]
+name = "trusted-setup"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Groth16 trusted-setup core and CLI over BLS12-381 using arkworks"
+
+[features]
+bins = []
+
+[lib]
+name = "trusted_setup"
+path = "src/lib.rs"
+
+[[bin]]
+name = "trusted-setup"
+path = "src/main.rs"
+
+[dependencies]
+ark-bls12-381 = "0.4"
+ark-ff = "0.4"
+ark-ec = "0.4"
+ark-poly = "0.4"
+ark-serialize = "0.4"
+ark-std = { version = "0.4", features = ["parallel"] }
+clap = { version = "4.5", features = ["derive"] }
+nom = "7"
+rand = "0.8"
+rayon = "1.7"
+
+[dev-dependencies]
+ark-std = { version = "0.4", features = ["std"] }
+assert_cmd = "2.0"
+predicates = "3.1"
+proptest = "1.4"
+tempfile = "3"

@@ -8,7 +8,7 @@
 
 ### What the single-party ceremony does today
 
-The `groth16-prover ceremony` command (in `src/ceremony.rs` and `cli/src/cmd/ceremony.rs`) currently:
+The `trusted-setup ceremony` command (in `clis/trusted-setup/src/ceremony.rs` and `clis/trusted-setup/src/cmd/ceremony.rs`) currently:
 
 1. Generates five random scalars (`tau`, `alpha`, `beta`, `gamma`, `delta`) using `rand::thread_rng()` (ChaCha12 CSPRNG)
 2. Evaluates the QAP polynomials at `tau` to get per-variable scalars `u_i(tau)`, `v_i(tau)`, `w_i(tau)`
@@ -199,7 +199,7 @@ This is exactly the structure our prover needs to migrate to.
 **CLI commands today:**
 
 ```bash
-groth16-prover ceremony --circuit c.r1cs --proving-key c.pk --verifying-key c.vk
+trusted-setup ceremony --circuit c.r1cs --proving-key c.pk --verifying-key c.vk
 groth16-prover prove --circuit c.r1cs --witness w.wtns --proving-key c.pk --out proof.bin
 groth16-prover verify --proof proof.bin --public proof.pub --verifying-key c.vk
 ```
@@ -235,16 +235,13 @@ witness.wtns          proof.bin
 groth16-prover import-srs --url https://... --out universal.srs
 
 # Per-circuit: run Phase 2 MPC (sequential contributions)
-groth16-prover phase2 new --circuit c.r1cs --srs universal.srs --zkey c_0000.zkey
-groth16-prover phase2 contribute --zkey-in c_0000.zkey --zkey-out c_0001.zkey --name "Alice"
-groth16-prover phase2 contribute --zkey-in c_0001.zkey --zkey-out c_0002.zkey --name "Bob"
-groth16-prover phase2 finalize --zkey-in c_0002.zkey --proving-key c.pk --verifying-key c.vk
+trusted-setup phase2 new --circuit c.r1cs --srs universal.srs --zkey c_0000.zkey
+trusted-setup phase2 contribute --zkey-in c_0000.zkey --zkey-out c_0001.zkey --name "Alice"
+trusted-setup phase2 contribute --zkey-in c_0001.zkey --zkey-out c_0002.zkey --name "Bob"
+trusted-setup phase2 finalize --zkey-in c_0002.zkey --proving-key c.pk --verifying-key c.vk
 
 # Proving (uses group elements, no scalars)
 groth16-prover prove --circuit c.r1cs --witness w.wtns --proving-key c.pk --out proof.bin
-
-# Verifying (unchanged)
-groth16-prover verify --proof proof.bin --public proof.pub --verifying-key c.vk
 ```
 
 **Key changes:**
@@ -354,8 +351,8 @@ The proving-key format is intentionally **the same** for both paths. The prover 
 
 | Path | Command | Use case | Security |
 |------|---------|----------|----------|
-| **Dev (without MPC)** | `groth16-prover ceremony-dev --circuit c.r1cs --proving-key c.pk --verifying-key c.vk` | Testing, benchmarking, CI, developer onboarding, debugging | Single-party — fine for dev, never for production |
-| **Production (with MPC)** | `groth16-ceremony phase2 new → contribute → finalize` | Production deployments, mainnet circuits | Multi-party — 1-of-N honesty guarantees |
+| **Dev (without MPC)** | `trusted-setup ceremony-dev --circuit c.r1cs --proving-key c.pk --verifying-key c.vk` | Testing, benchmarking, CI, developer onboarding, debugging | Single-party — fine for dev, never for production |
+| **Production (with MPC)** | `trusted-setup phase2 new → contribute → finalize` | Production deployments, mainnet circuits | Multi-party — 1-of-N honesty guarantees |
 
 Both paths output the **exact same binary format** (`ark_groth16::ProvingKey` serialized with `CanonicalSerialize`). The `prove` and `verify` commands are completely agnostic:
 
@@ -415,7 +412,7 @@ groth16-prover verify --proof proof.bin --public proof.pub --verifying-key c.vk
 
 **Priority: High — enables multi-party security**
 
-1. ✅ **Implement `.ptau` parser** — `src/ptau.rs` reads snarkjs `.ptau` files and converts LEM (Little-Endian Montgomery) uncompressed points directly into arkworks `G1Affine`/`G2Affine`.  The byte mapping is 1:1 because both snarkjs and arkworks use the same internal Montgomery representation.
+1. ✅ **Implement `.ptau` parser** — `clis/trusted-setup/src/ptau.rs` reads snarkjs `.ptau` files and converts LEM (Little-Endian Montgomery) uncompressed points directly into arkworks `G1Affine`/`G2Affine`.  The byte mapping is 1:1 because both snarkjs and arkworks use the same internal Montgomery representation.
    - Sections parsed: `tauG1` (2), `tauG2` (3), `alphaTauG1` (4), `betaTauG1` (5), `betaG2` (6)
    - On-curve and subgroup validation for every point
    - Tested against a snarkjs-generated power-4 BLS12-381 `.ptau` file
@@ -431,10 +428,10 @@ groth16-prover verify --proof proof.bin --public proof.pub --verifying-key c.vk
    - `finalize()` — converts accumulator into `FullProvingKey` + `VerifyingKey`, compatible with existing prover
 
 2. ⏳ **Implement CLI subcommands:**
-   - `groth16-ceremony phase2 new --circuit c.r1cs --srs universal.ptau --zkey c_0000.zkey`
-   - `groth16-ceremony phase2 contribute --zkey-in c_0000.zkey --zkey-out c_0001.zkey --entropy /dev/urandom`
-   - `groth16-ceremony phase2 verify --zkey c_0001.zkey --circuit c.r1cs --srs universal.ptau`
-   - `groth16-ceremony phase2 finalize --zkey c_final.zkey --proving-key c.pk --verifying-key c.vk`
+   - `trusted-setup phase2 new --circuit c.r1cs --srs universal.ptau --zkey c_0000.zkey`
+   - `trusted-setup phase2 contribute --zkey-in c_0000.zkey --zkey-out c_0001.zkey --entropy /dev/urandom`
+   - `trusted-setup phase2 verify --zkey c_0001.zkey --circuit c.r1cs --srs universal.ptau`
+   - `trusted-setup phase2 finalize --zkey c_final.zkey --proving-key c.pk --verifying-key c.vk`
 
 3. ✅ **Implement `phase2 verify`** — validates that all contributions are well-formed (no participant learned the combined randomness)
 
@@ -477,7 +474,7 @@ groth16-prover verify --proof proof.bin --public proof.pub --verifying-key c.vk
 
 Given our project context (didactic but moving toward production, Cardano ecosystem, BLS12-381), the **recommended approach is B + C hybrid**:
 
-1. ✅ **Phase 0 (COMPLETE):** Prover migrated from scalars to group elements. `FullProvingKey` is the default format; CLI `ceremony-dev` outputs it; `prove` auto-detects and routes to the fast MSM path.
+1. ✅ **Phase 0 (COMPLETE):** Prover migrated from scalars to group elements. `FullProvingKey` is the default format; the `trusted-setup ceremony-dev` CLI outputs it; `prove` auto-detects and routes to the fast MSM path.
 
 2. ✅ **Phase 1 (COMPLETE):** `.ptau` parser implemented. We can import Perpetual Powers of Tau files directly into arkworks `G1Affine`/`G2Affine` vectors.
 

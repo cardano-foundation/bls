@@ -28,6 +28,12 @@ import time
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_BIN = os.path.join(SCRIPT_DIR, "../cli/target/release/groth16-prover")
+# Trusted-setup ceremonies moved to the standalone `trusted-setup` CLI
+# (clis/trusted-setup); default to its release binary if present.
+DEFAULT_TRUSTED_SETUP = os.path.join(SCRIPT_DIR,
+                                     "../../clis/trusted-setup/target/release/trusted-setup")
+if not os.path.exists(DEFAULT_TRUSTED_SETUP):
+    DEFAULT_TRUSTED_SETUP = "trusted-setup"
 # The SMT input generator shells out to the standalone `smt` CLI (clis/smt)
 # for all SMT/Ed25519 crypto; default to its release binary if present.
 DEFAULT_SMT_CLI = os.path.join(SCRIPT_DIR, "../../clis/smt/target/release/smt")
@@ -106,6 +112,9 @@ def main():
     ap.add_argument("--xsk")
     ap.add_argument("--vk")
     ap.add_argument("--bin", default=DEFAULT_BIN)
+    ap.add_argument("--trusted-setup", default=DEFAULT_TRUSTED_SETUP,
+                    help="Path to the standalone 'trusted-setup' CLI "
+                         "(clis/trusted-setup) used for the monolithic ceremony.")
     ap.add_argument("--smt-cli", default=DEFAULT_SMT_CLI,
                     help="Path to the standalone 'smt' CLI (clis/smt) used for "
                          "SMT/Ed25519 crypto in the CardanoKeyOwnershipSMT family.")
@@ -189,7 +198,7 @@ def main():
               [args.snarkjs, "wc", mono_wasm, input_json, mono_wtns],
               os.path.exists(mono_wtns) and not args.force)
         phase(store, f"{fname}_mono_ceremony",
-              [args.bin, "ceremony-dev", "--sparse", "--h-scalar",
+              [args.trusted_setup, "ceremony-dev", "--sparse", "--h-scalar",
                "--circuit", mono_r1cs, "--proving-key", mono_pk,
                "--verifying-key", mono_vk],
               os.path.exists(mono_pk) and os.path.exists(mono_vk) and not args.force)

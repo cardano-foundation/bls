@@ -22,7 +22,7 @@
 //! # Usage
 //!
 //! ```no_run
-//! use groth16_prover::ptau::PtauFile;
+//! use trusted_setup::ptau::PtauFile;
 //!
 //! let mut ptau = PtauFile::open("pot14_final.ptau").unwrap();
 //! let tau_g1 = ptau.read_tau_g1(ptau.max_g1_points()).unwrap();
