@@ -8,14 +8,15 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from gen_smt_input import (
-    P_BLS, P_ED, ROUND_CONSTANTS, mimc2, multi_mimc7, build_merkle_tree,
+    P_BLS, P_ED, ROUND_CONSTANTS, mimc2, multi_mimc7,
+    build_merkle_tree_cli_multi, build_merkle_tree_cli,
     bytes_to_bits_le, decompress_point, to_chunks, clamp_ed25519_scalar,
 )
 
 import nacl.signing
 
 
-def generate_test_input(depth=4, index=0, output_file="test_smt_input.json"):
+def generate_test_input(depth=4, index=0, output_file="test_smt_input.json", smt_cli="groth16-prover"):
     sk = nacl.signing.SigningKey.generate()
     pk = sk.verify_key
 
@@ -34,12 +35,12 @@ def generate_test_input(depth=4, index=0, output_file="test_smt_input.json"):
     leaf = multi_mimc7(PointA_chunks[0] + PointA_chunks[1])
 
     other_leaves = [12345, 67890, 11111, 22222, 33333, 44444, 55555, 66666, 77777, 88888, 99999, 10101, 20202, 30303, 40404]
-    all_leaves = [0] * (1 << depth)
-    all_leaves[index] = leaf
-    for i, l in enumerate(other_leaves):
-        all_leaves[i + 1] = l
-
-    smt_root, siblings, directions = build_merkle_tree(index, depth, all_leaves)
+    if index == 0:
+        smt_root, siblings, directions, used_cli = build_merkle_tree_cli_multi(
+            [leaf] + other_leaves, index, depth, smt_cli)
+    else:
+        smt_root, siblings, directions, used_cli = build_merkle_tree_cli(
+            leaf, index, depth, smt_cli)
 
     circuit_input = {
         "A": [str(b) for b in A_bits],
@@ -58,6 +59,10 @@ def generate_test_input(depth=4, index=0, output_file="test_smt_input.json"):
     print(f"  Scalar (hex): {scalar.hex()}")
     print(f"  SMT depth: {depth}")
     print(f"  SMT leaf index: {index}")
+    if used_cli:
+        print(f"  SMT builder: groth16-prover smt CLI (--smt-cli {smt_cli})")
+    else:
+        print(f"  SMT builder: PYTHON FALLBACK (smt CLI '{smt_cli}' unavailable)")
     print(f"  SMT root: {smt_root}")
     print(f"  MiMC leaf: {leaf}")
 
@@ -70,5 +75,13 @@ if __name__ == "__main__":
     parser.add_argument("--depth", type=int, default=4)
     parser.add_argument("--index", type=int, default=0)
     parser.add_argument("--output", default="test_smt_input.json")
+    parser.add_argument(
+        "--smt-cli",
+        default="groth16-prover",
+        help="Path to the 'groth16-prover' binary used to build the SMT "
+             "(must expose the 'smt' subcommand, i.e. be built with the "
+             "'privacy' feature). Default: 'groth16-prover' (looked up on PATH).",
+    )
     args = parser.parse_args()
-    generate_test_input(depth=args.depth, index=args.index, output_file=args.output)
+    generate_test_input(depth=args.depth, index=args.index,
+                        output_file=args.output, smt_cli=args.smt_cli)

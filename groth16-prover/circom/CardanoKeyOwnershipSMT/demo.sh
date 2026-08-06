@@ -10,6 +10,13 @@ WITNESS="${CIRCUIT_DIR}/test_smt_witness.wtns"
 PROOF="${CIRCUIT_DIR}/test_smt_proof.json"
 PUBLIC="${CIRCUIT_DIR}/test_smt_public.json"
 
+# Path to the groth16-prover binary used to build the SMT (must expose the
+# 'smt' subcommand). Defaults to the release binary if present, else PATH.
+if [ -z "${SMT_CLI:-}" ] && [ -x "${SCRIPT_DIR}/../../cli/target/release/groth16-prover" ]; then
+    SMT_CLI="${SCRIPT_DIR}/../../cli/target/release/groth16-prover"
+fi
+SMT_CLI="${SMT_CLI:-groth16-prover}"
+
 echo "========================================"
 echo "CardanoKeyOwnershipSMT End-to-End Demo"
 echo "========================================"
@@ -27,7 +34,7 @@ if [ ! -f "$WASM" ]; then
 fi
 
 echo "=== Step 1: Generate test input ==="
-python3 "${CIRCUIT_DIR}/test_e2e.py"
+python3 "${CIRCUIT_DIR}/test_e2e.py" --depth 4 --index 0 --output "$INPUT" --smt-cli "$SMT_CLI"
 echo "   Input generated: $INPUT"
 
 echo ""
