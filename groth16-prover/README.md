@@ -286,6 +286,9 @@ This concept was formalised by Dahlberg, Pulls, and Peeters in *"Efficient Spars
 The CLI includes an insert-only sparse Merkle tree backed by MiMC(x⁷) over BLS12-381:
 
 ```bash
+# Compute a MiMC leaf commitment (MultiMiMC7 over 6 limbs, k = 0)
+cargo run --release -- smt leaf --items "x0,x1,x2,y0,y1,y2"
+
 # Insert items and persist tree state
 cargo run --release -- smt insert --depth 2 --items "1,2,3" --state /tmp/smt.json
 
