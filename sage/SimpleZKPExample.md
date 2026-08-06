@@ -457,8 +457,8 @@ If Alice cheated (wrong witness, or no witness at all), the equation fails with 
 
 The matrices, witness, and all intermediate polynomial coefficients used above are exactly the ones hard-coded in:
 
-- `src/r1cs.rs` — witness and matrices
-- `src/qap.rs` — dense Lagrange interpolation and target polynomial `T(x)`
+- `clis/trusted-setup/src/r1cs.rs` — witness and matrices
+- `clis/trusted-setup/src/qap.rs` — dense Lagrange interpolation and target polynomial `T(x)`
 - [`../sage/groth16.sage`](../sage/groth16.sage) — full Sage reference with explicit prints
 
 > **Note on the two paths.** The numbers shown in this walkthrough come from the **dense path** (Lagrange over `{0, 1, 2}`). An alternative **FFT path** (roots of unity, coset quotient) is described in §6.5. Both paths produce valid proofs, but the internal coefficient vectors and proof coordinates differ because the QAP polynomials are expressed in different bases. The [`groth16-prover/README.md`](README.md) §"Step 2 — FFT / Lagrange basis path" lists every sub-step and labels each one as **REUSED**, **SWITCHABLE**, or **NEW**.

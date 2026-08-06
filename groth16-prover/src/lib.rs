@@ -1,11 +1,10 @@
-pub mod r1cs;
-pub mod qap;
-pub mod engine;
-pub mod prover;
-pub mod circom_adapter;
-pub mod ceremony;
-pub mod ptau;
-pub mod phase2;
+// The Groth16 proof-system core (R1CS/QAP/engine, ceremony, phase2, ptau,
+// circom adapter, prover) lives in the standalone `trusted_setup` library
+// crate (`clis/trusted-setup`). This crate re-exports it so existing callers
+// of `groth16_prover::{r1cs, qap, engine, prover, circom_adapter, ceremony,
+// ptau, phase2}` keep working unchanged, and adds the Privacy-circuit witness
+// helpers on top.
+pub use trusted_setup::{circom_adapter, ceremony, engine, phase2, prover, ptau, qap, r1cs};
 
 // Witness-input helpers for the Privacy / Spend circuit (BLS12-381 only)
 #[cfg(feature = "privacy")]

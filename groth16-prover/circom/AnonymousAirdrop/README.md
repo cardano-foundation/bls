@@ -113,7 +113,7 @@ snarkjs wtns calculate anonymous_airdrop_depth2_js/anonymous_airdrop_depth2.wasm
 
 ```bash
 cd ../../cli
-cargo run --release -p groth16-prover-cli --bin groth16-prover -- ceremony-dev \
+../../clis/trusted-setup/target/release/trusted-setup ceremony-dev \
   --circuit ../circom/AnonymousAirdrop/anonymous_airdrop_depth2.r1cs \
   --proving-key ../circom/AnonymousAirdrop/airdrop.pk \
   --verifying-key ../circom/AnonymousAirdrop/airdrop.vk

@@ -107,9 +107,11 @@ snarkjs wtns calculate \
 
 ### 4. Sparse dev ceremony
 
+> The ceremony runs in the standalone `trusted-setup` CLI (built via `cd ../../../clis/trusted-setup && cargo build --release`), invoked here by its binary path.
+
 ```bash
 cd ../../cli
-cargo run --release -- ceremony-dev --sparse \
+../../clis/trusted-setup/target/release/trusted-setup ceremony-dev --sparse \
   --circuit ../circom/Blake2b224Preimage/blake2b224_preimage.r1cs \
   --proving-key /tmp/blake2b224.pk \
   --verifying-key /tmp/blake2b224.vk

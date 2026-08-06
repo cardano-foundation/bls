@@ -136,7 +136,7 @@ snarkjs wtns calculate spend_depth2.wasm input.json witness.wtns
 
 ```bash
 cd ../../cli
-cargo run --release -- ceremony-dev \
+../../clis/trusted-setup/target/release/trusted-setup ceremony-dev \
   --circuit ../circom/Privacy/spend_depth2.r1cs \
   --proving-key /tmp/spend_depth2.pk \
   --verifying-key /tmp/spend_depth2.vk

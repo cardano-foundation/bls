@@ -113,7 +113,7 @@ snarkjs wtns calculate \
 
 # 2. Dev ceremony (sparse — mandatory for this circuit size)
 cd ../../cli
-cargo run --release -- ceremony-dev --sparse \
+../../clis/trusted-setup/target/release/trusted-setup ceremony-dev --sparse \
   --circuit ../circom/CardanoKeyOwnership/cardano_ed25519_ownership.r1cs \
   --proving-key /tmp/cardano_ownership.pk \
   --verifying-key /tmp/cardano_ownership.vk

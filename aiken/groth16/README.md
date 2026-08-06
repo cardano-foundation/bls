@@ -197,9 +197,9 @@ Several example circuits are provided:
    snarkjs wtns calculate multiplier_js/multiplier.wasm input.json witness.wtns
    ```
 
-3. **Run the dev ceremony** (in `groth16-prover/cli/`):
+3. **Run the dev ceremony** (in `clis/trusted-setup/`, binary at `clis/trusted-setup/target/release/trusted-setup`):
    ```bash
-   cargo run --release -- ceremony-dev \
+   ../../clis/trusted-setup/target/release/trusted-setup ceremony-dev \
      --circuit ../circom/SimpleExample/multiplier.r1cs \
      --proving-key /tmp/multiplier.pk \
      --verifying-key /tmp/multiplier.vk
@@ -252,7 +252,7 @@ circom spend_depth2.circom --r1cs --wasm --sym --prime bls12381
 snarkjs wtns calculate spend_depth2.wasm input.json witness.wtns
 
 # 3. Ceremony
-cargo run --release -- ceremony-dev \
+../../clis/trusted-setup/target/release/trusted-setup ceremony-dev \
   --circuit spend_depth2.r1cs \
   --proving-key /tmp/spend_depth2.pk \
   --verifying-key /tmp/spend_depth2.vk

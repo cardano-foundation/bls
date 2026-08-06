@@ -119,69 +119,6 @@ fn build_synthetic_ptau(power: u32) -> Vec<u8> {
     out
 }
 
-/// Run a full ceremony → prove → verify round-trip using random keys.
-#[test]
-fn full_ceremony_prove_verify_roundtrip() {
-    let (r1cs, wtns) = create_test_artifacts();
-    let pk_file = NamedTempFile::new().unwrap();
-    let vk_file = NamedTempFile::new().unwrap();
-    let out_file = NamedTempFile::new().unwrap();
-
-    // 1. Ceremony
-    let mut cmd_ceremony = Command::cargo_bin("groth16-prover").unwrap();
-    cmd_ceremony
-        .arg("ceremony")
-        .arg("--circuit")
-        .arg(r1cs.path())
-        .arg("--proving-key")
-        .arg(pk_file.path())
-        .arg("--verifying-key")
-        .arg(vk_file.path());
-    cmd_ceremony
-        .assert()
-        .success()
-        .stderr(predicate::str::contains("Ceremony complete"))
-        .stderr(predicate::str::contains("Proving key written to"))
-        .stderr(predicate::str::contains("Verifying key written to"));
-
-    // 2. Prove with the generated proving key (legacy scalar path — must opt in with --qap-not-on-fly)
-    let mut cmd_prove = Command::cargo_bin("groth16-prover").unwrap();
-    cmd_prove
-        .arg("prove")
-        .arg("--circuit")
-        .arg(r1cs.path())
-        .arg("--witness")
-        .arg(wtns.path())
-        .arg("--proving-key")
-        .arg(pk_file.path())
-        .arg("--qap-not-on-fly")
-        .arg("--out")
-        .arg(out_file.path());
-    cmd_prove
-        .assert()
-        .success()
-        .stderr(predicate::str::contains(
-            "Using legacy scalar-based QAP construction",
-        ))
-        .stderr(predicate::str::contains("Loaded legacy proving key"));
-
-    // 3. Verify with the generated verifying key
-    let pub_path = out_file.path().with_extension("pub");
-    let mut cmd_verify = Command::cargo_bin("groth16-prover").unwrap();
-    cmd_verify
-        .arg("verify")
-        .arg("--proof")
-        .arg(out_file.path())
-        .arg("--public")
-        .arg(&pub_path)
-        .arg("--verifying-key")
-        .arg(vk_file.path());
-    cmd_verify
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("Verification result: VALID"));
-}
-
 /// Generate a synthetic `.r1cs` file for the 3-gate multiplier circuit.
 fn build_synthetic_r1cs() -> Vec<u8> {
     let mut out = Vec::new();
@@ -280,6 +217,74 @@ fn create_test_artifacts() -> (NamedTempFile, NamedTempFile) {
     fs::write(wtns_file.path(), build_synthetic_wtns()).unwrap();
 
     (r1cs_file, wtns_file)
+}
+
+// ------------------------------------------------------------------
+// Key-generation helpers (mirror the `trusted-setup` CLI output)
+// ------------------------------------------------------------------
+//
+// The ceremony / ceremony-dev commands moved to the standalone
+// `trusted-setup` CLI. These helpers reproduce their file output through
+// the shared library so the groth16-prover CLI tests stay self-contained.
+
+use ark_serialize::CanonicalSerialize;
+use groth16_prover::ceremony::single_party_ceremony_full;
+use groth16_prover::circom_adapter::CircomCircuit;
+use groth16_prover::engine::FftQapEngine;
+
+/// Run a legacy `ceremony` and write the `.pk` / `.vk` files, matching the
+/// `trusted-setup ceremony` CLI output (compressed `ProvingKey`).
+fn write_legacy_ceremony_files(
+    r1cs: &std::path::Path,
+    pk_file: &std::path::Path,
+    vk_file: &std::path::Path,
+) {
+    let circuit = CircomCircuit::from_r1cs(r1cs.to_str().unwrap()).unwrap();
+    let n_public = 1 + circuit.n_pub_out as usize + circuit.n_pub_in as usize;
+    let engine = FftQapEngine::new();
+    let mut rng = rand::thread_rng();
+    let (pk, vk) = groth16_prover::ceremony::ceremony(
+        &engine,
+        &circuit.l,
+        &circuit.r,
+        &circuit.o,
+        n_public,
+        &mut rng,
+    );
+    let mut pk_bytes = Vec::new();
+    pk.serialize_compressed(&mut pk_bytes).unwrap();
+    fs::write(pk_file, &pk_bytes).unwrap();
+    let mut vk_bytes = Vec::new();
+    vk.serialize_compressed(&mut vk_bytes).unwrap();
+    fs::write(vk_file, &vk_bytes).unwrap();
+}
+
+/// Run a `ceremony-dev` and write the `.pk` / `.vk` files, matching the
+/// `trusted-setup ceremony-dev` CLI output (uncompressed `FullProvingKey`).
+fn write_ceremony_dev_files(
+    r1cs: &std::path::Path,
+    pk_file: &std::path::Path,
+    vk_file: &std::path::Path,
+) {
+    let circuit = CircomCircuit::from_r1cs(r1cs.to_str().unwrap()).unwrap();
+    let n_public = 1 + circuit.n_pub_out as usize + circuit.n_pub_in as usize;
+    let engine = FftQapEngine::new();
+    let mut rng = rand::thread_rng();
+    let (full_pk, vk) = single_party_ceremony_full(
+        &engine,
+        &circuit.l,
+        &circuit.r,
+        &circuit.o,
+        n_public,
+        &mut rng,
+        false,
+    );
+    let mut pk_bytes = Vec::new();
+    full_pk.serialize_uncompressed(&mut pk_bytes).unwrap();
+    fs::write(pk_file, &pk_bytes).unwrap();
+    let mut vk_bytes = Vec::new();
+    vk.serialize_uncompressed(&mut vk_bytes).unwrap();
+    fs::write(vk_file, &vk_bytes).unwrap();
 }
 
 // ------------------------------------------------------------------
@@ -474,17 +479,9 @@ fn prove_qap_on_fly_with_legacy_pk_suggests_not_on_fly() {
     let pk_file = NamedTempFile::new().unwrap();
     let vk_file = NamedTempFile::new().unwrap();
 
-    // Legacy ceremony produces a scalar ProvingKey
-    let mut cmd_ceremony = Command::cargo_bin("groth16-prover").unwrap();
-    cmd_ceremony
-        .arg("ceremony")
-        .arg("--circuit")
-        .arg(r1cs.path())
-        .arg("--proving-key")
-        .arg(pk_file.path())
-        .arg("--verifying-key")
-        .arg(vk_file.path());
-    cmd_ceremony.assert().success();
+    // Legacy ceremony produces a scalar ProvingKey (via the shared library,
+    // mirroring `trusted-setup ceremony` output)
+    write_legacy_ceremony_files(r1cs.path(), pk_file.path(), vk_file.path());
 
     // Default prove expects a FullProvingKey and should give a helpful error
     let mut cmd = Command::cargo_bin("groth16-prover").unwrap();
@@ -507,17 +504,9 @@ fn prove_qap_not_on_fly_with_full_pk_suggests_on_fly() {
     let pk_file = NamedTempFile::new().unwrap();
     let vk_file = NamedTempFile::new().unwrap();
 
-    // Dev ceremony produces a FullProvingKey
-    let mut cmd_ceremony = Command::cargo_bin("groth16-prover").unwrap();
-    cmd_ceremony
-        .arg("ceremony-dev")
-        .arg("--circuit")
-        .arg(r1cs.path())
-        .arg("--proving-key")
-        .arg(pk_file.path())
-        .arg("--verifying-key")
-        .arg(vk_file.path());
-    cmd_ceremony.assert().success();
+    // Dev ceremony produces a FullProvingKey (via the shared library,
+    // mirroring `trusted-setup ceremony-dev` output)
+    write_ceremony_dev_files(r1cs.path(), pk_file.path(), vk_file.path());
 
     // Legacy path with a FullProvingKey should give a helpful error
     let mut cmd = Command::cargo_bin("groth16-prover").unwrap();
@@ -845,322 +834,11 @@ fn verify_tampered_public_input_fails() {
         .stderr(predicate::str::contains("INVALID"));
 }
 
-/// Run a full ceremony-dev → prove → verify round-trip using a FullProvingKey.
-#[test]
-fn full_ceremony_dev_prove_verify_roundtrip() {
-    let (r1cs, wtns) = create_test_artifacts();
-    let pk_file = NamedTempFile::new().unwrap();
-    let vk_file = NamedTempFile::new().unwrap();
-    let out_file = NamedTempFile::new().unwrap();
-
-    // 1. Dev ceremony (outputs FullProvingKey)
-    let mut cmd_ceremony = Command::cargo_bin("groth16-prover").unwrap();
-    cmd_ceremony
-        .arg("ceremony-dev")
-        .arg("--circuit")
-        .arg(r1cs.path())
-        .arg("--proving-key")
-        .arg(pk_file.path())
-        .arg("--verifying-key")
-        .arg(vk_file.path());
-    cmd_ceremony
-        .assert()
-        .success()
-        .stderr(predicate::str::contains("Dev ceremony complete"))
-        .stderr(predicate::str::contains("Full proving key (uncompressed) written to"))
-        .stderr(predicate::str::contains("Verifying key (uncompressed) written to"));
-
-    // 2. Prove with the FullProvingKey
-    let mut cmd_prove = Command::cargo_bin("groth16-prover").unwrap();
-    cmd_prove
-        .arg("prove")
-        .arg("--circuit")
-        .arg(r1cs.path())
-        .arg("--witness")
-        .arg(wtns.path())
-        .arg("--proving-key")
-        .arg(pk_file.path())
-        .arg("--out")
-        .arg(out_file.path());
-    cmd_prove
-        .assert()
-        .success()
-        .stderr(predicate::str::contains("Loaded FullProvingKey"));
-
-    // 3. Verify with the generated verifying key
-    let pub_path = out_file.path().with_extension("pub");
-    let mut cmd_verify = Command::cargo_bin("groth16-prover").unwrap();
-    cmd_verify
-        .arg("verify")
-        .arg("--proof")
-        .arg(out_file.path())
-        .arg("--public")
-        .arg(&pub_path)
-        .arg("--verifying-key")
-        .arg(vk_file.path());
-    cmd_verify
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("Verification result: VALID"));
-}
-
-/// Run a full ceremony-dev --h-scalar → prove → verify round-trip.
-#[test]
-fn full_ceremony_dev_h_scalar_prove_verify_roundtrip() {
-    let (r1cs, wtns) = create_test_artifacts();
-    let pk_file = NamedTempFile::new().unwrap();
-    let vk_file = NamedTempFile::new().unwrap();
-    let out_file = NamedTempFile::new().unwrap();
-
-    // 1. Dev ceremony with h_scalar compression
-    let mut cmd_ceremony = Command::cargo_bin("groth16-prover").unwrap();
-    cmd_ceremony
-        .arg("ceremony-dev")
-        .arg("--h-scalar")
-        .arg("--circuit")
-        .arg(r1cs.path())
-        .arg("--proving-key")
-        .arg(pk_file.path())
-        .arg("--verifying-key")
-        .arg(vk_file.path());
-    cmd_ceremony
-        .assert()
-        .success()
-        .stderr(predicate::str::contains("h_scalar compression (Implementation 7)"))
-        .stderr(predicate::str::contains("Full proving key (uncompressed) written to"))
-        .stderr(predicate::str::contains("Verifying key (uncompressed) written to"));
-
-    // 2. Prove with the h_scalar FullProvingKey
-    let mut cmd_prove = Command::cargo_bin("groth16-prover").unwrap();
-    cmd_prove
-        .arg("prove")
-        .arg("--circuit")
-        .arg(r1cs.path())
-        .arg("--witness")
-        .arg(wtns.path())
-        .arg("--proving-key")
-        .arg(pk_file.path())
-        .arg("--out")
-        .arg(out_file.path());
-    cmd_prove
-        .assert()
-        .success()
-        .stderr(predicate::str::contains("Loaded FullProvingKey"));
-
-    // 3. Verify with the generated verifying key
-    let pub_path = out_file.path().with_extension("pub");
-    let mut cmd_verify = Command::cargo_bin("groth16-prover").unwrap();
-    cmd_verify
-        .arg("verify")
-        .arg("--proof")
-        .arg(out_file.path())
-        .arg("--public")
-        .arg(&pub_path)
-        .arg("--verifying-key")
-        .arg(vk_file.path());
-    cmd_verify
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("Verification result: VALID"));
-}
-
 // ------------------------------------------------------------------
-// Phase-2 ceremony CLI tests
-// ------------------------------------------------------------------
-
-#[test]
-fn phase2_new_creates_accumulator() {
-    let (r1cs, _wtns) = create_test_artifacts();
-    let ptau = NamedTempFile::new().unwrap();
-    fs::write(ptau.path(), build_synthetic_ptau(4)).unwrap();
-    let zkey = NamedTempFile::new().unwrap();
-
-    let mut cmd = Command::cargo_bin("groth16-prover").unwrap();
-    cmd.arg("phase2")
-        .arg("new")
-        .arg("--circuit")
-        .arg(r1cs.path())
-        .arg("--srs")
-        .arg(ptau.path())
-        .arg("--zkey")
-        .arg(zkey.path());
-
-    cmd.assert()
-        .success()
-        .stderr(predicate::str::contains(
-            "Loaded circuit: 8 wires, 3 constraints",
-        ))
-        .stderr(predicate::str::contains("Accumulator initialized"))
-        .stderr(predicate::str::contains("Initial accumulator written to"));
-
-    let zkey_bytes = fs::read(zkey.path()).unwrap();
-    assert!(!zkey_bytes.is_empty(), "accumulator should be written");
-}
-
-#[test]
-fn phase2_contribute_and_verify() {
-    let (r1cs, _wtns) = create_test_artifacts();
-    let ptau = NamedTempFile::new().unwrap();
-    fs::write(ptau.path(), build_synthetic_ptau(4)).unwrap();
-    let zkey0 = NamedTempFile::new().unwrap();
-    let zkey1 = NamedTempFile::new().unwrap();
-
-    // 1. New
-    let mut cmd_new = Command::cargo_bin("groth16-prover").unwrap();
-    cmd_new
-        .arg("phase2")
-        .arg("new")
-        .arg("--circuit")
-        .arg(r1cs.path())
-        .arg("--srs")
-        .arg(ptau.path())
-        .arg("--zkey")
-        .arg(zkey0.path());
-    cmd_new.assert().success();
-
-    // 2. Contribute
-    let mut cmd_contrib = Command::cargo_bin("groth16-prover").unwrap();
-    cmd_contrib
-        .arg("phase2")
-        .arg("contribute")
-        .arg("--zkey-in")
-        .arg(zkey0.path())
-        .arg("--zkey-out")
-        .arg(zkey1.path())
-        .arg("--name")
-        .arg("Alice");
-    cmd_contrib
-        .assert()
-        .success()
-        .stderr(predicate::str::contains("Contribution applied by 'Alice'."))
-        .stderr(predicate::str::contains("Accumulator written to"));
-
-    // 3. Verify
-    let mut cmd_verify = Command::cargo_bin("groth16-prover").unwrap();
-    cmd_verify
-        .arg("phase2")
-        .arg("verify")
-        .arg("--zkey")
-        .arg(zkey1.path());
-    cmd_verify
-        .assert()
-        .success()
-        .stderr(predicate::str::contains(
-            "Accumulator is valid. All 1 contribution(s) passed verification.",
-        ));
-}
-
-#[test]
-fn phase2_full_roundtrip_prove_verify() {
-    let (r1cs, wtns) = create_test_artifacts();
-    let ptau = NamedTempFile::new().unwrap();
-    fs::write(ptau.path(), build_synthetic_ptau(4)).unwrap();
-    let zkey0 = NamedTempFile::new().unwrap();
-    let zkey1 = NamedTempFile::new().unwrap();
-    let pk_file = NamedTempFile::new().unwrap();
-    let vk_file = NamedTempFile::new().unwrap();
-    let out_file = NamedTempFile::new().unwrap();
-
-    // 1. New
-    let mut cmd_new = Command::cargo_bin("groth16-prover").unwrap();
-    cmd_new
-        .arg("phase2")
-        .arg("new")
-        .arg("--circuit")
-        .arg(r1cs.path())
-        .arg("--srs")
-        .arg(ptau.path())
-        .arg("--zkey")
-        .arg(zkey0.path());
-    cmd_new.assert().success();
-
-    // 2. Contribute
-    let mut cmd_contrib = Command::cargo_bin("groth16-prover").unwrap();
-    cmd_contrib
-        .arg("phase2")
-        .arg("contribute")
-        .arg("--zkey-in")
-        .arg(zkey0.path())
-        .arg("--zkey-out")
-        .arg(zkey1.path());
-    cmd_contrib.assert().success();
-
-    // 3. Finalize
-    let mut cmd_final = Command::cargo_bin("groth16-prover").unwrap();
-    cmd_final
-        .arg("phase2")
-        .arg("finalize")
-        .arg("--zkey")
-        .arg(zkey1.path())
-        .arg("--proving-key")
-        .arg(pk_file.path())
-        .arg("--verifying-key")
-        .arg(vk_file.path());
-    cmd_final
-        .assert()
-        .success()
-        .stderr(predicate::str::contains("Accumulator finalized"))
-        .stderr(predicate::str::contains("Proving key written to"))
-        .stderr(predicate::str::contains("Verifying key written to"));
-
-    // 4. Prove
-    let mut cmd_prove = Command::cargo_bin("groth16-prover").unwrap();
-    cmd_prove
-        .arg("prove")
-        .arg("--circuit")
-        .arg(r1cs.path())
-        .arg("--witness")
-        .arg(wtns.path())
-        .arg("--proving-key")
-        .arg(pk_file.path())
-        .arg("--out")
-        .arg(out_file.path());
-    cmd_prove.assert().success();
-
-    // 5. Verify
-    let pub_path = out_file.path().with_extension("pub");
-    let mut cmd_verify = Command::cargo_bin("groth16-prover").unwrap();
-    cmd_verify
-        .arg("verify")
-        .arg("--proof")
-        .arg(out_file.path())
-        .arg("--public")
-        .arg(&pub_path)
-        .arg("--verifying-key")
-        .arg(vk_file.path());
-    cmd_verify
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("Verification result: VALID"));
-}
 
 // ------------------------------------------------------------------
 // Sparse mode CLI tests (Implementation 6)
 // ------------------------------------------------------------------
-
-#[test]
-fn ceremony_dev_sparse() {
-    let (r1cs, _wtns) = create_test_artifacts();
-    let pk_file = NamedTempFile::new().unwrap();
-    let vk_file = NamedTempFile::new().unwrap();
-
-    let mut cmd = Command::cargo_bin("groth16-prover").unwrap();
-    cmd.arg("ceremony-dev")
-        .arg("--sparse")
-        .arg("--circuit")
-        .arg(r1cs.path())
-        .arg("--proving-key")
-        .arg(pk_file.path())
-        .arg("--verifying-key")
-        .arg(vk_file.path());
-
-    cmd.assert()
-        .success()
-        .stderr(predicate::str::contains("Loaded circuit (sparse)"))
-        .stderr(predicate::str::contains("Dev ceremony complete"))
-        .stderr(predicate::str::contains("Full proving key (uncompressed) written to"))
-        .stderr(predicate::str::contains("Verifying key (uncompressed) written to"));
-}
 
 #[test]
 fn prove_sparse_stdout() {
@@ -1257,65 +935,6 @@ fn prove_sparse_rejects_qap_not_on_fly() {
         ));
 }
 
-/// Full sparse roundtrip: ceremony-dev --sparse → prove --sparse → verify
-#[test]
-fn full_sparse_roundtrip() {
-    let (r1cs, wtns) = create_test_artifacts();
-    let pk_file = NamedTempFile::new().unwrap();
-    let vk_file = NamedTempFile::new().unwrap();
-    let out_file = NamedTempFile::new().unwrap();
-
-    // 1. Sparse dev ceremony
-    let mut cmd_ceremony = Command::cargo_bin("groth16-prover").unwrap();
-    cmd_ceremony
-        .arg("ceremony-dev")
-        .arg("--sparse")
-        .arg("--circuit")
-        .arg(r1cs.path())
-        .arg("--proving-key")
-        .arg(pk_file.path())
-        .arg("--verifying-key")
-        .arg(vk_file.path());
-    cmd_ceremony
-        .assert()
-        .success()
-        .stderr(predicate::str::contains("Dev ceremony complete"));
-
-    // 2. Sparse prove with generated PK
-    let mut cmd_prove = Command::cargo_bin("groth16-prover").unwrap();
-    cmd_prove
-        .arg("prove")
-        .arg("--sparse")
-        .arg("--circuit")
-        .arg(r1cs.path())
-        .arg("--witness")
-        .arg(wtns.path())
-        .arg("--proving-key")
-        .arg(pk_file.path())
-        .arg("--out")
-        .arg(out_file.path());
-    cmd_prove
-        .assert()
-        .success()
-        .stderr(predicate::str::contains("Loaded FullProvingKey"));
-
-    // 3. Verify
-    let pub_path = out_file.path().with_extension("pub");
-    let mut cmd_verify = Command::cargo_bin("groth16-prover").unwrap();
-    cmd_verify
-        .arg("verify")
-        .arg("--proof")
-        .arg(out_file.path())
-        .arg("--public")
-        .arg(&pub_path)
-        .arg("--verifying-key")
-        .arg(vk_file.path());
-    cmd_verify
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("Verification result: VALID"));
-}
-
 // ------------------------------------------------------------------
 // AnonymousAirdrop end-to-end test
 // ------------------------------------------------------------------
@@ -1392,17 +1011,8 @@ fn anonymous_airdrop_e2e_accepted() {
         String::from_utf8_lossy(&out.stderr)
     );
 
-    // 2. Dev ceremony
-    let mut cmd_ceremony = Command::cargo_bin("groth16-prover").unwrap();
-    cmd_ceremony
-        .arg("ceremony-dev")
-        .arg("--circuit")
-        .arg(&r1cs)
-        .arg("--proving-key")
-        .arg(pk_file.path())
-        .arg("--verifying-key")
-        .arg(vk_file.path());
-    cmd_ceremony.assert().success();
+    // 2. Dev ceremony (via the shared library, mirroring `trusted-setup ceremony-dev`)
+    write_ceremony_dev_files(&r1cs, pk_file.path(), vk_file.path());
 
     // 3. Prove
     let mut cmd_prove = Command::cargo_bin("groth16-prover").unwrap();
@@ -1958,17 +1568,9 @@ fn export_vk_produces_aiken_source() {
     let vk_file = NamedTempFile::new().unwrap();
     let out_file = NamedTempFile::new().unwrap();
 
-    // Generate a VK via ceremony-dev
-    let mut cmd_ceremony = Command::cargo_bin("groth16-prover").unwrap();
-    cmd_ceremony
-        .arg("ceremony-dev")
-        .arg("--circuit")
-        .arg(r1cs.path())
-        .arg("--proving-key")
-        .arg(pk_file.path())
-        .arg("--verifying-key")
-        .arg(vk_file.path());
-    cmd_ceremony.assert().success();
+    // Generate a VK via ceremony-dev (via the shared library, mirroring the
+    // `trusted-setup ceremony-dev` output)
+    write_ceremony_dev_files(r1cs.path(), pk_file.path(), vk_file.path());
 
     // Export to a file
     let mut cmd_export = Command::cargo_bin("groth16-prover").unwrap();
@@ -2002,16 +1604,8 @@ fn export_vk_prints_to_stdout() {
     let pk_file = NamedTempFile::new().unwrap();
     let vk_file = NamedTempFile::new().unwrap();
 
-    let mut cmd_ceremony = Command::cargo_bin("groth16-prover").unwrap();
-    cmd_ceremony
-        .arg("ceremony-dev")
-        .arg("--circuit")
-        .arg(r1cs.path())
-        .arg("--proving-key")
-        .arg(pk_file.path())
-        .arg("--verifying-key")
-        .arg(vk_file.path());
-    cmd_ceremony.assert().success();
+    // Generate a VK via ceremony-dev (via the shared library)
+    write_ceremony_dev_files(r1cs.path(), pk_file.path(), vk_file.path());
 
     let mut cmd_export = Command::cargo_bin("groth16-prover").unwrap();
     cmd_export
@@ -2065,40 +1659,10 @@ fn help_top_level() {
         .success()
         .stdout(predicate::str::contains("Usage: groth16-prover <COMMAND>"))
         .stdout(predicate::str::contains("Commands:"))
-        .stdout(predicate::str::contains("ceremony"))
-        .stdout(predicate::str::contains("ceremony-dev"))
         .stdout(predicate::str::contains("prove"))
         .stdout(predicate::str::contains("verify"))
         .stdout(predicate::str::contains("export-vk"))
-        .stdout(predicate::str::contains("phase2"))
         .stdout(predicate::str::contains("nova"));
-}
-
-/// `phase2 --help` lists all Phase-2 subcommands.
-#[test]
-fn help_phase2() {
-    let mut cmd = Command::cargo_bin("groth16-prover").unwrap();
-    cmd.arg("phase2").arg("--help");
-    cmd.assert()
-        .success()
-        .stdout(predicate::str::contains("new"))
-        .stdout(predicate::str::contains("contribute"))
-        .stdout(predicate::str::contains("verify"))
-        .stdout(predicate::str::contains("finalize"));
-}
-
-/// `phase2 new --help` shows the --circuit, --srs, and --zkey options.
-#[test]
-fn help_phase2_new() {
-    let mut cmd = Command::cargo_bin("groth16-prover").unwrap();
-    cmd.arg("phase2").arg("new").arg("--help");
-    cmd.assert()
-        .success()
-        .stdout(predicate::str::contains("--circuit"))
-        .stdout(predicate::str::contains("--srs"))
-        .stdout(predicate::str::contains("--zkey"))
-        .stdout(predicate::str::contains("Path to the `.r1cs` circuit file"))
-        .stdout(predicate::str::contains("Path to the Phase-1 `.ptau` SRS file"));
 }
 
 /// `nova --help` lists all Nova subcommands.
@@ -2124,19 +1688,6 @@ fn help_nova_ceremony() {
         .stdout(predicate::str::contains("--h-scalar"))
         .stdout(predicate::str::contains("h-query scalar compression"))
         .stdout(predicate::str::contains("Use h-query scalar compression (Implementation 7)"));
-}
-
-/// `ceremony-dev --help` shows the --sparse and --h-scalar options.
-#[test]
-fn help_ceremony_dev() {
-    let mut cmd = Command::cargo_bin("groth16-prover").unwrap();
-    cmd.arg("ceremony-dev").arg("--help");
-    cmd.assert()
-        .success()
-        .stdout(predicate::str::contains("--sparse"))
-        .stdout(predicate::str::contains("--h-scalar"))
-        .stdout(predicate::str::contains("sparse constraint representation"))
-        .stdout(predicate::str::contains("h-query scalar compression"));
 }
 
 /// `prove --help` shows the --sparse, --engine, and --prover options.
@@ -2190,47 +1741,6 @@ fn export_vk_missing_verifying_key() {
     cmd.assert()
         .failure()
         .stderr(predicate::str::contains("required arguments were not provided"));
-}
-
-/// `phase2 new` fails when the circuit file does not exist.
-#[test]
-fn phase2_new_missing_circuit() {
-    let ptau = NamedTempFile::new().unwrap();
-    fs::write(ptau.path(), build_synthetic_ptau(4)).unwrap();
-    let zkey = NamedTempFile::new().unwrap();
-
-    let mut cmd = Command::cargo_bin("groth16-prover").unwrap();
-    cmd.arg("phase2")
-        .arg("new")
-        .arg("--circuit")
-        .arg("/nonexistent/circuit.r1cs")
-        .arg("--srs")
-        .arg(ptau.path())
-        .arg("--zkey")
-        .arg(zkey.path());
-    cmd.assert()
-        .failure()
-        .stderr(predicate::str::contains("failed to load circuit"));
-}
-
-/// `phase2 new` fails when the SRS file does not exist.
-#[test]
-fn phase2_new_missing_srs() {
-    let (r1cs, _wtns) = create_test_artifacts();
-    let zkey = NamedTempFile::new().unwrap();
-
-    let mut cmd = Command::cargo_bin("groth16-prover").unwrap();
-    cmd.arg("phase2")
-        .arg("new")
-        .arg("--circuit")
-        .arg(r1cs.path())
-        .arg("--srs")
-        .arg("/nonexistent/universal.ptau")
-        .arg("--zkey")
-        .arg(zkey.path());
-    cmd.assert()
-        .failure()
-        .stderr(predicate::str::contains("failed to open .ptau"));
 }
 
 /// `nova ceremony` fails when the circuit file does not exist.

@@ -121,7 +121,7 @@ snarkjs wtns calculate poseidon_merkle_depth2_js/poseidon_merkle_depth2.wasm inp
 
 ```bash
 cd ../../cli
-cargo run --release -- ceremony-dev \
+../../clis/trusted-setup/target/release/trusted-setup ceremony-dev \
   --circuit ../circom/PoseidonMerkle/poseidon_merkle_depth2.r1cs \
   --proving-key /tmp/poseidon_merkle_depth2.pk \
   --verifying-key /tmp/poseidon_merkle_depth2.vk

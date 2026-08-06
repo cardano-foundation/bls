@@ -7,7 +7,7 @@ description = "Groth16 prover over BLS12-381 using arkworks"
 
 [features]
 default = []
-bins = []
+bins = ["trusted-setup/bins"]
 privacy = []
 
 [dependencies]
@@ -20,6 +20,7 @@ ark-std = { version = "0.4", features = ["parallel"] }
 nom = "7"
 rand = "0.8"
 rayon = "1.7"
+trusted-setup = { path = "../clis/trusted-setup" }
 
 [dev-dependencies]
 ark-std = { version = "0.4", features = ["std"] }

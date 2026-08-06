@@ -449,7 +449,7 @@ circom multiplier.circom --r1cs --wasm --prime bls12381
 
 ### 2. Trusted-setup ceremony (choose your path)
 
-The CLI supports **two ceremony modes** that produce the **same** `.pk` / `.vk` binary format. The prover and verifier are agnostic to which path was used.
+The `trusted-setup` CLI (`clis/trusted-setup`) supports **two ceremony modes** that produce the **same** `.pk` / `.vk` binary format. The prover and verifier are agnostic to which path was used.
 
 #### Option A: Dev ceremony (`ceremony-dev`) — fastest, for testing/CI
 
@@ -458,9 +458,9 @@ The CLI supports **two ceremony modes** that produce the **same** `.pk` / `.vk` 
 **Command:**
 
 ```bash
-cd groth16-prover/cli
+cd clis/trusted-setup
 cargo run --release -- ceremony-dev \
-  --circuit ../circom/SimpleExample/multiplier.r1cs \
+  --circuit ../../groth16-prover/circom/SimpleExample/multiplier.r1cs \
   --proving-key /tmp/multiplier.pk \
   --verifying-key /tmp/multiplier.vk
 ```
@@ -479,9 +479,9 @@ cargo run --release -- ceremony-dev \
 
 ```bash
 # 1. Initialize the circuit-specific accumulator (coordinator or first participant)
-cd groth16-prover/cli
+cd clis/trusted-setup
 cargo run --release -- phase2 new \
-  --circuit ../circom/SimpleExample/multiplier.r1cs \
+  --circuit ../../groth16-prover/circom/SimpleExample/multiplier.r1cs \
   --srs /path/to/pot14_final.ptau \
   --zkey /tmp/multiplier_0000.zkey
 

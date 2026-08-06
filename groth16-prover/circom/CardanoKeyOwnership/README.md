@@ -21,7 +21,8 @@ Two variants are provided:
 | `snarkjs` | `npm install -g snarkjs` | Generate `.wtns` from `.wasm` + `input.json` |
 | `cardano-address` | [IntersectMBO/cardano-addresses releases](https://github.com/IntersectMBO/cardano-addresses/releases) | Derive real Cardano keys from BIP-39 mnemonic |
 | `bech32` (CLI) | [IntersectMBO/bech32 releases](https://github.com/IntersectMBO/bech32/releases) | Decode bech32 key files |
-| `groth16-prover` CLI | `cd cli && cargo build --release` | Ceremony, proof generation, verification |
+| `trusted-setup` CLI | `cd clis/trusted-setup && cargo build --release` | Trusted-setup ceremonies (`ceremony-dev`) |
+| `groth16-prover` CLI | `cd groth16-prover/cli && cargo build --release` | Proof generation, verification |
 
 ---
 
@@ -59,7 +60,7 @@ snarkjs wtns calculate \
 
 # 4. Dev ceremony
 cd ../../cli
-cargo run --release -- ceremony-dev \
+../../clis/trusted-setup/target/release/trusted-setup ceremony-dev \
   --circuit ../circom/CardanoKeyOwnership/cardano_key_ownership.r1cs \
   --proving-key /tmp/jubjub.pk --verifying-key /tmp/jubjub.vk
 
@@ -161,7 +162,7 @@ snarkjs wtns calculate \
 #     Add --h-scalar to store a single scalar instead of the full h_query vector.
 #     This halves the PK size and cuts prove time by ~10–15 %.
 cd ../../cli
-cargo run --release -- ceremony-dev --sparse --h-scalar \
+../../clis/trusted-setup/target/release/trusted-setup ceremony-dev --sparse --h-scalar \
   --circuit ../circom/CardanoKeyOwnership/cardano_ed25519_ownership.r1cs \
   --proving-key /tmp/cardano_ed25519.pk \
   --verifying-key /tmp/cardano_ed25519.vk

@@ -280,10 +280,10 @@ Both paths use the same BLS12-381 curve and the same ZCash point-compression for
 
 | Component | Status | Location |
 |-----------|--------|----------|
-| **Circom compiler adapter** (`.r1cs` + `.wtns` parser) | ✅ Done | `groth16-prover/src/circom_adapter.rs` |
-| **QAP engine** (dense + FFT paths) | ✅ Done | `groth16-prover/src/engine.rs` |
-| **Groth16 prover** (BLS12-381, naive + Pippenger MSM) | ✅ Done | `groth16-prover/src/prover.rs` |
-| **Trusted setup** (dev ceremony + Phase-2 MPC) | ✅ Done | `groth16-prover/src/phase2.rs`, `src/ptau.rs` |
+| **Circom compiler adapter** (`.r1cs` + `.wtns` parser) | ✅ Done | `clis/trusted-setup/src/circom_adapter.rs` |
+| **QAP engine** (dense + FFT paths) | ✅ Done | `clis/trusted-setup/src/engine.rs` |
+| **Groth16 prover** (BLS12-381, naive + Pippenger MSM) | ✅ Done | `clis/trusted-setup/src/prover.rs` |
+| **Trusted setup** (dev ceremony + Phase-2 MPC) | ✅ Done | `clis/trusted-setup/src/phase2.rs`, `clis/trusted-setup/src/ptau.rs` |
 | **Proof serialization** (arkworks → compressed bytes) | ✅ Done | `groth16-prover/cli` |
 | **VK export** (binary `.vk` → Aiken `VerificationKey`) | ✅ Done | `groth16-prover/cli` (`export-vk`) |
 | **Aiken Groth16 verifier library** (parameterized) | ✅ Done | `aiken/groth16/lib/groth16/verifier.ak` |

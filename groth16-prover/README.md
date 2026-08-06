@@ -21,7 +21,7 @@ All 54 library tests pass (R1CS relation, QAP interpolation, target polynomial, 
 
 ### 2. Use the CLI
 
-A full-featured command-line interface lives in `groth16-prover/cli/`. It covers the entire Groth16 lifecycle—from ceremony to proof generation and verification—and includes auxiliary tools for Circom witness computation and sparse Merkle tree operations.
+A full-featured command-line interface lives in `groth16-prover/cli/` (proving, verification, Nova). Trusted-setup ceremonies live in the standalone `trusted-setup` CLI (`clis/trusted-setup`), and sparse Merkle tree operations live in `clis/smt`.
 
 #### Ceremony
 
@@ -31,9 +31,9 @@ Two switchable ceremony paths produce the same `.pk` / `.vk` binary format. The 
 <summary><b>Dev ceremony</b> (single-party, instant — for testing and CI)</summary>
 
 ```bash
-cd groth16-prover/cli
+cd clis/trusted-setup
 cargo run --release -- ceremony-dev \
-  --circuit ../circom/SimpleExample/multiplier.r1cs \
+  --circuit ../../groth16-prover/circom/SimpleExample/multiplier.r1cs \
   --proving-key /tmp/multiplier.pk \
   --verifying-key /tmp/multiplier.vk
 ```
@@ -44,10 +44,12 @@ cargo run --release -- ceremony-dev \
 <summary><b>Production ceremony</b> (multi-party MPC — for mainnet)</summary>
 
 ```bash
+cd clis/trusted-setup
+
 # 1. Initialize from a universal Phase 1 SRS
 cargo run --release -- phase2 new \
-  --circuit ../circom/SimpleExample/multiplier.r1cs \
-  --srs ../universal.ptau \
+  --circuit ../../groth16-prover/circom/SimpleExample/multiplier.r1cs \
+  --srs ../../groth16-prover/circom/universal.ptau \
   --zkey /tmp/multiplier_0000.zkey
 
 # 2. Participants contribute sequentially
@@ -157,15 +159,15 @@ curl -L -o universal.ptau \
 
 **Step 2 — Import into the prover**
 
-The `groth16-prover` CLI can read `.ptau` files directly and use them as the Phase 1 SRS for a Phase 2 ceremony:
+The `trusted-setup` CLI can read `.ptau` files directly and use them as the Phase 1 SRS for a Phase 2 ceremony:
 
 ```bash
-cd groth16-prover/cli
+cd clis/trusted-setup
 
 # Initialize a new Phase 2 ceremony from the universal SRS
 cargo run --release -- phase2 new \
-  --circuit ../circom/SimpleExample/multiplier.r1cs \
-  --srs ../universal.ptau \
+  --circuit ../../groth16-prover/circom/SimpleExample/multiplier.r1cs \
+  --srs ../../groth16-prover/circom/universal.ptau \
   --zkey /tmp/multiplier_0000.zkey
 ```
 
@@ -177,7 +179,7 @@ What happens under the hood:
 
 **Step 3 — Multi-party Phase 2 contributions**
 
-After importing the SRS, run the circuit-specific MPC:
+After importing the SRS, run the circuit-specific MPC (continuing in `clis/trusted-setup`):
 
 ```bash
 # Alice contributes
@@ -353,10 +355,10 @@ The 16 sub-steps are grouped into six phases:
 
 | File | Step | What it does |
 |------|------|-------------|
-| `src/r1cs.rs` | 1.1 | Hard-coded `L`, `R`, `O` matrices and witness `a = [1, 48, 2, 2, 3, 4, 4, 12]` |
-| `src/qap.rs` | 1.3–1.4 | Lagrange interpolation of QAP polynomials and target polynomial `T(x)` (dense path) |
-| `src/engine.rs` | 2.3–2.12 | `QapEngine` trait + `DenseQapEngine` + `FftQapEngine` (switchable paths) |
-| `src/prover.rs` | 3.1 | `Prover` trait + `NaiveProver` + `PippengerProver` (switchable MSM) |
+| `clis/trusted-setup/src/r1cs.rs` | 1.1 | Hard-coded `L`, `R`, `O` matrices and witness `a = [1, 48, 2, 2, 3, 4, 4, 12]` |
+| `clis/trusted-setup/src/qap.rs` | 1.3–1.4 | Lagrange interpolation of QAP polynomials and target polynomial `T(x)` (dense path) |
+| `clis/trusted-setup/src/engine.rs` | 2.3–2.12 | `QapEngine` trait + `DenseQapEngine` + `FftQapEngine` (switchable paths) |
+| `clis/trusted-setup/src/prover.rs` | 3.1 | `Prover` trait + `NaiveProver` + `PippengerProver` (switchable MSM) |
 | `src/bin/print_r1cs.rs` | 1.1 | Prints matrices and verifies `(L·a) ∘ (R·a) == O·a` |
 | `src/bin/print_field.rs` | 1.2 | Prints the BLS12-381 scalar field `Fr` and sample arithmetic |
 | `src/bin/print_qap.rs` | 1.3–1.5 | Prints `u_i(x)`, `v_i(x)`, `w_i(x)` coefficients and evaluates them at constraint points |
@@ -708,7 +710,7 @@ impl CircomCircuit {
 }
 ```
 
-The adapter is in `src/circom_adapter.rs` and uses `nom` to parse Circom's binary sections (header, constraints, wire map). For the 3-gate `multiplier.circom` circuit, the parsed matrices are **bit-for-bit identical** to the hard-coded Rust arrays, so the downstream proof is identical too.
+The adapter is in `clis/trusted-setup/src/circom_adapter.rs` and uses `nom` to parse Circom's binary sections (header, constraints, wire map). For the 3-gate `multiplier.circom` circuit, the parsed matrices are **bit-for-bit identical** to the hard-coded Rust arrays, so the downstream proof is identical too.
 
 ### Parity assertions
 
@@ -991,7 +993,7 @@ impl SparseCircomCircuit {
 }
 ```
 
-The sparse adapter lives in `src/circom_adapter.rs` (sparse mode) and uses the existing `nom` parser, but stops after decoding the sparse constraint sections instead of expanding them into dense columns.
+The sparse adapter lives in `clis/trusted-setup/src/circom_adapter.rs` (sparse mode) and uses the existing `nom` parser, but stops after decoding the sparse constraint sections instead of expanding them into dense columns.
 
 ### On-the-fly sparse QAP construction
 
@@ -1124,13 +1126,14 @@ cd ../zeroj-assessment/zeroj-audit
 # java  -cp ... com.bloxbean.cardano.zeroj.crypto.groth16.ZerojBenchmark
 
 # Sparse dev ceremony
-cd cli
+cd ../../clis/trusted-setup
 cargo run --release -- ceremony-dev --sparse \
-  --circuit ../circom/SimpleExample/multiplier.r1cs \
+  --circuit ../../groth16-prover/circom/SimpleExample/multiplier.r1cs \
   --proving-key /tmp/multiplier.pk \
   --verifying-key /tmp/multiplier.vk
 
 # Prove with the sparse path
+cd ../../groth16-prover/cli
 cargo run --release -- prove --sparse \
   --circuit ../circom/SimpleExample/multiplier.r1cs \
   --witness ../circom/SimpleExample/witness.wtns \
@@ -1228,9 +1231,9 @@ So the whole MSM collapses to **one scalar multiplication**.
 Add `--h-scalar` to the dev ceremony:
 
 ```bash
-cd groth16-prover/cli
+cd clis/trusted-setup
 cargo run --release -- ceremony-dev --h-scalar \
-  --circuit ../circom/SimpleExample/multiplier.r1cs \
+  --circuit ../../groth16-prover/circom/SimpleExample/multiplier.r1cs \
   --proving-key /tmp/multiplier.pk \
   --verifying-key /tmp/multiplier.vk
 ```
@@ -1249,7 +1252,7 @@ The prover auto-detects `h_scalar` in the proving key and uses the fast path; if
 - `FullProvingKey.h_scalar_tau: Option<Fr>` — the `tau` value needed to evaluate `h(tau)` during proving (dev-only; `None` in MPC path).
 - Fast-path branch in all four prover methods (`Naive`/`Pippenger` × `dense`/`sparse`).
 - `rayon::join` parallel assembly of A, B, and C_private MSMs in the Pippenger prover.
-- `--h-scalar` CLI flag on `ceremony-dev`.
+- `--h-scalar` CLI flag on `trusted-setup ceremony-dev`.
 - 4 parity tests asserting bit-for-bit identical proofs between the legacy and fast paths.
 
 ### Why this is safe
@@ -1568,7 +1571,7 @@ For **long-term research**:
 
 > **Home:** standalone — the only prover-engine pending item (Lagrange-basis SRS), orthogonal to the IVC and verification implementations; no natural host until a prover-path implementation picks it up.
 
-- **Status:** ⚠️ **Partial.** The `QapEngine` trait, `DenseQapEngine`, and `FftQapEngine` are all implemented in `src/engine.rs`. The only remaining gap is building the group-element SRS in the Lagrange basis (`L_i(τ)·G1` instead of `τ^i·G1`) so the FFT path can skip monomial conversion and use the most efficient production pattern.
+- **Status:** ⚠️ **Partial.** The `QapEngine` trait, `DenseQapEngine`, and `FftQapEngine` are all implemented in `clis/trusted-setup/src/engine.rs`. The only remaining gap is building the group-element SRS in the Lagrange basis (`L_i(τ)·G1` instead of `τ^i·G1`) so the FFT path can skip monomial conversion and use the most efficient production pattern.
 - **Benefit:** Completes the FFT production path and removes the last monomial fallback.
 
 ### (q) Proof aggregation (beyond what zeroj supports)

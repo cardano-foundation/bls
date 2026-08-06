@@ -109,7 +109,8 @@ Each circuit README documents its own full e2e flow. The common CLI steps after 
 cd groth16-prover/cli
 
 # 1. Single-party trusted setup (dev only). Use --sparse for large circuits.
-cargo run --release -- ceremony-dev \
+#    The ceremony runs in the standalone trusted-setup CLI (clis/trusted-setup).
+../../clis/trusted-setup/target/release/trusted-setup ceremony-dev \
   --circuit ../circom/<Circuit>/<circuit>.r1cs \
   --proving-key /tmp/<circuit>.pk \
   --verifying-key /tmp/<circuit>.vk

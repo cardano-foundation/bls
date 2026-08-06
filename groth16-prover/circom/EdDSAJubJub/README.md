@@ -138,7 +138,7 @@ snarkjs wtns calculate \
 ```bash
 mkdir -p /tmp/eddsa_ceremony
 cd ../../cli
-cargo run --release -- ceremony-dev \
+../../clis/trusted-setup/target/release/trusted-setup ceremony-dev \
   --circuit ../circom/EdDSAJubJub/eddsa_out/eddsa_jubjub.r1cs \
   --proving-key /tmp/eddsa_ceremony/eddsa_jubjub.pk \
   --verifying-key /tmp/eddsa_ceremony/eddsa_jubjub.vk
