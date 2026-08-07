@@ -233,7 +233,7 @@ smt compute-inputs \
 cargo build --release
 ```
 
-The binary is `target/release/smt`. The crate depends on the `groth16-prover` library with its `privacy` feature enabled (`groth16-prover/src/{mimc,sparse_merkle_tree,ed25519,privacy_inputs}.rs`).
+The binary is `target/release/smt`. The crate ships the MiMC / sparse-Merkle-tree / Ed25519 / Privacy-input helpers as its library target (`clis/smt/src/{mimc,sparse_merkle_tree,ed25519,privacy_inputs}.rs`); `groth16-prover` depends on this library for its `privacy` feature.
 
 ## Test suite
 
