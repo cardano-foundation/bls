@@ -61,9 +61,9 @@
 //!     $ smt cardano-input --state smt.json --key key.json --out input.json
 
 use clap::Parser;
-use groth16_prover::ed25519::{bits_le, clamp_scalar, decompress_point, to_chunks};
-use groth16_prover::mimc::{mimc2, mimc_hash};
-use groth16_prover::sparse_merkle_tree::SparseMerkleTree;
+use smt::ed25519::{bits_le, clamp_scalar, decompress_point, to_chunks};
+use smt::mimc::{mimc2, mimc_hash};
+use smt::sparse_merkle_tree::SparseMerkleTree;
 use std::error::Error;
 use std::fs;
 use std::path::PathBuf;
@@ -567,7 +567,7 @@ pub fn run_verify(args: VerifyArgs) -> Result<(), Box<dyn Error>> {
 }
 
 pub fn run_export(args: ExportArgs) -> Result<(), Box<dyn Error>> {
-    use groth16_prover::privacy_inputs::{compute_spend_inputs, parse_transcript_lines};
+    use smt::privacy_inputs::{compute_spend_inputs, parse_transcript_lines};
 
     let state: SmtState = load_state(&args.state)?;
 

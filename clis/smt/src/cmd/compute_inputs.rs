@@ -13,7 +13,7 @@
 //!       --out input.json
 
 use clap::Parser;
-use groth16_prover::privacy_inputs::{compute_spend_inputs, parse_transcript_lines};
+use smt::privacy_inputs::{compute_spend_inputs, parse_transcript_lines};
 use std::error::Error;
 use std::fs;
 use std::path::PathBuf;

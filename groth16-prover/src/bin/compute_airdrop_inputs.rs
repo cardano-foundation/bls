@@ -2,8 +2,8 @@
 // This project is strictly focused on BLS12-381. BN254 is not supported.
 
 use ark_bls12_381::Fr;
-use groth16_prover::mimc::mimc2;
-use groth16_prover::sparse_merkle_tree::SparseMerkleTree;
+use smt::mimc::mimc2;
+use smt::sparse_merkle_tree::SparseMerkleTree;
 
 fn fr_to_str(fr: Fr) -> String {
     let s = fr.to_string();
