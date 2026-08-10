@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document explains the Nova folding scheme as applied in the `groth16-prover` project. It covers the core concepts, the IVC architecture, the comparison with alternatives, and the design decisions specific to this project's stack (BLS12-381, Circom, arkworks, Aiken).
+This document explains the Nova folding scheme as applied in the `nova-prover` project. It covers the core concepts, the IVC architecture, the comparison with alternatives, and the design decisions specific to this project's stack (BLS12-381, Circom, arkworks, Aiken).
 
 ## Background: The Recursion Problem
 

@@ -1,0 +1,20 @@
+[package]
+name = "nova-prover"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Nova IVC folding prover over BLS12-381 using arkworks"
+
+[dependencies]
+ark-bls12-381 = "0.4"
+ark-ff = "0.4"
+ark-serialize = "0.4"
+blake2 = "0.10"
+groth16-prover = { path = "../groth16-prover" }
+hex = "0.4"
+rand = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+tempfile = "3"
