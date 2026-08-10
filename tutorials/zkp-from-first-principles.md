@@ -597,8 +597,8 @@ circom sum_of_products.circom --r1cs --wasm --sym --prime bls12381
 snarkjs wtns calculate sum_of_products.wasm input.json witness.wtns
 
 # 3. Dev ceremony → pk + vk
-cd ../../../clis/groth16
-../../../clis/trusted-setup/target/release/trusted-setup ceremony-dev \
+cd ../../clis/groth16
+../../clis/trusted-setup/target/release/trusted-setup ceremony-dev \
   --circuit ../../circom/SumOfProducts/sum_of_products.r1cs \
   --proving-key /tmp/sum_of_products.pk \
   --verifying-key /tmp/sum_of_products.vk
@@ -1827,7 +1827,7 @@ The scalar arithmetic balances via the bilinearity property. The actual pairing 
 >
 > This is the essence of Groth16: a 192-byte proof that hides arbitrarily large secrets while convincing any verifier of their validity.
 
-> **From toy circuits to real keys.** The `SumOfProducts` circuit is intentionally tiny — it exists only to make every intermediate value printable. If you want to see the same pipeline applied to a production-grade use case, the companion article [**"Proving Cardano address ownership via ZKP"**](proving-cardano-address-ownership-via-zkp.md) walks through a ~1.97M-constraint Ed25519 ownership circuit. It derives a real Cardano payment key using the `cardano-address` CLI (mnemonic → root key → payment key), feeds it into the Groth16 prover, and includes automated positive/negative security tests showing that forged ownership proofs are rejected.
+> **From toy circuits to real keys.** The `SumOfProducts` circuit is intentionally tiny — it exists only to make every intermediate value printable. If you want to see the same pipeline applied to a production-grade use case, the companion article [**"Proving Cardano address ownership via ZKP"**](proving-cardano-address-ownership-via-zkp.md) walks through a ~1.97M-constraint Ed25519 ownership circuit. It derives a real Cardano payment key using the `cardano-address` CLI (mnemonic → root key → payment key), feeds it into the Groth16 prover, and includes automated positive/negative security tests showing that forged ownership proofs are rejected. The same walkthrough also covers the **Nova step-chain variant** of this circuit — 255 × 7.7K-constraint steps proven incrementally via the standalone `clis/nova` CLI — for the case where the monolithic ceremony is too heavy.
 
 ---
 

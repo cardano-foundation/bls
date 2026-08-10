@@ -95,17 +95,17 @@ This is a minimal subset of the full `Ed25519Verify` circuit: one scalar multipl
 >
 > The monolithic ~1.97M-constraint flow below is bottlenecked by its ceremony:
 > **~8 min ceremony + ~74 s prove + ~10 s witness ≈ ~9.7 min e2e on first run**.
-> The [Implementation 8](../../README.md#implementation-8-nova-ivc--compression-snark) step-chain decomposes the same ownership proof into **255 × 7.7K-constraint steps** (`cardano_ed25519_ownership_nova.circom`): the ceremony drops to **~3 s** and the fold takes **~167 s**, i.e. **~5.1 min total e2e on first run** — with per-step memory instead of ~4.5 GiB peak, and a 5 MB pk instead of 1.2 GB. The steps, keys, and transcript are all bound by a BLAKE2b512 state chain. (Note: once the ceremony is amortized across many keys, the monolithic path is ~3.5× faster per key — see the [Benchmarks](#benchmarks--pre-nova-vs-nova) section below.)
+> The [Implementation 8](../../nova-prover/README.md#implementation-8-nova-ivc--compression-snark) step-chain decomposes the same ownership proof into **255 × 7.7K-constraint steps** (`cardano_ed25519_ownership_nova.circom`): the ceremony drops to **~3 s** and the fold takes **~167 s**, i.e. **~5.1 min total e2e on first run** — with per-step memory instead of ~4.5 GiB peak, and a 5 MB pk instead of 1.2 GB. The steps, keys, and transcript are all bound by a BLAKE2b512 state chain. (Note: once the ceremony is amortized across many keys, the monolithic path is ~3.5× faster per key — see the [Benchmarks](#benchmarks--pre-nova-vs-nova) section below.)
 >
 > ```bash
 > circom --prime bls12381 -l ../Ed25519Verify/node_modules/circomlib/circuits \
 >   cardano_ed25519_ownership_nova.circom --r1cs --wasm --sym
-> ../../clis/groth16/target/release/groth16 nova params --circuit cardano_ed25519_ownership_nova.r1cs
-> ../../clis/groth16/target/release/groth16 nova ceremony --circuit cardano_ed25519_ownership_nova.r1cs \
+> ../../clis/nova/target/release/nova params --circuit cardano_ed25519_ownership_nova.r1cs
+> ../../clis/nova/target/release/nova ceremony --circuit cardano_ed25519_ownership_nova.r1cs \
 >   --proving-key cko255.pk --verifying-key cko255.vk
-> ../../clis/groth16/target/release/groth16 nova fold --circuit cardano_ed25519_ownership_nova.r1cs \
+> ../../clis/nova/target/release/nova fold --circuit cardano_ed25519_ownership_nova.r1cs \
 >   --proving-key cko255.pk --steps <witness-dir> --out cko255_ivc.json
-> ../../clis/groth16/target/release/groth16 nova verify --ivc cko255_ivc.json --verifying-key cko255.vk
+> ../../clis/nova/target/release/nova verify --ivc cko255_ivc.json --verifying-key cko255.vk
 > ```
 >
 > Full worked example (witness generation, flags, expected output): the **End-to-end flow — Implementation 8 (Nova step-chain)** section below. The monolithic Implementation 7 flow that follows remains available as the reference single-proof path.
@@ -203,8 +203,8 @@ cargo run --release -- export-vk \
 **1. Build the CLI**
 
 ```bash
-cargo build --release --manifest-path ../../clis/groth16/Cargo.toml
-# binary: ../../clis/groth16/target/release/groth16 (used as `groth16` below)
+cargo build --release --manifest-path ../../clis/nova/Cargo.toml
+# binary: ../../clis/nova/target/release/nova (used as `nova` below)
 ```
 
 **2. Compile the step circuit** (once; BLS12-381 field, `circomlib` include path)
@@ -217,13 +217,13 @@ circom --prime bls12381 -l ../Ed25519Verify/node_modules/circomlib/circuits \
 **3. Inspect the step circuit** (must report `n_pub_in == n_pub_out == 24`)
 
 ```bash
-../../clis/groth16/target/release/groth16 nova params --circuit cardano_ed25519_ownership_nova.r1cs
+../../clis/nova/target/release/nova params --circuit cardano_ed25519_ownership_nova.r1cs
 ```
 
 **4. One ceremony for the step circuit** (reusable for *any* run of the same step shape)
 
 ```bash
-../../clis/groth16/target/release/groth16 nova ceremony --circuit cardano_ed25519_ownership_nova.r1cs \
+../../clis/nova/target/release/nova ceremony --circuit cardano_ed25519_ownership_nova.r1cs \
   --proving-key cko255.pk --verifying-key cko255.vk
 ```
 
@@ -243,22 +243,22 @@ The `sel` bits come from the same clamped scalar `sk` as in the Implementation 7
 **6. Fold** — proves each step, checks the state chain, accumulates the transcript (≈2–4 min for 255 × 7.7K-constraint steps)
 
 ```bash
-../../clis/groth16/target/release/groth16 nova fold --circuit cardano_ed25519_ownership_nova.r1cs \
+../../clis/nova/target/release/nova fold --circuit cardano_ed25519_ownership_nova.r1cs \
   --proving-key cko255.pk --steps <witness-dir> --out cko255_ivc.json
 ```
 
 **7. Verify** — re-checks every Groth16 pairing, the state chain, and the transcript
 
 ```bash
-../../clis/groth16/target/release/groth16 nova verify --ivc cko255_ivc.json --verifying-key cko255.vk
+../../clis/nova/target/release/nova verify --ivc cko255_ivc.json --verifying-key cko255.vk
 # → Verified 255 steps: 255 pairings OK, state chain OK, transcript OK
 ```
 
-> **Note:** `nova` verification is still **O(N)** — it re-checks every step proof. The constant-size compression SNARK (one pairing, O(1) verify) is [Implementation 9 / item (u)](../../README.md#pending) — not yet built.
+> **Note:** `nova` verification is still **O(N)** — it re-checks every step proof. The constant-size compression SNARK (one pairing, O(1) verify) is [Implementation 9 / item (u)](../../nova-prover/README.md#implementation-9-relaxed-r1cs-folding--single-compression-snark) — not yet built.
 
 ### Benchmarks — pre-Nova vs Nova
 
-Measured on the same machine (4 × 31 GB) with the `groth16` release binary, `snarkjs` for witness generation, one shared key, single runs.
+Measured on the same machine (4 × 31 GB) with the `nova` release binary, `snarkjs` for witness generation, one shared key, single runs.
 
 | Phase | Pre-Nova (monolithic) | Nova (step-chain) |
 |---|---|---|
