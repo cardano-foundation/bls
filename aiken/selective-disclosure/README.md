@@ -1034,9 +1034,19 @@ Two production-grade references are already on this path:
 
 **How it could fit into this design:** the Step 1 predicate proof is a natural candidate for the same staged migration — issue credentials with the current Groth16 proof today, and move the predicate proof to a STARK/zkVM backend once proofs are small enough for the Plutus V3 budget. The issuer/holder/Gate Script architecture is unchanged; only the primitive inside the redeemer changes. The lattice path in `groth16-prover` and `nova-prover` (Implementation 10) and this STARK path are complementary candidates for the same future PQ chain.
 
+### Partial post-quantum — what the STARK swap covers and what it does not
+
+A FRI-STARK (ZKPoSP-style, RISC Zero) makes the **proof layer** post-quantum: transparent, no trusted setup, only hash assumptions (FRI over a hash-based polynomial commitment). But the solution is only as PQ as its **weakest link**, so three things decide whether the *whole* pipeline is quantum-resistant:
+
+1. **Witness relations.** A STARK faithfully proves whatever relation the circuit encodes. If the predicate circuit verifies a classical Ed25519 / BLS / BBS+ signature, the statement is classical — a quantum attacker forges the signature and the (now-PQ) proof verifies it. PQ requires the relation to be **hash-based**: e.g., *"the public key is derived from a seed along the Cardano path"* — BIP-32-Ed25519 key *derivation* is a hash chain with no ECDLP anywhere, which is precisely why ZKPoSP proves seed ownership rather than signature validity. For the ownership use case (prove control of a key from a mnemonic) a FRI-STARK therefore gives a **fully** post-quantum solution end to end.
+2. **Credentials.** In the VC model the issuer signs the attributes, and that signature is the weak link unless it too goes PQ (lattice-based, e.g. LACTv2, or hash-based such as SPHINCS+ / Merkle-based). The ZKPoSP-style swap alone leaves a classical credential signature outside the proof, still forgeable by Shor's algorithm. For **selective disclosure** (as opposed to plain ownership) the FRI-STARK is therefore necessary but **not sufficient** — the credential signature layer must be PQ as well, or the predicate proof must be reduced to hash-based relations (committed attributes + seed/preimage knowledge) with no in-circuit classical signature check.
+3. **On-chain verification.** The hash-based verifier is PQ by construction, but Plutus V3 budget and ~219 KB proof sizes keep on-chain verification Phase-2-gated (the same staging ZKPoSP commits to).
+
+**Additional caveat specific to a privacy design:** FRI-STARKs are not zero-knowledge by default — full hiding requires a masking / hiding-FRI variant (RISC Zero provides this via hidden witness), so ZK must be an explicit requirement of the STARK backend, not an assumption.
+
 ### Summary
 
-Hash-based / STARK-style proofs are a **strategic future direction** for quantum resistance, with ZKPoSP (CIP-1242) and Zcash as live production references. They are transparent and natively post-quantum but proof-size-heavy today; revisit for on-chain verification as proofs shrink.
+Hash-based / STARK-style proofs are a **strategic future direction** for quantum resistance, with ZKPoSP (CIP-1242) and Zcash as live production references. They make the **proof layer** post-quantum (transparent, hash-based, no trusted setup) and give a **fully** PQ solution for the ownership case; a **fully** PQ selective-disclosure pipeline additionally requires PQ credential signatures (lattice or hash-based) or hash-based witness relations, plus proof sizes small enough for the Plutus V3 budget.
 
 </details>
 
