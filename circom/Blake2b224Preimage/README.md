@@ -36,7 +36,7 @@ Everything else (the `CompressionF` function, the 12 rounds, the IV, the sigma p
 ## Compilation results
 
 ```bash
-cd groth16-prover/circom/Blake2b224Preimage
+cd circom/Blake2b224Preimage
 circom blake2b224_preimage.circom --r1cs --wasm --sym --prime bls12381
 ```
 
@@ -78,7 +78,7 @@ The pipeline runs with the sparse prover: use `--sparse` on the ceremony (the de
 ### 1. Compile
 
 ```bash
-cd groth16-prover/circom/Blake2b224Preimage
+cd circom/Blake2b224Preimage
 circom blake2b224_preimage.circom --r1cs --wasm --sym --prime bls12381
 ```
 
@@ -110,9 +110,9 @@ snarkjs wtns calculate \
 > The ceremony runs in the standalone `trusted-setup` CLI (built via `cd ../../../clis/trusted-setup && cargo build --release`), invoked here by its binary path.
 
 ```bash
-cd ../../cli
+cd ../../clis/groth16
 ../../clis/trusted-setup/target/release/trusted-setup ceremony-dev --sparse \
-  --circuit ../circom/Blake2b224Preimage/blake2b224_preimage.r1cs \
+  --circuit ../../circom/Blake2b224Preimage/blake2b224_preimage.r1cs \
   --proving-key /tmp/blake2b224.pk \
   --verifying-key /tmp/blake2b224.vk
 ```
@@ -123,8 +123,8 @@ cd ../../cli
 
 ```bash
 cargo run --release -- prove --sparse \
-  --circuit ../circom/Blake2b224Preimage/blake2b224_preimage.r1cs \
-  --witness ../circom/Blake2b224Preimage/witness.wtns \
+  --circuit ../../circom/Blake2b224Preimage/blake2b224_preimage.r1cs \
+  --witness ../../circom/Blake2b224Preimage/witness.wtns \
   --proving-key /tmp/blake2b224.pk \
   --out /tmp/blake2b224_proof.bin
 ```

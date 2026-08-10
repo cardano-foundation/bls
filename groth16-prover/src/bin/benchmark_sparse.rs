@@ -365,22 +365,22 @@ fn main() {
     bench_toy();
 
     // 2. PoseidonMerkle depth-2
-    if std::path::Path::new("circom/PoseidonMerkle/poseidon_merkle_depth2.r1cs").exists() {
+    if std::path::Path::new("../circom/PoseidonMerkle/poseidon_merkle_depth2.r1cs").exists() {
         bench_real_circuit(
             "PoseidonMerkle depth-2",
-            "circom/PoseidonMerkle/poseidon_merkle_depth2.r1cs",
-            "circom/PoseidonMerkle/witness.wtns",
+            "../circom/PoseidonMerkle/poseidon_merkle_depth2.r1cs",
+            "../circom/PoseidonMerkle/witness.wtns",
         );
     } else {
         println!("\n⚠️  PoseidonMerkle circuit not found, skipping.");
     }
 
     // 3. EdDSAJubJub test
-    if std::path::Path::new("circom/EdDSAJubJub/test_pbk_only.r1cs").exists() {
+    if std::path::Path::new("../circom/EdDSAJubJub/test_pbk_only.r1cs").exists() {
         bench_real_circuit(
             "EdDSAJubJub test_pbk_only",
-            "circom/EdDSAJubJub/test_pbk_only.r1cs",
-            "circom/EdDSAJubJub/test_pbk_witness.wtns",
+            "../circom/EdDSAJubJub/test_pbk_only.r1cs",
+            "../circom/EdDSAJubJub/test_pbk_witness.wtns",
         );
     } else {
         println!("\n⚠️  EdDSAJubJub circuit not found, skipping.");

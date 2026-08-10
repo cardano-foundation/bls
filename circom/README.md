@@ -67,7 +67,7 @@ npm install -g snarkjs
 ## Compiling a circuit
 
 ```bash
-cd groth16-prover/circom/SimpleExample
+cd circom/SimpleExample
 
 # Compile to BLS12-381 (must match the Rust prover curve; BN254 is not supported)
 circom multiplier.circom --r1cs --wasm --sym --prime bls12381
@@ -106,19 +106,19 @@ The parsed `L`, `R`, `O` matrices and witness vector are then fed into any `QapE
 Each circuit README documents its own full e2e flow. The common CLI steps after compilation and witness generation are:
 
 ```bash
-cd groth16-prover/cli
+cd clis/groth16
 
 # 1. Single-party trusted setup (dev only). Use --sparse for large circuits.
 #    The ceremony runs in the standalone trusted-setup CLI (clis/trusted-setup).
 ../../clis/trusted-setup/target/release/trusted-setup ceremony-dev \
-  --circuit ../circom/<Circuit>/<circuit>.r1cs \
+  --circuit ../../circom/<Circuit>/<circuit>.r1cs \
   --proving-key /tmp/<circuit>.pk \
   --verifying-key /tmp/<circuit>.vk
 
 # 2. Produce the proof
 cargo run --release -- prove \
-  --circuit ../circom/<Circuit>/<circuit>.r1cs \
-  --witness ../circom/<Circuit>/witness.wtns \
+  --circuit ../../circom/<Circuit>/<circuit>.r1cs \
+  --witness ../../circom/<Circuit>/witness.wtns \
   --proving-key /tmp/<circuit>.pk \
   --out /tmp/<circuit>.proof
 

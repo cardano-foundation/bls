@@ -3,7 +3,7 @@
 
 import re
 
-with open('groth16-prover/circom/Privacy/mimc.js', 'r') as f:
+with open('circom/Privacy/mimc.js', 'r') as f:
     content = f.read()
 
 # Extract the decimal constants from the `const c = [...]` array

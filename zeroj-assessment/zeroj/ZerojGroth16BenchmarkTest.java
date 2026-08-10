@@ -25,7 +25,7 @@ class ZerojGroth16BenchmarkTest {
 
     @Test
     void benchmarkPoseidonMerkleDepth2() throws IOException {
-        Path r1cs = Paths.get("../groth16-prover/circom/PoseidonMerkle/poseidon_merkle_depth2.r1cs");
+        Path r1cs = Paths.get("../circom/PoseidonMerkle/poseidon_merkle_depth2.r1cs");
         var data = R1CSImporter.importR1CS(new FileInputStream(r1cs.toFile()));
 
         System.out.println("\n=== zeroj: PoseidonMerkle depth-2 ===");
@@ -67,7 +67,7 @@ class ZerojGroth16BenchmarkTest {
 
     @Test
     void benchmarkEdDSAJubJub() throws IOException {
-        Path r1cs = Paths.get("../groth16-prover/circom/EdDSAJubJub/test_pbk_only.r1cs");
+        Path r1cs = Paths.get("../circom/EdDSAJubJub/test_pbk_only.r1cs");
         var data = R1CSImporter.importR1CS(new FileInputStream(r1cs.toFile()));
 
         System.out.println("\n=== zeroj: EdDSAJubJub test_pbk_only ===");

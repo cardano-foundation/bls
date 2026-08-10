@@ -27,7 +27,7 @@ import sys
 import time
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-DEFAULT_BIN = os.path.join(SCRIPT_DIR, "../cli/target/release/groth16-prover")
+DEFAULT_BIN = os.path.join(SCRIPT_DIR, "../clis/groth16/target/release/groth16")
 # Trusted-setup ceremonies moved to the standalone `trusted-setup` CLI
 # (clis/trusted-setup); default to its release binary if present.
 DEFAULT_TRUSTED_SETUP = os.path.join(SCRIPT_DIR,

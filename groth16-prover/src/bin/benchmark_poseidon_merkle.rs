@@ -1,6 +1,6 @@
 //! `benchmark_poseidon_merkle` — benchmark proof generation for the PoseidonMerkle depth-2 circuit.
 //!
-//! Loads the real `circom/PoseidonMerkle/poseidon_merkle_depth2.r1cs` +
+//! Loads the real `../circom/PoseidonMerkle/poseidon_merkle_depth2.r1cs` +
 //! `witness.wtns` artifacts from disk, then times all Circom prover paths
 //! including the h_scalar fast path (Implementation 7).
 //!
@@ -31,9 +31,9 @@ fn main() {
 
     // Load real Circom circuit artifacts.
     let mut circuit =
-        CircomCircuit::from_r1cs("circom/PoseidonMerkle/poseidon_merkle_depth2.r1cs").unwrap();
+        CircomCircuit::from_r1cs("../circom/PoseidonMerkle/poseidon_merkle_depth2.r1cs").unwrap();
     circuit
-        .load_witness("circom/PoseidonMerkle/witness.wtns")
+        .load_witness("../circom/PoseidonMerkle/witness.wtns")
         .unwrap();
 
     println!(

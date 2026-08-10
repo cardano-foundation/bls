@@ -864,7 +864,7 @@ fn airdrop_input_json_rejected() -> String {
 fn anonymous_airdrop_e2e_accepted() {
     let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let repo_root = manifest_dir.parent().unwrap().parent().unwrap();
-    let airdrop_dir = repo_root.join("groth16-prover/circom/AnonymousAirdrop");
+    let airdrop_dir = repo_root.join("circom/AnonymousAirdrop");
     let r1cs = airdrop_dir.join("anonymous_airdrop_depth2.r1cs");
     let wasm = airdrop_dir.join("anonymous_airdrop_depth2_js/anonymous_airdrop_depth2.wasm");
 
@@ -940,7 +940,7 @@ fn anonymous_airdrop_e2e_accepted() {
 fn anonymous_airdrop_e2e_rejected() {
     let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let repo_root = manifest_dir.parent().unwrap().parent().unwrap();
-    let airdrop_dir = repo_root.join("groth16-prover/circom/AnonymousAirdrop");
+    let airdrop_dir = repo_root.join("circom/AnonymousAirdrop");
     let wasm = airdrop_dir.join("anonymous_airdrop_depth2_js/anonymous_airdrop_depth2.wasm");
 
     if !wasm.exists() {

@@ -43,7 +43,7 @@ Round constants and MDS matrix are from ZeroJ's `PoseidonParamsBLS12_381T3`, gen
 ### Step 0: Generate the witness input (helper)
 
 ```bash
-cd groth16-prover/circom/PoseidonMerkle
+cd circom/PoseidonMerkle
 python3 helpers_py/poseidon_merkle.py
 ```
 
@@ -89,7 +89,7 @@ input_json = compute_input(
 | `poseidon_merkle_depth2.sym` | Symbol file (human-readable wire names, optional) |
 
 ```bash
-cd groth16-prover/circom/PoseidonMerkle
+cd circom/PoseidonMerkle
 circom poseidon_merkle_depth2.circom --r1cs --wasm --sym --prime bls12381
 ```
 
@@ -120,9 +120,9 @@ snarkjs wtns calculate poseidon_merkle_depth2_js/poseidon_merkle_depth2.wasm inp
 - `/tmp/poseidon_merkle_depth2.vk` — binary verifying key
 
 ```bash
-cd ../../cli
+cd ../../clis/groth16
 ../../clis/trusted-setup/target/release/trusted-setup ceremony-dev \
-  --circuit ../circom/PoseidonMerkle/poseidon_merkle_depth2.r1cs \
+  --circuit ../../circom/PoseidonMerkle/poseidon_merkle_depth2.r1cs \
   --proving-key /tmp/poseidon_merkle_depth2.pk \
   --verifying-key /tmp/poseidon_merkle_depth2.vk
 ```
@@ -144,8 +144,8 @@ cd ../../cli
 
 ```bash
 cargo run --release -- prove \
-  --circuit ../circom/PoseidonMerkle/poseidon_merkle_depth2.r1cs \
-  --witness ../circom/PoseidonMerkle/witness.wtns \
+  --circuit ../../circom/PoseidonMerkle/poseidon_merkle_depth2.r1cs \
+  --witness ../../circom/PoseidonMerkle/witness.wtns \
   --proving-key /tmp/poseidon_merkle_depth2.pk \
   --engine fft --prover pippenger \
   --out /tmp/poseidon_merkle_depth2.proof
