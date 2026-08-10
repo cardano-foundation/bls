@@ -21,7 +21,7 @@ All 54 library tests pass (R1CS relation, QAP interpolation, target polynomial, 
 
 ### 2. Use the CLI
 
-A full-featured command-line interface lives in `groth16-prover/cli/` (proving, verification, Nova). Trusted-setup ceremonies live in the standalone `trusted-setup` CLI (`clis/trusted-setup`), and sparse Merkle tree operations live in `clis/smt`.
+A command-line interface lives in `clis/groth16` (proving, verification, verifying-key export). Trusted-setup ceremonies live in the standalone `trusted-setup` CLI (`clis/trusted-setup`), and sparse Merkle tree operations live in the standalone `smt` CLI (`clis/smt`).
 
 #### Ceremony
 
@@ -33,7 +33,7 @@ Two switchable ceremony paths produce the same `.pk` / `.vk` binary format. The 
 ```bash
 cd clis/trusted-setup
 cargo run --release -- ceremony-dev \
-  --circuit ../../groth16-prover/circom/SimpleExample/multiplier.r1cs \
+  --circuit ../../circom/SimpleExample/multiplier.r1cs \
   --proving-key /tmp/multiplier.pk \
   --verifying-key /tmp/multiplier.vk
 ```
@@ -48,8 +48,8 @@ cd clis/trusted-setup
 
 # 1. Initialize from a universal Phase 1 SRS
 cargo run --release -- phase2 new \
-  --circuit ../../groth16-prover/circom/SimpleExample/multiplier.r1cs \
-  --srs ../../groth16-prover/circom/universal.ptau \
+  --circuit ../../circom/SimpleExample/multiplier.r1cs \
+  --srs ../../circom/universal.ptau \
   --zkey /tmp/multiplier_0000.zkey
 
 # 2. Participants contribute sequentially
@@ -166,8 +166,8 @@ cd clis/trusted-setup
 
 # Initialize a new Phase 2 ceremony from the universal SRS
 cargo run --release -- phase2 new \
-  --circuit ../../groth16-prover/circom/SimpleExample/multiplier.r1cs \
-  --srs ../../groth16-prover/circom/universal.ptau \
+  --circuit ../../circom/SimpleExample/multiplier.r1cs \
+  --srs ../../circom/universal.ptau \
   --zkey /tmp/multiplier_0000.zkey
 ```
 
@@ -229,9 +229,10 @@ All circuit-specific group elements are computed via **MSM over the `.ptau` basi
 
 ```bash
 # Generate a proof (uses FFT + Pippenger by default)
+cd clis/groth16
 cargo run --release -- prove \
-  --circuit ../circom/SimpleExample/multiplier.r1cs \
-  --witness ../circom/SimpleExample/witness.wtns \
+  --circuit ../../circom/SimpleExample/multiplier.r1cs \
+  --witness ../../circom/SimpleExample/witness.wtns \
   --proving-key /tmp/multiplier.pk \
   --out /tmp/proof.bin
 
@@ -259,10 +260,10 @@ cargo run --release -- export-vk \
 The `compute-inputs` command (in the standalone `smt` CLI, `clis/smt`) reads a transcript and produces the private Merkle-path JSON needed by the Circom witness generator for the shielded-spend (`Spend(depth)`) circuit:
 
 ```bash
-cd ../clis/smt
+cd clis/smt
 cargo run --release -- compute-inputs \
   --depth 2 \
-  --transcript ../../groth16-prover/circom/Privacy/transcript.txt \
+  --transcript ../../circom/Privacy/transcript.txt \
   --nullifier 2 \
   --out /tmp/input.json
 ```
@@ -326,7 +327,7 @@ cargo build --release
 # binary: clis/smt/target/release/smt
 ```
 
-See [`cli/README.md`](cli/README.md) for the `groth16-prover` CLI documentation, including proof serialization format, proving key structure, and complete end-to-end examples.
+See [`clis/groth16/README.md`](../clis/groth16/README.md) for the `groth16` CLI documentation, including proof serialization format, proving key structure, and complete end-to-end examples.
 
 </details>
 
@@ -779,26 +780,26 @@ cargo run --bin benchmark_circom --release
 
 ### CLI (Implementation 4 / 5 in practice)
 
-The `groth16-prover-cli` crate wraps the Circom adapter into a command-line tool. By default it uses the on-the-fly `FullProvingKey` path (Implementation 5); add `--qap-not-on-fly` to force the legacy scalar-based path (Implementation 4):
+The `groth16` CLI (`clis/groth16`) wraps the Circom adapter into a command-line tool. By default it uses the on-the-fly `FullProvingKey` path (Implementation 5); add `--qap-not-on-fly` to force the legacy scalar-based path (Implementation 4):
 
 ```bash
-cd groth16-prover/cli
+cd clis/groth16
 
 # Default: Implementation 5 (on-the-fly, generates a deterministic FullProvingKey if none is supplied)
 cargo run --release -- prove \
-  --circuit ../circom/SimpleExample/multiplier.r1cs \
-  --witness ../circom/SimpleExample/witness.wtns \
+  --circuit ../../circom/SimpleExample/multiplier.r1cs \
+  --witness ../../circom/SimpleExample/witness.wtns \
   --out /tmp/proof.bin
 
 # Explicit Implementation 4: legacy scalar-based path
 cargo run --release -- prove \
-  --circuit ../circom/SimpleExample/multiplier.r1cs \
-  --witness ../circom/SimpleExample/witness.wtns \
+  --circuit ../../circom/SimpleExample/multiplier.r1cs \
+  --witness ../../circom/SimpleExample/witness.wtns \
   --qap-not-on-fly \
   --out /tmp/proof_impl4.bin
 ```
 
-Both use `FftQapEngine` + `PippengerProver` by default and output a standard arkworks-serialized proof. See [`cli/README.md`](cli/README.md) for details.
+Both use `FftQapEngine` + `PippengerProver` by default and output a standard arkworks-serialized proof. See [`clis/groth16/README.md`](../clis/groth16/README.md) for details.
 
 </details>
 
@@ -903,17 +904,17 @@ cargo test test_pippenger_full_pk_matches_scalar_prover
 cargo run --bin print_circom_proof
 
 # CLI: prove with the default on-the-fly path (Implementation 5)
-cd cli
+cd ../clis/groth16
 cargo run --release -- prove \
-  --circuit ../circom/SimpleExample/multiplier.r1cs \
-  --witness ../circom/SimpleExample/witness.wtns \
+  --circuit ../../circom/SimpleExample/multiplier.r1cs \
+  --witness ../../circom/SimpleExample/witness.wtns \
   --proving-key /tmp/multiplier.pk \
   --out /tmp/proof.bin
 
 # CLI: prove with the legacy scalar-based path (Implementation 4)
 cargo run --release -- prove \
-  --circuit ../circom/SimpleExample/multiplier.r1cs \
-  --witness ../circom/SimpleExample/witness.wtns \
+  --circuit ../../circom/SimpleExample/multiplier.r1cs \
+  --witness ../../circom/SimpleExample/witness.wtns \
   --proving-key /tmp/multiplier_legacy.pk \
   --qap-not-on-fly \
   --out /tmp/proof_legacy.bin
@@ -1128,15 +1129,15 @@ cd ../zeroj-assessment/zeroj-audit
 # Sparse dev ceremony
 cd ../../clis/trusted-setup
 cargo run --release -- ceremony-dev --sparse \
-  --circuit ../../groth16-prover/circom/SimpleExample/multiplier.r1cs \
+  --circuit ../../circom/SimpleExample/multiplier.r1cs \
   --proving-key /tmp/multiplier.pk \
   --verifying-key /tmp/multiplier.vk
 
 # Prove with the sparse path
-cd ../../groth16-prover/cli
+cd ../../clis/groth16
 cargo run --release -- prove --sparse \
-  --circuit ../circom/SimpleExample/multiplier.r1cs \
-  --witness ../circom/SimpleExample/witness.wtns \
+  --circuit ../../circom/SimpleExample/multiplier.r1cs \
+  --witness ../../circom/SimpleExample/witness.wtns \
   --proving-key /tmp/multiplier.pk \
   --out /tmp/proof.bin
 ```
@@ -1233,7 +1234,7 @@ Add `--h-scalar` to the dev ceremony:
 ```bash
 cd clis/trusted-setup
 cargo run --release -- ceremony-dev --h-scalar \
-  --circuit ../../groth16-prover/circom/SimpleExample/multiplier.r1cs \
+  --circuit ../../circom/SimpleExample/multiplier.r1cs \
   --proving-key /tmp/multiplier.pk \
   --verifying-key /tmp/multiplier.vk
 ```
@@ -1356,12 +1357,12 @@ state_0 ──▶ [step0: f(step_0, state_0)] ──▶ state_1 ──▶ [step1
 The full step-by-step worked example — building the CLI, compiling the step circuit, the **iterative step-witness generation** that makes the chain invariant hold by construction, and the `nova params` / `ceremony` / `fold` / `verify` run with expected output — is in [`circom/CardanoKeyOwnership/README.md`](../circom/CardanoKeyOwnership/README.md) (Variant B, "End-to-end flow — Implementation 8 (Nova step-chain)"). Quick form:
 
 ```bash
-groth16-prover nova params   --circuit cardano_ed25519_ownership_nova.r1cs
-groth16-prover nova ceremony --circuit cardano_ed25519_ownership_nova.r1cs \
+../../clis/groth16/target/release/groth16 nova params   --circuit cardano_ed25519_ownership_nova.r1cs
+../../clis/groth16/target/release/groth16 nova ceremony --circuit cardano_ed25519_ownership_nova.r1cs \
   --proving-key cko255.pk --verifying-key cko255.vk
-groth16-prover nova fold     --circuit cardano_ed25519_ownership_nova.r1cs \
+../../clis/groth16/target/release/groth16 nova fold     --circuit cardano_ed25519_ownership_nova.r1cs \
   --proving-key cko255.pk --steps <witness-dir> --out cko255_ivc.json
-groth16-prover nova verify   --ivc cko255_ivc.json --verifying-key cko255.vk
+../../clis/groth16/target/release/groth16 nova verify   --ivc cko255_ivc.json --verifying-key cko255.vk
 # → Verified 255 steps: 255 pairings OK, state chain OK, transcript OK
 ```
 

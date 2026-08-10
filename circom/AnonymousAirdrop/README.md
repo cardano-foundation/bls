@@ -67,7 +67,7 @@ template AnonymousAirdrop(depth, n) {
 ### 1. Compile the circuit
 
 ```bash
-cd groth16-prover/circom/AnonymousAirdrop
+cd circom/AnonymousAirdrop
 circom --prime bls12381 -l ../Ed25519Verify/node_modules/circomlib/circuits \
   anonymous_airdrop_depth2.circom --r1cs --wasm --sym
 ```
@@ -81,7 +81,9 @@ The project maintains an SMT of eligible members. Each member has a `(nullifier,
 Use the helper binary (or do it manually):
 
 ```bash
-cargo run -p groth16-prover --bin compute_airdrop_inputs --features privacy
+cd ../../groth16-prover
+cargo run --bin compute_airdrop_inputs --features privacy
+cd ../circom/AnonymousAirdrop
 ```
 
 This prints:
@@ -112,28 +114,28 @@ snarkjs wtns calculate anonymous_airdrop_depth2_js/anonymous_airdrop_depth2.wasm
 ### 4. Run the dev ceremony
 
 ```bash
-cd ../../cli
+cd ../../clis/groth16
 ../../clis/trusted-setup/target/release/trusted-setup ceremony-dev \
-  --circuit ../circom/AnonymousAirdrop/anonymous_airdrop_depth2.r1cs \
-  --proving-key ../circom/AnonymousAirdrop/airdrop.pk \
-  --verifying-key ../circom/AnonymousAirdrop/airdrop.vk
+  --circuit ../../circom/AnonymousAirdrop/anonymous_airdrop_depth2.r1cs \
+  --proving-key ../../circom/AnonymousAirdrop/airdrop.pk \
+  --verifying-key ../../circom/AnonymousAirdrop/airdrop.vk
 ```
 
 Output:
 ```
 Dev ceremony complete. Full proving key generated.
-  Proving key:  ../circom/AnonymousAirdrop/airdrop.pk  (552882 bytes compressed)
-  Verifying key: ../circom/AnonymousAirdrop/airdrop.vk  (76000 bytes)
+  Proving key:  ../../circom/AnonymousAirdrop/airdrop.pk  (552882 bytes compressed)
+  Verifying key: ../../circom/AnonymousAirdrop/airdrop.vk  (76000 bytes)
 ```
 
 ### 5. Generate the proof
 
 ```bash
-cargo run --release -p groth16-prover-cli --bin groth16-prover -- prove \
-  --circuit ../circom/AnonymousAirdrop/anonymous_airdrop_depth2.r1cs \
-  --witness ../circom/AnonymousAirdrop/witness.wtns \
-  --proving-key ../circom/AnonymousAirdrop/airdrop.pk \
-  --out ../circom/AnonymousAirdrop/proof.bin
+cargo run --release -- prove \
+  --circuit ../../circom/AnonymousAirdrop/anonymous_airdrop_depth2.r1cs \
+  --witness ../../circom/AnonymousAirdrop/witness.wtns \
+  --proving-key ../../circom/AnonymousAirdrop/airdrop.pk \
+  --out ../../circom/AnonymousAirdrop/proof.bin
 ```
 
 Output:
@@ -141,17 +143,17 @@ Output:
 Loaded circuit: 1576 wires, 1575 constraints
 Using on-the-fly QAP construction (Implementation 5)
 Proof generated successfully.
-Proof written to ../circom/AnonymousAirdrop/proof.bin
-Public input written to ../circom/AnonymousAirdrop/proof.pub
+Proof written to ../../circom/AnonymousAirdrop/proof.bin
+Public input written to ../../circom/AnonymousAirdrop/proof.pub
 ```
 
 ### 6. Verify the proof
 
 ```bash
-cargo run --release -p groth16-prover-cli --bin groth16-prover -- verify \
-  --proof ../circom/AnonymousAirdrop/proof.bin \
-  --public ../circom/AnonymousAirdrop/proof.pub \
-  --verifying-key ../circom/AnonymousAirdrop/airdrop.vk
+cargo run --release -- verify \
+  --proof ../../circom/AnonymousAirdrop/proof.bin \
+  --public ../../circom/AnonymousAirdrop/proof.pub \
+  --verifying-key ../../circom/AnonymousAirdrop/airdrop.vk
 ```
 
 Output:

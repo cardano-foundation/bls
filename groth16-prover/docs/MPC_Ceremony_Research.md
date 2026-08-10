@@ -19,7 +19,7 @@ The `trusted-setup ceremony` command (in `clis/trusted-setup/src/ceremony.rs` an
 
 ### How the prover uses the proving key today
 
-The `prove` command (in `cli/src/cmd/prove.rs`) loads the `ProvingKey` and extracts the raw scalars:
+The `prove` command (in `clis/groth16/src/cmd/prove.rs`) loads the `ProvingKey` and extracts the raw scalars:
 
 ```rust
 let tau    = pk.toxic_waste.tau;
@@ -200,8 +200,8 @@ This is exactly the structure our prover needs to migrate to.
 
 ```bash
 trusted-setup ceremony --circuit c.r1cs --proving-key c.pk --verifying-key c.vk
-groth16-prover prove --circuit c.r1cs --witness w.wtns --proving-key c.pk --out proof.bin
-groth16-prover verify --proof proof.bin --public proof.pub --verifying-key c.vk
+groth16 prove --circuit c.r1cs --witness w.wtns --proving-key c.pk --out proof.bin
+groth16 verify --proof proof.bin --public proof.pub --verifying-key c.vk
 ```
 
 ### 4.2 Target pipeline (MPC)
@@ -232,7 +232,7 @@ witness.wtns          proof.bin
 
 ```bash
 # One-time: download universal SRS from a trusted source
-groth16-prover import-srs --url https://... --out universal.srs
+trusted-setup import-srs --url https://... --out universal.srs
 
 # Per-circuit: run Phase 2 MPC (sequential contributions)
 trusted-setup phase2 new --circuit c.r1cs --srs universal.srs --zkey c_0000.zkey
@@ -241,7 +241,7 @@ trusted-setup phase2 contribute --zkey-in c_0001.zkey --zkey-out c_0002.zkey --n
 trusted-setup phase2 finalize --zkey-in c_0002.zkey --proving-key c.pk --verifying-key c.vk
 
 # Proving (uses group elements, no scalars)
-groth16-prover prove --circuit c.r1cs --witness w.wtns --proving-key c.pk --out proof.bin
+groth16 prove --circuit c.r1cs --witness w.wtns --proving-key c.pk --out proof.bin
 ```
 
 **Key changes:**
@@ -358,10 +358,10 @@ Both paths output the **exact same binary format** (`ark_groth16::ProvingKey` se
 
 ```bash
 # Proving: identical for both paths
-groth16-prover prove --circuit c.r1cs --witness w.wtns --proving-key c.pk --out proof.bin
+groth16 prove --circuit c.r1cs --witness w.wtns --proving-key c.pk --out proof.bin
 
 # Verifying: identical for both paths
-groth16-prover verify --proof proof.bin --public proof.pub --verifying-key c.vk
+groth16 verify --proof proof.bin --public proof.pub --verifying-key c.vk
 ```
 
 **Why retain dev mode?**

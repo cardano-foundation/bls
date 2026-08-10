@@ -22,7 +22,7 @@ Two variants are provided:
 | `cardano-address` | [IntersectMBO/cardano-addresses releases](https://github.com/IntersectMBO/cardano-addresses/releases) | Derive real Cardano keys from BIP-39 mnemonic |
 | `bech32` (CLI) | [IntersectMBO/bech32 releases](https://github.com/IntersectMBO/bech32/releases) | Decode bech32 key files |
 | `trusted-setup` CLI | `cd clis/trusted-setup && cargo build --release` | Trusted-setup ceremonies (`ceremony-dev`) |
-| `groth16-prover` CLI | `cd groth16-prover/cli && cargo build --release` | Proof generation, verification |
+| `groth16` CLI | `cd clis/groth16 && cargo build --release` | Proof generation, verification |
 
 ---
 
@@ -38,7 +38,7 @@ The prover knows a scalar `sk` such that `pk = [sk] · G_JubJub`, where `G_JubJu
 ### End-to-end flow
 
 ```bash
-cd groth16-prover/circom/CardanoKeyOwnership
+cd circom/CardanoKeyOwnership
 
 # 1. Compile (once)
 circom --prime bls12381 cardano_key_ownership.circom --r1cs --wasm --sym
@@ -59,15 +59,15 @@ snarkjs wtns calculate \
   input.json witness.wtns
 
 # 4. Dev ceremony
-cd ../../cli
+cd ../../clis/groth16
 ../../clis/trusted-setup/target/release/trusted-setup ceremony-dev \
-  --circuit ../circom/CardanoKeyOwnership/cardano_key_ownership.r1cs \
+  --circuit ../../circom/CardanoKeyOwnership/cardano_key_ownership.r1cs \
   --proving-key /tmp/jubjub.pk --verifying-key /tmp/jubjub.vk
 
 # 5. Prove
 cargo run --release -- prove \
-  --circuit ../circom/CardanoKeyOwnership/cardano_key_ownership.r1cs \
-  --witness ../circom/CardanoKeyOwnership/witness.wtns \
+  --circuit ../../circom/CardanoKeyOwnership/cardano_key_ownership.r1cs \
+  --witness ../../circom/CardanoKeyOwnership/witness.wtns \
   --proving-key /tmp/jubjub.pk --out /tmp/jubjub_proof.bin
 
 # 6. Verify
@@ -100,12 +100,12 @@ This is a minimal subset of the full `Ed25519Verify` circuit: one scalar multipl
 > ```bash
 > circom --prime bls12381 -l ../Ed25519Verify/node_modules/circomlib/circuits \
 >   cardano_ed25519_ownership_nova.circom --r1cs --wasm --sym
-> groth16-prover nova params --circuit cardano_ed25519_ownership_nova.r1cs
-> groth16-prover nova ceremony --circuit cardano_ed25519_ownership_nova.r1cs \
+> ../../clis/groth16/target/release/groth16 nova params --circuit cardano_ed25519_ownership_nova.r1cs
+> ../../clis/groth16/target/release/groth16 nova ceremony --circuit cardano_ed25519_ownership_nova.r1cs \
 >   --proving-key cko255.pk --verifying-key cko255.vk
-> groth16-prover nova fold --circuit cardano_ed25519_ownership_nova.r1cs \
+> ../../clis/groth16/target/release/groth16 nova fold --circuit cardano_ed25519_ownership_nova.r1cs \
 >   --proving-key cko255.pk --steps <witness-dir> --out cko255_ivc.json
-> groth16-prover nova verify --ivc cko255_ivc.json --verifying-key cko255.vk
+> ../../clis/groth16/target/release/groth16 nova verify --ivc cko255_ivc.json --verifying-key cko255.vk
 > ```
 >
 > Full worked example (witness generation, flags, expected output): the **End-to-end flow — Implementation 8 (Nova step-chain)** section below. The monolithic Implementation 7 flow that follows remains available as the reference single-proof path.
@@ -117,7 +117,7 @@ This is a minimal subset of the full `Ed25519Verify` circuit: one scalar multipl
 #### Step 1: Derive a real Cardano payment key
 
 ```bash
-cd groth16-prover/circom/CardanoKeyOwnership
+cd circom/CardanoKeyOwnership
 
 # Generate a 15-word recovery phrase
 cardano-address recovery-phrase generate --size 15 > phrase.prv
@@ -161,17 +161,17 @@ snarkjs wtns calculate \
 # 3c. Dev ceremony (⚠️ MUST use --sparse)
 #     Add --h-scalar to store a single scalar instead of the full h_query vector.
 #     This halves the PK size and cuts prove time by ~10–15 %.
-cd ../../cli
+cd ../../clis/groth16
 ../../clis/trusted-setup/target/release/trusted-setup ceremony-dev --sparse --h-scalar \
-  --circuit ../circom/CardanoKeyOwnership/cardano_ed25519_ownership.r1cs \
+  --circuit ../../circom/CardanoKeyOwnership/cardano_ed25519_ownership.r1cs \
   --proving-key /tmp/cardano_ed25519.pk \
   --verifying-key /tmp/cardano_ed25519.vk
 
 # 3d. Prove (⚠️ MUST use --sparse)
 #     No extra flags needed — the prover auto-detects h_scalar from the PK.
 cargo run --release -- prove --sparse \
-  --circuit ../circom/CardanoKeyOwnership/cardano_ed25519_ownership.r1cs \
-  --witness ../circom/CardanoKeyOwnership/witness_ownership.wtns \
+  --circuit ../../circom/CardanoKeyOwnership/cardano_ed25519_ownership.r1cs \
+  --witness ../../circom/CardanoKeyOwnership/witness_ownership.wtns \
   --proving-key /tmp/cardano_ed25519.pk \
   --out /tmp/cardano_ed25519_proof.bin
 
@@ -203,8 +203,8 @@ cargo run --release -- export-vk \
 **1. Build the CLI**
 
 ```bash
-cargo build --release --manifest-path ../../cli/Cargo.toml
-# binary: ../../cli/target/release/groth16-prover (used as `groth16-prover` below)
+cargo build --release --manifest-path ../../clis/groth16/Cargo.toml
+# binary: ../../clis/groth16/target/release/groth16 (used as `groth16` below)
 ```
 
 **2. Compile the step circuit** (once; BLS12-381 field, `circomlib` include path)
@@ -217,13 +217,13 @@ circom --prime bls12381 -l ../Ed25519Verify/node_modules/circomlib/circuits \
 **3. Inspect the step circuit** (must report `n_pub_in == n_pub_out == 24`)
 
 ```bash
-groth16-prover nova params --circuit cardano_ed25519_ownership_nova.r1cs
+../../clis/groth16/target/release/groth16 nova params --circuit cardano_ed25519_ownership_nova.r1cs
 ```
 
 **4. One ceremony for the step circuit** (reusable for *any* run of the same step shape)
 
 ```bash
-groth16-prover nova ceremony --circuit cardano_ed25519_ownership_nova.r1cs \
+../../clis/groth16/target/release/groth16 nova ceremony --circuit cardano_ed25519_ownership_nova.r1cs \
   --proving-key cko255.pk --verifying-key cko255.vk
 ```
 
@@ -243,14 +243,14 @@ The `sel` bits come from the same clamped scalar `sk` as in the Implementation 7
 **6. Fold** — proves each step, checks the state chain, accumulates the transcript (≈2–4 min for 255 × 7.7K-constraint steps)
 
 ```bash
-groth16-prover nova fold --circuit cardano_ed25519_ownership_nova.r1cs \
+../../clis/groth16/target/release/groth16 nova fold --circuit cardano_ed25519_ownership_nova.r1cs \
   --proving-key cko255.pk --steps <witness-dir> --out cko255_ivc.json
 ```
 
 **7. Verify** — re-checks every Groth16 pairing, the state chain, and the transcript
 
 ```bash
-groth16-prover nova verify --ivc cko255_ivc.json --verifying-key cko255.vk
+../../clis/groth16/target/release/groth16 nova verify --ivc cko255_ivc.json --verifying-key cko255.vk
 # → Verified 255 steps: 255 pairings OK, state chain OK, transcript OK
 ```
 
@@ -258,7 +258,7 @@ groth16-prover nova verify --ivc cko255_ivc.json --verifying-key cko255.vk
 
 ### Benchmarks — pre-Nova vs Nova
 
-Measured on the same machine (4 × 31 GB) with the `groth16-prover` release binary, `snarkjs` for witness generation, one shared key, single runs.
+Measured on the same machine (4 × 31 GB) with the `groth16` release binary, `snarkjs` for witness generation, one shared key, single runs.
 
 | Phase | Pre-Nova (monolithic) | Nova (step-chain) |
 |---|---|---|

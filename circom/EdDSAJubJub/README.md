@@ -78,8 +78,9 @@ cargo install circom          # or build from source
 npm install -g snarkjs
 
 # Rust Groth16 prover
-cargo build --release -p groth16-prover
-# binary: target/release/groth16-prover
+cd clis/groth16
+cargo build --release
+# binary: clis/groth16/target/release/groth16
 ```
 
 ### 1. Compile
@@ -133,7 +134,7 @@ snarkjs wtns calculate \
   eddsa_out/eddsa_jubjub.wtns
 ```
 
-### 4. Run the dev ceremony (groth16-prover CLI)
+### 4. Run the dev ceremony (trusted-setup CLI)
 
 ```bash
 mkdir -p /tmp/eddsa_ceremony

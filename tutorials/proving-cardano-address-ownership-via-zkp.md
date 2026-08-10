@@ -40,7 +40,7 @@ This walkthrough assumes two tools are installed:
 | `cardano-address` | [IntersectMBO/cardano-addresses releases](https://github.com/IntersectMBO/cardano-addresses/releases) | Derives real Cardano keys from a mnemonic (CIP-1852) |
 | `bech32` (CLI) | [IntersectMBO/bech32 releases](https://github.com/IntersectMBO/bech32/releases) | Decode bech32 key files into hex for the Python helper |
 
-The `groth16-prover` CLI is already built from the first-principles article (`cargo build --release` in `groth16-prover/cli/`), and `snarkjs` is assumed to be in `PATH`.
+The `groth16` CLI is already built from the first-principles article (`cargo build --release` in `clis/groth16/`), and `snarkjs` is assumed to be in `PATH`.
 
 ---
 
@@ -49,7 +49,7 @@ The `groth16-prover` CLI is already built from the first-principles article (`ca
 The `cardano-address` CLI implements the exact derivation path used by Daedalus, Yoroi, and Lace. We follow it step by step so the resulting keys are **mainnet-compatible**.
 
 ```bash
-cd groth16-prover/circom/CardanoKeyOwnership
+cd circom/CardanoKeyOwnership
 
 # (a) Generate a 15-word recovery phrase
 cardano-address recovery-phrase generate --size 15 > phrase.prv
@@ -112,16 +112,16 @@ snarkjs wtns calculate \
   witness_ownership.wtns
 
 # 2. Dev ceremony (sparse — mandatory for this circuit size)
-cd ../../cli
+cd ../../clis/groth16
 ../../clis/trusted-setup/target/release/trusted-setup ceremony-dev --sparse \
-  --circuit ../circom/CardanoKeyOwnership/cardano_ed25519_ownership.r1cs \
+  --circuit ../../circom/CardanoKeyOwnership/cardano_ed25519_ownership.r1cs \
   --proving-key /tmp/cardano_ownership.pk \
   --verifying-key /tmp/cardano_ownership.vk
 
 # 3. Prove
 cargo run --release -- prove --sparse \
-  --circuit ../circom/CardanoKeyOwnership/cardano_ed25519_ownership.r1cs \
-  --witness ../circom/CardanoKeyOwnership/witness_ownership.wtns \
+  --circuit ../../circom/CardanoKeyOwnership/cardano_ed25519_ownership.r1cs \
+  --witness ../../circom/CardanoKeyOwnership/witness_ownership.wtns \
   --proving-key /tmp/cardano_ownership.pk \
   --out /tmp/cardano_ownership_proof.bin
 
@@ -161,7 +161,7 @@ Groth16's soundness guarantee means **no one can forge a proof for a public key 
 The repository includes a shell script that automates both tests end-to-end:
 
 ```bash
-cd groth16-prover/circom/CardanoKeyOwnership
+cd circom/CardanoKeyOwnership
 ./test_cardano_address_e2e.sh
 ```
 

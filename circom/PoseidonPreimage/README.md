@@ -68,7 +68,7 @@ snarkjs wtns calculate poseidon_preimage.wasm input.json witness.wtns
 
 ---
 
-### Step 3: Run the dev ceremony (groth16-prover CLI)
+### Step 3: Run the dev ceremony (trusted-setup CLI)
 
 **Inputs:**
 - `poseidon_preimage.r1cs` — constraints from Step 1
@@ -89,7 +89,7 @@ cd ../../clis/groth16
 
 ---
 
-### Step 4: Produce the proof (groth16-prover CLI)
+### Step 4: Produce the proof (groth16 CLI)
 
 **Inputs:**
 - `poseidon_preimage.r1cs` — constraints from Step 1
@@ -151,7 +151,7 @@ test test_verify_poseidon_preimage_proof() {
 Run the tests:
 
 ```bash
-cd aiken/groth16
+cd ../../aiken/groth16
 aiken check
 ```
 

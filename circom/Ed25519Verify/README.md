@@ -50,7 +50,7 @@ The circuit follows RFC 8032 Section 6:
 ## Compilation results
 
 ```bash
-cd groth16-prover/circom/Ed25519Verify
+cd circom/Ed25519Verify
 circom ed25519_verify.circom --r1cs --wasm --sym --prime bls12381
 ```
 
@@ -74,7 +74,7 @@ circom ed25519_verify.circom --r1cs --wasm --sym --prime bls12381
 ### Step 1 — Compile the circuit
 
 ```bash
-cd groth16-prover/circom/Ed25519Verify
+cd circom/Ed25519Verify
 circom ed25519_verify.circom --r1cs --wasm --sym --prime bls12381
 ```
 
@@ -85,7 +85,7 @@ Produces: `ed25519_verify.r1cs` (~4M constraints), `ed25519_verify.wasm`, `ed255
 Generate a valid Ed25519 test input (uses `pynacl`):
 
 ```bash
-cd groth16-prover/circom/Ed25519Verify
+cd circom/Ed25519Verify
 python3 gen_verify_input.py
 snarkjs wtns calculate ed25519_verify_js/ed25519_verify.wasm test_verify_input.json witness_verify.wtns
 ```
@@ -97,10 +97,10 @@ Witness generation works for valid signatures (`out = 1`). Invalid signatures pr
 ⚠️ **Use `--sparse` flag.** Without it, the dense-matrix ceremony requires ~512 TB RAM and will OOM immediately.
 
 ```bash
-cd groth16-prover/cli
+cd ../../clis/groth16
 
 ../../clis/trusted-setup/target/release/trusted-setup ceremony-dev --sparse \
-  --circuit ../circom/Ed25519Verify/ed25519_verify.r1cs \
+  --circuit ../../circom/Ed25519Verify/ed25519_verify.r1cs \
   --proving-key /tmp/ed25519.pk \
   --verifying-key /tmp/ed25519.vk
 ```
@@ -122,10 +122,10 @@ ls -lh /tmp/ed25519.pk /tmp/ed25519.vk
 ### Step 4 — Generate the proof
 
 ```bash
-cd groth16-prover/cli
+cd ../../clis/groth16
 cargo run --release -- prove --sparse \
-  --circuit ../circom/Ed25519Verify/ed25519_verify.r1cs \
-  --witness ../circom/Ed25519Verify/witness_verify.wtns \
+  --circuit ../../circom/Ed25519Verify/ed25519_verify.r1cs \
+  --witness ../../circom/Ed25519Verify/witness_verify.wtns \
   --proving-key /tmp/ed25519.pk \
   --out /tmp/ed25519_proof.bin
 ```
@@ -187,4 +187,4 @@ Ed25519Verify/
 - [RFC 8032](https://datatracker.ietf.org/doc/html/rfc8032) — EdDSA and Ed25519 specification
 - [circomlib](https://github.com/iden3/circomlib) — standard Circom gadgets (`comparators`, `gates`, `bitify`)
 - [@electron-labs/sha512](https://www.npmjs.com/package/@electron-labs/sha512) — SHA-512 Circom implementation
-- [`groth16-prover/circom/README.md`](../../circom/README.md) — Parent directory with full pipeline documentation
+- [`../circom/README.md`](../README.md) — Parent directory with full pipeline documentation

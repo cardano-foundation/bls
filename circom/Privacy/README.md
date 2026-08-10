@@ -60,7 +60,7 @@ Composed from two `IfThenElse` gadgets; enforces `s ∈ {0, 1}`.
 | `spend_depth2.sym` | Symbol file (human-readable wire names, optional) |
 
 ```bash
-cd groth16-prover/circom/Privacy
+cd circom/Privacy
 circom spend_depth2.circom --r1cs --wasm --sym
 ```
 
@@ -88,12 +88,12 @@ node helpers_js/compute_spend_inputs.js 2 transcript.txt 2 input.json
 #### Option B — Rust CLI (standalone `smt` CLI, `clis/smt`)
 
 ```bash
-cd ../../../clis/smt
+cd ../../clis/smt
 cargo run --release -- compute-inputs \
   --depth 2 \
-  --transcript ../../../groth16-prover/circom/Privacy/transcript.txt \
+  --transcript ../../circom/Privacy/transcript.txt \
   --nullifier 2 \
-  --out ../../../groth16-prover/circom/Privacy/input.json
+  --out ../../circom/Privacy/input.json
 ```
 
 Example `input.json` for depth 2, proving nullifier `2`:
@@ -125,7 +125,7 @@ snarkjs wtns calculate spend_depth2.wasm input.json witness.wtns
 
 ---
 
-### Step 4: Run the dev ceremony (groth16-prover CLI)
+### Step 4: Run the dev ceremony (trusted-setup CLI)
 
 **Inputs:**
 - `spend_depth2.r1cs` — constraints from Step 1
@@ -135,9 +135,9 @@ snarkjs wtns calculate spend_depth2.wasm input.json witness.wtns
 - `/tmp/spend_depth2.vk` — binary verifying key
 
 ```bash
-cd ../../cli
+cd ../../clis/groth16
 ../../clis/trusted-setup/target/release/trusted-setup ceremony-dev \
-  --circuit ../circom/Privacy/spend_depth2.r1cs \
+  --circuit ../../circom/Privacy/spend_depth2.r1cs \
   --proving-key /tmp/spend_depth2.pk \
   --verifying-key /tmp/spend_depth2.vk
 ```
@@ -146,7 +146,7 @@ cd ../../cli
 
 ---
 
-### Step 5: Produce the proof (groth16-prover CLI)
+### Step 5: Produce the proof (groth16 CLI)
 
 **Inputs:**
 - `spend_depth2.r1cs` — constraints from Step 1
@@ -159,8 +159,8 @@ cd ../../cli
 
 ```bash
 cargo run --release -- prove \
-  --circuit ../circom/Privacy/spend_depth2.r1cs \
-  --witness ../circom/Privacy/witness.wtns \
+  --circuit ../../circom/Privacy/spend_depth2.r1cs \
+  --witness ../../circom/Privacy/witness.wtns \
   --proving-key /tmp/spend_depth2.pk \
   --engine fft --prover pippenger \
   --out /tmp/spend_depth2.proof
@@ -216,7 +216,7 @@ test test_verify_circom_spend_depth2_proof() {
 Run the tests:
 
 ```bash
-cd aiken/groth16
+cd ../../aiken/groth16
 aiken check
 ```
 

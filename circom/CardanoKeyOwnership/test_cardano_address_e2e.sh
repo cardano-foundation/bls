@@ -11,14 +11,14 @@ set -euo pipefail
 #   - cardano-address  in $PATH
 #   - bech32 CLI in $PATH  (install from https://github.com/IntersectMBO/bech32/releases)
 #   - snarkjs  in $PATH
-#   - groth16-prover CLI built in release mode
+#   - groth16 CLI built in release mode
 #   - trusted-setup CLI built in release mode (ceremony step)
 #
 # Usage:
 #   ./test_cardano_address_e2e.sh
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CLI_DIR="${SCRIPT_DIR}/../../cli"
+CLI_DIR="${SCRIPT_DIR}/../../../clis/groth16"
 TRUSTED_SETUP_DIR="${SCRIPT_DIR}/../../../clis/trusted-setup"
 CIRCUIT="${SCRIPT_DIR}/cardano_ed25519_ownership.r1cs"
 WASM="${SCRIPT_DIR}/cardano_ed25519_ownership_js/cardano_ed25519_ownership.wasm"
@@ -45,8 +45,8 @@ if ! command -v snarkjs &> /dev/null; then
     echo "ERROR: snarkjs not found in PATH"
     exit 1
 fi
-if [ ! -f "${CLI_DIR}/target/release/groth16-prover" ]; then
-    echo "ERROR: groth16-prover CLI not built. Run: cd ${CLI_DIR} && cargo build --release"
+if [ ! -f "${CLI_DIR}/target/release/groth16" ]; then
+    echo "ERROR: groth16 CLI not built. Run: cd ${CLI_DIR} && cargo build --release"
     exit 1
 fi
 if [ ! -f "${TRUSTED_SETUP_DIR}/target/release/trusted-setup" ]; then
@@ -134,14 +134,14 @@ echo "   Verifying key -> /tmp/cardano_addr_test.vk"
 # ------------------------------------------------------------------
 echo ""
 echo "=== TEST A: Positive — Alice proves ownership of her own key ==="
-"${CLI_DIR}/target/release/groth16-prover" prove --sparse \
+"${CLI_DIR}/target/release/groth16" prove --sparse \
     --circuit "$CIRCUIT" \
     --witness alice_witness.wtns \
     --proving-key /tmp/cardano_addr_test.pk \
     --out /tmp/alice_proof.bin \
     2>&1 | tail -5
 
-verify_output=$("${CLI_DIR}/target/release/groth16-prover" verify \
+verify_output=$("${CLI_DIR}/target/release/groth16" verify \
     --proof /tmp/alice_proof.bin \
     --public /tmp/alice_proof.pub \
     --verifying-key /tmp/cardano_addr_test.vk \
@@ -176,7 +176,7 @@ python3 "${SCRIPT_DIR}/gen_cardano_address_input.py" \
 echo "   Attempting witness generation with Bob's sk + Alice's pk ..."
 if snarkjs wtns calculate "$WASM" forged_input.json forged_witness.wtns 2>&1; then
     echo "   ⚠️  Witness generated (Circom WASM did not assert); trying to prove..."
-    prove_output=$("${CLI_DIR}/target/release/groth16-prover" prove --sparse \
+    prove_output=$("${CLI_DIR}/target/release/groth16" prove --sparse \
         --circuit "$CIRCUIT" \
         --witness forged_witness.wtns \
         --proving-key /tmp/cardano_addr_test.pk \
@@ -187,7 +187,7 @@ if snarkjs wtns calculate "$WASM" forged_input.json forged_witness.wtns 2>&1; th
         echo "   ✅ TEST B PASSED: Prover rejected the forged witness"
     else
         # Even if proof was produced, verification must fail
-        verify_output=$("${CLI_DIR}/target/release/groth16-prover" verify \
+        verify_output=$("${CLI_DIR}/target/release/groth16" verify \
             --proof /tmp/forged_proof.bin \
             --public /tmp/forged_proof.pub \
             --verifying-key /tmp/cardano_addr_test.vk \
@@ -217,7 +217,7 @@ echo "=== TEST C: Negative — Verify Alice's proof against Bob's public key ===
 # We can't easily swap public inputs in the binary proof file,
 # but we can prove Bob's ownership correctly and show the proofs
 # are bound to their respective public keys.
-"${CLI_DIR}/target/release/groth16-prover" prove --sparse \
+"${CLI_DIR}/target/release/groth16" prove --sparse \
     --circuit "$CIRCUIT" \
     --witness bob_witness.wtns \
     --proving-key /tmp/cardano_addr_test.pk \
@@ -225,7 +225,7 @@ echo "=== TEST C: Negative — Verify Alice's proof against Bob's public key ===
     2>&1 | tail -3
 
 # Verify Bob's proof
-bob_verify=$("${CLI_DIR}/target/release/groth16-prover" verify \
+bob_verify=$("${CLI_DIR}/target/release/groth16" verify \
     --proof /tmp/bob_proof.bin \
     --public /tmp/bob_proof.pub \
     --verifying-key /tmp/cardano_addr_test.vk \
