@@ -131,32 +131,32 @@ the root, and the keys never have to be revealed to it.
 
 4. Single-party dev ceremony (one-time per circuit, ~6 min)
 
-   $ ../../../clis/trusted-setup/target/release/trusted-setup ceremony-dev --sparse --h-scalar \
+   $ ../../clis/trusted-setup/target/release/trusted-setup ceremony-dev --sparse --h-scalar \
        --circuit cardano_key_ownership_smt.r1cs \
        --proving-key smt.pk --verifying-key smt.vk
 
 5. Generate the combined proof (Ed25519 + SMT membership)
 
-   $ groth16-prover prove --sparse \
+   $ ../../clis/groth16/target/release/groth16 prove --sparse \
        --circuit cardano_key_ownership_smt.r1cs \
        --witness witness.wtns --proving-key smt.pk --out proof.bin
 
 6. Verify the combined proof
 
-   $ groth16-prover verify --proof proof.bin --public proof.pub \
+   $ ../../clis/groth16/target/release/groth16 verify --proof proof.bin --public proof.pub \
        --verifying-key smt.vk
    # → Verification result: VALID
 
    (or, for the Nova step-chain alternative — see Implementation 8 below:)
 
-   $ groth16-prover nova ceremony --circuit cardano_key_ownership_smt_nova.r1cs \
+   $ ../../clis/groth16/target/release/groth16 nova ceremony --circuit cardano_key_ownership_smt_nova.r1cs \
        --proving-key smt_nova.pk --verifying-key smt_nova.vk
    $ python3 gen_smt_nova_steps.py --input input.json \
        --wasm cardano_key_ownership_smt_nova_js/cardano_key_ownership_smt_nova.wasm \
        --dir steps
-   $ groth16-prover nova fold --circuit cardano_key_ownership_smt_nova.r1cs \
+   $ ../../clis/groth16/target/release/groth16 nova fold --circuit cardano_key_ownership_smt_nova.r1cs \
        --proving-key smt_nova.pk --steps steps --out smt_nova_ivc.json
-   $ groth16-prover nova verify --ivc smt_nova_ivc.json --verifying-key smt_nova.vk
+   $ ../../clis/groth16/target/release/groth16 nova verify --ivc smt_nova_ivc.json --verifying-key smt_nova.vk
    # → Verified 255 steps: 255 pairings OK, state chain OK, transcript OK
 ```
 
@@ -171,7 +171,7 @@ the root, and the keys never have to be revealed to it.
 #### Step 1: Derive a real Cardano payment key
 
 ```bash
-cd groth16-prover/circom/CardanoKeyOwnershipSMT
+cd circom/CardanoKeyOwnershipSMT
 
 cardano-address recovery-phrase generate --size 15 > phrase.prv
 cardano-address key from-recovery-phrase Shelley < phrase.prv > root.xsk
@@ -232,7 +232,7 @@ snarkjs wchk cardano_key_ownership_smt.r1cs witness.wtns
 #### Step 4: Single-party dev ceremony (one-time per circuit, ~6 min)
 
 ```bash
-../../../clis/trusted-setup/target/release/trusted-setup ceremony-dev --sparse --h-scalar \
+../../clis/trusted-setup/target/release/trusted-setup ceremony-dev --sparse --h-scalar \
   --circuit cardano_key_ownership_smt.r1cs \
   --proving-key smt.pk --verifying-key smt.vk
 ```
@@ -246,7 +246,7 @@ snarkjs wchk cardano_key_ownership_smt.r1cs witness.wtns
 #### Step 5: Prove
 
 ```bash
-groth16-prover prove --sparse \
+../../clis/groth16/target/release/groth16 prove --sparse \
   --circuit cardano_key_ownership_smt.r1cs \
   --witness witness.wtns --proving-key smt.pk --out proof.bin
 # → Proof generation (sparse) took ~32 s
@@ -255,7 +255,7 @@ groth16-prover prove --sparse \
 #### Step 6: Verify
 
 ```bash
-groth16-prover verify --proof proof.bin --public proof.pub \
+../../clis/groth16/target/release/groth16 verify --proof proof.bin --public proof.pub \
   --verifying-key smt.vk
 # → Verification result: VALID
 ```
@@ -263,7 +263,7 @@ groth16-prover verify --proof proof.bin --public proof.pub \
 #### Step 7 (optional): Export the verification key for on-chain use
 
 ```bash
-groth16-prover export-vk --verifying-key smt.vk --out smt_vk.ak
+../../clis/groth16/target/release/groth16 export-vk --verifying-key smt.vk --out smt_vk.ak
 ```
 
 > The monolithic path is the reference single-proof flow. The
@@ -293,10 +293,10 @@ coordinates `[4][3]` (each coordinate as 3 limbs of base 2^85):
 **1. Build the CLI**
 
 ```bash
-cargo build --release --manifest-path ../../cli/Cargo.toml
-# binary: ../../cli/target/release/groth16-prover (used as `groth16-prover` below)
-cargo build --release --manifest-path ../../../clis/trusted-setup/Cargo.toml
-# binary: ../../../clis/trusted-setup/target/release/trusted-setup (used for the ceremony)
+cargo build --release --manifest-path ../../clis/groth16/Cargo.toml
+# binary: ../../clis/groth16/target/release/groth16 (used as `groth16` below)
+cargo build --release --manifest-path ../../clis/trusted-setup/Cargo.toml
+# binary: ../../clis/trusted-setup/target/release/trusted-setup (used for the ceremony)
 ```
 
 **2. Compile the step circuit** (once; BLS12-381 field, `circomlib` include path)
@@ -309,13 +309,13 @@ circom --prime bls12381 -l ../Ed25519Verify/node_modules/circomlib/circuits \
 **3. Inspect the step circuit** (must report `n_pub_in == n_pub_out == 24`)
 
 ```bash
-groth16-prover nova params --circuit cardano_key_ownership_smt_nova.r1cs
+../../clis/groth16/target/release/groth16 nova params --circuit cardano_key_ownership_smt_nova.r1cs
 ```
 
 **4. One ceremony for the step circuit** (reusable for *any* run of the same step shape)
 
 ```bash
-groth16-prover nova ceremony --circuit cardano_key_ownership_smt_nova.r1cs \
+../../clis/groth16/target/release/groth16 nova ceremony --circuit cardano_key_ownership_smt_nova.r1cs \
   --proving-key smt_nova.pk --verifying-key smt_nova.vk
 ```
 
@@ -349,7 +349,7 @@ forward, sanity-checks every step against a pure-Python model, and asserts
 transcript (~3 min for 255 × 7.7K-constraint steps)
 
 ```bash
-groth16-prover nova fold --circuit cardano_key_ownership_smt_nova.r1cs \
+../../clis/groth16/target/release/groth16 nova fold --circuit cardano_key_ownership_smt_nova.r1cs \
   --proving-key smt_nova.pk --steps steps --out smt_nova_ivc.json
 ```
 
@@ -357,7 +357,7 @@ groth16-prover nova fold --circuit cardano_key_ownership_smt_nova.r1cs \
 transcript
 
 ```bash
-groth16-prover nova verify --ivc smt_nova_ivc.json \
+../../clis/groth16/target/release/groth16 nova verify --ivc smt_nova_ivc.json \
   --verifying-key smt_nova.vk
 # → Verified 255 steps: 255 pairings OK, state chain OK, transcript OK
 ```
@@ -392,21 +392,21 @@ round constants, and padding scheme as the circuit itself.
 |------|-------|----------------------|
 | Key generation (random seeds) | Python | PyNaCl `SigningKey` (test-only, `test_e2e.py`) |
 | bech32 key-file decoding (`pay.xsk`/`pay.vk`) | external `bech32` CLI | `bech32` decode (invoked by `gen_input.sh --xsk/--vk` and `gen_smt_input.py`) |
-| Ed25519 point decompression (X, Y, Z, T) | Rust CLI | `smt key` → `groth16-prover/src/ed25519.rs` `decompress_point` |
+| Ed25519 point decompression (X, Y, Z, T) | Rust CLI | `smt key` → `clis/smt/src/ed25519.rs` `decompress_point` |
 | base-2^85 limb chunking of `PointA` | Rust CLI | `smt key` → `to_chunks` |
-| MiMC leaf commitment `MultiMiMC7(6,91)` | Rust CLI | `smt key` / `smt leaf` → `groth16-prover/src/mimc.rs` |
+| MiMC leaf commitment `MultiMiMC7(6,91)` | Rust CLI | `smt key` / `smt leaf` → `clis/smt/src/mimc.rs` |
 | `A[256]` / `sk[255]` bit decomposition | Rust CLI | `smt key` → `bits_le`, `clamp_scalar` |
 | SMT insert / root / Merkle path | Rust CLI | `smt insert`, `smt digest`, `smt path`, `smt verify` |
 | Full circuit-input assembly | Rust CLI | `smt cardano-input` → `{A, sk, PointA, smt_root, smt_siblings, smt_directions}` |
-| Witness generation + proof + verify | Rust CLI / snarkjs | `snarkjs wc`/`wchk`, `groth16-prover prove`/`verify` |
+| Witness generation + proof + verify | Rust CLI / snarkjs | `snarkjs wc`/`wchk`, `../../clis/groth16/target/release/groth16 prove`/`verify` |
 | Orchestration of `test_smt.sh` / `demo.sh` | shell | `gen_input.sh` (no Python) |
 | Orchestration for the benchmark harness | Python | `gen_smt_input.py` (called by `benchmarks_compare.py`) |
 
 The CLI is built with:
 
 ```bash
-cargo build --release --manifest-path ../../../clis/smt/Cargo.toml
-# binary: ../../../clis/smt/target/release/smt
+cargo build --release --manifest-path ../../clis/smt/Cargo.toml
+# binary: ../../clis/smt/target/release/smt
 ```
 
 If the CLI (or `bech32`, for the real-key mode) is missing, the scripts stop
@@ -414,7 +414,7 @@ with a clear error — there is no Python crypto fallback.
 
 ### Benchmarks — pre-Nova vs Nova
 
-Measured on the same machine (4 × 31 GB) with the `groth16-prover` release
+Measured on the same machine (4 × 31 GB) with the `groth16` release
 binary, `snarkjs` for witness generation, one shared key, single runs.
 
 | Phase | Pre-Nova (monolithic) | Nova (step-chain) |
@@ -491,7 +491,7 @@ over its `PointA[2][3]` input, then walks the Merkle path to `smt_root`.
 The SMT uses MiMC(x⁷) over the **BLS12-381 scalar field** (`0x73eda7...0001`,
 the field circom targets with `--prime bls12381`). Empty leaves default to `0`
 and hash up as `mimc2(default, default)`, matching the padding scheme of
-`SparseMerkleTree` in `groth16-prover/src/sparse_merkle_tree.rs`.
+`SparseMerkleTree` in `clis/smt/src/sparse_merkle_tree.rs`.
 
 > Note: `smt insert --index <N>` is what lets `gen_input.sh` /
 > `gen_smt_input.py` place the single leaf at an arbitrary index while keeping
@@ -538,8 +538,8 @@ CardanoKeyOwnershipSMT/
 - `circom` compiler (≥ 2.0.0) for compiling `cardano_key_ownership_smt.circom`
 - `snarkjs` for witness generation
 - `trusted-setup` CLI (`clis/trusted-setup`) for the single-party ceremony
-- `groth16-prover` CLI for proving, and verification (incl. `nova`)
-- `groth16-prover` **`smt` subcommand** for all circuit-input crypto
+- `groth16` CLI (`clis/groth16`) for proving and verification
+- `smt` CLI (`clis/smt`) for all circuit-input crypto
   (`smt key`, `smt leaf`, `smt insert`, `smt cardano-input`) —
   `gen_input.sh`, `test_e2e.py`, `test_smt_simple.py` shell out to it
 - `bech32` CLI to decode `pay.xsk`/`pay.vk` bech32 files (needed by
@@ -553,7 +553,7 @@ CardanoKeyOwnershipSMT/
 
 The SMT uses MiMC(x^7) over the BLS12-381 **scalar field** as its hash
 function. The circuit and the Rust CLI use the same round constants (see
-`groth16-prover/src/mimc.rs` and `circom/Privacy/mimc.circom`).
+`clis/smt/src/mimc.rs` and `circom/Privacy/mimc.circom`).
 - 91 rounds for 128-bit security
 - `MultiMimc7(6, 91)` commits the public key coordinates to the leaf
 

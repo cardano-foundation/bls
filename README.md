@@ -417,7 +417,7 @@ Both pairing outputs are identical, confirming that `xy = 26` holds — without 
 ## Groth16 with BLS12-381 curve primitives
 
 The system was introduced in [seminal paper](https://eprint.iacr.org/2016/260.pdf).
-Groth16 prover with circom adapter written in Rust is [here](./groth16-prover/). It contains CLI too.
+Groth16 prover with circom adapter written in Rust is [here](./groth16-prover/), with its command-line interface in [`clis/groth16`](./clis/groth16/).
 Groth16 verifier written in Aiken is [here](./aiken/groth16/).
 
 <details>
@@ -435,7 +435,7 @@ Below is the minimal path from a Circom circuit to an on-chain Aiken verifier, w
 **Command:**
 
 ```bash
-cd groth16-prover/circom/SimpleExample
+cd circom/SimpleExample
 circom multiplier.circom --r1cs --wasm --prime bls12381
 ```
 
@@ -460,7 +460,7 @@ The `trusted-setup` CLI (`clis/trusted-setup`) supports **two ceremony modes** t
 ```bash
 cd clis/trusted-setup
 cargo run --release -- ceremony-dev \
-  --circuit ../../groth16-prover/circom/SimpleExample/multiplier.r1cs \
+  --circuit ../../circom/SimpleExample/multiplier.r1cs \
   --proving-key /tmp/multiplier.pk \
   --verifying-key /tmp/multiplier.vk
 ```
@@ -481,7 +481,7 @@ cargo run --release -- ceremony-dev \
 # 1. Initialize the circuit-specific accumulator (coordinator or first participant)
 cd clis/trusted-setup
 cargo run --release -- phase2 new \
-  --circuit ../../groth16-prover/circom/SimpleExample/multiplier.r1cs \
+  --circuit ../../circom/SimpleExample/multiplier.r1cs \
   --srs /path/to/pot14_final.ptau \
   --zkey /tmp/multiplier_0000.zkey
 
@@ -545,7 +545,7 @@ snarkjs wtns calculate multiplier.wasm input.json witness.wtns
 
 ---
 
-### 4. Generate the proof (groth16-prover CLI)
+### 4. Generate the proof (groth16 CLI)
 
 **Inputs:**
 - `multiplier.r1cs` — constraint system from step 1
@@ -555,10 +555,10 @@ snarkjs wtns calculate multiplier.wasm input.json witness.wtns
 **Command:**
 
 ```bash
-cd groth16-prover/cli
+cd clis/groth16
 cargo run --release -- prove \
-  --circuit ../circom/SimpleExample/multiplier.r1cs \
-  --witness ../circom/SimpleExample/witness.wtns \
+  --circuit ../../circom/SimpleExample/multiplier.r1cs \
+  --witness ../../circom/SimpleExample/witness.wtns \
   --proving-key /tmp/multiplier.pk \
   --out /tmp/proof.bin
 ```

@@ -156,7 +156,7 @@ validator my_zk_app(vk: groth16.VerificationKey) {
 
 ## Circom pipeline (end-to-end)
 
-The verifier is designed to consume proofs produced by the Rust `groth16-prover` CLI from Circom circuits. The full pipeline is:
+The verifier is designed to consume proofs produced by the Rust `groth16` CLI (`clis/groth16`) from Circom circuits. The full pipeline is:
 
 ```
 multiplier.circom  ──►  circom  ──►  multiplier.r1cs + multiplier.wasm
@@ -165,7 +165,7 @@ multiplier.circom  ──►  circom  ──►  multiplier.r1cs + multiplier.wa
 input.json + multiplier.wasm  ──►  snarkjs  ──►  witness.wtns
                                                │
                                                ▼
-multiplier.r1cs + witness.wtns  ──►  groth16-prover  ──►  proof.bin + .vk
+multiplier.r1cs + witness.wtns  ──►  groth16  ──►  proof.bin + .vk
                                                │
                                                ▼
 .vk  ──►  export-vk  ──►  circuit_vk.ak  ──►  paste into Aiken project
@@ -187,8 +187,9 @@ Several example circuits are provided:
 
 #### SimpleExample (3-gate multiplier)
 
-1. **Compile the circuit** (in `groth16-prover/circom/SimpleExample/`):
+1. **Compile the circuit** (in `circom/SimpleExample/`):
    ```bash
+   cd circom/SimpleExample
    circom multiplier.circom --r1cs --wasm --sym --prime bls12381
    ```
 
@@ -200,16 +201,17 @@ Several example circuits are provided:
 3. **Run the dev ceremony** (in `clis/trusted-setup/`, binary at `clis/trusted-setup/target/release/trusted-setup`):
    ```bash
    ../../clis/trusted-setup/target/release/trusted-setup ceremony-dev \
-     --circuit ../circom/SimpleExample/multiplier.r1cs \
+     --circuit multiplier.r1cs \
      --proving-key /tmp/multiplier.pk \
      --verifying-key /tmp/multiplier.vk
    ```
 
 4. **Generate the proof**:
    ```bash
+   cd ../../clis/groth16
    cargo run --release -- prove \
-     --circuit ../circom/SimpleExample/multiplier.r1cs \
-     --witness ../circom/SimpleExample/witness.wtns \
+     --circuit ../../circom/SimpleExample/multiplier.r1cs \
+     --witness ../../circom/SimpleExample/witness.wtns \
      --proving-key /tmp/multiplier.pk \
      --out /tmp/multiplier.proof
    ```
@@ -238,13 +240,15 @@ Several example circuits are provided:
    }
    ```
 
-See the [`SimpleExample` README](../../groth16-prover/circom/SimpleExample/README.md) for a deeper walkthrough.
+See the [`SimpleExample` README](../../circom/SimpleExample/README.md) for a deeper walkthrough.
 
 #### Privacy/spend_depth2 (1107-constraint Merkle membership)
 
-Follow the same 6-step pattern using the files in `groth16-prover/circom/Privacy/`:
+Follow the same 6-step pattern using the files in `circom/Privacy/`:
 
 ```bash
+cd circom/Privacy
+
 # 1. Compile
 circom spend_depth2.circom --r1cs --wasm --sym --prime bls12381
 
@@ -258,9 +262,10 @@ snarkjs wtns calculate spend_depth2.wasm input.json witness.wtns
   --verifying-key /tmp/spend_depth2.vk
 
 # 4. Prove
+cd ../../clis/groth16
 cargo run --release -- prove \
-  --circuit spend_depth2.r1cs \
-  --witness witness.wtns \
+  --circuit ../../circom/Privacy/spend_depth2.r1cs \
+  --witness ../../circom/Privacy/witness.wtns \
   --proving-key /tmp/spend_depth2.pk \
   --out /tmp/spend_depth2.proof
 
@@ -275,7 +280,7 @@ cargo run --release -- export-vk \
 
 > **Key property:** Because all user inputs are private, the public-input list is just `[1]` (the constant wire). The on-chain verification cost is **identical** to the 3-gate SimpleExample — roughly 20% of the Cardano script CPU budget — even though the circuit has 1107 constraints. Groth16 verification cost is constant regardless of circuit size.
 
-See the [`Privacy` README](../../groth16-prover/circom/Privacy/README.md) for a detailed walkthrough.
+See the [`Privacy` README](../../circom/Privacy/README.md) for a detailed walkthrough.
 
 ---
 

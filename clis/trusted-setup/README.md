@@ -2,7 +2,7 @@
 
 Standalone CLI (and library `trusted_setup`) for Groth16 trusted-setup ceremonies on BLS12-381.
 
-This crate hosts the ceremony functionality that previously lived in the `groth16-prover` CLI: the single-party dev ceremony, the legacy `ceremony` command, and the multi-party Phase-2 MPC on top of a public Phase-1 SRS (`.ptau`). Proof generation, verification, and Nova IVC folding remain in the `groth16-prover` CLI (`groth16-prover/cli`).
+This crate hosts the ceremony functionality that previously lived in the `groth16-prover` CLI: the single-party dev ceremony, the legacy `ceremony` command, and the multi-party Phase-2 MPC on top of a public Phase-1 SRS (`.ptau`). Proof generation, verification, and verifying-key export live in the `groth16` CLI (`clis/groth16`).
 
 ## Build
 
@@ -181,7 +181,7 @@ trusted-setup phase2 finalize \
 
 ## Consuming the keys
 
-The `.pk` / `.vk` files produced by any of these ceremonies are consumed by the `groth16-prover` CLI (`prove` / `verify` / `export-vk`) and by the on-chain Aiken verifiers. Both formats are auto-detected on load:
+The `.pk` / `.vk` files produced by any of these ceremonies are consumed by the `groth16` CLI (`prove` / `verify` / `export-vk`) and by the on-chain Aiken verifiers. Both formats are auto-detected on load:
 
 - `FullProvingKey` (group elements only, from `ceremony-dev` / `phase2 finalize`) uses the fast MSM prover path.
 - Legacy `ProvingKey` (contains scalars, from `ceremony`) falls back to the scalar-based prover path.

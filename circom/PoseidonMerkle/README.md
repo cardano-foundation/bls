@@ -110,7 +110,7 @@ snarkjs wtns calculate poseidon_merkle_depth2_js/poseidon_merkle_depth2.wasm inp
 
 ---
 
-### Step 3: Run the dev ceremony (groth16-prover CLI)
+### Step 3: Run the dev ceremony (trusted-setup CLI)
 
 **Inputs:**
 - `poseidon_merkle_depth2.r1cs` — constraints from Step 1
@@ -131,7 +131,7 @@ cd ../../clis/groth16
 
 ---
 
-### Step 4: Produce the proof (groth16-prover CLI)
+### Step 4: Produce the proof (groth16 CLI)
 
 **Inputs:**
 - `poseidon_merkle_depth2.r1cs` — constraints from Step 1
@@ -197,7 +197,7 @@ test test_verify_poseidon_merkle_depth2_proof() {
 Run it with:
 
 ```bash
-cd ../../../aiken/groth16
+cd ../../aiken/groth16
 aiken check
 ```
 

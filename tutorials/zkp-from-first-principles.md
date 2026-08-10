@@ -138,7 +138,7 @@ w =  [  1,   100,  1, 2, 3, 4, 5, 6, 7, 8,  2, 12, 30, 56 ]
 
 Note the first entry is the constant `1` (present in every R1CS witness), and `out = 100` is the public output that the verifier knows.
 
-We write circuits in **Circom** — think of it as the assembly language for R1CS: it compiles directly to constraint matrices with no hidden abstractions, which is why we use it throughout this tutorial. This circuit has 8 private inputs, 4 intermediate wires, and 1 public output. In R1CS form it yields 5 constraints — four multiplication gates plus one addition gate (which R1CS also encodes as a constraint). The source lives in [`groth16-prover/circom/SumOfProducts/sum_of_products.circom`](https://github.com/cardano-foundation/bls/blob/main/groth16-prover/circom/SumOfProducts/sum_of_products.circom):
+We write circuits in **Circom** — think of it as the assembly language for R1CS: it compiles directly to constraint matrices with no hidden abstractions, which is why we use it throughout this tutorial. This circuit has 8 private inputs, 4 intermediate wires, and 1 public output. In R1CS form it yields 5 constraints — four multiplication gates plus one addition gate (which R1CS also encodes as a constraint). The source lives in [`circom/SumOfProducts/sum_of_products.circom`](https://github.com/cardano-foundation/bls/blob/main/circom/SumOfProducts/sum_of_products.circom):
 
 ```circom
 pragma circom 2.0.0;
@@ -162,7 +162,7 @@ template SumOfProducts() {
 component main = SumOfProducts();
 ```
 
-The prover's job is to come up with a solution to the equation. Here the prover chose [`input.json`](https://github.com/cardano-foundation/bls/blob/main/groth16-prover/circom/SumOfProducts/input.json) — the eight numbers that satisfy the circuit:
+The prover's job is to come up with a solution to the equation. Here the prover chose [`input.json`](https://github.com/cardano-foundation/bls/blob/main/circom/SumOfProducts/input.json) — the eight numbers that satisfy the circuit:
 
 ```json
 { "a": "1", "b": "2", "c": "3", "d": "4",
@@ -590,23 +590,23 @@ To see the full pipeline for the new `SumOfProducts` circuit:
 
 ```bash
 # 1. Compile the circuit
-cd groth16-prover/circom/SumOfProducts
+cd circom/SumOfProducts
 circom sum_of_products.circom --r1cs --wasm --sym --prime bls12381
 
 # 2. Generate the witness (snarkjs, temporary)
 snarkjs wtns calculate sum_of_products.wasm input.json witness.wtns
 
 # 3. Dev ceremony → pk + vk
-cd ../../cli
-../../clis/trusted-setup/target/release/trusted-setup ceremony-dev \
-  --circuit ../circom/SumOfProducts/sum_of_products.r1cs \
+cd ../../../clis/groth16
+../../../clis/trusted-setup/target/release/trusted-setup ceremony-dev \
+  --circuit ../../circom/SumOfProducts/sum_of_products.r1cs \
   --proving-key /tmp/sum_of_products.pk \
   --verifying-key /tmp/sum_of_products.vk
 
 # 4. Prove
 cargo run --release -- prove \
-  --circuit ../circom/SumOfProducts/sum_of_products.r1cs \
-  --witness ../circom/SumOfProducts/witness.wtns \
+  --circuit ../../circom/SumOfProducts/sum_of_products.r1cs \
+  --witness ../../circom/SumOfProducts/witness.wtns \
   --proving-key /tmp/sum_of_products.pk \
   --out /tmp/proof.bin
 

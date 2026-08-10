@@ -186,4 +186,4 @@ Blake2b224Preimage/
 - [bkomuves/hash-circuits](https://github.com/bkomuves/hash-circuits) — Blake2b Circom circuits (MIT License)
 - [RFC 7693](https://tools.ietf.org/html/rfc7693) — The BLAKE2 Cryptographic Hash and Message Authentication Code (MAC)
 - [Cardano crypto specs](https://github.com/IntersectMBO/cardano-crypto) — Key derivation and Blake2b-224 usage in Cardano wallets
-- [`groth16-prover/circom/README.md`](../../circom/README.md) — Parent directory with full pipeline documentation
+- [`circom/README.md`](../README.md) — Parent directory with full pipeline documentation
