@@ -966,7 +966,7 @@ The F5 research direction extends this single-chain pool to **cross-chain** deli
 
 ## Step 4: Future Directions
 
-**Executive summary:** The Groth16-based design in Steps 0–3 provides practical, production-ready privacy today, but it relies on elliptic-curve cryptography that is not quantum-resistant. A long-term research direction is to complement or replace the zk-SNARK layer with **fully homomorphic encryption (FHE)** schemes that can evaluate predicates and proofs under encryption and remain secure against quantum adversaries.
+**Executive summary:** The Groth16-based design in Steps 0–3 provides practical, production-ready privacy today, but it relies on elliptic-curve cryptography that is not quantum-resistant. Long-term research directions are to complement or replace the zk-SNARK layer with **fully homomorphic encryption (FHE)** schemes or with **hash-based STARK / zkVM proof systems** — both remain secure against quantum adversaries (details below).
 
 <details>
 <summary><b>Click to expand: FHE-Based, Quantum-Resistant Selective Disclosure</b></summary>
@@ -1019,6 +1019,24 @@ FHE-augmented design:
 ### Summary
 
 FHE-based selective disclosure is not yet a drop-in replacement for Groth16 on Cardano, but it is a **strategic future direction** for quantum resistance and for scenarios where the predicate itself should be evaluated on encrypted data by an untrusted party. The two references above provide both a concrete implementation starting point (LACTv2) and the theoretical basis (De Salve et al., 2018) for this research direction.
+
+</details>
+
+<details>
+<summary><b>Click to expand: STARK / zkVM Quantum-Resistance Path (CIP-1242 ZKPoSP, Zcash)</b></summary>
+
+Alongside lattice-based FHE, **hash-based proof systems** are the other live post-quantum track for predicate proofs. Hash-based STARKs and zkVM backends (FRI-STARK, RISC Zero) are transparent (no trusted setup), natively post-quantum, and — unlike Groth16's single pairing check — are verified on-chain by a **hash-based verifier**. Their cost is proof size (hundreds of KB today) and a heavier on-chain verification circuit.
+
+Two production-grade references are already on this path:
+
+- **CIP-1242 — ZKPoSP, post-quantum ZK signatures for Cardano HD wallets** (Botta, Pospieszalski, Ragnoli, Ranvier, IACR ePrint [2026/1508](https://eprint.iacr.org/2026/1508); CIP draft in [cardano-foundation/CIPs PR 1242](https://github.com/cardano-foundation/CIPs/pull/1242)). Proves Cardano BIP-32-Ed25519 key ownership with a **RISC Zero STARK** instead of the classical pairing-based witness. Two phases: Phase 1 verifies proofs off-chain (no ledger change), Phase 2 adds a native STARK verifier gated on shrinking the ~219 KB proof to a few KB. Its authors cite the approach in this repo as the classical baseline — "useful as a performance bound and for a possible **hybrid**."
+- **Zcash quantum readiness** ([CoinDesk Research, June 2026](https://www.coindesk.com/research/building-the-zcash-machine-tachyon-and-quantum-readiness)). Three steps: quantum recoverability (ZIP 2005) → ML-KEM + Tachyon against harvest-and-decrypt → a fully post-quantum pool with hybrid classical+PQ signatures and "hash-based or STARK-style proof hardening" of Halo2. The SNARK swap is deferred on purpose: PQ proofs are "much larger" and primitives are still moving fast.
+
+**How it could fit into this design:** the Step 1 predicate proof is a natural candidate for the same staged migration — issue credentials with the current Groth16 proof today, and move the predicate proof to a STARK/zkVM backend once proofs are small enough for the Plutus V3 budget. The issuer/holder/Gate Script architecture is unchanged; only the primitive inside the redeemer changes. The lattice path in `groth16-prover` and `nova-prover` (Implementation 10) and this STARK path are complementary candidates for the same future PQ chain.
+
+### Summary
+
+Hash-based / STARK-style proofs are a **strategic future direction** for quantum resistance, with ZKPoSP (CIP-1242) and Zcash as live production references. They are transparent and natively post-quantum but proof-size-heavy today; revisit for on-chain verification as proofs shrink.
 
 </details>
 
@@ -1206,3 +1224,11 @@ In all cases, the **Gate Script remains unchanged** — it validates only the pr
    https://dl.acm.org/doi/10.1049/iet-ifs.2018.5491
 
    Proposes a selective-disclosure scheme where credential attributes are encrypted with fully homomorphic encryption and predicates are evaluated on encrypted data. The construction targets post-quantum security and provides the theoretical foundation for an FHE-based future direction (Step 3).
+
+8. **ZKPoSP** — Vincenzo Botta, Michał Pospieszalski, Emanuele Ragnoli, John Ranvier, "ZKPoSP: Post-Quantum Zero-Knowledge Proofs for Hierarchical Deterministic Wallets," IACR ePrint [2026/1508](https://eprint.iacr.org/2026/1508); CIP draft in [cardano-foundation/CIPs PR 1242](https://github.com/cardano-foundation/CIPs/pull/1242).
+
+   A production-grade reference for the STARK/zkVM post-quantum track: RISC Zero proofs of BIP-32-Ed25519 seed ownership for Cardano HD wallets, deployed in two phases (off-chain verification now, native STARK verifier later once proofs shrink from ~219 KB). Its authors cite this repository as the classical baseline ("useful as a performance bound and for a possible hybrid").
+
+9. **Zcash quantum readiness** — CoinDesk Research, "Building the Zcash Machine: Tachyon and Quantum Readiness," June 2026. https://www.coindesk.com/research/building-the-zcash-machine-tachyon-and-quantum-readiness
+
+   Zcash's committed three-step path: quantum recoverability (ZIP 2005, Ironwood pool) → ML-KEM (FIPS 203) + Tachyon to close the harvest-and-decrypt window → a fully post-quantum pool with hybrid classical+PQ signatures and "hash-based or STARK-style proof hardening" of Halo2. Explicitly defers the SNARK swap because PQ proofs are much larger and the primitives are still maturing — the same Phase-1-then-Phase-2 discipline as ZKPoSP.

@@ -1471,6 +1471,15 @@ The two functional gaps of the POC — it is a proof *chain* (N proofs, N pairin
 
 **Reality check:** a chain is only as PQ as its weakest link, so partial PQ buys nothing — the compression SNARK must go PQ too. A hybrid dual proof (Groth16 OR lattice IVC) hedges the transition at double cost. Full status and trade-offs are in **item (v)**.
 
+### Industry context — CIP-1242 (ZKPoSP) and Zcash's quantum-readiness roadmap
+
+This PQ track is not hypothetical — two production-grade references have committed to exactly the staged posture item (v) recommends (document the risk, keep the classical stack as the default, hedge, migrate when standards mature).
+
+- **CIP-1242 — ZKPoSP, post-quantum ZK signatures for Cardano HD wallets** (Botta, Pospieszalski, Ragnoli, Ranvier, IACR ePrint [2026/1508](https://eprint.iacr.org/2026/1508); CIP draft in [cardano-foundation/CIPs PR 1242](https://github.com/cardano-foundation/CIPs/pull/1242)). Replaces/augments the classical Ed25519 ownership witness with a ZK proof that a public key was derived from a seed along the Cardano BIP-32-Ed25519 path, using a **STARK** (RISC Zero zkVM). Two-phase deployment: Phase 1 verifies proofs **off-chain** (wallets, exchanges, indexers) with no ledger change; Phase 2 adds a **native STARK verifier** on-chain, gated on proof size dropping from ~219 KB toward a few KB. The CIP lists this repo as its classical comparison point — efficient, but pairing-based and not quantum-safe — "useful as a performance bound and for a possible **hybrid**" with the STARK path.
+- **Zcash — committed three-step quantum-readiness path** (CoinDesk Research, June 2026). (1) Quantum recoverability (ZIP 2005, Ironwood pool) → (2) ML-KEM (FIPS 203) + Tachyon to close the harvest-and-decrypt window → (3) a fully post-quantum pool with **hybrid classical+PQ signatures** and "hash-based or STARK-style proof hardening" of Halo2. Zcash explicitly defers the SNARK swap: PQ proofs are "much larger" and the primitives are "improving almost weekly" — the same Phase-1-then-Phase-2 discipline as ZKPoSP.
+
+**What this means for item (v):** both references validate the "keep the classical stack, hedge, migrate later" posture, and they broaden the PQ target **beyond lattice folding**. Hash-based / STARK-style proof systems (FRI-STARK, zkVMs like RISC Zero, Halo2-with-FRI) are the other live PQ track — transparent (no trusted setup) and natively post-quantum, at the cost of large proofs. Lattice folding and a STARK/zkVM backend are complementary candidates for a future PQ chain; in both cases the on-chain verifier ends up hash-based.
+
 ### Cryptographic remarks
 
 - **Q: Is replacing Groth16's pairing-based compression SNARK with a sumcheck/GKR-based PQ SNARK a drop-in replacement, or does it require a fundamentally different verification stack?** It is not a drop-in replacement. Groth16 verification is a single pairing check (~2 ms on Aiken/Plutus). A hash-based or sumcheck-based verifier is significantly heavier (hundreds of field operations per round, multiple rounds). The on-chain verification cost will increase, trading gas for PQ security. The Aiken verifier would need a complete rewrite, and the Plutus V3 budget may not accommodate a complex hash-based verification circuit.
@@ -1547,6 +1556,7 @@ For **long-term research**:
 7. ⏳ Implementation 10 — post-quantum lattice folding — **only if quantum timelines shorten; executed after the classical items above (9, 11) (item (v) below)**
 8. Evaluate PLONK / Halo2 only if proof size or verification cost regressions are acceptable.
 9. Evaluate FHE-based selective disclosure for quantum resistance (see `aiken/selective-disclosure`).
+10. Track the hash-based / STARK PQ path in parallel — CIP-1242 (ZKPoSP) and Zcash's quantum-readiness roadmap are live deployments of exactly this track (see [Implementation 10 §Industry context](#implementation-10-post-quantum-lattice-folding)); revisit for on-chain use once proof sizes shrink toward Plutus V3 feasibility.
 
 > **Note on the ownership circuit.** The Cardano Ed25519 key ownership circuit (~1.97M constraints) already has a ceremony of only **~5 min** and proving of **~1.7 min** — a total of ~7 min e2e. This is already acceptable for dev/testnet workflows. The ~16 min Ed25519 full-signature ceremony is the outlier because SHA-512 in-circuit is expensive. If the use case is "prove I own this key" rather than "verify a signature", the bottleneck is already manageable.
 
@@ -1705,6 +1715,7 @@ For **long-term research**:
   1. **Document the risk** (this item) and keep the classical stack — quantum-safe migration is a research/roadmap question, not today's blocker (consistent with the existing long-term item "Evaluate FHE-based selective disclosure for quantum resistance").
   2. **Optional hybrid** for high-value use cases: dual proof (Groth16 + lattice IVC) verified as an OR — the survey's "hybrid elliptic-curve–lattice" open problem; doubles cost but hedges the transition.
   3. **If quantum timelines shorten:** switch the IVC layer to a lattice folding (Lova first) + PQ compression + hash-based on-chain verifier, re-arithmetizing the step circuits for a small field.
+  4. **STARK/zkVM is the parallel PQ track** — see the industry context in [Implementation 10](#implementation-10-post-quantum-lattice-folding) (§Industry context — CIP-1242 (ZKPoSP) and Zcash's quantum-readiness roadmap): hash-based proofs are the other live PQ family, and a future PQ chain may pick lattice folding *or* a STARK/zkVM backend — both converge on a hash-based on-chain verifier.
 - **Status:** ⏳ **Research direction.** Natural PQ counterpart of Implementation 9 (u); neither is committed.
 - **Reference:** LatticeFold (Boneh, Chen, eprint 2024/257), Lova (Fenzi et al., ASIACRYPT 2024, eprint 2024/1964), ProtogaLattice (eprint 2026/1317), Sakwa et al. survey §4 (quantum-secure folding), [SSRN 5293078](https://doi.org/10.2139/ssrn.5293078).
 
@@ -1895,22 +1906,23 @@ All works cited across this README and the linked implementation / tutorial docu
 11. Ryan Lavin, Xuekai Liu, Hardhik Mohanty, Logan Norman, Giovanni Zaarour, Bhaskar Krishnamachari. *A Survey on the Applications of Zero-Knowledge Proofs.* arXiv [2408.00243](https://arxiv.org/abs/2408.00243) (2024).
 12. Sean Bowe, Jack Grigg, Daira Hopwood. *Recursive Proof Composition without a Trusted Setup* (Halo / Halo2). IACR ePrint [2019/1021](https://eprint.iacr.org/2019/1021).
 13. Liam Eagen. *Bulletproofs++: Next Generation Confidential Transactions Based on Proofs of Statement and Knowledge.* IACR ePrint [2022/510](https://eprint.iacr.org/2022/510).
+14. Vincenzo Botta, Michał Pospieszalski, Emanuele Ragnoli, John Ranvier. *ZKPoSP: Post-Quantum Zero-Knowledge Proofs for Hierarchical Deterministic Wallets.* IACR ePrint [2026/1508](https://eprint.iacr.org/2026/1508); CIP draft in [cardano-foundation/CIPs PR 1242](https://github.com/cardano-foundation/CIPs/pull/1242).
 
 ### Hash functions and authenticated data structures
 
-14. Lorenzo Grassi, Dmitry Khovratovich, Christian Rechberger, Arnab Roy, Markus Schofnegger. *POSEIDON: A New Hash Function for Zero-Knowledge Proof Systems.* USENIX Security 2021. IACR ePrint [2019/458](https://eprint.iacr.org/2019/458).
-15. Rasmus Dahlberg, Tobias Pulls, Roel Peeters. *Efficient Sparse Merkle Trees: Caching Strategies and Secure (Non-)Membership Proofs.* NordSec 2016. IACR ePrint [2016/683](https://eprint.iacr.org/2016/683).
-16. Dan Boneh, Henry Corrigan-Gibbs, Stuart Schechter. *Balloon Hashing: A Memory-Hard Function Providing Provable Protection Against Sequential Attacks.* ASIACRYPT 2016. IACR ePrint [2016/027](https://eprint.iacr.org/2016/027).
+15. Lorenzo Grassi, Dmitry Khovratovich, Christian Rechberger, Arnab Roy, Markus Schofnegger. *POSEIDON: A New Hash Function for Zero-Knowledge Proof Systems.* USENIX Security 2021. IACR ePrint [2019/458](https://eprint.iacr.org/2019/458).
+16. Rasmus Dahlberg, Tobias Pulls, Roel Peeters. *Efficient Sparse Merkle Trees: Caching Strategies and Secure (Non-)Membership Proofs.* NordSec 2016. IACR ePrint [2016/683](https://eprint.iacr.org/2016/683).
+17. Dan Boneh, Henry Corrigan-Gibbs, Stuart Schechter. *Balloon Hashing: A Memory-Hard Function Providing Provable Protection Against Sequential Attacks.* ASIACRYPT 2016. IACR ePrint [2016/027](https://eprint.iacr.org/2016/027).
 
 ### Signatures and pairing-friendly curves
 
-17. Dan Boneh, Ben Lynn, Hovav Shacham. *Short Signatures from the Weil Pairing.* ASIACRYPT 2001; *Journal of Cryptology* 17(4):297–319, 2004.
-18. Paulo S. L. M. Barreto, Ben Lynn, Michael Scott. *Constructing Elliptic Curves with Prescribed Embedding Degrees.* SCN 2002. IACR ePrint [2002/088](https://eprint.iacr.org/2002/088).
+18. Dan Boneh, Ben Lynn, Hovav Shacham. *Short Signatures from the Weil Pairing.* ASIACRYPT 2001; *Journal of Cryptology* 17(4):297–319, 2004.
+19. Paulo S. L. M. Barreto, Ben Lynn, Michael Scott. *Constructing Elliptic Curves with Prescribed Embedding Degrees.* SCN 2002. IACR ePrint [2002/088](https://eprint.iacr.org/2002/088).
 
 ### Privacy and selective disclosure
 
-19. Andrea De Salve, Paolo Mori, Laura Ricci. *A Fully Homomorphic Encryption Based Scheme for Verifiable Credential Selective Disclosure.* IET Information Security, 2018. DOI [10.1049/iet-ifs.2018.5491](https://dl.acm.org/doi/10.1049/iet-ifs.2018.5491).
-20. Andrea De Salve, Andrea Lisi, Miriam Cascino, Paolo Mori, Laura Ricci. *Selective Disclosure Approaches in Self-Sovereign Identity: An Experimental Comparison.* IEEE Access, 2025. DOI [10.1109/ACCESS.2025.3649167](https://doi.org/10.1109/ACCESS.2025.3649167).
+20. Andrea De Salve, Paolo Mori, Laura Ricci. *A Fully Homomorphic Encryption Based Scheme for Verifiable Credential Selective Disclosure.* IET Information Security, 2018. DOI [10.1049/iet-ifs.2018.5491](https://dl.acm.org/doi/10.1049/iet-ifs.2018.5491).
+21. Andrea De Salve, Andrea Lisi, Miriam Cascino, Paolo Mori, Laura Ricci. *Selective Disclosure Approaches in Self-Sovereign Identity: An Experimental Comparison.* IEEE Access, 2025. DOI [10.1109/ACCESS.2025.3649167](https://doi.org/10.1109/ACCESS.2025.3649167).
 
 ### Software, specifications, and ceremonies
 
@@ -1922,6 +1934,9 @@ All works cited across this README and the linked implementation / tutorial docu
 - [Halo2 (Zcash)](https://github.com/zcash/halo2) — PLONKish recursive proof system.
 - [Groth.jl](https://github.com/0xpantera/Groth.jl) — Julia Groth16 with `prepare_verifying_key` / batched verification.
 - [zeroj](https://github.com/bloxbean/zeroj) — pure-Java Groth16 prover for BLS12-381.
+- [RISC Zero zkVM](https://dev.risczero.com/) — STARK proof system over a Rust zkVM; the proving backend used by CIP-1242 (ZKPoSP).
+- [Tachyon (Kroma)](https://github.com/kroma-network/tachyon) — modular ZK backend with a Halo2 + FRI polynomial-commitment scheme and GPU acceleration; the Zcash quantum-readiness track.
+- [CoinDesk Research, "Building the Zcash Machine: Tachyon and Quantum Readiness"](https://www.coindesk.com/research/building-the-zcash-machine-tachyon-and-quantum-readiness) — Zcash's three-step path to post-quantum security (June 2026).
 - [Perpetual Powers of Tau](https://github.com/privacy-scaling-explorations/perpetualpowersoftau) — universal BLS12-381 Phase 1 ceremony (`.ptau`).
 - [Manta trusted setup](https://github.com/Manta-Network/manta-rs) — production arkworks-based Phase 2 MPC ceremony.
 - [F5 PoC](https://f5.primemodulus.com/) — ZK privacy-pool proof of concept.

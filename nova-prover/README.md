@@ -247,6 +247,15 @@ The two functional gaps of the POC — it is a proof *chain* (N proofs, N pairin
 
 **Reality check:** a chain is only as PQ as its weakest link, so partial PQ buys nothing — the compression SNARK must go PQ too. A hybrid dual proof (Groth16 OR lattice IVC) hedges the transition at double cost. Full status and trade-offs are in **item (v)**.
 
+### Industry context — CIP-1242 (ZKPoSP) and Zcash's quantum-readiness roadmap
+
+This PQ track is not hypothetical — two production-grade references have committed to exactly the staged posture item (v) recommends (document the risk, keep the classical stack as the default, hedge, migrate when standards mature).
+
+- **CIP-1242 — ZKPoSP, post-quantum ZK signatures for Cardano HD wallets** (Botta, Pospieszalski, Ragnoli, Ranvier, IACR ePrint [2026/1508](https://eprint.iacr.org/2026/1508); CIP draft in [cardano-foundation/CIPs PR 1242](https://github.com/cardano-foundation/CIPs/pull/1242)). Replaces/augments the classical Ed25519 ownership witness with a ZK proof that a public key was derived from a seed along the Cardano BIP-32-Ed25519 path, using a **STARK** (RISC Zero zkVM). Two-phase deployment: Phase 1 verifies proofs **off-chain** (wallets, exchanges, indexers) with no ledger change; Phase 2 adds a **native STARK verifier** on-chain, gated on proof size dropping from ~219 KB toward a few KB. The CIP lists this repo as its classical comparison point — efficient, but pairing-based and not quantum-safe — "useful as a performance bound and for a possible **hybrid**" with the STARK path.
+- **Zcash — committed three-step quantum-readiness path** (CoinDesk Research, June 2026). (1) Quantum recoverability (ZIP 2005, Ironwood pool) → (2) ML-KEM (FIPS 203) + Tachyon to close the harvest-and-decrypt window → (3) a fully post-quantum pool with **hybrid classical+PQ signatures** and "hash-based or STARK-style proof hardening" of Halo2. Zcash explicitly defers the SNARK swap: PQ proofs are "much larger" and the primitives are "improving almost weekly" — the same Phase-1-then-Phase-2 discipline as ZKPoSP.
+
+**What this means for item (v):** both references validate the "keep the classical stack, hedge, migrate later" posture, and they broaden the PQ target **beyond lattice folding**. Hash-based / STARK-style proof systems (FRI-STARK, zkVMs like RISC Zero, Halo2-with-FRI) are the other live PQ track — transparent (no trusted setup) and natively post-quantum, at the cost of large proofs. Lattice folding and a STARK/zkVM backend are complementary candidates for a future PQ chain; in both cases the on-chain verifier ends up hash-based.
+
 ### Cryptographic remarks
 
 - **Q: Is replacing Groth16's pairing-based compression SNARK with a sumcheck/GKR-based PQ SNARK a drop-in replacement, or does it require a fundamentally different verification stack?** It is not a drop-in replacement. Groth16 verification is a single pairing check (~2 ms on Aiken/Plutus). A hash-based or sumcheck-based verifier is significantly heavier (hundreds of field operations per round, multiple rounds). The on-chain verification cost will increase, trading gas for PQ security. The Aiken verifier would need a complete rewrite, and the Plutus V3 budget may not accommodate a complex hash-based verification circuit.
@@ -346,6 +355,7 @@ The two functional gaps of the POC — it is a proof *chain* (N proofs, N pairin
   1. **Document the risk** (this item) and keep the classical stack — quantum-safe migration is a research/roadmap question, not today's blocker (consistent with the existing long-term item "Evaluate FHE-based selective disclosure for quantum resistance").
   2. **Optional hybrid** for high-value use cases: dual proof (Groth16 + lattice IVC) verified as an OR — the survey's "hybrid elliptic-curve–lattice" open problem; doubles cost but hedges the transition.
   3. **If quantum timelines shorten:** switch the IVC layer to a lattice folding (Lova first) + PQ compression + hash-based on-chain verifier, re-arithmetizing the step circuits for a small field.
+  4. **STARK/zkVM is the parallel PQ track** — see the industry context in [Implementation 10](#implementation-10-post-quantum-lattice-folding) (§Industry context — CIP-1242 (ZKPoSP) and Zcash's quantum-readiness roadmap): hash-based proofs are the other live PQ family, and a future PQ chain may pick lattice folding *or* a STARK/zkVM backend — both converge on a hash-based on-chain verifier.
 - **Status:** ⏳ **Research direction.** Natural PQ counterpart of Implementation 9 (u); neither is committed.
 - **Reference:** LatticeFold (Boneh, Chen, eprint 2024/257), Lova (Fenzi et al., ASIACRYPT 2024, eprint 2024/1964), ProtogaLattice (eprint 2026/1317), Sakwa et al. survey §4 (quantum-secure folding), [SSRN 5293078](https://doi.org/10.2139/ssrn.5293078).
 
@@ -394,6 +404,7 @@ cargo run --release --bin benchmark_nova -- --circuit <step.r1cs> --steps <witne
 11. Ryan Lavin, Xuekai Liu, Hardhik Mohanty, Logan Norman, Giovanni Zaarour, Bhaskar Krishnamachari. *A Survey on the Applications of Zero-Knowledge Proofs.* arXiv [2408.00243](https://arxiv.org/abs/2408.00243) (2024).
 12. Sean Bowe, Jack Grigg, Daira Hopwood. *Recursive Proof Composition without a Trusted Setup* (Halo / Halo2). IACR ePrint [2019/1021](https://eprint.iacr.org/2019/1021).
 13. Liam Eagen. *Bulletproofs++: Next Generation Confidential Transactions Based on Proofs of Statement and Knowledge.* IACR ePrint [2022/510](https://eprint.iacr.org/2022/510).
+14. Vincenzo Botta, Michał Pospieszalski, Emanuele Ragnoli, John Ranvier. *ZKPoSP: Post-Quantum Zero-Knowledge Proofs for Hierarchical Deterministic Wallets.* IACR ePrint [2026/1508](https://eprint.iacr.org/2026/1508); CIP draft in [cardano-foundation/CIPs PR 1242](https://github.com/cardano-foundation/CIPs/pull/1242).
 
 ### Software, specifications, and ceremonies
 
@@ -402,6 +413,9 @@ cargo run --release --bin benchmark_nova -- --circuit <step.r1cs> --steps <witne
 - [Sonobe](https://github.com/privacy-scaling-explorations/sonobe) — experimental arkworks-based folding-schemes library (Nova, CycleFold, HyperNova, ProtoGalaxy).
 - [Halo2 (Zcash)](https://github.com/zcash/halo2) — PLONKish recursive proof system.
 - [arkworks](https://arkworks.rs/) — Rust ecosystem for pairing-based cryptography (R1CS, Groth16, FFT, MSM).
+- [RISC Zero zkVM](https://dev.risczero.com/) — STARK proof system over a Rust zkVM; the proving backend used by CIP-1242 (ZKPoSP).
+- [Tachyon (Kroma)](https://github.com/kroma-network/tachyon) — modular ZK backend with a Halo2 + FRI polynomial-commitment scheme and GPU acceleration; the Zcash quantum-readiness track.
+- [CoinDesk Research, "Building the Zcash Machine: Tachyon and Quantum Readiness"](https://www.coindesk.com/research/building-the-zcash-machine-tachyon-and-quantum-readiness) — Zcash's three-step path to post-quantum security (June 2026).
 
 ---
 
