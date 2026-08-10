@@ -39,7 +39,7 @@ the witness vector is `[1, 48, 2, 2, 3, 4, 4, 12]`.
 | `multiplier.sym` | Symbol file (human-readable wire names, optional) |
 
 ```bash
-cd groth16-prover/circom/SimpleExample
+cd circom/SimpleExample
 circom multiplier.circom --r1cs --wasm --sym --prime bls12381
 ```
 
@@ -60,7 +60,7 @@ snarkjs wtns calculate multiplier.wasm input.json witness.wtns
 
 ---
 
-### Step 3: Produce the proof (groth16-prover CLI)
+### Step 3: Produce the proof (groth16 CLI)
 
 **Inputs:**
 - `multiplier.r1cs` — constraints from Step 1
@@ -70,10 +70,10 @@ snarkjs wtns calculate multiplier.wasm input.json witness.wtns
 **Output:** `/tmp/proof.bin` — a binary Groth16 proof (arkworks serialization)
 
 ```bash
-cd ../../cli
+cd ../../clis/groth16
 cargo run --release -- prove \
-  --circuit ../circom/SimpleExample/multiplier.r1cs \
-  --witness ../circom/SimpleExample/witness.wtns \
+  --circuit ../../circom/SimpleExample/multiplier.r1cs \
+  --witness ../../circom/SimpleExample/witness.wtns \
   --out /tmp/proof.bin
 ```
 
@@ -87,7 +87,7 @@ The CLI uses `FftQapEngine` + `PippengerProver` internally for fast proof genera
 **Output:** Aiken source file containing the `VerificationKey` record
 
 ```bash
-cd ../../cli
+cd ../../clis/groth16
 cargo run --release -- export-vk \
   --verifying-key /tmp/multiplier.vk \
   --out /tmp/multiplier_vk.ak

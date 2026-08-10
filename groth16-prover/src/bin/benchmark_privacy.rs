@@ -1,6 +1,6 @@
 //! `benchmark_privacy` — benchmark proof generation for the Spend(depth) circuit.
 //!
-//! Loads the real `circom/Privacy/spend_depth2.r1cs` + `witness.wtns` artifacts
+//! Loads the real `../circom/Privacy/spend_depth2.r1cs` + `witness.wtns` artifacts
 //! from disk, generates a `FullProvingKey` once, then times proof production
 //! using the fast group-element-only path.
 
@@ -17,8 +17,8 @@ fn main() {
     println!("=== Benchmark: Privacy circuit (Spend depth-2) ===\n");
 
     // Load real Circom circuit
-    let mut circuit = CircomCircuit::from_r1cs("circom/Privacy/spend_depth2.r1cs").unwrap();
-    circuit.load_witness("circom/Privacy/witness.wtns").unwrap();
+    let mut circuit = CircomCircuit::from_r1cs("../circom/Privacy/spend_depth2.r1cs").unwrap();
+    circuit.load_witness("../circom/Privacy/witness.wtns").unwrap();
 
     println!(
         "Loaded circuit: {} wires, {} constraints\n",

@@ -47,7 +47,7 @@ Round constants and MDS matrix are from ZeroJ's `PoseidonParamsBLS12_381T3`, gen
 | `poseidon_preimage.sym` | Symbol file (human-readable wire names, optional) |
 
 ```bash
-cd groth16-prover/circom/PoseidonPreimage
+cd circom/PoseidonPreimage
 circom poseidon_preimage.circom --r1cs --wasm --sym --prime bls12381
 ```
 
@@ -78,9 +78,9 @@ snarkjs wtns calculate poseidon_preimage.wasm input.json witness.wtns
 - `/tmp/poseidon_preimage.vk` — binary verifying key
 
 ```bash
-cd ../../cli
+cd ../../clis/groth16
 ../../clis/trusted-setup/target/release/trusted-setup ceremony-dev \
-  --circuit ../circom/PoseidonPreimage/poseidon_preimage.r1cs \
+  --circuit ../../circom/PoseidonPreimage/poseidon_preimage.r1cs \
   --proving-key /tmp/poseidon_preimage.pk \
   --verifying-key /tmp/poseidon_preimage.vk
 ```
@@ -102,8 +102,8 @@ cd ../../cli
 
 ```bash
 cargo run --release -- prove \
-  --circuit ../circom/PoseidonPreimage/poseidon_preimage.r1cs \
-  --witness ../circom/PoseidonPreimage/witness.wtns \
+  --circuit ../../circom/PoseidonPreimage/poseidon_preimage.r1cs \
+  --witness ../../circom/PoseidonPreimage/witness.wtns \
   --proving-key /tmp/poseidon_preimage.pk \
   --engine fft --prover pippenger \
   --out /tmp/poseidon_preimage.proof

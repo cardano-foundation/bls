@@ -29,10 +29,10 @@ public class ZerojBenchmark {
         System.out.println("═══════════════════════════════════════════════════════════════════════");
 
         benchCircuit("PoseidonMerkle depth-2",
-            "../groth16-prover/circom/PoseidonMerkle/poseidon_merkle_depth2.r1cs", 10);
+            "../circom/PoseidonMerkle/poseidon_merkle_depth2.r1cs", 10);
 
         benchCircuit("EdDSAJubJub test_pbk_only",
-            "../groth16-prover/circom/EdDSAJubJub/test_pbk_only.r1cs", 3);
+            "../circom/EdDSAJubJub/test_pbk_only.r1cs", 3);
 
         System.out.println("\n═══════════════════════════════════════════════════════════════════════");
         System.out.println("  zeroj benchmark complete.");

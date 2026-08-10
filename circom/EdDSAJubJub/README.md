@@ -85,7 +85,7 @@ cargo build --release -p groth16-prover
 ### 1. Compile
 
 ```bash
-cd groth16-prover/circom/EdDSAJubJub
+cd circom/EdDSAJubJub
 
 circom eddsa_jubjub.circom \
   --r1cs --wasm --sym \
@@ -137,9 +137,9 @@ snarkjs wtns calculate \
 
 ```bash
 mkdir -p /tmp/eddsa_ceremony
-cd ../../cli
+cd ../../clis/groth16
 ../../clis/trusted-setup/target/release/trusted-setup ceremony-dev \
-  --circuit ../circom/EdDSAJubJub/eddsa_out/eddsa_jubjub.r1cs \
+  --circuit ../../circom/EdDSAJubJub/eddsa_out/eddsa_jubjub.r1cs \
   --proving-key /tmp/eddsa_ceremony/eddsa_jubjub.pk \
   --verifying-key /tmp/eddsa_ceremony/eddsa_jubjub.vk
 ```
@@ -148,8 +148,8 @@ cd ../../cli
 
 ```bash
 cargo run --release -- prove \
-  --circuit ../circom/EdDSAJubJub/eddsa_out/eddsa_jubjub.r1cs \
-  --witness ../circom/EdDSAJubJub/eddsa_out/eddsa_jubjub.wtns \
+  --circuit ../../circom/EdDSAJubJub/eddsa_out/eddsa_jubjub.r1cs \
+  --witness ../../circom/EdDSAJubJub/eddsa_out/eddsa_jubjub.wtns \
   --proving-key /tmp/eddsa_ceremony/eddsa_jubjub.pk \
   --out /tmp/eddsa_ceremony/eddsa_jubjub.proof
 ```
