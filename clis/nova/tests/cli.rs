@@ -65,6 +65,98 @@ fn build_synthetic_r1cs() -> Vec<u8> {
     out
 }
 
+/// Generate a synthetic `.r1cs` for a 1-constraint step circuit with
+/// `n_pub_out == n_pub_in == 1`: wires `[1, out, in, x]`, constraint `in·x = out`.
+fn build_synthetic_step_r1cs() -> Vec<u8> {
+    let mut out = Vec::new();
+    out.extend_from_slice(b"r1cs");
+    out.extend_from_slice(&1u32.to_le_bytes());
+    out.extend_from_slice(&2u32.to_le_bytes());
+
+    let field_size = 32u32;
+    let n_wires = 4u32;
+    let n_pub_out = 1u32;
+    let n_pub_in = 1u32;
+    let n_prv_in = 1u32;
+    let n_labels = 4u64;
+    let n_constraints = 1u32;
+
+    let mut header = Vec::new();
+    header.extend_from_slice(&field_size.to_le_bytes());
+    header.extend_from_slice(&[0u8; 32]);
+    header.extend_from_slice(&n_wires.to_le_bytes());
+    header.extend_from_slice(&n_pub_out.to_le_bytes());
+    header.extend_from_slice(&n_pub_in.to_le_bytes());
+    header.extend_from_slice(&n_prv_in.to_le_bytes());
+    header.extend_from_slice(&n_labels.to_le_bytes());
+    header.extend_from_slice(&n_constraints.to_le_bytes());
+
+    out.extend_from_slice(&1u32.to_le_bytes());
+    out.extend_from_slice(&(header.len() as u64).to_le_bytes());
+    out.extend_from_slice(&header);
+
+    let mut constraints = Vec::new();
+    let mut write_vec = |terms: &[(u32, u64)]| {
+        constraints.extend_from_slice(&(terms.len() as u32).to_le_bytes());
+        for &(w, v) in terms {
+            constraints.extend_from_slice(&w.to_le_bytes());
+            constraints.push(v as u8);
+            constraints.extend_from_slice(&vec![0u8; field_size as usize - 1]);
+        }
+    };
+
+    // in * x = out  (A = wire 2, B = wire 3, C = wire 1)
+    write_vec(&[(2, 1)]);
+    write_vec(&[(3, 1)]);
+    write_vec(&[(1, 1)]);
+
+    out.extend_from_slice(&2u32.to_le_bytes());
+    out.extend_from_slice(&(constraints.len() as u64).to_le_bytes());
+    out.extend_from_slice(&constraints);
+    out
+}
+
+/// Serialize witness values to a valid Circom `.wtns` blob.  The values are
+/// stored as canonical little-endian field elements (the values are small
+/// u64s here, so the canonical form is 8 value bytes + 24 zero bytes), which
+/// matches how `parse_wtns` reads them back via `from_le_bytes_mod_order`.
+fn wtns_bytes(witness: &[u64]) -> Vec<u8> {
+    let mut out = Vec::new();
+    out.extend_from_slice(b"wtns");
+    out.extend_from_slice(&1u32.to_le_bytes());
+    out.extend_from_slice(&2u32.to_le_bytes());
+
+    let mut header = Vec::new();
+    header.extend_from_slice(&32u32.to_le_bytes());
+    header.extend_from_slice(&[0u8; 32]);
+    header.extend_from_slice(&(witness.len() as u32).to_le_bytes());
+    out.extend_from_slice(&1u32.to_le_bytes());
+    out.extend_from_slice(&(header.len() as u64).to_le_bytes());
+    out.extend_from_slice(&header);
+
+    let mut data = Vec::new();
+    for v in witness {
+        data.extend_from_slice(&v.to_le_bytes());
+        data.extend_from_slice(&[0u8; 24]);
+    }
+    out.extend_from_slice(&2u32.to_le_bytes());
+    out.extend_from_slice(&(data.len() as u64).to_le_bytes());
+    out.extend_from_slice(&data);
+    out
+}
+
+/// Write one chained step witness for the synthetic step circuit:
+/// `[1, out, in, x]` with `out = in·x`.  Returns `out` as the next state in.
+fn write_step_wtns(dir: &std::path::Path, idx: usize, st_in: u64, x: u64) -> u64 {
+    let st_out = st_in * x;
+    fs::write(
+        dir.join(format!("step_{idx:04}.wtns")),
+        wtns_bytes(&[1, st_out, st_in, x]),
+    )
+    .unwrap();
+    st_out
+}
+
 // ------------------------------------------------------------------
 // Nova / Implementation 8 — CardanoKeyOwnership step-chain tests
 //
@@ -617,4 +709,181 @@ fn verify_missing_ivc() {
     cmd.assert()
         .failure()
         .stderr(predicate::str::contains("failed to read IVC bundle"));
+}
+
+// ------------------------------------------------------------------
+// Nova / Implementation 9 — NIFS folding (constant-size bundle)
+// ------------------------------------------------------------------
+
+/// Full `nova fold --nifs` flow on a synthetic step circuit: folding is
+/// transparent (no proving key), producing an O(1) NIFS bundle with a folded
+/// Relaxed-R1CS final instance and a deterministic transcript.
+#[test]
+fn fold_nifs_end_to_end() {
+    let r1cs = NamedTempFile::new().unwrap();
+    fs::write(r1cs.path(), build_synthetic_step_r1cs()).unwrap();
+
+    // State chain: 2 -> 6 -> 30 -> 210 (private factors 3, 5, 7).
+    let steps_dir = tempfile::tempdir().unwrap();
+    let mut state = 2u64;
+    for (i, x) in [3u64, 5, 7].iter().enumerate() {
+        state = write_step_wtns(steps_dir.path(), i, state, *x);
+    }
+    assert_eq!(state, 210);
+
+    let bundle_file = NamedTempFile::new().unwrap();
+    let mut cmd = Command::cargo_bin("nova").unwrap();
+    cmd.arg("fold")
+        .arg("--nifs")
+        .arg("--circuit")
+        .arg(r1cs.path())
+        .arg("--steps")
+        .arg(steps_dir.path())
+        .arg("--out")
+        .arg(bundle_file.path());
+    cmd.assert().success();
+
+    let bundle: serde_json::Value =
+        serde_json::from_slice(&fs::read(bundle_file.path()).unwrap()).unwrap();
+    assert!(bundle.get("steps").is_none());
+    assert!(bundle["final_instance"].is_object());
+    assert_eq!(bundle["n_steps"], 3);
+    assert_eq!(bundle["initial_state"], serde_json::json!(["2"]));
+    // The final instance holds the *folded* accumulated state
+    // (x_acc = x_0 + Σ r_i·x_i), not the last step's state — so just check
+    // the structure and that folding is deterministic.
+    assert_eq!(bundle["final_instance"]["x"].as_array().unwrap().len(), 2);
+    assert_ne!(bundle["final_instance"]["u"].as_str().unwrap(), "1");
+    assert!(
+        bundle["final_instance"]["w_commit"]
+            .as_str()
+            .is_some_and(|s| !s.is_empty())
+    );
+    assert!(
+        bundle["final_instance"]["e_commit"]
+            .as_str()
+            .is_some_and(|s| !s.is_empty())
+    );
+    assert_eq!(bundle["transcript_final"].as_str().unwrap().len(), 128);
+
+    // Folding is deterministic: re-folding the same witnesses yields the
+    // exact same bundle (challenges are transcript-derived, not sampled).
+    let rerun = NamedTempFile::new().unwrap();
+    let mut cmd = Command::cargo_bin("nova").unwrap();
+    cmd.arg("fold")
+        .arg("--nifs")
+        .arg("--circuit")
+        .arg(r1cs.path())
+        .arg("--steps")
+        .arg(steps_dir.path())
+        .arg("--out")
+        .arg(rerun.path());
+    cmd.assert().success();
+    let bundle2: serde_json::Value =
+        serde_json::from_slice(&fs::read(rerun.path()).unwrap()).unwrap();
+    assert_eq!(bundle, bundle2);
+}
+
+/// `fold --nifs` isolates the exact step whose `state_in` breaks the chain.
+#[test]
+fn fold_nifs_rejects_broken_chain() {
+    let r1cs = NamedTempFile::new().unwrap();
+    fs::write(r1cs.path(), build_synthetic_step_r1cs()).unwrap();
+
+    let full = tempfile::tempdir().unwrap();
+    let mut state = 2u64;
+    for (i, x) in [3u64, 5, 7].iter().enumerate() {
+        state = write_step_wtns(full.path(), i, state, *x);
+    }
+
+    let broken = tempfile::tempdir().unwrap();
+    fs::copy(
+        full.path().join("step_0000.wtns"),
+        broken.path().join("step_0000.wtns"),
+    )
+    .unwrap();
+    fs::copy(
+        full.path().join("step_0002.wtns"),
+        broken.path().join("step_0001.wtns"),
+    )
+    .unwrap();
+
+    let bundle_file = NamedTempFile::new().unwrap();
+    let mut cmd = Command::cargo_bin("nova").unwrap();
+    cmd.arg("fold")
+        .arg("--nifs")
+        .arg("--circuit")
+        .arg(r1cs.path())
+        .arg("--steps")
+        .arg(broken.path())
+        .arg("--out")
+        .arg(bundle_file.path());
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "state_in does not chain to previous state_out",
+        ))
+        .stderr(predicate::str::contains("step_0001.wtns"));
+}
+
+/// Without `--nifs`, `fold` still requires a proving key (clap).
+#[test]
+fn fold_requires_proving_key_without_nifs() {
+    let r1cs = NamedTempFile::new().unwrap();
+    fs::write(r1cs.path(), build_synthetic_step_r1cs()).unwrap();
+    let steps_dir = tempfile::tempdir().unwrap();
+    let out = NamedTempFile::new().unwrap();
+
+    let mut cmd = Command::cargo_bin("nova").unwrap();
+    cmd.arg("fold")
+        .arg("--circuit")
+        .arg(r1cs.path())
+        .arg("--steps")
+        .arg(steps_dir.path())
+        .arg("--out")
+        .arg(out.path());
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "the following required arguments were not provided",
+        ))
+        .stderr(predicate::str::contains("--proving-key"));
+}
+
+/// `nova verify` on a NIFS bundle reports that the compression proof is
+/// pending (Implementation 9 work item 2) instead of misreading the bundle.
+#[test]
+fn verify_nifs_bundle_reports_pending_compression() {
+    let r1cs = NamedTempFile::new().unwrap();
+    fs::write(r1cs.path(), build_synthetic_step_r1cs()).unwrap();
+
+    let steps_dir = tempfile::tempdir().unwrap();
+    let mut state = 2u64;
+    for (i, x) in [3u64, 5, 7].iter().enumerate() {
+        state = write_step_wtns(steps_dir.path(), i, state, *x);
+    }
+
+    let bundle_file = NamedTempFile::new().unwrap();
+    let mut fold = Command::cargo_bin("nova").unwrap();
+    fold.arg("fold")
+        .arg("--nifs")
+        .arg("--circuit")
+        .arg(r1cs.path())
+        .arg("--steps")
+        .arg(steps_dir.path())
+        .arg("--out")
+        .arg(bundle_file.path());
+    fold.assert().success();
+
+    let mut verify = Command::cargo_bin("nova").unwrap();
+    verify
+        .arg("verify")
+        .arg("--ivc")
+        .arg(bundle_file.path())
+        .arg("--verifying-key")
+        .arg("/nonexistent/step.vk");
+    verify
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("compression proof"));
 }
