@@ -1,8 +1,7 @@
 //! `fold` subcommand — fold step witnesses into an IVC bundle + transcript.
 
 use clap::Parser;
-use nova_prover::run_fold;
-use nova_prover::run_fold_nifs;
+use nova_prover::{emit_compression_r1cs, run_fold, run_fold_nifs};
 use std::error::Error;
 use std::fs;
 use std::path::PathBuf;
@@ -35,6 +34,12 @@ pub struct Args {
     /// Folding is linear-time and needs no proving key.
     #[arg(long)]
     pub nifs: bool,
+
+    /// (With `--nifs`) also write the compression circuit `.r1cs` for this
+    /// step circuit.  Feed it to `trusted-setup ceremony-dev --sparse` to
+    /// derive the compression proving / verifying keys (work item 2).
+    #[arg(long, value_name = "FILE", requires = "nifs")]
+    pub compression_r1cs: Option<PathBuf>,
 }
 
 /// Run the `fold` subcommand.
@@ -51,6 +56,10 @@ pub fn run(args: Args) -> Result<(), Box<dyn Error>> {
             out.bundle.n_steps,
             out.bundle.final_instance.u
         );
+
+        if let Some(r1cs_out) = &args.compression_r1cs {
+            emit_compression_r1cs(&args.circuit, r1cs_out)?;
+        }
         return Ok(());
     }
 

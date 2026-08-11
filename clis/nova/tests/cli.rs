@@ -887,3 +887,49 @@ fn verify_nifs_bundle_reports_pending_compression() {
         .failure()
         .stderr(predicate::str::contains("compression proof"));
 }
+
+/// `fold --nifs --compression-r1cs` emits the compression circuit `.r1cs`
+/// (work item 2): 2× the step constraints, with only the `t_i` intermediates
+/// private.  The output must parse back through the standard circuit loader so
+/// it can be fed to `trusted-setup ceremony-dev --sparse`.
+#[test]
+fn fold_nifs_emits_compression_r1cs() {
+    let r1cs = NamedTempFile::new().unwrap();
+    fs::write(r1cs.path(), build_synthetic_step_r1cs()).unwrap();
+
+    let steps_dir = tempfile::tempdir().unwrap();
+    let mut state = 2u64;
+    for (i, x) in [3u64, 5, 7].iter().enumerate() {
+        state = write_step_wtns(steps_dir.path(), i, state, *x);
+    }
+
+    let bundle_file = NamedTempFile::new().unwrap();
+    let compression_r1cs = tempfile::NamedTempFile::new().unwrap();
+    let mut cmd = Command::cargo_bin("nova").unwrap();
+    cmd.arg("fold")
+        .arg("--nifs")
+        .arg("--circuit")
+        .arg(r1cs.path())
+        .arg("--steps")
+        .arg(steps_dir.path())
+        .arg("--out")
+        .arg(bundle_file.path())
+        .arg("--compression-r1cs")
+        .arg(compression_r1cs.path());
+    cmd.assert()
+        .success()
+        .stderr(predicate::str::contains("Compression circuit"));
+
+    // Step circuit: 4 wires, 1 constraint, 1 public out + 1 public in.
+    // Compression circuit: 2 constraints, n_public = 1+4+1+1 = 7,
+    // n_wires_total = 8, n_pub_out = 6, n_prv_in = 1.
+    let c = nova_prover::load_circuit(compression_r1cs.path()).expect("compression .r1cs must parse");
+    assert_eq!(c.n_wires, 8);
+    assert_eq!(c.n_constraints, 2);
+    assert_eq!(c.n_pub_out, 6);
+    assert_eq!(c.n_pub_in, 0);
+    assert_eq!(c.n_prv_in, 1);
+
+    // The bundle is still written regardless of the optional r1cs output.
+    assert!(bundle_file.path().exists());
+}
