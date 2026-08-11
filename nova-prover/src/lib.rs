@@ -585,8 +585,15 @@ pub fn run_fold_nifs(circuit: &Path, steps: &Path) -> Result<NifsFoldOutput, Box
 pub fn run_verify(ivc: &Path, verifying_key: &Path) -> Result<VerifyOutput, Box<dyn Error>> {
     let bytes = fs::read(ivc)
         .map_err(|e| format!("failed to read IVC bundle {}: {e}", ivc.display()))?;
-    let bundle: IvcBundle =
-        serde_json::from_slice(&bytes).map_err(|e| format!("failed to parse IVC bundle: {e}"))?;
+    let bundle: IvcBundle = serde_json::from_slice(&bytes).map_err(|e| {
+        if serde_json::from_slice::<NifsBundle>(&bytes).is_ok() {
+            "this is a NIFS bundle (Implementation 9) — verification requires the \
+             compression proof, which is not implemented yet (work item 2)"
+                .to_string()
+        } else {
+            format!("failed to parse IVC bundle: {e}")
+        }
+    })?;
 
     let vk = load_vk(verifying_key).map_err(|e| format!("failed to load verifying key: {e}"))?;
 

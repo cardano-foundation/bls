@@ -60,6 +60,10 @@ pub enum Command {
     /// produces a Groth16 proof for each step and binds them together
     /// with a BLAKE2b transcript.
     ///
+    /// With `--nifs` (Implementation 9) no proving key is needed: the step
+    /// instances are folded into a single Relaxed-R1CS instance instead of
+    /// producing one Groth16 proof per step.
+    ///
     /// The output bundle (`.ivc.json`) contains all step proofs, the
     /// initial state, and the final transcript hash.  It is consumed by
     /// the `verify` subcommand.
@@ -67,6 +71,7 @@ pub enum Command {
     /// Example:
     ///
     ///   $ nova fold --circuit step_circuit.r1cs --proving-key step.pk --steps ./step_witnesses/ --out bundle.ivc.json
+    ///   $ nova fold --nifs --circuit step_circuit.r1cs --steps ./step_witnesses/ --out bundle.ivc.json
     Fold(cmd::fold::Args),
 
     /// Verify a folded IVC bundle
