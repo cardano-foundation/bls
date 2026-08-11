@@ -4,7 +4,7 @@ Command-line interface for the Groth16 zero-knowledge proof lifecycle on BLS12-3
 
 This CLI covers proof generation, verification, and verifying-key export. Trusted-setup ceremonies (both the single-party dev ceremony and the multi-party Phase-2 MPC) live in the standalone `trusted-setup` CLI (`clis/trusted-setup`), and sparse Merkle tree operations plus privacy-circuit witness-input generation live in the standalone `smt` CLI (`clis/smt`). All outputs use arkworks' canonical compressed serialization so they are directly consumable by on-chain Aiken verifiers.
 
-The core proof logic lives in the `groth16-prover` crate; this crate only adds the command-line interface on top of it.
+The core proof logic lives in the `groth16-prover` crate; this crate only adds the command-line interface on top of it. **All implementation details** — the dense and FFT QAP engines, naive and Pippenger provers, Circom adapter, sparse-matrix prover, `h_scalar` optimization, serialization formats, and the step-by-step Implementation 1–7 walkthrough with parity tests and benchmarks — are documented in the [groth16-prover README](../../groth16-prover/README.md).
 
 ---
 
