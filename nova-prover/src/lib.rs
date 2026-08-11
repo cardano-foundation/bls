@@ -18,7 +18,8 @@
 //! operations in this crate.
 
 use ark_bls12_381::{Fr, G1Affine, G2Affine};
-use ark_ff::PrimeField;
+use ark_ec::AffineRepr;
+use ark_ff::{PrimeField, Zero};
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use blake2::{Blake2b512, Digest};
 use groth16_prover::ceremony::{
@@ -35,6 +36,14 @@ use std::path::{Path, PathBuf};
 
 /// Domain separator for the IVC transcript.
 pub const TRANSCRIPT_PREFIX: &[u8] = b"groth16-prover-nova-transcript-v1";
+
+/// NIFS (Implementation 9) domain separators.
+///
+/// `NIFS_PARAMS_SEED` derives the transparent Pedersen basis; the transcript
+/// prefix is distinct from the `"chain"` transcript to prevent cross-context
+/// challenge reuse.
+pub const NIFS_PARAMS_SEED: &[u8] = b"groth16-prover-nova-nifs-params-v1";
+pub const NIFS_TRANSCRIPT_PREFIX: &[u8] = b"groth16-prover-nova-nifs-transcript-v1";
 
 /// NIFS folding module (Implementation 9) — Relaxed-R1CS + Pedersen commitments.
 pub mod nifs;
@@ -73,6 +82,42 @@ pub struct IvcBundle {
     pub initial_state: Vec<String>,
     pub steps: Vec<StepProof>,
     pub transcript_final: String,
+}
+
+/// Final Relaxed-R1CS instance in a NIFS bundle (public artifact).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NifsFinalInstance {
+    /// Folded public input (IVC state), decimal field strings
+    pub x: Vec<String>,
+    /// Slack scalar `u`, decimal
+    pub u: String,
+    /// Pedersen commitment to the final witness (compressed G1 hex)
+    pub w_commit: String,
+    /// Pedersen commitment to the final error (compressed G1 hex)
+    pub e_commit: String,
+}
+
+/// The NIFS bundle produced by [`run_fold_nifs`] — O(1) in the step count.
+///
+/// Consumed by the compression proof (Implementation 9, work item 2) and the
+/// `nova verify` subcommand.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NifsBundle {
+    pub circuit: String,
+    pub n_pub_out: u32,
+    pub n_pub_in: u32,
+    pub initial_state: Vec<String>,
+    pub n_steps: usize,
+    pub final_instance: NifsFinalInstance,
+    pub transcript_final: String,
+}
+
+/// Output of [`run_fold_nifs`]: the public bundle plus the private final
+/// witness (consumed by the compression proof).
+#[derive(Debug, Clone)]
+pub struct NifsFoldOutput {
+    pub bundle: NifsBundle,
+    pub final_witness: nifs::RelaxedR1csWitness,
 }
 
 /// Summary of a successful [`run_ceremony`].
@@ -378,6 +423,158 @@ pub fn run_fold(
     })
 }
 
+/// `fold --nifs` — fold step witnesses into a single Relaxed-R1CS instance.
+///
+/// Loads the step circuit and a directory of witness files, derives the
+/// transparent Pedersen parameters, and folds every step instance into one
+/// running accumulator via the NIFS.  Folding is linear-time and needs no
+/// proving key.  Returns the O(1) [`NifsBundle`] (final instance + transcript)
+/// plus the private final witness for the compression proof.
+pub fn run_fold_nifs(circuit: &Path, steps: &Path) -> Result<NifsFoldOutput, Box<dyn Error>> {
+    let circuit_path_str = circuit.to_string_lossy().into_owned();
+    let mut circuit = load_circuit(circuit)?;
+    check_step_circuit(&circuit)?;
+
+    let n_pub_out = circuit.n_pub_out as usize;
+    let n_pub_in = circuit.n_pub_in as usize;
+    let n_wires = circuit.n_wires as usize;
+    let n_constraints = circuit.n_constraints as usize;
+
+    let params = nifs::PedersenParams::from_seed(NIFS_PARAMS_SEED, n_wires, n_constraints);
+    let zero_e = vec![Fr::zero(); n_constraints];
+
+    let mut wtns_paths: Vec<PathBuf> = Vec::new();
+    for entry in fs::read_dir(steps)
+        .map_err(|e| format!("failed to read steps dir {}: {e}", steps.display()))?
+    {
+        let entry = entry.map_err(|e| format!("failed to read steps dir entry: {e}"))?;
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) == Some("wtns") {
+            wtns_paths.push(path);
+        }
+    }
+    wtns_paths.sort();
+
+    if wtns_paths.is_empty() {
+        return Err(format!(
+            "no .wtns files found in steps dir {}",
+            steps.display()
+        )
+        .into());
+    }
+    eprintln!(
+        "Folding {} step witnesses (NIFS) from {}",
+        wtns_paths.len(),
+        steps.display()
+    );
+
+    let mut acc_hash: Option<Vec<u8>> = None;
+    let mut prev_out: Option<Vec<String>> = None;
+    let mut initial_state: Vec<String> = Vec::new();
+    let mut acc_u: Option<nifs::RelaxedR1csInstance> = None;
+    let mut acc_w: Option<nifs::RelaxedR1csWitness> = None;
+
+    for (i, p) in wtns_paths.iter().enumerate() {
+        circuit
+            .load_witness(
+                p.to_str()
+                    .ok_or_else(|| format!("step witness path is not valid UTF-8: {p:?}"))?,
+            )
+            .map_err(|e| format!("failed to load witness {}: {e}", p.display()))?;
+        let w = &circuit.witness;
+
+        let out_fr = &w[1..1 + n_pub_out];
+        let in_fr = &w[1 + n_pub_out..1 + n_pub_out + n_pub_in];
+        let state_in: Vec<String> = in_fr.iter().map(fr_to_string).collect();
+        let state_out: Vec<String> = out_fr.iter().map(fr_to_string).collect();
+
+        if let Some(prev) = &prev_out {
+            if state_in != *prev {
+                return Err(format!(
+                    "step {i} ({}): state_in does not chain to previous state_out. \
+                     The step witnesses were not generated from a consistent state chain.",
+                    p.display()
+                )
+                .into());
+            }
+        } else {
+            initial_state = state_in.clone();
+            acc_hash = Some(transcript_nifs_init(in_fr));
+        }
+
+        let x: Vec<Fr> = w[1..1 + n_pub_out + n_pub_in].to_vec();
+        let step_u = nifs::RelaxedR1csInstance {
+            x,
+            u: Fr::from(1u64),
+            w_commit: nifs::commit(&params.basis_w, w),
+            e_commit: G1Affine::zero(),
+        };
+        let step_w = nifs::RelaxedR1csWitness {
+            w: w.to_vec(),
+            e: zero_e.clone(),
+        };
+
+        match acc_u.take() {
+            None => {
+                acc_u = Some(step_u);
+                acc_w = Some(step_w);
+            }
+            Some(u_acc) => {
+                let w_acc = acc_w.take().expect("running witness must exist");
+                let acc = acc_hash.as_ref().expect("transcript initialized");
+                let challenge = nifs::fold_challenge(acc, &u_acc, &step_u);
+                let (u3, w3) = nifs::fold(
+                    &params,
+                    &circuit.l,
+                    &circuit.r,
+                    &circuit.o,
+                    &u_acc,
+                    &w_acc,
+                    &step_u,
+                    &step_w,
+                    challenge,
+                );
+                acc_u = Some(u3);
+                acc_w = Some(w3);
+            }
+        }
+
+        acc_hash = Some(transcript_nifs_step(
+            acc_hash.as_ref().expect("transcript initialized"),
+            acc_u.as_ref().expect("running instance"),
+        ));
+        prev_out = Some(state_out);
+        eprintln!(
+            "  step {i:>3}: folded (u = {})",
+            fr_to_string(&acc_u.as_ref().expect("running instance").u)
+        );
+    }
+
+    let final_u = acc_u.ok_or("no step witnesses folded")?;
+    let final_w = acc_w.expect("final witness present");
+    let transcript_final = hex::encode(acc_hash.as_ref().expect("transcript finalized"));
+
+    let bundle = NifsBundle {
+        circuit: circuit_path_str,
+        n_pub_out: circuit.n_pub_out,
+        n_pub_in: circuit.n_pub_in,
+        initial_state,
+        n_steps: wtns_paths.len(),
+        final_instance: NifsFinalInstance {
+            x: final_u.x.iter().map(fr_to_string).collect(),
+            u: fr_to_string(&final_u.u),
+            w_commit: g1_hex(&final_u.w_commit),
+            e_commit: g1_hex(&final_u.e_commit),
+        },
+        transcript_final,
+    };
+
+    Ok(NifsFoldOutput {
+        bundle,
+        final_witness: final_w,
+    })
+}
+
 /// `verify` — verify a folded IVC bundle.
 ///
 /// Loads an IVC bundle (`.ivc.json`) and the step verifying key, then
@@ -508,6 +705,25 @@ pub fn transcript_step(acc_hash: &[u8], out_bytes: &[u8], proof_bytes: &[u8]) ->
     h.update(acc_hash);
     h.update(out_bytes);
     h.update(proof_bytes);
+    h.finalize().to_vec()
+}
+
+/// Initialize the NIFS transcript: `H(NIFS_TRANSCRIPT_PREFIX ‖ initial_state)`.
+fn transcript_nifs_init(initial_state: &[Fr]) -> Vec<u8> {
+    let mut h = Blake2b512::new();
+    h.update(NIFS_TRANSCRIPT_PREFIX);
+    h.update(frs_bytes(initial_state));
+    h.finalize().to_vec()
+}
+
+/// Extend the NIFS transcript with the running instance after a fold:
+/// `H(acc ‖ instance_bytes)`.  The folding challenge (`nifs::fold_challenge`)
+/// is domain-separated via `FOLD_PREFIX`.
+fn transcript_nifs_step(acc_hash: &[u8], u: &nifs::RelaxedR1csInstance) -> Vec<u8> {
+    let mut h = Blake2b512::new();
+    h.update(NIFS_TRANSCRIPT_PREFIX);
+    h.update(acc_hash);
+    h.update(nifs::instance_to_bytes(u).expect("serialize instance"));
     h.finalize().to_vec()
 }
 
