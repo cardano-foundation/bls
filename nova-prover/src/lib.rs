@@ -579,6 +579,38 @@ pub fn run_fold_nifs(circuit: &Path, steps: &Path) -> Result<NifsFoldOutput, Box
     })
 }
 
+/// Emit the compression circuit `.r1cs` for a step circuit (Implementation 9,
+/// work item 2).
+///
+/// The compression circuit reuses the step circuit's sparse A/B/C matrices and
+/// checks the relaxed equation `(AZ)∘(BZ) = u·(CZ) + E` row by row — the exact
+/// invariant [`nifs::fold`] guarantees the accumulated instance satisfies.  The
+/// resulting `.r1cs` is Circom-compatible and can be fed to
+/// `trusted-setup ceremony-dev --sparse` to derive the compression proving /
+/// verifying keys.  Returns the number of bytes written.
+pub fn emit_compression_r1cs(circuit: &Path, out: &Path) -> Result<usize, Box<dyn Error>> {
+    let c = load_circuit(circuit)?;
+    check_step_circuit(&c)?;
+
+    let cc = compression::CompressionCircuit::new(&c.l, &c.r, &c.o, c.n_wires as usize);
+    let bytes = cc.to_r1cs_bytes();
+    fs::write(out, &bytes)
+        .map_err(|e| format!("failed to write compression .r1cs to {}: {e}", out.display()))?;
+    eprintln!(
+        "Compression circuit (from {} step constraints): {} wires, {} constraints, {} public",
+        c.n_constraints,
+        cc.n_wires_total,
+        cc.l.len(),
+        cc.n_public
+    );
+    eprintln!(
+        "Compression circuit .r1cs ({} bytes) written to {}",
+        bytes.len(),
+        out.display()
+    );
+    Ok(bytes.len())
+}
+
 /// `verify` — verify a folded IVC bundle.
 ///
 /// Loads an IVC bundle (`.ivc.json`) and the step verifying key, then
