@@ -4,6 +4,8 @@
 
 This document explains the Nova folding scheme as applied in the `nova-prover` project. It covers the core concepts, the IVC architecture, the comparison with alternatives, and the design decisions specific to this project's stack (BLS12-381, Circom, arkworks, Aiken).
 
+> **Status:** the NIFS folding + compression scheme described here is **implemented** (Implementation 9, POC): `nova-prover/src/nifs.rs`, `nova-prover/src/compression.rs`, and the `nova` CLI (`fold --nifs` / `compress` / `verify --compression-proof`). Sections below marked *design* are the design as-built; measured numbers come from the same-run benchmark in [`nova-prover/README.md`](../README.md).
+
 ## Background: The Recursion Problem
 
 Groth16 is the most efficient general-purpose SNARK for R1CS circuits, but it has a fundamental limitation: verifying a proof requires a pairing check, and embedding a pairing check inside a circuit (to make proofs recursive) costs ~100K–500K constraints per nesting level. For a computation with N steps, naive recursion means N nested proofs, each requiring its own trusted setup and re-proving everything above it. The verification cost and proof bundle both grow with N.
@@ -39,12 +41,17 @@ The fold is a linear-time operation (two group scalar multiplications and a few 
 
 ```
 state_0 ──▶ [step₀: f(step₀, state₀)] ──▶ state_1 ──▶ [step₁] ──▶ … ──▶ state_N
-              │ Groth16 proof₀                       │ Groth16 proof₁
-              └──────────────── transcript ─────────┘
-              acc = BLAKE2b512(acc ‖ state_out ‖ proof_bytes)
+              │ NIFS fold (two O(step) MSMs)     │ NIFS fold
+              └──────────────▶ one Relaxed-R1CS running instance U_N
+                                        │
+                                        ▼
+                        compression circuit (2·n_constraints, Rust-built)
+                                        │ Groth16
+                                        ▼
+                              one proof, one pairing check
 ```
 
-Each step is proven as a standalone Groth16 proof. The running accumulator is folded after each step. At the end, a **compression SNARK** (Groth16 over ~100K constraints) proves that the final relaxed instance is satisfiable. The verifier checks a single pairing and the transcript.
+Each step's witness is folded into a running Relaxed-R1CS instance `U` with a NIFS (linear-time, no trusted setup, **off-circuit** — no curve cycle needed). At the end, a **compression circuit** proves the final relaxed instance is satisfiable and is Groth16-compressed into a single proof verified with one pairing check. The Fiat-Shamir challenge is `r = H("groth16-prover-nova-fold-v1" ‖ acc ‖ U1 ‖ U2)`, domain-separated from the `"groth16-prover-nova-transcript-v1"` state-chain transcript.
 
 ### Properties
 
@@ -120,17 +127,24 @@ Relaxed-R1CS instance `U = (x, u, W̄, Ē)`, witness `W' = (W, E)`, relaxed equa
   - cross-term `E_cross = (AZ1)∘(BZ2) + (AZ2)∘(BZ1) − u1(CZ2) − u2(CZ1)`
 - Per-step prover work: two O(step) MSMs (commitments of the new instance + `E_cross`). Folding is off-circuit → **no curve cycle**.
 
-### Compression circuit (`circom/RelaxedR1CS/`)
+### Compression circuit (`nova-prover/src/compression.rs`)
 
-Proves final `U_N` satisfiable. Private inputs `W_N, E_N`; public inputs `x_N, u_N` + affine coordinates of `W̄_N, Ē_N`. Two checks:
-1. Relaxed equation — reuses step A/B/C, `n_constraints` gates.
-2. Pedersen re-commitment `com(W_N) = W̄_N`, `com(E_N) = Ē_N` — **the size driver**: O(n_vars + n_constraints) in-circuit scalar muls, i.e. non-native G1-in-Fr. For the 7.7K-wire step this is ~2–6M gates, one-time and step-agnostic; refine the estimate in the benchmark. Mitigation if prohibitive: windowed fixed-base (constants), shrinking the basis.
+Proves final `U_N` satisfiable. The circuit is built **in Rust** (no circom needed): it reuses the step circuit's sparse A/B/C matrices and checks the relaxed equation `(AZ)∘(BZ) = u·(CZ) + E` row by row, with `Z`, `u` and `E` all public. Size is **`2 · n_constraints` constraints** ("size ≈ one step"), measured:
+
+| Step circuit | Step constraints | Compression constraints | Compression wires |
+|---|---|---|---|
+| `ed25519_verify_nova` / `cardano_ed25519_ownership_nova` | 7,724 | 15,448 | 23,108 |
+| `anonymous_airdrop_nova` | 1,207 | 2,414 | 3,626 |
+| `eddsa_jubjub_nova` | 9 | 18 | 35 |
+
+**Design change vs the original plan: the Pedersen commitments `W̄`, `Ē` are NOT checked inside the circuit.** An in-circuit re-commitment would require non-native G1-in-Fr arithmetic (~30K–190K constraints per wire — infeasible at step scale). Instead the verifier recomputes `com(W)`, `com(E)` natively with an O(step) MSM (milliseconds) and compares against the bundle instance. Binding holds because the circuit makes `(x, u, W, E)` public, so the Groth16 proof and the native MSM check are anchored to the same witness. This removes the estimated 2–6M-gate cost driver entirely and shrinks the ceremony to the `2·n_constraints` circuit.
 
 ### CLI
 
-- `nova fold --nifs` — fold N step instances → one relaxed instance → one compression proof (existing Groth16 prover). `params` / `ceremony` / step circuits unchanged.
-- New `nova ceremony-compression` — step-agnostic ceremony for the compression circuit.
-- `nova verify` — transcript check + **one** pairing check (vs N today).
+- `nova fold --nifs [--compression-r1cs compression.r1cs]` — fold N step instances → one relaxed instance; optionally emits the compression circuit `.r1cs`. `params` / `ceremony` / step circuits unchanged.
+- `trusted-setup ceremony-dev --sparse --circuit compression.r1cs` — one-time ceremony for the compression circuit (reusable for any step shape).
+- `nova compress` — Groth16-compress the final instance (re-folds the witnesses deterministically to recover the private final witness).
+- `nova verify --compression-proof ... --compression-vk ...` — transcript check + **one** pairing check (vs N today).
 
 ### Shared with groth16-prover (reused unchanged)
 
@@ -138,8 +152,8 @@ Proves final `U_N` satisfiable. Private inputs `W_N, E_N`; public inputs `x_N, u
 
 ### E2E demo + benchmark
 
-- Demo: `cardano_ed25519_ownership_nova` (255 steps, 7,724 gates) — compression ceremony → `fold --nifs` → `verify` (one pairing).
-- Benchmark: extend `benchmark_nova.rs` with `--nifs` — per-step fold time, compression time, bundle size, verify time (constant vs O(N)).
+- Demo: `nova fold --nifs` → `trusted-setup ceremony-dev --sparse` on the emitted compression `.r1cs` → `nova compress` → `nova verify --compression-proof` (one pairing). Worked end to end on all four step circuits (255-step `cardano_ed25519_ownership_nova` / `ed25519_verify_nova`, 254-step `eddsa_jubjub_nova`, 5-step `anonymous_airdrop_nova`) — see the [E2E flow](README.md#e2e-flow--implementation-9-nifs) and [Benchmarks](README.md#benchmarks--nova-ivc-implementation-8-step-chain-vs-implementation-9-nifs).
+- Measured (single run): NIFS fold 230 ms/step for the 7.7K-constraint steps vs 700 ms/step Groth16 fold (3.1×); single-pairing verify ~8.8 s for 255 steps (MSM-dominated); compression ceremony 6.2 s; bundle constant in N (579.6 KiB, dominated by the revealed `Z`/`E`).
 
 ## References
 

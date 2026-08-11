@@ -29,6 +29,25 @@ nova fold --circuit step_circuit.r1cs --proving-key step.pk --steps ./step_witne
 nova verify --ivc bundle.ivc.json --verifying-key step.vk
 ```
 
+**Implementation 9 (NIFS, constant-time verify)** — no per-step proving key:
+
+```bash
+# Fold the step witnesses into one Relaxed-R1CS instance + emit the compression circuit
+nova fold --nifs --circuit step_circuit.r1cs --steps ./step_witnesses/ --out bundle.ivc.json \
+  --compression-r1cs compression.r1cs
+
+# One-time ceremony for the compression circuit
+trusted-setup ceremony-dev --sparse --circuit compression.r1cs \
+  --proving-key compression.pk --verifying-key compression.vk
+
+# Compress the final instance into one Groth16 proof
+nova compress --circuit step_circuit.r1cs --steps ./step_witnesses/ \
+  --proving-key compression.pk --out compression.proof.json
+
+# Verify: one pairing check + native commitments + transcript
+nova verify --ivc bundle.ivc.json --compression-proof compression.proof.json --compression-vk compression.vk
+```
+
 The full step-by-step worked example (`cardano_ed25519_ownership_nova` — 255
 steps over the Cardano Ed25519 ownership circuit) is in
 [`circom/CardanoKeyOwnership/README.md`](../circom/CardanoKeyOwnership/README.md)
@@ -45,7 +64,7 @@ arguments (Halo2, CIRCOM-recursive), design decisions for our stack — is in
 <details>
 <summary><b>Implementation 8 — click to expand</b></summary>
 
-> **Status:** ✅ **Done (POC).** An end-to-end Nova CLI (`nova params / ceremony / fold / verify`) is implemented in the `nova-prover` library + `clis/nova` CLI and smoke-tested on four step circuits (Ed25519Verify, EdDSA-JubJub, CardanoKeyOwnership—Ed25519, AnonymousAirdrop). It proves each step as a **standalone Groth16 proof** and binds the state chain with a BLAKE2b512 transcript. The POC validates the step-decomposition + incremental-proving approach end to end. The full Nova **Relaxed-R1CS folding + compression SNARK** (constant-size proof, no per-step Groth16) is no longer part of this implementation — it is tracked as **Implementation 9 (item (u) below)**.
+> **Status:** ✅ **Done (POC).** An end-to-end Nova CLI (`nova params / ceremony / fold / verify`) is implemented in the `nova-prover` library + `clis/nova` CLI and smoke-tested on four step circuits (Ed25519Verify, EdDSA-JubJub, CardanoKeyOwnership—Ed25519, AnonymousAirdrop). It proves each step as a **standalone Groth16 proof** and binds the state chain with a BLAKE2b512 transcript. The POC validates the step-decomposition + incremental-proving approach end to end. The full Nova **Relaxed-R1CS folding + compression SNARK** (constant-time proof, no per-step Groth16) is shipped as **Implementation 9** below.
 >
 > **Goal:** Eliminate the circuit-specific trusted setup entirely for computations that exceed monolithic Groth16 feasibility (~4M+ constraints), and enable incremental proving where each step fits in memory.
 
@@ -112,12 +131,12 @@ Nova IVC splits a large computation into small step circuits (~40K constraints e
 ### Verdict
 
 - ✅ **Implementation 8 POC delivered.** Step decomposition + incremental proving validated end to end on four step circuits; ceremony elimination and per-step memory scaling are demonstrated.
-- **Next:** the production-grade fold (Relaxed-R1CS accumulator + compression SNARK) is Implementation 9 — pending, tracked as item **(u)**. Undertake it when the O(N) chain or the per-step ceremony becomes operationally painful.
+- **Next:** the production-grade fold (Relaxed-R1CS accumulator + compression SNARK) is shipped as **Implementation 9** below — `nova fold --nifs` → `nova compress` → `nova verify` (one pairing check, O(1) bundle).
 - **When mandatory:** For 10M+ constraint circuits (rollups, full transaction validation) where monolithic Groth16 is infeasible.
 
 ### What exists today (implementation plan, step by step)
 
-The POC does **not** implement Relaxed-R1CS folding — that is the scope of Implementation 9 (item **(u)**). Instead it runs a **chain of ordinary Groth16 proofs**, one per step, and binds the state chain with a BLAKE2b512 transcript. Each step proof is fully independent and verifiable; `nova verify` re-derives the chain and the transcript. The only circuit invariant is **`n_pub_in == n_pub_out`** (the public input block of step `i+1` is the public output block of step `i` — public inputs *are* the IVC state), checked by `nova params`.
+The POC does **not** implement Relaxed-R1CS folding — that is shipped in **Implementation 9** below. Instead it runs a **chain of ordinary Groth16 proofs**, one per step, and binds the state chain with a BLAKE2b512 transcript. Each step proof is fully independent and verifiable; `nova verify` re-derives the chain and the transcript. The only circuit invariant is **`n_pub_in == n_pub_out`** (the public input block of step `i+1` is the public output block of step `i` — public inputs *are* the IVC state), checked by `nova params`.
 
 ```
 state_0 ──▶ [step0: f(step_0, state_0)] ──▶ state_1 ──▶ [step1] ──▶ … ──▶ state_N
@@ -165,7 +184,7 @@ Decompose a computation into `N` identical, small step circuits and prove it **i
 
 ### Weak points / limitations (of the POC)
 
-The two functional gaps of the POC — it is a proof *chain* (N proofs, N pairing checks, bundle O(N)) rather than real Nova folding, and it has no compression SNARK yet — are exactly the scope of **Implementation 9 (item (u))**. The remaining design-level limitations are:
+The two functional gaps of the POC — it is a proof *chain* (N proofs, N pairing checks, bundle O(N)) rather than real Nova folding, and it has no compression SNARK — are closed by **Implementation 9** below. The remaining design-level limitations are:
 
 | Weak point | Detail |
 |------------|--------|
@@ -189,35 +208,78 @@ The two functional gaps of the POC — it is a proof *chain* (N proofs, N pairin
 <details>
 <summary><b>Implementation 9 — click to expand</b></summary>
 
-> **Status:** 🔨 **Under the work.** Real Nova folding that upgrades the Implementation 8 step-chain (one Groth16 proof per step, bundle O(N), verification O(N) pairings) to a **constant-size** proof: fold N step instances into one Relaxed-R1CS running instance with a NIFS, then compress with a single Groth16 proof verified with one pairing check. The full design, work items, and non-goals are tracked as **Pending item (u)** below.
+> **Status:** ✅ **Done (POC).** Real Nova folding that upgrades the Implementation 8 step-chain (one Groth16 proof per step, bundle O(N), verification O(N) pairings) to a **constant-time** proof: fold N step instances into one Relaxed-R1CS running instance with a NIFS, then compress with a single Groth16 proof verified with one pairing check. Implemented in the `nova-prover` library (`nifs.rs`, `compression.rs`), wired into the `nova` CLI (`fold --nifs`, `compress`, `verify --compression-proof`), and benchmarked on the same four step circuits as Implementation 8. See the [E2E flow](#e2e-flow--implementation-9-nifs) and [Benchmarks](#benchmarks--nova-ivc-implementation-8-step-chain-vs-implementation-9-nifs) below.
 >
 > **Goal:** O(1) bundle + O(1) on-chain verification for sequential computations, reusing the Implementation 8 step circuits and the existing `nova` CLI unchanged.
 
 ### What changes vs Implementation 8
 
-| | Implementation 8 (POC, ✅ done) | Implementation 9 (🔨 under the work) |
+| | Implementation 8 (POC, ✅ done) | Implementation 9 (✅ done) |
 |---|---|---|
 | Per-step prover work | One full Groth16 proof | Two O(step)-sized MSMs (the NIFS fold) |
 | Proof bundle | N Groth16 proofs → O(N) | One relaxed instance + one compression proof → O(1) |
 | On-chain verification | N pairing checks | One pairing check |
 | Trusted setup | One ceremony per step shape | One small, step-agnostic compression ceremony |
 
-### Scope (full detail in [Pending item (u)](#pending))
+### Scope
 
-1. **NIFS folding module** (in-repo, arkworks BLS12-381): Relaxed-R1CS instance `U=(x,u,W̄,Ē)` with Pedersen G1 commitments; Fiat-Shamir challenge `r=H(acc‖step)` via the existing BLAKE2b512 transcript. Folding runs **off-circuit**, so no curve cycle is needed.
-2. **Compression circuit** (own Circom, `circom/RelaxedR1CS/`): proves the final relaxed instance is satisfiable; size ≈ one step; proved with the existing Groth16 prover.
-3. **CLI:** `nova fold --nifs` → `nova verify` = transcript check + one pairing check; `params / ceremony` and the step circuits unchanged.
-4. **Benchmarks:** extend `benchmark_nova.rs` — bundle O(N)→O(1), verification O(N)→O(1) pairings.
+1. **NIFS folding module** (in-repo, arkworks BLS12-381, ✅ done — `nova-prover/src/nifs.rs`): Relaxed-R1CS instance `U=(x,u,W̄,Ē)` with Pedersen G1 commitments; Fiat-Shamir challenge `r=H(acc‖step)` via a domain-separated BLAKE2b512 transcript (`b"groth16-prover-nova-fold-v1"`). Folding runs **off-circuit**, so no curve cycle is needed.
+2. **Compression circuit** (✅ done — `nova-prover/src/compression.rs`): proves the final relaxed instance is satisfiable (`(AZ)∘(BZ)=u(CZ)+E` for folded `Z=(W,x,u)`), reusing the step's A/B/C matrices; `2·n_constraints` constraints; proved with the existing Groth16 prover.
+3. **CLI** (✅ done): `nova fold --nifs` → `nova compress` → `nova verify --compression-proof` = transcript check + one pairing check; `params / ceremony` and the step circuits unchanged.
+4. **Benchmarks** (✅ done): `benchmark_nova.rs --nifs` — bundle O(N)→O(1), verification O(N)→O(1) pairings (see below).
 
-**Non-goals** (details in item (u)): in-circuit IVC recursion (not buildable on BLS12-381 — no 2-cycle) and SuperNova non-uniform steps.
+**Non-goals**: in-circuit IVC recursion (not buildable on BLS12-381 — no 2-cycle) and SuperNova non-uniform steps.
+
+### Design-space position (per the folding survey — Sakwa et al. 2026)
+
+Implementation 9 sits in the **R1CS + elliptic-curve-MSM** quadrant of the folding landscape (the Nova family): the simplest and most mature axis. The survey's other axes are explicitly out of scope and logged as follow-ups:
+
+- **CCS/Plonkish folding (HyperNova):** generalizes folding beyond fixed-R1CS (custom gates, lookups) — relevant only if a step must mix constraint shapes.
+- **AIR folding (Cairo-style):** CPU/trace-based steps; not our model.
+- **Post-quantum lattice folding (LatticeFold, Lova, Neo, ProtogaLattice):** our Pedersen commitments are DLOG-based and break under Shor; the PQ track replaces EC-MSM with SIS/Ajtai commitments (Lova even runs on power-of-two moduli, no field arithmetic). Long-term only — it would also mean replacing our Groth16 compression (equally non-PQ), and it is tracked as Implementation 10 / item (v).
+- **CycleFold** (also surveyed) relaxes the full 2-cycle requirement: only the secondary curve's base field must equal the primary scalar field, and only a single scalar multiplication per fold runs on it. It is the closest published route toward in-circuit recursion *near* BLS12-381 — whether a curve over `Fr1` (e.g. Bandersnatch) instantiates it is an open research question, not scope.
+- **Memory-bounded proving** is an open engineering problem in the survey; our per-step O(step) memory design is exactly that target.
+- **ZK layer:** folding itself is not ZK, but our Groth16 compression proof *is* — zero-knowledge for the final proof comes for free, where Nova+Spartan needs a separate ZK add-on.
 
 ### Cryptographic remarks
 
-- **Q: What are the soundness and completeness properties of the NIFS folding scheme, and what is the soundness error per fold and after N folds?** The NIFS fold is computationally sound under the DLOG assumption on BLS12-381. The soundness error per fold is negligible (dominated by the Fiat-Shamir challenge entropy). After N folds, the accumulated soundness error remains negligible as long as the transcript is collision-resistant. This should be explicitly stated in the design doc and the implementation.
+- **Q: What are the soundness and completeness properties of the NIFS folding scheme, and what is the soundness error per fold and after N folds?** The NIFS fold is computationally sound under the DLOG assumption on BLS12-381. The soundness error per fold is negligible (dominated by the Fiat-Shamir challenge entropy). After N folds, the accumulated soundness error remains negligible as long as the transcript is collision-resistant. This is stated in [docs/nova-folding-design.md](docs/nova-folding-design.md) and the fold is verified end to end by `nova verify`.
 
-- **Q: What is the constraint cost of embedding Pedersen commitments in the compression circuit, and how does this affect the compression SNARK size?** A Pedersen commitment over G1 with a 381-bit scalar requires ~200–400 R1CS constraints in Circom (for the exponentiation). The compression circuit must verify the folded instance's Pedersen commitments as R1CS constraints. The total constraint count of the compression circuit should be estimated and reported, as it directly impacts the compression ceremony cost and the on-chain verification gas.
+- **Q: What is the constraint cost of embedding Pedersen commitments in the compression circuit?** **Resolved — the commitments are NOT embedded.** An in-circuit re-commitment would require non-native G1-in-Fr arithmetic (infeasible at step scale), so the compression circuit (`compression.rs`) checks only the relaxed equation `(AZ)∘(BZ)=u(CZ)+E` — **`2·n_constraints` constraints** (measured: 15,448 for the 7,724-constraint step, 2,414 for the 1,207-constraint airdrop step, 18 for the 9-constraint eddsa step). The Pedersen re-commitment `com(W)`, `com(E)` is instead recomputed natively at verify time with an O(step) MSM and compared against the bundle instance (milliseconds — included in the benchmark's verify phase).
 
-- **Q: Is the Fiat-Shamir challenge `r=H(acc‖step)` using the same BLAKE2b512 transcript as the state chain, and if so, is domain separation needed?** Yes — the same BLAKE2b512 hash is used for both the state-chain binding and the folding challenge. Without domain separation, a malicious prover could potentially reuse a folding challenge in a different context. Implementation 9 should use domain-separated hash calls (e.g., `H("fold" ‖ acc ‖ step)` vs. `H("chain" ‖ acc ‖ state_out ‖ proof_bytes)`) to prevent transcript-reuse attacks.
+- **Q: Is the Fiat-Shamir challenge `r=H(acc‖step)` using the same BLAKE2b512 transcript as the state chain?** **Resolved — domain separation is implemented.** The folding challenge uses `b"groth16-prover-nova-fold-v1"` (`FOLD_PREFIX` in `nifs.rs`), distinct from the state-chain `b"groth16-prover-nova-transcript-v1"` (`TRANSCRIPT_PREFIX`) and the NIFS transcript prefix `b"groth16-prover-nova-nifs-transcript-v1"`, preventing cross-context transcript-reuse attacks.
+
+### E2E flow — Implementation 9 (NIFS)
+
+Worked end to end on the `eddsa_jubjub_nova` step circuit (254 steps, 9 constraints — runs in seconds; the same commands work for the 255-step `cardano_ed25519_ownership_nova` / `ed25519_verify_nova` circuits, scaling the fold from ~1.7 s to ~60 s). Step witnesses are generated iteratively with [`circom/gen_nova_steps.py`](../circom/gen_nova_steps.py) so the state chain holds by construction (see the Implementation 8 flow for the witness recipe).
+
+```bash
+# 1. Inspect the step circuit (n_pub_in == n_pub_out)
+nova params --circuit eddsa_jubjub_nova.r1cs
+# → {"n_wires":15, "n_constraints":9, "n_pub_out":4, "n_pub_in":4, "n_prv_in":1}
+
+# 2. Fold the step witnesses into one Relaxed-R1CS instance (no proving key — folding is transparent)
+nova fold --nifs --circuit eddsa_jubjub_nova.r1cs \
+  --steps ./eddsa_steps/ --out bundle.ivc.json --compression-r1cs compression.r1cs
+# → NIFS bundle written to bundle.ivc.json (254 steps → one instance, u = <scalar>)
+# → Compression circuit (from 9 step constraints): 35 wires, 18 constraints, 26 public
+
+# 3. One-time ceremony for the compression circuit (reusable for any step shape)
+trusted-setup ceremony-dev --sparse --circuit compression.r1cs \
+  --proving-key compression.pk --verifying-key compression.vk
+
+# 4. Compress the final instance into one Groth16 proof (re-folds deterministically)
+nova compress --circuit eddsa_jubjub_nova.r1cs --steps ./eddsa_steps/ \
+  --proving-key compression.pk --out compression.proof.json
+# → Compression proof written to compression.proof.json (u = <scalar>)
+
+# 5. Verify — one Groth16 pairing + native com(W)/com(E) MSM + transcript
+nova verify --ivc bundle.ivc.json --compression-proof compression.proof.json --compression-vk compression.vk
+# → Verified 254 steps: compression proof OK, commitments OK, state chain OK
+# → Final transcript: <64-byte hex>
+```
+
+The bundle `.ivc.json` holds only the O(1) final relaxed instance (no per-step proofs); the step witnesses are needed by `compress`/`verify` to recover the private final witness and re-check the commitments.
 
 </details>
 
@@ -268,71 +330,6 @@ This PQ track is not hypothetical — two production-grade references have commi
 
 ## Pending
 
-### (u) Implementation 9 — Relaxed-R1CS folding (NIFS) + single Groth16 compression proof
-
-- **Current:** Implementation 8 POC proves every step as its own Groth16 proof, chained by a BLAKE2b512 transcript → bundle size and on-chain verification grow O(N); no real folding, no compression SNARK.
-- **Target:** Fold N step instances into one Relaxed-R1CS running instance, then compress with a single Groth16 proof verified with one pairing check (O(1) bundle, O(1) verify).
-- **Work items:**
-  1. **NIFS folding module (in-repo, arkworks BLS12-381):** Relaxed-R1CS instance `U=(x,u,W̄,Ē)`, witness `W=(W,E)`, relaxed equation `(AZ)∘(BZ)=u(CZ)+E`; Pedersen commitment over G1; Fiat-Shamir challenge `r=H(acc‖step)` via the existing BLAKE2b512 transcript (off-circuit, no Poseidon gadget); fold instances and witnesses in linear time. Native over BLS12-381 — **no curve cycle needed because folding runs outside any verifier circuit**. No FFTs, no per-step SNARK: recursion overhead is constant, dominated by two group scalar multiplications in the step circuit (the smallest verifier circuit in the literature), and the prover's per-step work is two MSMs of size O(step).
-  2. **Compression circuit (own Circom, `circom/RelaxedR1CS/`):** proves the final relaxed instance is satisfiable (`(AZ)∘(BZ)=u(CZ)+E` for folded `Z=(W,x,u)`), reusing the step's A/B/C matrices; size ≈ one step; proved with the existing Groth16 prover.
-  3. **CLI:** extend the `nova` CLI (`nova fold --nifs`): fold N step instances → one relaxed instance → one compression proof; `nova verify` = transcript check + single pairings check. `params / ceremony` and existing step circuits unchanged.
-  4. **Benchmarks:** extend `benchmark_nova.rs` — bundle O(N)→O(1); verify one pairing (constant vs N); prover time = fast folding + one step-sized compression proof.
-  5. **Non-goals (explicitly documented):** true in-circuit IVC (SuperNova-style recursion) is not buildable on BLS12-381 — requires a 2-cycle (Pasta / BN254–Grumpkin) or non-native `Fq1`-in-`Fr1` emulation (~1M+ gates/scalar mult). SuperNova non-uniform steps (different circuit per step) deferred — Implementation 9 assumes one repeated step circuit.
-- **Design (target architecture, moved from Implementation 8):** the POC ships the step-chain CLI; the trait and accumulator path below are the Implementation 9 build target:
-
-  ```rust
-  /// A single step in an IVC computation.
-  pub trait StepCircuit<F: PrimeField> {
-      /// Number of constraints in this step.
-      fn num_constraints(&self) -> usize;
-
-      /// Compute the next state from current state + step input.
-      fn synthesize(
-          &self,
-          cs: &mut ConstraintSystem<F>,
-          z: &[F],        // current state
-          w: &[F],        // step witness
-      ) -> Vec<F>;       // next state
-  }
-
-  /// Nova-style folding prover.
-  pub struct NovaProver<C: StepCircuit<Fr>> {
-      step_circuit: C,
-      compression_pk: FullProvingKey,   // Groth16 pk for ~100K compression circuit
-  }
-  ```
-
-  **IVC prover path:**
-  ```rust
-  // 1. Fold each step into a running accumulator.
-  let mut accumulator = Accumulator::new(public_params);
-  for (step_input, step_witness) in steps {
-      let step_proof = step_circuit.prove(step_input, step_witness);
-      accumulator = nova::fold(&accumulator, &step_proof, &public_params);
-  }
-
-  // 2. Compress to a standard Groth16 proof.
-  let (proof, public_inputs) = groth16_prover::prove(
-      &compression_pk,
-      &accumulator.to_witness(),
-  );
-  ```
-
-  **On-chain verifier (Aiken):** the existing `aiken/groth16` verifier checks the compression SNARK; an additional accumulator check (2–3 group additions) is added to the validator — small enough to fit in Plutus V3.
-- **Why it is hard (moved from Implementation 8):**
-  1. **Circuit rewrite.** Current Circom circuits are flat R1CS; Nova requires explicit step circuits with state passing (`state_{i+1} = f(step_i, state_i)`). No automatic compiler exists; each circuit must be redesigned.
-  2. **Nova overhead.** Each step includes the Nova verifier logic (~10K–30K constraints). For 40K steps this is ~25 % overhead.
-  3. **Ecosystem maturity.** Rust Nova crates (`nova-snark`) exist but integration with Circom-generated R1CS is experimental; most Nova work uses hand-written circuits in custom DSLs.
-  4. **On-chain verifier extension.** Aiken needs a small accumulator check in addition to the Groth16 pairing check.
-- **Design-space position (per the folding survey — Sakwa et al. 2026):** Implementation 9 sits in the **R1CS + elliptic-curve-MSM** quadrant of the folding landscape (the Nova family): the simplest and most mature axis. The survey's other axes are explicitly out of (u) scope and logged as follow-ups:
-  - **CCS/Plonkish folding (HyperNova):** generalizes folding beyond fixed-R1CS (custom gates, lookups) — relevant only if a step must mix constraint shapes.
-  - **AIR folding (Cairo-style):** CPU/trace-based steps; not our model.
-  - **Post-quantum lattice folding (LatticeFold, Lova, Neo, ProtogaLattice):** our Pedersen commitments are DLOG-based and break under Shor; the PQ track replaces EC-MSM with SIS/Ajtai commitments (Lova even runs on power-of-two moduli, no field arithmetic). Long-term only — it would also mean replacing our Groth16 compression (equally non-PQ), and it tracks the existing "FHE/quantum resistance" long-term research item.
-  - **CycleFold** (also surveyed) relaxes the full 2-cycle requirement: only the secondary curve's base field must equal the primary scalar field, and only a single scalar multiplication per fold runs on it. It is the closest published route toward in-circuit recursion *near* BLS12-381 — whether a curve over `Fr1` (e.g. Bandersnatch) instantiates it is an open research question, not (u) scope.
-  - **Memory-bounded proving** is an open engineering problem in the survey; our per-step O(step) memory design is exactly that target.
-  - **ZK layer:** folding itself is not ZK, but our Groth16 compression proof *is* — zero-knowledge for the final proof comes for free, where Nova+Spartan needs a separate ZK add-on.
-- **Reference:** Nova (CRYPTO'22, eprint 2021/370), Nova-Scotia (Circom→Nova frontend), Sonobe (arkworks folding), SuperNova (DeepWiki/lurk-beta), arXiv 2408.00243 (ZKP survey, evaluation criteria), **Sakwa, Omala, Li, "A survey of folding-based zero-knowledge proofs", *Information Sciences* 724 (2026) 122698, [DOI 10.1016/j.ins.2025.122698](https://doi.org/10.1016/j.ins.2025.122698)** ([SSRN preprint](https://doi.org/10.2139/ssrn.5293078)).
-
 ### (v) Post-quantum path — lattice folding as the PQ counterpart of Implementation 9
 
 - **Why:** every component of the current stack is broken by Shor's algorithm once large-scale quantum computing arrives — Groth16 is pairing-based (BLS12-381), and the Nova folding commitments are Pedersen over G1 (DLOG-based). Both Implementation 8 and Implementation 9 are classically secure only.
@@ -347,7 +344,7 @@ This PQ track is not hypothetical — two production-grade references have commi
   | Neo / SuperNeo / Cyclo | ring-SIS / MSIS | Newer variants; simpler arithmetic, larger proofs |
 
 - **What we would adapt (proposed shape):**
-  1. **Folding layer:** replace the Pedersen commitment in the (u) NIFS module with an SIS/Ajtai commitment (Lova-style power-of-two modulus q=2⁶⁴ is the most hardware-friendly; folding math is otherwise unchanged).
+  1. **Folding layer:** replace the Pedersen commitment in the NIFS module with an SIS/Ajtai commitment (Lova-style power-of-two modulus q=2⁶⁴ is the most hardware-friendly; folding math is otherwise unchanged).
   2. **Compression:** our Groth16 compression proof is equally non-PQ, so a PQ chain needs a PQ compression SNARK (sumcheck/GKR-based, hash- or lattice-polynomial-commitment based). The one-pairing verifier becomes a hash/sumcheck verifier.
   3. **On-chain verifier:** the Aiken Groth16 verifier is replaced by a hash-based (STARK-like) verifier — on-chain verification gets heavier, trading gas/cost for PQ security.
   4. **Steps:** lattice folding runs over small moduli/rings, not a 381-bit prime. Our Circom steps must be re-arithmetized for a small field — circom already supports `--prime goldilocks` (a 64-bit prime), and small fields are *faster* (Lova's design exploits this).
@@ -356,25 +353,40 @@ This PQ track is not hypothetical — two production-grade references have commi
   2. **Optional hybrid** for high-value use cases: dual proof (Groth16 + lattice IVC) verified as an OR — the survey's "hybrid elliptic-curve–lattice" open problem; doubles cost but hedges the transition.
   3. **If quantum timelines shorten:** switch the IVC layer to a lattice folding (Lova first) + PQ compression + hash-based on-chain verifier, re-arithmetizing the step circuits for a small field.
   4. **STARK/zkVM is the parallel PQ track** — see the industry context in [Implementation 10](#implementation-10-post-quantum-lattice-folding) (§Industry context — CIP-1242 (ZKPoSP) and Zcash's quantum-readiness roadmap): hash-based proofs are the other live PQ family, and a future PQ chain may pick lattice folding *or* a STARK/zkVM backend — both converge on a hash-based on-chain verifier.
-- **Status:** ⏳ **Research direction.** Natural PQ counterpart of Implementation 9 (u); neither is committed.
+- **Status:** ⏳ **Research direction.** Post-quantum counterpart of the now-shipped Implementation 9; not committed.
 - **Reference:** LatticeFold (Boneh, Chen, eprint 2024/257), Lova (Fenzi et al., ASIACRYPT 2024, eprint 2024/1964), ProtogaLattice (eprint 2026/1317), Sakwa et al. survey §4 (quantum-secure folding), [SSRN 5293078](https://doi.org/10.2139/ssrn.5293078).
 
-## Benchmarks — Nova IVC step-chain (Implementation 8)
+## Benchmarks — Nova IVC (Implementation 8 step-chain vs Implementation 9 NIFS)
 
-Measured with `cargo run --release --bin benchmark_nova -- --circuit <step.r1cs> --steps <witness-dir>` (single core, keys kept in memory, transcript hashing excluded — it is microseconds per step). Each run performs a fresh single-party ceremony, folds every step witness into a proof (with the state-chain check), and verifies every step proof. All numbers are from the smoke-tested step circuits in the [Implementation 8](#implementation-8-nova-ivc--compression-snark) flow.
+Measured with `cargo run --release --bin benchmark_nova -- --circuit <step.r1cs> --steps <witness-dir>` (and `--nifs` for the fold) on a single machine / single core, keys kept in memory, transcript hashing excluded (microseconds per step). Each run performs a fresh single-party ceremony, folds every step witness, and verifies the result. All numbers in a row come from the **same run**, so the two implementations are directly comparable. Step witnesses use full-size state values (for the ed25519 circuits: base-2⁸⁵ limbs, since the scalar-mul step range-checks each limb < 2⁸⁵), so the MSMs see realistic scalars.
 
-| Step circuit | Wires | Constraints | Steps | Ceremony | Fold (total) | Fold (per step) | Verify (total) |
-|--------------|-------|-------------|-------|----------|--------------|-----------------|----------------|
-| `ed25519_verify_nova` | 7,658 | 7,724 | 255 | **1.97 s** | **116.0 s** | **455 ms** | **2.18 s** |
-| `cardano_ed25519_ownership_nova` | 7,658 | 7,724 | 255 | **1.51 s** | **107.8 s** | **423 ms** | **2.09 s** |
-| `eddsa_jubjub_nova` | 15 | 9 | 254 | **17 ms** | **2.19 s** | **8.6 ms** | **2.48 s** |
-| `anonymous_airdrop_nova` | 1,210 | 1,207 | 5 | **0.51 s** | **1.48 s** | **296 ms** | **0.05 s** |
+### Implementation 8 — per-step Groth16 chain
 
-> **What the numbers mean.** The core claim of Implementation 8 holds: a **one-time ceremony of ~2 s** replaces the monolithic Ed25519Verify (~16 min) / CardanoKeyOwnership (~5 min) ceremonies. The cost is moved to the fold: 255 steps × ~0.42–0.46 s ≈ 2 min, with per-step memory (and therefore peak memory) proportional to the 7.7K-constraint step rather than the ~2–4M-constraint whole circuit. Verification is the current weak point, as documented in Implementation 9 (item **(u)**): each step proof costs a constant ~8–10 ms pairing check, so verifying the full chain is O(N) — ~2.1–2.5 s for 255 steps, and the bundle stores all N proofs (no constant-size compression yet).
+| Step circuit | Wires | Constraints | Steps | Ceremony | Fold (total) | Fold (per step) | Verify (total) | Bundle |
+|--------------|-------|-------------|-------|----------|--------------|-----------------|----------------|--------|
+| `ed25519_verify_nova` | 7,658 | 7,724 | 255 | **2.73 s** | **180.6 s** | **708 ms** | **3.39 s** | 47.8 KiB (O(N)) |
+| `cardano_ed25519_ownership_nova` | 7,658 | 7,724 | 255 | **2.71 s** | **178.5 s** | **700 ms** | **3.19 s** | 47.8 KiB (O(N)) |
+| `eddsa_jubjub_nova` | 15 | 9 | 254 | **33 ms** | **2.91 s** | **11.5 ms** | **3.54 s** | 47.6 KiB (O(N)) |
+| `anonymous_airdrop_nova` | 1,210 | 1,207 | 5 | **0.90 s** | **2.20 s** | **440 ms** | **0.09 s** | 0.9 KiB (O(N)) |
+
+### Implementation 9 — NIFS fold + single compression proof
+
+| Step circuit | NIFS fold (total) | Fold (per step) | Compression ceremony | Compress | Verify | Bundle |
+|--------------|-------------------|-----------------|----------------------|----------|--------|--------|
+| `ed25519_verify_nova` | **58.7 s** | **230 ms** | 6.26 s | 2.66 s | **8.78 s** (one pairing) | 579.6 KiB (O(1)) |
+| `cardano_ed25519_ownership_nova` | **58.2 s** | **228 ms** | 6.20 s | 2.85 s | **8.91 s** (one pairing) | 579.6 KiB (O(1)) |
+| `eddsa_jubjub_nova` | **1.65 s** | **6.5 ms** | 0.05 s | 0.04 s | **0.03 s** (one pairing) | 4.8 KiB (O(1)) |
+| `anonymous_airdrop_nova` | **2.20 s** | **440 ms** | 1.56 s | 0.80 s | **1.66 s** (one pairing) | 124.3 KiB (O(1)) |
+
+Compression circuit size (`2·n_constraints`, built in Rust): 15,448 constraints / 23,108 wires for the 7,724-constraint step; 2,414 / 3,626 for the airdrop step; 18 / 35 for the eddsa step.
+
+> **What the numbers mean — fold.** The NIFS fold replaces one full Groth16 proof per step with two O(step)-sized MSMs (the running-instance commitment and the cross-term commitment): **3.1× faster** on the 7.7K-constraint steps (700 ms → 230 ms), 1.8× on the tiny eddsa step, and roughly equal on the 1.2K-constraint airdrop step where the fixed MSM/overhead dominates both paths. Because the fold needs no proving key, `nova fold --nifs` also **eliminates the per-step ceremony** entirely.
 >
-> **Fixed overhead vs. circuit size.** The 9-constraint `eddsa_jubjub_nova` step still costs 8.6 ms to prove and 9.75 ms to verify per step — the entire per-step cost is fixed prover/verifier overhead (FFT-domain setup, witness-polynomial IFFT, MSM, pairing). The 1,207-constraint airdrop step is 296 ms/step for the same reason. Only when step size grows past ~10K constraints does circuit work dominate the fixed cost — which is exactly the regime Nova targets.
+> **What the numbers mean — verify and bundle.** Verification drops from O(N) pairings (3.4 s for 255 steps) to a **single** pairing + two native MSM re-commitments + transcript (8.8 s for 255 steps — the MSMs dominate, see below). The bundle drops from 255 proofs (47.8 KiB, O(N)) to one instance + one compression proof. Honest caveats: (1) the compressed proof *reveals* the folded `Z`/`E`, so its bytes are O(step size) — 579.6 KiB for the 23K-wire compression circuit — though independent of N; (2) `nova compress`/`nova verify` currently re-fold the witnesses to recover the private final witness, so the O(1) *proof size* claim is about what a deployed verifier would receive, not the current CLI re-derivation.
 >
-> **Reproducibility.** The step `.r1cs` and `step_XXXX.wtns` files are produced by the `circom --prime bls12381` + witness-generation steps in the [Implementation 8](#implementation-8-nova-ivc--compression-snark) section; the benchmark measures the same cryptographic phases as `nova ceremony` / `nova fold` / `nova verify` but keeps the keys in memory (no `.pk`/`.vk` disk I/O) and skips the transcript hashing.
+> **Where the time goes (next optimization).** The NIFS fold's per-step cost is dominated by two *variable-base* `G1Projective::msm` calls (~0.16 ms/point, i.e. ~50× slower than ideal: Pippenger's window tables are rebuilt on every call). The basis is deterministic, so these are really fixed-base MSMs — precomputing the window tables once (arkworks `FixedBaseMSM`) would bring the 255-step fold from ~59 s toward single-digit seconds. The compression verify's `com(Z)`/`com(E)` MSMs have the same profile. This is a pure constant-factor optimization, tracked for a follow-up.
+>
+> **Reproducibility.** The step `.r1cs` and `step_XXXX.wtns` files are produced by `circom --prime bls12381` + the iterative witness generator [`circom/gen_nova_steps.py`](../circom/gen_nova_steps.py) (feeds each step's outputs back as the next step's inputs so the chain holds by construction); the benchmark measures the same cryptographic phases as `nova ceremony` / `nova fold` / `nova verify` but keeps the keys in memory (no `.pk`/`.vk` disk I/O) and skips the transcript hashing.
 
 Run the benchmark yourself:
 
@@ -382,9 +394,12 @@ Run the benchmark yourself:
 cd nova-prover
 
 # Nova IVC step-chain (Implementation 8) — ceremony/fold/verify for one step circuit
-# (requires a compiled step .r1cs + a directory of step_XXXX.wtns witnesses, see the
-# Implementation 8 section; --limit N restricts to the first N steps)
 cargo run --release --bin benchmark_nova -- --circuit <step.r1cs> --steps <witness-dir>
+
+# Nova NIFS (Implementation 9) — fold/compression-ceremony/compress/verify for one step circuit
+cargo run --release --bin benchmark_nova -- --nifs --circuit <step.r1cs> --steps <witness-dir>
+# (both require a compiled step .r1cs + a directory of step_XXXX.wtns witnesses, see the
+# Implementation 8 section; --limit N restricts to the first N steps)
 ```
 
 ## References
