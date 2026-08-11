@@ -642,42 +642,8 @@ pub fn run_compress(
     check_step_circuit(&c)?;
 
     let folded = fold_nifs(circuit, steps)?;
-
-    let cc = compression::CompressionCircuit::new(&c.l, &c.r, &c.o, c.n_wires as usize);
-    let v = cc.witness(
-        &folded.final_witness.w,
-        folded.final_instance.u,
-        &folded.final_witness.e,
-    );
-    if !cc.is_satisfied(&v) {
-        return Err("internal error: compression witness does not satisfy the circuit".into());
-    }
-
     let full_pk = load_full_pk(proving_key).map_err(|e| format!("failed to load proving key: {e}"))?;
-    if full_pk.vk.n_public != cc.n_public || full_pk.a_query.len() != cc.n_wires_total {
-        return Err(
-            "proving key does not match the compression circuit (wrong ceremony output?)".into(),
-        );
-    }
-
-    let engine = FftQapEngine::new();
-    let prover = PippengerProver::new();
-    let (proof, public) =
-        prover.prove_with_full_pk_sparse(&engine, &full_pk, cc.l.len(), &cc.l, &cc.r, &cc.o, &v);
-
-    let cproof = CompressionProof {
-        circuit: circuit.to_string_lossy().into_owned(),
-        n_wires: c.n_wires,
-        n_constraints: c.n_constraints,
-        n_pub_out: c.n_pub_out,
-        n_pub_in: c.n_pub_in,
-        final_instance: folded.bundle.final_instance.clone(),
-        proof_a: g1_hex(&proof.a),
-        proof_b: g2_hex(&proof.b),
-        proof_c: g1_hex(&proof.c),
-        public_v: g1_hex(&public.v),
-        public_inputs: cc.public_inputs(&v).iter().map(fr_to_string).collect(),
-    };
+    let cproof = prove_compression(&c, &folded, &full_pk)?;
 
     let json = serde_json::to_string_pretty(&cproof)
         .map_err(|e| format!("failed to serialize compression proof: {e}"))?;
@@ -693,6 +659,58 @@ pub fn run_compress(
         bytes: json.len(),
         bundle: folded.bundle,
     })
+}
+
+/// Build the compression Groth16 proof over an already-folded NIFS instance
+/// (in-memory; the CLI path [`run_compress`] folds and serializes it).
+///
+/// This is the O(1) end of Implementation 9: one Groth16 proof certifying the
+/// final relaxed instance, independent of the step count.
+pub fn prove_compression(
+    circuit: &SparseCircomCircuit,
+    folded: &NifsFoldOutput,
+    full_pk: &FullProvingKey,
+) -> Result<CompressionProof, Box<dyn Error>> {
+    let cc = compression::CompressionCircuit::new(&circuit.l, &circuit.r, &circuit.o, circuit.n_wires as usize);
+    let v = cc.witness(
+        &folded.final_witness.w,
+        folded.final_instance.u,
+        &folded.final_witness.e,
+    );
+    if !cc.is_satisfied(&v) {
+        return Err("internal error: compression witness does not satisfy the circuit".into());
+    }
+    if full_pk.vk.n_public != cc.n_public || full_pk.a_query.len() != cc.n_wires_total {
+        return Err(
+            "proving key does not match the compression circuit (wrong ceremony output?)".into(),
+        );
+    }
+
+    let engine = FftQapEngine::new();
+    let prover = PippengerProver::new();
+    let (proof, public) =
+        prover.prove_with_full_pk_sparse(&engine, full_pk, cc.l.len(), &cc.l, &cc.r, &cc.o, &v);
+
+    Ok(CompressionProof {
+        circuit: circuit_path_display(circuit),
+        n_wires: circuit.n_wires,
+        n_constraints: circuit.n_constraints,
+        n_pub_out: circuit.n_pub_out,
+        n_pub_in: circuit.n_pub_in,
+        final_instance: folded.bundle.final_instance.clone(),
+        proof_a: g1_hex(&proof.a),
+        proof_b: g2_hex(&proof.b),
+        proof_c: g1_hex(&proof.c),
+        public_v: g1_hex(&public.v),
+        public_inputs: cc.public_inputs(&v).iter().map(fr_to_string).collect(),
+    })
+}
+
+fn circuit_path_display(_c: &SparseCircomCircuit) -> String {
+    // The circuit's source path is only known to the file-based loaders; the
+    // in-memory path records the step circuit's provenance as its identity is
+    // carried by the bundle instead.
+    String::new()
 }
 
 /// Output of [`run_compress`].
