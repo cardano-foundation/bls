@@ -106,6 +106,41 @@ The Aiken verifier currently checks a single Groth16 pairing. For Nova IVC, it n
 - **SuperNova non-uniform steps:** Implementation 9 assumes one repeated step circuit. Supporting different circuits per step is deferred.
 - **CycleFold:** The closest published route toward in-circuit recursion near BLS12-381, but whether a curve over `Fr1` (e.g., Bandersnatch) instantiates it is an open research question.
 
+## Implementation 9 — Concrete Design (NIFS + compression)
+
+### NIFS module (`nova-prover/src/nifs.rs`)
+
+Relaxed-R1CS instance `U = (x, u, W̄, Ē)`, witness `W' = (W, E)`, relaxed equation `(AZ)∘(BZ) = u·(CZ) + E` with `Z = (W, x, u)`. Step instances are ordinary R1CS (`u = 1`, `E = 0`).
+
+- **Folding params (transparent, no SRS):** two deterministic G1 bases `G_W` (n_vars points) and `G_E` (n_constraints points) by hash-to-curve from a fixed seed; `com(v) = Σ v_i·G_i`.
+- **Fold** (`r = BLAKE2b512("fold" ‖ acc ‖ U1 ‖ U2)`, domain-separated from the `"chain"` transcript):
+  - `x3 = x1 + r·x2`, `u3 = u1 + r·u2`
+  - `W̄3 = W̄1 + r·W̄2`, `Ē3 = Ē1 + r·Ē2 + r·Ē_cross`
+  - `W3 = W1 + r·W2`, `E3 = E1 + r·E2 + r·E_cross`
+  - cross-term `E_cross = (AZ1)∘(BZ2) + (AZ2)∘(BZ1) − u1(CZ2) − u2(CZ1)`
+- Per-step prover work: two O(step) MSMs (commitments of the new instance + `E_cross`). Folding is off-circuit → **no curve cycle**.
+
+### Compression circuit (`circom/RelaxedR1CS/`)
+
+Proves final `U_N` satisfiable. Private inputs `W_N, E_N`; public inputs `x_N, u_N` + affine coordinates of `W̄_N, Ē_N`. Two checks:
+1. Relaxed equation — reuses step A/B/C, `n_constraints` gates.
+2. Pedersen re-commitment `com(W_N) = W̄_N`, `com(E_N) = Ē_N` — **the size driver**: O(n_vars + n_constraints) in-circuit scalar muls, i.e. non-native G1-in-Fr. For the 7.7K-wire step this is ~2–6M gates, one-time and step-agnostic; refine the estimate in the benchmark. Mitigation if prohibitive: windowed fixed-base (constants), shrinking the basis.
+
+### CLI
+
+- `nova fold --nifs` — fold N step instances → one relaxed instance → one compression proof (existing Groth16 prover). `params` / `ceremony` / step circuits unchanged.
+- New `nova ceremony-compression` — step-agnostic ceremony for the compression circuit.
+- `nova verify` — transcript check + **one** pairing check (vs N today).
+
+### Shared with groth16-prover (reused unchanged)
+
+`FftQapEngine`, `PippengerProver::prove_with_full_pk_sparse`, `single_party_ceremony_full_from_tw_sparse`, `FullProvingKey`/`VerifyingKey` serialization + `verify_with_vk`, `SparseCircomCircuit` parsing. New code is nova-prover-only: `nifs.rs`, transcript prefixes, CLI wiring.
+
+### E2E demo + benchmark
+
+- Demo: `cardano_ed25519_ownership_nova` (255 steps, 7,724 gates) — compression ceremony → `fold --nifs` → `verify` (one pairing).
+- Benchmark: extend `benchmark_nova.rs` with `--nifs` — per-step fold time, compression time, bundle size, verify time (constant vs O(N)).
+
 ## References
 
 1. Abhiram Kothapalli, Srinath Setty, Ioanna Tzialla. *Nova: Recursive Zero-Knowledge Arguments from Folding Schemes.* CRYPTO 2022. IACR ePrint [2021/370](https://eprint.iacr.org/2021/370).
