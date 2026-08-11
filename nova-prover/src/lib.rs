@@ -36,6 +36,9 @@ use std::path::{Path, PathBuf};
 /// Domain separator for the IVC transcript.
 pub const TRANSCRIPT_PREFIX: &[u8] = b"groth16-prover-nova-transcript-v1";
 
+/// NIFS folding module (Implementation 9) — Relaxed-R1CS + Pedersen commitments.
+pub mod nifs;
+
 /// JSON descriptor of a step circuit (emitted by the `params` operation).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CircuitDescriptor {
