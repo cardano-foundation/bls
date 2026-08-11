@@ -254,7 +254,7 @@ The `sel` bits come from the same clamped scalar `sk` as in the Implementation 7
 # → Verified 255 steps: 255 pairings OK, state chain OK, transcript OK
 ```
 
-> **Note:** `nova` verification is still **O(N)** — it re-checks every step proof. The constant-size compression SNARK (one pairing, O(1) verify) is [Implementation 9 / item (u)](../../nova-prover/README.md#implementation-9-relaxed-r1cs-folding--single-compression-snark) — not yet built.
+> **Note:** `nova` verification is still **O(N)** — it re-checks every step proof. The constant-time compression SNARK (one pairing, O(1) verify) is shipped as [Implementation 9](../../nova-prover/README.md#implementation-9-relaxed-r1cs-folding--single-compression-snark): `nova fold --nifs` → `trusted-setup ceremony-dev` on the emitted compression circuit → `nova compress` → `nova verify --compression-proof` — see the [Implementation 9 e2e flow](../../nova-prover/README.md#e2e-flow--implementation-9-nifs). On the 255-step 7,724-constraint step the NIFS fold measures **~230 ms/step vs ~700 ms/step** for the Groth16 chain, and the single-pairing verify replaces 255 pairings.
 
 ### Benchmarks — pre-Nova vs Nova
 
