@@ -251,7 +251,7 @@ Implementation 9 sits in the **R1CS + elliptic-curve-MSM** quadrant of the foldi
 
 ### E2E flow — Implementation 9 (NIFS)
 
-Worked end to end on the `eddsa_jubjub_nova` step circuit (254 steps, 9 constraints — runs in seconds; the same commands work for the 255-step `cardano_ed25519_ownership_nova` / `ed25519_verify_nova` circuits, scaling the fold from ~1.7 s to ~60 s). Step witnesses are generated iteratively with [`circom/gen_nova_steps.py`](../circom/gen_nova_steps.py) so the state chain holds by construction (see the Implementation 8 flow for the witness recipe).
+Worked end to end on the `eddsa_jubjub_nova` step circuit (254 steps, 9 constraints — runs in seconds; the same commands work for the 255-step `cardano_ed25519_ownership_nova` / `cardano_key_ownership_smt_nova` / `ed25519_verify_nova` circuits, scaling the fold from ~1.7 s to ~60 s). `cardano_key_ownership_smt_nova.r1cs` is byte-identical to `cardano_ed25519_ownership_nova.r1cs` (the SMT-membership half lives only in the monolithic SMT circuit), so the two share the same fold/ceremony/compress/verify numbers. Step witnesses are generated iteratively with [`circom/gen_nova_steps.py`](../circom/gen_nova_steps.py) (or `circom/CardanoKeyOwnershipSMT/gen_smt_nova_steps.py` for the SMT flow) so the state chain holds by construction (see the Implementation 8 flow for the witness recipe).
 
 ```bash
 # 1. Inspect the step circuit (n_pub_in == n_pub_out)
