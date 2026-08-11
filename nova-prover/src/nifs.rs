@@ -98,6 +98,114 @@ pub fn instance_to_bytes(u: &RelaxedR1csInstance) -> Result<Vec<u8>, Serializati
     Ok(buf)
 }
 
+/// Evaluate the sparse matrix `m` at the assignment `z`.
+fn sparse_eval(m: &[Vec<(u32, Fr)>], z: &[Fr]) -> Vec<Fr> {
+    m.iter()
+        .map(|row| {
+            row.iter()
+                .fold(Fr::zero(), |acc, &(i, v)| acc + v * z[i as usize])
+        })
+        .collect()
+}
+
+/// The NIFS cross-term vector (length = n_constraints):
+/// `E_cross = (AZ1)∘(BZ2) + (AZ2)∘(BZ1) − u1·(CZ2) − u2·(CZ1)`.
+fn cross_term(
+    l: &[Vec<(u32, Fr)>],
+    r: &[Vec<(u32, Fr)>],
+    o: &[Vec<(u32, Fr)>],
+    z1: &[Fr],
+    z2: &[Fr],
+    u1: Fr,
+    u2: Fr,
+) -> Vec<Fr> {
+    let az1 = sparse_eval(l, z1);
+    let az2 = sparse_eval(l, z2);
+    let bz1 = sparse_eval(r, z1);
+    let bz2 = sparse_eval(r, z2);
+    let cz1 = sparse_eval(o, z1);
+    let cz2 = sparse_eval(o, z2);
+    (0..l.len())
+        .map(|j| az1[j] * bz2[j] + az2[j] * bz1[j] - u1 * cz2[j] - u2 * cz1[j])
+        .collect()
+}
+
+/// Fiat-Shamir folding challenge `r = H(FOLD_PREFIX ‖ acc ‖ U1 ‖ U2)`.
+///
+/// Domain-separated from the `"chain"` state-chain transcript.
+pub fn fold_challenge(acc: &[u8], u1: &RelaxedR1csInstance, u2: &RelaxedR1csInstance) -> Fr {
+    let mut h = Blake2b512::new();
+    h.update(FOLD_PREFIX);
+    h.update(acc);
+    h.update(instance_to_bytes(u1).expect("serialize U1"));
+    h.update(instance_to_bytes(u2).expect("serialize U2"));
+    Fr::from_le_bytes_mod_order(&h.finalize())
+}
+
+/// Fold two Relaxed-R1CS instances (and their witnesses) into one.
+///
+/// `l`, `r`, `o` are the step circuit's sparse A/B/C matrices.  The folded
+/// instance is satisfiable exactly when both inputs were.
+pub fn fold(
+    params: &PedersenParams,
+    l: &[Vec<(u32, Fr)>],
+    r: &[Vec<(u32, Fr)>],
+    o: &[Vec<(u32, Fr)>],
+    u1: &RelaxedR1csInstance,
+    w1: &RelaxedR1csWitness,
+    u2: &RelaxedR1csInstance,
+    w2: &RelaxedR1csWitness,
+    challenge: Fr,
+) -> (RelaxedR1csInstance, RelaxedR1csWitness) {
+    assert_eq!(u1.x.len(), u2.x.len(), "public input widths must match");
+    assert_eq!(w1.w.len(), w2.w.len(), "witness widths must match");
+    assert_eq!(w1.e.len(), w2.e.len(), "error widths must match");
+    assert_eq!(w1.e.len(), l.len(), "error length must equal n_constraints");
+
+    let x3: Vec<Fr> = u1
+        .x
+        .iter()
+        .zip(&u2.x)
+        .map(|(a, b)| *a + challenge * *b)
+        .collect();
+    let u3 = u1.u + challenge * u2.u;
+
+    let w3: Vec<Fr> = w1
+        .w
+        .iter()
+        .zip(&w2.w)
+        .map(|(a, b)| *a + challenge * *b)
+        .collect();
+
+    let e3_cross = cross_term(l, r, o, &w1.w, &w2.w, u1.u, u2.u);
+    let e3: Vec<Fr> = w1
+        .e
+        .iter()
+        .zip(&w2.e)
+        .map(|(a, b)| *a + challenge * *b)
+        .zip(&e3_cross)
+        .map(|(s, c)| s + challenge * c)
+        .collect();
+
+    let w_commit3 = G1Affine::from(
+        G1Projective::from(u1.w_commit) + G1Projective::from(u2.w_commit) * challenge,
+    );
+    let e_commit3 = G1Affine::from(
+        G1Projective::from(u1.e_commit)
+            + G1Projective::from(u2.e_commit) * challenge
+            + G1Projective::from(commit(&params.basis_e, &e3_cross)) * challenge,
+    );
+
+    let u3 = RelaxedR1csInstance {
+        x: x3,
+        u: u3,
+        w_commit: w_commit3,
+        e_commit: e_commit3,
+    };
+    debug_assert_eq!(u3.w_commit, commit(&params.basis_w, &w3));
+    (u3, RelaxedR1csWitness { w: w3, e: e3 })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -139,5 +247,71 @@ mod tests {
         let params = PedersenParams::from_seed(b"seed", 4, 1);
         let zeros = vec![Fr::zero(); 4];
         assert!(commit(&params.basis_w, &zeros).is_zero());
+    }
+
+    /// One-constraint multiplier: `Z[1]·Z[2] = Z[3]`, wire 0 = constant 1.
+    fn simple_r1cs() -> (Vec<Vec<(u32, Fr)>>, Vec<Vec<(u32, Fr)>>, Vec<Vec<(u32, Fr)>>) {
+        (
+            vec![vec![(1, Fr::from(1u64))]],
+            vec![vec![(2, Fr::from(1u64))]],
+            vec![vec![(3, Fr::from(1u64))]],
+        )
+    }
+
+    fn make_instance(params: &PedersenParams, w: &[Fr]) -> (RelaxedR1csInstance, RelaxedR1csWitness) {
+        let e = vec![Fr::zero(); 1];
+        let u = Fr::from(1u64);
+        (
+            RelaxedR1csInstance {
+                x: w[1..3].to_vec(),
+                u,
+                w_commit: commit(&params.basis_w, w),
+                e_commit: commit(&params.basis_e, &e),
+            },
+            RelaxedR1csWitness {
+                w: w.to_vec(),
+                e,
+            },
+        )
+    }
+
+    #[test]
+    fn fold_challenge_is_deterministic_and_distinct() {
+        let params = PedersenParams::from_seed(b"fold-test", 4, 1);
+        let (u1, _) = make_instance(&params, &[Fr::from(1), Fr::from(2), Fr::from(3), Fr::from(6)]);
+        let (u2, _) = make_instance(&params, &[Fr::from(1), Fr::from(5), Fr::from(7), Fr::from(35)]);
+
+        assert_eq!(
+            fold_challenge(b"acc", &u1, &u2),
+            fold_challenge(b"acc", &u1, &u2)
+        );
+        assert_ne!(fold_challenge(b"acc", &u1, &u2), fold_challenge(b"other", &u1, &u2));
+        assert_ne!(fold_challenge(b"acc", &u1, &u2), fold_challenge(b"acc", &u2, &u1));
+    }
+
+    #[test]
+    fn fold_combines_instances() {
+        let (l, r, o) = simple_r1cs();
+        let params = PedersenParams::from_seed(b"fold-test", 4, 1);
+        let (u1, w1) = make_instance(&params, &[Fr::from(1), Fr::from(2), Fr::from(3), Fr::from(6)]);
+        let (u2, w2) = make_instance(&params, &[Fr::from(1), Fr::from(5), Fr::from(7), Fr::from(35)]);
+        let challenge = Fr::from(11u64);
+
+        let (u3, w3) = fold(&params, &l, &r, &o, &u1, &w1, &u2, &w2, challenge);
+
+        assert_eq!(u3.u, u1.u + challenge * u2.u);
+        assert_eq!(u3.x, vec![w3.w[1], w3.w[2]]);
+
+        // Commitments are consistent with the folded witness.
+        assert_eq!(u3.w_commit, commit(&params.basis_w, &w3.w));
+        assert_eq!(u3.e_commit, commit(&params.basis_e, &w3.e));
+
+        // The folded instance satisfies the relaxed equation.
+        let az = sparse_eval(&l, &w3.w);
+        let bz = sparse_eval(&r, &w3.w);
+        let cz = sparse_eval(&o, &w3.w);
+        for j in 0..l.len() {
+            assert_eq!(az[j] * bz[j], u3.u * cz[j] + w3.e[j]);
+        }
     }
 }
