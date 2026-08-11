@@ -314,4 +314,93 @@ mod tests {
             assert_eq!(az[j] * bz[j], u3.u * cz[j] + w3.e[j]);
         }
     }
+
+    /// `k` independent multiplier constraints: for `i in 0..k`,
+    /// `w[1+3i] * w[2+3i] = w[3+3i]`, `w[0] = 1`.
+    fn chain_r1cs(k: usize) -> (Vec<Vec<(u32, Fr)>>, Vec<Vec<(u32, Fr)>>, Vec<Vec<(u32, Fr)>>) {
+        let mut l = Vec::with_capacity(k);
+        let mut r = Vec::with_capacity(k);
+        let mut o = Vec::with_capacity(k);
+        for i in 0..k {
+            l.push(vec![((1 + 3 * i) as u32, Fr::from(1u64))]);
+            r.push(vec![((2 + 3 * i) as u32, Fr::from(1u64))]);
+            o.push(vec![((3 + 3 * i) as u32, Fr::from(1u64))]);
+        }
+        (l, r, o)
+    }
+
+    /// A random witness satisfying `chain_r1cs(k)`.
+    fn random_satisfying_witness(k: usize, rng: &mut impl rand::RngCore) -> Vec<Fr> {
+        use ark_ff::UniformRand;
+        let mut w = vec![Fr::from(1u64)];
+        for _ in 0..k {
+            let a = Fr::rand(rng);
+            let b = Fr::rand(rng);
+            w.push(a);
+            w.push(b);
+            w.push(a * b);
+        }
+        w
+    }
+
+    /// Build an ordinary R1CS instance (`u = 1`, `E = 0`) from a witness.
+    fn make_instance_chain(
+        params: &PedersenParams,
+        w: &[Fr],
+        k: usize,
+    ) -> (RelaxedR1csInstance, RelaxedR1csWitness) {
+        let e = vec![Fr::zero(); k];
+        (
+            RelaxedR1csInstance {
+                x: w[1..].to_vec(),
+                u: Fr::from(1u64),
+                w_commit: commit(&params.basis_w, w),
+                e_commit: commit(&params.basis_e, &e),
+            },
+            RelaxedR1csWitness { w: w.to_vec(), e },
+        )
+    }
+
+    /// Assert a relaxed instance is consistent with its witness and satisfies
+    /// the relaxed equation.
+    fn assert_valid(
+        l: &[Vec<(u32, Fr)>],
+        r: &[Vec<(u32, Fr)>],
+        o: &[Vec<(u32, Fr)>],
+        params: &PedersenParams,
+        u: &RelaxedR1csInstance,
+        w: &RelaxedR1csWitness,
+    ) {
+        assert_eq!(u.w_commit, commit(&params.basis_w, &w.w));
+        assert_eq!(u.e_commit, commit(&params.basis_e, &w.e));
+        let az = sparse_eval(l, &w.w);
+        let bz = sparse_eval(r, &w.w);
+        let cz = sparse_eval(o, &w.w);
+        for j in 0..l.len() {
+            assert_eq!(az[j] * bz[j], u.u * cz[j] + w.e[j]);
+        }
+    }
+
+    #[test]
+    fn fold_accumulates_random_chain() {
+        let k = 4;
+        let n_wires = 1 + 3 * k;
+        let (l, r, o) = chain_r1cs(k);
+        let params = PedersenParams::from_seed(b"chain-test", n_wires, k);
+        let mut rng = rand::thread_rng();
+
+        let base_w = random_satisfying_witness(k, &mut rng);
+        let (mut acc_u, mut acc_w) = make_instance_chain(&params, &base_w, k);
+        assert_valid(&l, &r, &o, &params, &acc_u, &acc_w);
+
+        for _ in 0..5 {
+            let step_w = random_satisfying_witness(k, &mut rng);
+            let (step_u, step_w) = make_instance_chain(&params, &step_w, k);
+            let challenge = fold_challenge(b"chain-acc", &acc_u, &step_u);
+            let (next_u, next_w) = fold(&params, &l, &r, &o, &acc_u, &acc_w, &step_u, &step_w, challenge);
+            assert_valid(&l, &r, &o, &params, &next_u, &next_w);
+            acc_u = next_u;
+            acc_w = next_w;
+        }
+    }
 }
