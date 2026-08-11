@@ -95,7 +95,7 @@ This is a minimal subset of the full `Ed25519Verify` circuit: one scalar multipl
 >
 > The monolithic ~1.97M-constraint flow below is bottlenecked by its ceremony:
 > **~8 min ceremony + ~74 s prove + ~10 s witness ≈ ~9.7 min e2e on first run**.
-> The [Implementation 8](../../nova-prover/README.md#implementation-8-nova-ivc--compression-snark) step-chain decomposes the same ownership proof into **255 × 7.7K-constraint steps** (`cardano_ed25519_ownership_nova.circom`): the ceremony drops to **~3 s** and the fold takes **~167 s**, i.e. **~5.1 min total e2e on first run** — with per-step memory instead of ~4.5 GiB peak, and a 5 MB pk instead of 1.2 GB. The steps, keys, and transcript are all bound by a BLAKE2b512 state chain. (Note: once the ceremony is amortized across many keys, the monolithic path is ~3.5× faster per key — see the [Benchmarks](#benchmarks--pre-nova-vs-nova) section below.)
+> The [Implementation 8](../../nova-prover/README.md#implementation-8-nova-ivc--compression-snark) step-chain decomposes the same ownership proof into **255 × 7.7K-constraint steps** (`cardano_ed25519_ownership_nova.circom`): the ceremony drops to **~3 s** and the fold takes **~179 s**, i.e. **~5.2 min total e2e on first run** — with per-step memory instead of ~4.5 GiB peak, and a 5 MB pk instead of 1.2 GB. The steps, keys, and transcript are all bound by a BLAKE2b512 state chain. (Note: once the ceremony is amortized across many keys, the monolithic path is ~3.6× faster per key — see the [Benchmarks](#benchmarks--pre-nova-vs-nova) section below.)
 >
 > ```bash
 > circom --prime bls12381 -l ../Ed25519Verify/node_modules/circomlib/circuits \
@@ -112,7 +112,7 @@ This is a minimal subset of the full `Ed25519Verify` circuit: one scalar multipl
 
 ### End-to-end flow — Implementation 7 (monolithic + h-scalar)
 
-> This is the **single-proof reference path**: one ~1.97M-constraint Groth16 proof, using the Implementation 7 sparse prover (`--sparse`) and h-query scalar compression (`--h-scalar`). Use it when you need one standalone proof for the whole key-ownership statement (e.g. a single on-chain verification). For interactive / step-heavy use, prefer the Implementation 8 step-chain below (~70 % faster e2e).
+> This is the **single-proof reference path**: one ~1.97M-constraint Groth16 proof, using the Implementation 7 sparse prover (`--sparse`) and h-query scalar compression (`--h-scalar`). Use it when you need one standalone proof for the whole key-ownership statement (e.g. a single on-chain verification). For interactive / step-heavy use, prefer the Implementation 8 step-chain below (~46 % faster first-run e2e).
 
 #### Step 1: Derive a real Cardano payment key
 
@@ -254,7 +254,7 @@ The `sel` bits come from the same clamped scalar `sk` as in the Implementation 7
 # → Verified 255 steps: 255 pairings OK, state chain OK, transcript OK
 ```
 
-> **Note:** `nova` verification is still **O(N)** — it re-checks every step proof. The constant-time compression SNARK (one pairing, O(1) verify) is shipped as [Implementation 9](../../nova-prover/README.md#implementation-9-relaxed-r1cs-folding--single-compression-snark): `nova fold --nifs` → `trusted-setup ceremony-dev` on the emitted compression circuit → `nova compress` → `nova verify --compression-proof` — see the [Implementation 9 e2e flow](../../nova-prover/README.md#e2e-flow--implementation-9-nifs). On the 255-step 7,724-constraint step the NIFS fold measures **~230 ms/step vs ~700 ms/step** for the Groth16 chain, and the single-pairing verify replaces 255 pairings.
+> **Note:** `nova` verification here is still **O(N)** — it re-checks every step proof. The O(1)-verify path is shipped as [Implementation 9](../../nova-prover/README.md#implementation-9-relaxed-r1cs-folding--single-compression-snark): `nova fold --nifs` → `trusted-setup ceremony-dev` on the emitted compression circuit → `nova compress` → `nova verify --compression-proof` — see the [Implementation 9 e2e flow](../../nova-prover/README.md#e2e-flow--implementation-9-nifs). On the 255-step 7,724-constraint circuit the NIFS fold measures **~230 ms/step vs ~700 ms/step** for the Groth16 chain (3×, no per-step proving key), and the single-pairing verify is O(1) — but at N = 255 its MSM re-commitments make it *slower* than the 255-pairing chain (7.8 s vs 3.2 s, crossover at N ≈ 620). Full measured tradeoffs: the [Impl 8 vs Impl 9 comparison](#end-to-end-comparison--implementation-8-step-chain-vs-implementation-9-nifs) below.
 
 ### Benchmarks — pre-Nova vs Nova
 
@@ -265,22 +265,45 @@ Measured on the same machine (4 × 31 GB) with the `nova` release binary, `snark
 | circuit | 1,967,405 constraints | 255 × 7,724 constraints |
 | key + circuit input | 0.3 s | (shared) |
 | witness generation | 9.8 s | 255 steps: 133.0 s |
-| ceremony (one-time, reusable) | 496.4 s | 2.8 s |
-| prove / fold | 73.9 s | 166.7 s |
-| verify | 1.5 s | 3.7 s |
-| **e2e, first run (incl. ceremony)** | **582 s** | **306 s** |
-| **e2e, steady (ceremony amortized)** | **86 s** | **304 s** |
+| ceremony (one-time, reusable) | 496.4 s | 2.7 s |
+| prove / fold | 73.9 s | 178.5 s |
+| verify | 1.5 s | 3.2 s |
+| **e2e, first run (incl. ceremony)** | **582 s** | **314 s** |
+| **e2e, steady (ceremony amortized)** | **86 s** | **312 s** |
 | proving key | 1.2 GB | 5.0 MB |
 | verifying key | 178 MB | 719 KB |
 
 Reading the table:
 
-- **First run** (fresh key + ceremony): Nova is **~47 % faster** — the ~8 min monolithic ceremony dominates, while the Nova ceremony is ~3 s. The proving-key footprint drops from 1.2 GB to 5 MB and peak memory from ~4.5 GiB to per-step.
-- **Steady state** (ceremony reused, per additional key): pre-Nova is **~3.5× faster** (86 s vs 304 s). Nova re-derives 255 step witnesses and folds them per key; the monolithic prover only redoes one witness + one proof. (The step chain is inherently sequential — each step feeds the next.)
+- **First run** (fresh key + ceremony): Nova is **~46 % faster** — the ~8 min monolithic ceremony dominates, while the Nova ceremony is ~3 s. The proving-key footprint drops from 1.2 GB to 5 MB and peak memory from ~4.5 GiB to per-step.
+- **Steady state** (ceremony reused, per additional key): pre-Nova is **~3.6× faster** (86 s vs 312 s). Nova re-derives 255 step witnesses and folds them per key; the monolithic prover only redoes one witness + one proof. (The step chain is inherently sequential — each step feeds the next.)
 - Both flows prove the **same** Ed25519 ownership statement; the point-compression and `addOut == 2·PointA` checks are done outside the Nova fold.
 
 Reproduce: `python3 ../benchmarks_compare.py --family cko --workdir <dir>`
 (see `../benchmarks_compare.py` header for the full CLI; the same harness covers `--family smt`).
+
+### End-to-end comparison — Implementation 8 (step-chain) vs Implementation 9 (NIFS)
+
+Measured on the **same machine / same 255 step witnesses** (full-size state values): Impl 8 from `benchmark_nova`, Impl 9 via the real CLI e2e (`nova fold --nifs` → `trusted-setup ceremony-dev` → `nova compress` → `nova verify`). Step-witness generation is identical for both implementations, so it is excluded.
+
+| Phase (per key, `cardano_ed25519_ownership_nova`, 255 × 7,724 constraints) | Impl 8 (step-chain) | Impl 9 (NIFS) |
+|---|---|---|
+| Ceremony (one-time, reusable) | **2.7 s** (step circuit) | **6.4 s** (compression circuit, 15,448 constraints) |
+| Prover per-step | 700 ms (one Groth16 proof) | 230 ms (NIFS fold, two O(step) MSMs) |
+| Prover total (fold) | **178.5 s** | **53.4 s** |
+| Compress (Impl 9 only) | — | **55.3 s** (incl. ~53 s deterministic re-fold) |
+| **Prover e2e, steady (ceremony amortized)** | **178.5 s** | **108.7 s** (1.6×) — **56.3 s** (3.2×) without the re-fold |
+| Verify | **3.2 s** (255 pairings, O(N)) | **7.8 s** (one pairing + two MSM re-commitments, O(1)) |
+| Bundle | 255 proofs + 255 states = **334.7 KiB (O(N))** | O(1) instance 5.6 KB + compression proof 650 KB = **~656 KiB (O(1))** |
+| Proving key | 5.0 MB (step pk) | none for folding; 16 MB compression pk (one-time) |
+
+Reading the table:
+
+- **Fold is 3× faster** per step (230 ms vs 700 ms): the NIFS fold replaces one full Groth16 proof per step with two O(step) MSMs, and needs **no per-step proving key**.
+- **`nova compress` currently re-folds.** The 55.3 s includes ~53 s re-running the fold to recover the private final witness, then only ~3 s for the actual compression proof. A deployed prover keeps the final witness and skips the re-fold → 56.3 s steady-state prover e2e (3.2× vs Impl 8). This is tracked as a cleanup.
+- **Verify is O(1) but not yet cheaper at N = 255.** Impl 9's single-pairing verify (7.8 s) is dominated by the native `com(Z)`/`com(E)` re-commitment MSMs (variable-base, ~0.16 ms/point) and is *slower* than Impl 8's 255 pairings (3.2 s) at this N. Crossover is at **N ≈ 620 steps**; beyond that the O(1) verify wins (Impl 8 grows ~12.5 ms/step). Switching these to precomputed fixed-base MSMs would make Impl 9's verify sub-second and win at all N.
+- **Bundle is O(1) but the constant is larger than Impl 8 at N = 255.** The compression proof reveals the folded `Z`/`E` (650 KB for the 23K-wire compression circuit), so the ~656 KB constant bundle beats Impl 8's O(N) bundle (334.7 KiB + ~1.3 KB/step) only past **N ≈ 500**. The O(1)-in-N property — not the byte count at small N — is the win.
+- **Ceremony moves, doesn't disappear.** Impl 8 needs a 2.7 s step ceremony; Impl 9 needs a 6.4 s compression ceremony (built from the step's A/B/C matrices, so per step shape in this build). Both are one-time and reusable across runs; Impl 9 additionally eliminates the per-step proving key.
 
 </details>
 
