@@ -48,6 +48,10 @@ pub const NIFS_TRANSCRIPT_PREFIX: &[u8] = b"groth16-prover-nova-nifs-transcript-
 /// NIFS folding module (Implementation 9) — Relaxed-R1CS + Pedersen commitments.
 pub mod nifs;
 
+/// Compression circuit for the NIFS fold (Implementation 9, work item 2) —
+/// proves the final relaxed instance satisfiable, reusing the step A/B/C.
+pub mod compression;
+
 /// JSON descriptor of a step circuit (emitted by the `params` operation).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CircuitDescriptor {
