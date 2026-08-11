@@ -10,7 +10,8 @@
 //!   1. `params` — inspect a step circuit and validate the IVC invariant
 //!   2. `ceremony` — single-party trusted setup for a step circuit
 //!   3. `fold` — fold step witnesses into an IVC bundle + transcript
-//!   4. `verify` — verify a folded IVC bundle (pairings + chain + transcript)
+//!   4. `compress` — Groth16-compress a NIFS bundle into one proof
+//!   5. `verify` — verify a folded IVC bundle (pairings + chain + transcript)
 //!
 //! The core IVC logic lives in the `nova-prover` crate; this crate only
 //! adds the command-line interface on top of it.
@@ -72,7 +73,25 @@ pub enum Command {
     ///
     ///   $ nova fold --circuit step_circuit.r1cs --proving-key step.pk --steps ./step_witnesses/ --out bundle.ivc.json
     ///   $ nova fold --nifs --circuit step_circuit.r1cs --steps ./step_witnesses/ --out bundle.ivc.json
+    ///   $ nova fold --nifs --circuit step_circuit.r1cs --steps ./step_witnesses/ --out bundle.ivc.json --compression-r1cs compression.r1cs
     Fold(cmd::fold::Args),
+
+    /// Compress a NIFS bundle into a single Groth16 proof (Implementation 9)
+    ///
+    /// Re-folds the step witnesses deterministically, builds the compression
+    /// circuit (relaxed-equation check) and proves it with the compression
+    /// proving key — producing one O(1) proof instead of one proof per step.
+    ///
+    /// The proving key comes from:
+    ///
+    ///   $ trusted-setup ceremony-dev --sparse --circuit compression.r1cs --proving-key compression.pk --verifying-key compression.vk
+    ///
+    /// The result is consumed by `nova verify` on the NIFS bundle.
+    ///
+    /// Example:
+    ///
+    ///   $ nova compress --circuit step_circuit.r1cs --steps ./step_witnesses/ --proving-key compression.pk --out compression.proof.json
+    Compress(cmd::compress::Args),
 
     /// Verify a folded IVC bundle
     ///
@@ -81,6 +100,11 @@ pub enum Command {
     ///   1. Each step's Groth16 pairing verification passes
     ///   2. The state chain is consistent (step[i].state_out == step[i+1].state_in)
     ///   3. The BLAKE2b transcript hashes match at every step
+    ///
+    /// For a NIFS bundle (from `fold --nifs`) pass the compression proof and
+    /// verifying key instead of the step verifying key:
+    ///
+    ///   $ nova verify --ivc bundle.ivc.json --compression-proof compression.proof.json --compression-vk compression.vk
     ///
     /// Example:
     ///
@@ -113,6 +137,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         Command::Params(args) => cmd::params::run(args),
         Command::Ceremony(args) => cmd::ceremony::run(args),
         Command::Fold(args) => cmd::fold::run(args),
+        Command::Compress(args) => cmd::compress::run(args),
         Command::Verify(args) => cmd::verify::run(args),
     }
 }

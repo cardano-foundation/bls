@@ -933,3 +933,125 @@ fn fold_nifs_emits_compression_r1cs() {
     // The bundle is still written regardless of the optional r1cs output.
     assert!(bundle_file.path().exists());
 }
+
+/// Full Implementation 9 flow at the CLI level:
+///   fold --nifs --compression-r1cs → ceremony (dev) on the compression
+///   circuit → compress → verify with the compression VK.
+/// The compression proof is one O(1) Groth16 proof for all 3 steps.
+#[test]
+fn nifs_compress_verify_end_to_end() {
+    let r1cs = NamedTempFile::new().unwrap();
+    fs::write(r1cs.path(), build_synthetic_step_r1cs()).unwrap();
+
+    let steps_dir = tempfile::tempdir().unwrap();
+    let mut state = 2u64;
+    for (i, x) in [3u64, 5, 7].iter().enumerate() {
+        state = write_step_wtns(steps_dir.path(), i, state, *x);
+    }
+
+    // 1. fold --nifs -> bundle + compression.r1cs
+    let bundle_file = NamedTempFile::new().unwrap();
+    let compression_r1cs = tempfile::NamedTempFile::new().unwrap();
+    let mut fold = Command::cargo_bin("nova").unwrap();
+    fold.arg("fold")
+        .arg("--nifs")
+        .arg("--circuit")
+        .arg(r1cs.path())
+        .arg("--steps")
+        .arg(steps_dir.path())
+        .arg("--out")
+        .arg(bundle_file.path())
+        .arg("--compression-r1cs")
+        .arg(compression_r1cs.path());
+    fold.assert().success();
+
+    // 2. dev ceremony on the compression circuit (in-process)
+    let tmp = tempfile::tempdir().unwrap();
+    let pk_path = tmp.path().join("compression.pk");
+    let vk_path = tmp.path().join("compression.vk");
+    {
+        let step = nova_prover::load_circuit(r1cs.path()).expect("step .r1cs parses");
+        let cc = nova_prover::compression::CompressionCircuit::new(
+            &step.l,
+            &step.r,
+            &step.o,
+            step.n_wires as usize,
+        );
+        let mut rng = rand::thread_rng();
+        let engine = trusted_setup::engine::FftQapEngine::new();
+        let tw = trusted_setup::ceremony::ToxicWaste::random(&mut rng);
+        let (full_pk, vk) = trusted_setup::ceremony::single_party_ceremony_full_from_tw_sparse(
+            &engine,
+            cc.l.len(),
+            cc.n_wires_total,
+            cc.n_public,
+            &cc.l,
+            &cc.r,
+            &cc.o,
+            tw,
+            false,
+        );
+        use ark_serialize::CanonicalSerialize;
+        let mut pk_bytes = Vec::new();
+        full_pk.serialize_uncompressed(&mut pk_bytes).unwrap();
+        fs::write(&pk_path, &pk_bytes).unwrap();
+        let mut vk_bytes = Vec::new();
+        vk.serialize_uncompressed(&mut vk_bytes).unwrap();
+        fs::write(&vk_path, &vk_bytes).unwrap();
+    }
+
+    // 3. compress -> one O(1) Groth16 proof
+    let proof_file = NamedTempFile::new().unwrap();
+    let mut compress = Command::cargo_bin("nova").unwrap();
+    compress
+        .arg("compress")
+        .arg("--circuit")
+        .arg(r1cs.path())
+        .arg("--steps")
+        .arg(steps_dir.path())
+        .arg("--proving-key")
+        .arg(&pk_path)
+        .arg("--out")
+        .arg(proof_file.path());
+    compress
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Compression proof"));
+
+    // 4. verify the NIFS bundle with the compression proof + VK
+    let mut verify = Command::cargo_bin("nova").unwrap();
+    verify
+        .arg("verify")
+        .arg("--ivc")
+        .arg(bundle_file.path())
+        .arg("--compression-proof")
+        .arg(proof_file.path())
+        .arg("--compression-vk")
+        .arg(&vk_path);
+    verify
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("commitments OK"));
+
+    // 5. tampering the bundle's instance must fail verification
+    let bundle: serde_json::Value =
+        serde_json::from_slice(&fs::read(bundle_file.path()).unwrap()).unwrap();
+    let mut tampered = bundle.clone();
+    tampered["final_instance"]["x"][0] = serde_json::json!((state + 1).to_string());
+    let tampered_file = tempfile::NamedTempFile::new().unwrap();
+    fs::write(
+        tampered_file.path(),
+        serde_json::to_string_pretty(&tampered).unwrap(),
+    )
+    .unwrap();
+    let mut verify2 = Command::cargo_bin("nova").unwrap();
+    verify2
+        .arg("verify")
+        .arg("--ivc")
+        .arg(tampered_file.path())
+        .arg("--compression-proof")
+        .arg(proof_file.path())
+        .arg("--compression-vk")
+        .arg(&vk_path);
+    verify2.assert().failure();
+}
