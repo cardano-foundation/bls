@@ -5,7 +5,7 @@
 //! pipeline.
 
 use ark_bls12_381::Fr;
-use ark_ff::PrimeField;
+use ark_ff::{BigInteger, PrimeField};
 use ark_serialize::CanonicalSerialize;
 use ark_std::vec::Vec;
 use ark_std::Zero;
@@ -619,6 +619,45 @@ mod tests {
         }
     }
 
+    /// `r1cs_to_bytes_sparse` must produce a `.r1cs` blob that parses back to
+    /// the exact same sparse matrices (header counts included).
+    #[test]
+    fn test_r1cs_to_bytes_sparse_roundtrip() {
+        let l = vec![
+            vec![(1u32, Fr::from(1u64)), (2u32, Fr::from(3u64))],
+            vec![(0u32, Fr::from(2u64))],
+        ];
+        let r = vec![
+            vec![(3u32, Fr::from(5u64))],
+            vec![(1u32, Fr::from(7u64)), (4u32, Fr::from(9u64))],
+        ];
+        let o = vec![
+            vec![(5u32, Fr::from(11u64))],
+            vec![(0u32, Fr::from(13u64)), (2u32, Fr::from(17u64))],
+        ];
+
+        let bytes = r1cs_to_bytes_sparse(6, 2, 1, 3, &l, &r, &o);
+        let (header, constraints) = parse_r1cs_raw(&bytes).unwrap();
+
+        assert_eq!(header.n_wires, 6);
+        assert_eq!(header.n_pub_out, 2);
+        assert_eq!(header.n_pub_in, 1);
+        assert_eq!(header.n_prv_in, 3);
+        assert_eq!(header.n_constraints, 2);
+
+        let mut got_l = Vec::new();
+        let mut got_r = Vec::new();
+        let mut got_o = Vec::new();
+        for (a, b, c) in constraints {
+            got_l.push(a);
+            got_r.push(b);
+            got_o.push(c);
+        }
+        assert_eq!(got_l, l);
+        assert_eq!(got_r, r);
+        assert_eq!(got_o, o);
+    }
+
     /// Implementation 5 parity: Circom-loaded circuit + FullProvingKey must
     /// produce the same proof as the legacy scalar path.
     #[test]
@@ -1018,6 +1057,67 @@ pub fn r1cs_to_bytes(circuit: &super::r1cs::Circuit) -> Vec<u8> {
         for (j, &val) in circuit.o[i].iter().enumerate() {
             if !val.is_zero() {
                 constraints.extend_from_slice(&(j as u32).to_le_bytes());
+                constraints.extend_from_slice(&fr_to_le_bytes(&val));
+            }
+        }
+    }
+
+    out.extend_from_slice(&2u32.to_le_bytes()); // section type
+    out.extend_from_slice(&(constraints.len() as u64).to_le_bytes());
+    out.extend_from_slice(&constraints);
+
+    out
+}
+
+/// Serialize a *sparse* R1CS circuit (native Circom format) to `.r1cs` bytes.
+///
+/// Unlike [`r1cs_to_bytes`] (which takes a dense [`Circuit`]), this takes the
+/// already-sparse `(wire_id, coefficient)` matrices directly — used to write
+/// compression circuits whose dense matrices would be impractically large.
+/// The label map (section 3) is omitted; [`parse_r1cs_raw`] does not require it.
+pub fn r1cs_to_bytes_sparse(
+    n_wires: u32,
+    n_pub_out: u32,
+    n_pub_in: u32,
+    n_prv_in: u32,
+    l: &[Vec<(u32, Fr)>],
+    r: &[Vec<(u32, Fr)>],
+    o: &[Vec<(u32, Fr)>],
+) -> Vec<u8> {
+    assert_eq!(l.len(), r.len());
+    assert_eq!(l.len(), o.len());
+    let n_constraints = l.len() as u32;
+    let n_labels = n_wires as u64;
+    let field_size = 32u32;
+    let prime = <Fr as ark_ff::PrimeField>::MODULUS.to_bytes_le();
+
+    let mut out = Vec::new();
+    out.extend_from_slice(b"r1cs");
+    out.extend_from_slice(&1u32.to_le_bytes()); // version
+    out.extend_from_slice(&2u32.to_le_bytes()); // n_sections
+
+    // Section 1: header
+    let mut header = Vec::new();
+    header.extend_from_slice(&field_size.to_le_bytes());
+    header.extend_from_slice(&prime);
+    header.extend_from_slice(&n_wires.to_le_bytes());
+    header.extend_from_slice(&n_pub_out.to_le_bytes());
+    header.extend_from_slice(&n_pub_in.to_le_bytes());
+    header.extend_from_slice(&n_prv_in.to_le_bytes());
+    header.extend_from_slice(&n_labels.to_le_bytes());
+    header.extend_from_slice(&n_constraints.to_le_bytes());
+
+    out.extend_from_slice(&1u32.to_le_bytes()); // section type
+    out.extend_from_slice(&(header.len() as u64).to_le_bytes());
+    out.extend_from_slice(&header);
+
+    // Section 2: constraints
+    let mut constraints = Vec::new();
+    for (a, b, c) in l.iter().zip(r).zip(o).map(|((a, b), c)| (a, b, c)) {
+        for m in [a, b, c] {
+            constraints.extend_from_slice(&(m.len() as u32).to_le_bytes());
+            for &(wire, val) in m {
+                constraints.extend_from_slice(&wire.to_le_bytes());
                 constraints.extend_from_slice(&fr_to_le_bytes(&val));
             }
         }
