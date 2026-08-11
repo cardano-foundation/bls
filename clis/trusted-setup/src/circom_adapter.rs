@@ -528,6 +528,97 @@ mod tests {
         assert_eq!(circuit.witness, expected);
     }
 
+    /// BLS12-381 scalar-field modulus minus one (`r - 1`), little-endian (the
+    /// canonical `.r1cs` / `.wtns` field-element encoding of `r - 1`).
+    const BLS12_381_R_MINUS_1_LE: [u8; 32] = [
+        0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff, 0xfe, 0x5b, 0xfe, 0xff, 0x02, 0xa4, 0xbd,
+        0x53, 0x05, 0xd8, 0xa1, 0x09, 0x08, 0xd8, 0x39, 0x33, 0x48, 0x7d, 0x9d, 0x29, 0x53, 0xa7,
+        0xed, 0x73,
+    ];
+
+    /// Regression test for the `fr_to_le_bytes` byte-order bug: arkworks'
+    /// `CanonicalSerialize` already emits little-endian canonical bytes, so the
+    /// old code's extra byte reversal shifted every value by 248 bits (a
+    /// witness `2` decoded as `2^249`).
+    #[test]
+    fn test_fr_to_le_bytes_is_little_endian_canonical() {
+        let mut one = [0u8; 32];
+        one[0] = 1;
+        assert_eq!(fr_to_le_bytes(&Fr::from(1u64)), one);
+
+        let mut two = [0u8; 32];
+        two[0] = 2;
+        assert_eq!(fr_to_le_bytes(&Fr::from(2u64)), two);
+
+        // High-bit values (r - 1) keep their canonical LE encoding.
+        let r_minus_1 = Fr::from_le_bytes_mod_order(&BLS12_381_R_MINUS_1_LE);
+        assert_eq!(fr_to_le_bytes(&r_minus_1), BLS12_381_R_MINUS_1_LE);
+
+        // Serialize -> parse is lossless across low, mid, and high-bit values.
+        for v in [
+            Fr::from(0u64),
+            Fr::from(1u64),
+            Fr::from(2u64),
+            Fr::from(48u64),
+            Fr::from(u64::MAX),
+            Fr::from(0x1234_5678_90ab_cdefu64),
+            r_minus_1,
+        ] {
+            assert_eq!(Fr::from_le_bytes_mod_order(&fr_to_le_bytes(&v)), v);
+        }
+    }
+
+    /// Regression test for the `wtns_to_bytes` byte-order bug: witness values
+    /// must survive a full serialize -> parse round-trip unchanged.
+    #[test]
+    fn test_wtns_to_bytes_roundtrip_preserves_values() {
+        let r_minus_1 = Fr::from_le_bytes_mod_order(&BLS12_381_R_MINUS_1_LE);
+        let values = vec![
+            Fr::from(0u64),
+            Fr::from(1u64),
+            Fr::from(2u64),
+            Fr::from(48u64),
+            Fr::from(u64::MAX),
+            Fr::from(0x1234_5678_90ab_cdefu64),
+            r_minus_1,
+            Fr::from(7u64),
+        ];
+
+        let bytes = wtns_to_bytes(&values);
+        let parsed = parse_wtns(&bytes, 32).unwrap();
+        assert_eq!(parsed, values);
+
+        // And the end-to-end circuit path sees the same witness.
+        let mut circuit = CircomCircuit::parse_r1cs(&build_synthetic_r1cs()).unwrap();
+        circuit
+            .load_witness_from_bytes(&bytes, 32)
+            .expect("WTNS bytes must parse");
+        assert_eq!(circuit.witness, values);
+    }
+
+    /// Regression test for `r1cs_to_bytes`: sparse constraint coefficients
+    /// must round-trip through the binary format exactly (the shared
+    /// `fr_to_le_bytes` bug also corrupted `.r1cs` coefficients).
+    #[test]
+    fn test_r1cs_to_bytes_roundtrip_preserves_coefficients() {
+        let circuit = crate::r1cs::random_r1cs_circuit(&mut rand::thread_rng(), 4);
+        let bytes = r1cs_to_bytes(&circuit);
+        let (_header, constraints) = parse_r1cs_raw(&bytes).unwrap();
+        assert_eq!(constraints.len(), 4);
+
+        for (i, (a, b, c)) in constraints.iter().enumerate() {
+            for (row, terms) in [(&circuit.l[i], a), (&circuit.r[i], b), (&circuit.o[i], c)] {
+                let expected: Vec<(u32, Fr)> = row
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, &val)| !val.is_zero())
+                    .map(|(j, &val)| (j as u32, val))
+                    .collect();
+                assert_eq!(&expected, terms, "constraint {i} coefficient mismatch");
+            }
+        }
+    }
+
     /// Implementation 5 parity: Circom-loaded circuit + FullProvingKey must
     /// produce the same proof as the legacy scalar path.
     #[test]
@@ -860,13 +951,16 @@ mod tests {
 // ------------------------------------------------------------------
 
 /// Serialize a field element to 32-byte little-endian (Circom binary format).
+///
+/// arkworks' `CanonicalSerialize` for `Fp` writes the canonical integer in
+/// little-endian byte order (each u64 limb serialized little-endian, least
+/// significant limb first — see `SerBuffer::copy_from_u64_slice`), which is
+/// exactly Circom's `.r1cs` / `.wtns` field-element encoding.
 fn fr_to_le_bytes(val: &Fr) -> [u8; 32] {
     let mut buf = Vec::new();
     val.serialize_compressed(&mut buf).expect("Fr serialize");
     let mut bytes = [0u8; 32];
-    // serialize_compressed writes big-endian canonical bytes; reverse for little-endian.
     bytes.copy_from_slice(&buf);
-    bytes.reverse();
     bytes
 }
 
@@ -876,7 +970,7 @@ pub fn r1cs_to_bytes(circuit: &super::r1cs::Circuit) -> Vec<u8> {
     let n_constraints = circuit.l.len() as u32;
     let n_pub_out = circuit.n_public as u32;
     let n_pub_in = 0u32;
-    let n_prv_in = (n_wires - n_pub_out - 1) as u32; // exclude constant wire
+    let n_prv_in = n_wires - n_pub_out - 1; // exclude constant wire
     let n_labels = n_wires as u64;
     let field_size = 32u32;
 
