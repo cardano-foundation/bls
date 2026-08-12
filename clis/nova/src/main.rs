@@ -119,9 +119,10 @@ pub enum Command {
 #[clap(about = "Nova IVC folding CLI for BLS12-381",
        long_about = "A command-line interface for the Nova step-chain IVC flow on BLS12-381.\n\n\
 A long computation is decomposed into N identical step circuits and each step is proven\n\
-as a standalone Groth16 proof, bound together by a BLAKE2b512 transcript. The CLI covers\n\
-params (inspect a step circuit), ceremony (per-step trusted setup), fold (step proofs +\n\
-transcript), and verify (pairings + chain + transcript).\n\n\
+either as a standalone Groth16 proof bound together by a BLAKE2b512 transcript\n\
+(Implementation 8: params, ceremony, fold, verify) or folded into one Relaxed-R1CS\n\
+instance with a NIFS and compressed into a single Groth16 proof\n\
+(Implementation 9: fold --nifs, compress, verify --compression-proof).\n\n\
 The core IVC logic lives in the `nova-prover` crate; the Groth16 proof-system core lives\n\
 in `groth16-prover` / `trusted-setup`. Step proofs use arkworks' canonical serialization\n\
 and are directly consumable by on-chain Aiken verifiers.")]

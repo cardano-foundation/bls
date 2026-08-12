@@ -2,11 +2,14 @@
 
 Command-line interface for the Nova IVC step-chain flow on BLS12-381.
 
-A long computation is decomposed into `N` identical step circuits, each proving `state_{i+1} = f(step_i, state_i)`. This CLI proves every step as a **standalone Groth16 proof** and binds the state chain with a BLAKE2b512 transcript. Each step proof is individually verifiable, and `verify` re-checks the whole chain (pairings + chain invariant + transcript).
+A long computation is decomposed into `N` identical step circuits, each proving `state_{i+1} = f(step_i, state_i)`. The CLI supports two proof paths:
+
+- **Implementation 8 (step-chain):** prove every step as a **standalone Groth16 proof** and bind the state chain with a BLAKE2b512 transcript. Each step proof is individually verifiable, and `verify` re-checks the whole chain (pairings + chain invariant + transcript). Bundle and verify cost are O(N).
+- **Implementation 9 (NIFS):** `nova fold --nifs` folds all step instances into one **Relaxed-R1CS instance** (transparent folding, no per-step proving key), `nova compress` turns it into a **single Groth16 proof**, and `nova verify --compression-proof` checks it with **one pairing**. Bundle and verify cost are O(1).
 
 The core IVC logic lives in the `nova-prover` crate; this crate only adds the command-line interface on top of it. The Groth16 proof-system core lives in `groth16-prover` / `trusted-setup`.
 
-The design, roadmap (Relaxed-R1CS folding + compression SNARK), and benchmarks are documented in [`nova-prover/README.md`](../../nova-prover/README.md).
+The design, roadmap (Relaxed-R1CS folding + compression SNARK), and benchmarks are documented in [`nova-prover/README.md`](../../nova-prover/README.md) (Implementation 8 and Implementation 9).
 
 ---
 
@@ -19,6 +22,7 @@ nova --help
 nova params --help
 nova ceremony --help
 nova fold --help
+nova compress --help
 nova verify --help
 ```
 
@@ -33,6 +37,7 @@ Commands:
   params    Inspect a step circuit and emit a JSON descriptor
   ceremony  Run a single-party ceremony for a step circuit
   fold      Fold step witnesses into an IVC bundle
+  compress  Compress a NIFS bundle into a single Groth16 proof (Implementation 9)
   verify    Verify a folded IVC bundle
   help      Print this message or the help of the given subcommand(s)
 
@@ -100,6 +105,42 @@ nova fold \
 
 The output bundle (`.ivc.json`) contains all step proofs, the initial state, and the final transcript hash. If any witness breaks the state chain, `fold` fails naming the exact step.
 
+#### NIFS folding (Implementation 9)
+
+With `--nifs` no proving key is needed — folding is transparent and linear-time. The step instances are folded into a single **Relaxed-R1CS instance** (`U = (x, u, W̄, Ē)`), so the bundle is O(1) regardless of `N`. Optionally emit the compression circuit `.r1cs` with `--compression-r1cs`; feed it to `trusted-setup ceremony-dev --sparse` to derive the compression proving / verifying keys.
+
+```bash
+nova fold --nifs \
+  --circuit step_circuit.r1cs \
+  --steps ./step_witnesses/ \
+  --out bundle.ivc.json \
+  --compression-r1cs compression.r1cs
+# → NIFS bundle written to bundle.ivc.json (N steps → one instance, u = <scalar>)
+# → Compression circuit (from n step constraints): 2n constraints, ...
+```
+
+The NIFS bundle holds only the O(1) final relaxed instance (no per-step proofs); the step witnesses are still needed by `compress` / `verify` to recover the private final witness and re-check the commitments.
+
+### `compress` — compress a NIFS bundle into one Groth16 proof (Implementation 9)
+
+Re-folds the step witnesses deterministically, builds the compression circuit (relaxed-equation check `(AZ)∘(BZ) = u(CZ) + E`) and proves it with the compression proving key — producing **one O(1) proof** instead of one proof per step.
+
+```bash
+# One-time ceremony for the compression circuit (reusable for any step shape)
+trusted-setup ceremony-dev --sparse \
+  --circuit compression.r1cs \
+  --proving-key compression.pk --verifying-key compression.vk
+
+nova compress \
+  --circuit step_circuit.r1cs \
+  --steps ./step_witnesses/ \
+  --proving-key compression.pk \
+  --out compression.proof.json
+# → Compression proof written to compression.proof.json (u = <scalar>)
+```
+
+The result is consumed by `nova verify` on the NIFS bundle.
+
 ### `verify` — check a folded IVC bundle
 
 Re-checks the whole chain from the bundle + verifying key:
@@ -114,6 +155,20 @@ nova verify \
 ```
 
 Verification checks (1) every step's Groth16 pairing, (2) the `state_out[i] == state_in[i+1]` chain, and (3) the deterministic transcript. Tampering with any proof, state, or transcript is detected.
+
+#### NIFS bundles (Implementation 9)
+
+For a NIFS bundle (from `fold --nifs`) pass the compression proof and verifying key instead of the step verifying key. Verification is **one Groth16 pairing** plus native `com(W)` / `com(E)` MSM re-commitments and the transcript check:
+
+```bash
+nova verify \
+  --ivc bundle.ivc.json \
+  --compression-proof compression.proof.json \
+  --compression-vk compression.vk
+
+# → Verified 254 steps: compression proof OK, commitments OK, state chain OK
+# → Final transcript: <blake2b512 hex>
+```
 
 ---
 
@@ -146,6 +201,39 @@ nova fold \
 # 5. Verify the whole chain
 nova verify --ivc cko255_ivc.json --verifying-key cko255.vk
 ```
+
+### NIFS — constant-size bundle and verify (Implementation 9)
+
+Same step circuits and step witnesses as the Implementation 8 flow, but folding is transparent (no per-step proving key) and the bundle + verify are O(1). Worked end to end on the `cardano_ed25519_ownership_nova` step circuit (255 steps, 7,724 constraints); the same commands run on any step circuit with `n_pub_in == n_pub_out`.
+
+```bash
+# 1. Fold the step witnesses into one Relaxed-R1CS instance (no proving key)
+nova fold --nifs \
+  --circuit cardano_ed25519_ownership_nova.r1cs \
+  --steps <witness-dir> \
+  --out cko255_ivc.json \
+  --compression-r1cs compression.r1cs
+
+# 2. One-time ceremony for the compression circuit (reusable for any step shape)
+trusted-setup ceremony-dev --sparse \
+  --circuit compression.r1cs \
+  --proving-key compression.pk --verifying-key compression.vk
+
+# 3. Compress the final instance into one O(1) Groth16 proof
+nova compress \
+  --circuit cardano_ed25519_ownership_nova.r1cs \
+  --steps <witness-dir> \
+  --proving-key compression.pk \
+  --out compression.proof.json
+
+# 4. Verify — one Groth16 pairing + native com(W)/com(E) MSMs + transcript
+nova verify \
+  --ivc cko255_ivc.json \
+  --compression-proof compression.proof.json \
+  --compression-vk compression.vk
+```
+
+Design, caveats (compression proof reveals the folded `Z`/`E`; the compression circuit is `2·n_constraints`), and benchmarks vs the Implementation 8 step-chain are in [`nova-prover/README.md`](../../nova-prover/README.md).
 
 ---
 
