@@ -236,7 +236,7 @@ Implementation 9 sits in the **R1CS + elliptic-curve-MSM** quadrant of the foldi
 
 - **CCS/Plonkish folding (HyperNova):** generalizes folding beyond fixed-R1CS (custom gates, lookups) — relevant only if a step must mix constraint shapes.
 - **AIR folding (Cairo-style):** CPU/trace-based steps; not our model.
-- **Post-quantum lattice folding (LatticeFold, Lova, Neo, ProtogaLattice):** our Pedersen commitments are DLOG-based and break under Shor; the PQ track replaces EC-MSM with SIS/Ajtai commitments (Lova even runs on power-of-two moduli, no field arithmetic). Long-term only — it would also mean replacing our Groth16 compression (equally non-PQ), and it is tracked as Implementation 10 / item (v).
+- **Post-quantum lattice folding (LatticeFold, Lova, Neo, ProtogaLattice):** our Pedersen commitments are DLOG-based and break under Shor; the PQ track replaces EC-MSM with SIS/Ajtai commitments (Lova even runs on power-of-two moduli, no field arithmetic). Long-term only — it would also mean replacing our Groth16 compression (equally non-PQ), and it is tracked as Implementation 12 / item (v).
 - **CycleFold** (also surveyed) relaxes the full 2-cycle requirement: only the secondary curve's base field must equal the primary scalar field, and only a single scalar multiplication per fold runs on it. It is the closest published route toward in-circuit recursion *near* BLS12-381 — whether a curve over `Fr1` (e.g. Bandersnatch) instantiates it is an open research question, not scope.
 - **Memory-bounded proving** is an open engineering problem in the survey; our per-step O(step) memory design is exactly that target.
 - **ZK layer:** folding itself is not ZK, but our Groth16 compression proof *is* — zero-knowledge for the final proof comes for free, where Nova+Spartan needs a separate ZK add-on.
@@ -283,10 +283,65 @@ The bundle `.ivc.json` holds only the O(1) final relaxed instance (no per-step p
 
 </details>
 
-## Implementation 10 (Post-quantum lattice folding)
+## Implementation 10 (Constant-size Nova proofs)
 
 <details>
 <summary><b>Implementation 10 — click to expand</b></summary>
+
+> **Status:** ⏳ **Roadmap item (not started).** Implementation 9's compression proof is constant in `N` but **not in the step size**: the compression circuit reveals the full folded witness `Z` and error vector `E` as *public* inputs, so the bundle is `O(step size)`. This implementation targets **true O(1) proofs** — independent of both the step count and the step width — with a sumcheck-based final SNARK (Nova+Spartan style), and enumerates the trade-offs against the alternatives (shrink-the-step, serialization, aggregation, post-quantum).
+>
+> **Goal:** a Nova proof of ~200 B SNARK + O(1) public input (the final state), replacing the step-sized `Z`/`E` reveal with a witness-hiding, constant-size one.
+
+### Why the bundle is O(step size) — the rationale
+
+The Groth16 compression proof itself is ~200 B (`A`/`B`/`C`/`V`). Almost all the bytes are the **revealed public input** of the compression circuit: `[1, Z, u, E]` (`nova-prover/src/compression.rs`) — i.e. the full folded witness `Z` (n_wires) and error vector `E` (n_constraints). `verify_compression` must see them because it recomputes the Pedersen commitments `com(Z)`, `com(E)` natively and cross-checks them against the bundle's final instance (`nova-prover/src/lib.rs`). Hence:
+
+- **Bundle size = O(step size):** `(n_wires + n_constraints) · 32 B` binary — measured **579.6 KiB** for the 7,724-constraint step in the [benchmarks](#benchmarks--nova-ivc-implementation-8-step-chain-vs-implementation-9-nifs), independent of `N`. It scales linearly with step width (a ~700-constraint step would already be ~45 kB).
+- **This is a soundness hinge, not an oversight.** The commitments `W̄`/`Ē` are the *only* link between the compression proof and the actual folded chain: a cheating prover can always find an `E` that makes the relaxed equation `(AZ)∘(BZ) = u·(CZ) + E` hold for a fake `(x, u)`, so if the circuit does not (or the verifier cannot) check the commitments, the IVC binding collapses. Checking them *in-circuit* requires non-native G1-in-`Fr` arithmetic (~30K–190K constraints per wire — infeasible at step scale), and BLS12-381 has no curve cycle to make G1 native. That is the structural floor of the Groth16-over-`Fr` compression.
+
+### Why proof aggregation does not shrink the single Nova proof
+
+After Implementation 9, each Nova computation already produces **one** Groth16 proof. Aggregation (`groth16-prover` item (q), arkworks `groth16::aggregate_proofs`) rolls *many independent* proofs of the same circuit into one pairing check — it amortises **verifier cost across many proofs** (many users, many ownership proofs in one transaction) but does not touch the per-proof 45 kB / 580 KiB, which is the revealed `Z`/`E`, not the SNARK. Aggregation is complementary, not a substitute: it helps the "N proofs on-chain" economics, not the single-proof size.
+
+### Steps to get there — sumcheck-based final SNARK (Nova+Spartan style)
+
+The fix is to replace the Groth16 compression — which must open `Z`/`E` so the verifier can recompute the Pedersen commitments — with a **sumcheck-based SNARK that proves knowledge of a witness *opening* the commitment without revealing it**. This is the standard constant-size route on a single BLS12-381 curve (no curve cycle needed):
+
+1. **Final-relation sumcheck.** Express the relaxed-equation check `(AZ)∘(BZ) = u·(CZ) + E` as a matrix product and reduce it via multi-round sumcheck, evaluated natively in `Fr` (Spartan's R1CS→matrix reduction).
+2. **Commitment opening, not reveal.** A polynomial/linear-commitment check binds the (private) witness to the instance's `W̄`/`Ē` — the verifier never needs `Z`/`E`. A hash-based polynomial commitment keeps the whole argument pairing-free.
+3. **Reuse the fold unchanged.** `nifs.rs`, the transcript, the bundle format and the step circuits stay as-is; only `prove_compression` / `verify_compression` internals change — new module (e.g. `nova-prover/src/spartan.rs`), plus a `nova compress --sumcheck` flag with Groth16 kept as the default/fallback.
+4. **ZK comes along for free.** The current Groth16 compression reveals `Z`/`E` (it is not zero-knowledge); a sumcheck-based compression is witness-hiding by construction.
+5. **On-chain verifier.** The Aiken check moves from one pairing to a native-field sumcheck + hash-PC verifier — more operations than a pairing, but pairing-free and constant-size.
+6. **Benchmark** proof size, prover time, verifier time and on-chain cost against Implementation 9.
+
+### Quick wins that apply regardless (constant factors)
+
+- **Shrink the step.** The reveal is `∝` step size, so a finer decomposition (e.g. limb-level steps for the ed25519 scalar-mul) cuts the bytes ~5–10× with zero new crypto — the state stays public and is small (24 `Fr` for the ownership step).
+- **Serialization.** The current JSON + decimal-string encoding inflates field elements ~2.4× (77-char decimal vs 32 B compressed); binary/base64 + zstd is a free constant factor.
+- **On/off-chain split.** Only the proof + final state + a digest need to touch the ledger; `Z`/`E` go to a relayer/aggregator.
+
+### Trade-offs
+
+| Approach | Proof size | Prover | Verifier (on-chain) | ZK | Status |
+|---|---|---|---|---|---|
+| **Impl 9 Groth16 compression (as-built)** | O(step): ~580 KiB @ 7.7K step | one Groth16 proof (~3 s) | one pairing (cheapest) | No (`Z`/`E` revealed) | ✅ Shipped POC |
+| **Impl 10 sumcheck final SNARK** | **O(1)**: ~200 B + small state | higher (sumcheck + hashing rounds) | native field ops, no pairing, more ops | **Yes** | ⏳ This impl |
+| **Shrink step + binary serialization** | O(step) but ~10× smaller | unchanged | unchanged | No | ✅ Do first |
+| **Proof aggregation (item q)** | per-proof unchanged | unchanged | amortised one pairing per batch | No | Complementary |
+| **Impl 11 PQ (lattice folding)** | changes commitment; not obviously smaller | — | hash-based, heavier | — | Long-term |
+
+### Cryptographic remarks
+
+- **Q: Can we just make `Z`/`E` private and hash them inside the compression circuit?** No — a plain hash is not additively homomorphic, so it cannot replace Pedersen in the fold; and if the compression circuit does not check the commitments, soundness collapses (the error vector absorbs any discrepancy). This is exactly the tension the sumcheck-based SNARK resolves: it proves knowledge of a witness *consistent with the committed instance* without opening it.
+- **Q: Is a sumcheck-based compression a drop-in replacement?** Not a drop-in — the Aiken verifier and the compression prover change, but the fold, transcript, bundle format and step circuits are untouched. It is the pairing-free, single-curve route to constant-size Nova proofs (Spartan, and the `Nova+Spartan` design mentioned in the Implementation 9 section).
+- **Q: What about the post-quantum track?** The PQ track (now Implementation 12) replaces the Pedersen commitment itself with an SIS/Ajtai lattice commitment — a different axis. The sumcheck-based compression is commitment-agnostic and compatible with either.
+
+</details>
+
+## Implementation 12 (Post-quantum lattice folding)
+
+<details>
+<summary><b>Implementation 12 — click to expand</b></summary>
 
 > **Status:** 🔨 **Under the work.** Post-quantum counterpart of Implementation 9, tracked as **Pending item (v)** below. Implementation 9's folding is *commitment-agnostic* — swapping its Pedersen commitments (DLOG-based, broken by Shor) for an **SIS/Ajtai lattice commitment** yields a post-quantum folding scheme with the same IVC structure (the LatticeFold / Lova / ProtogaLattice line of the folding survey).
 >
@@ -352,7 +407,7 @@ This PQ track is not hypothetical — two production-grade references have commi
   1. **Document the risk** (this item) and keep the classical stack — quantum-safe migration is a research/roadmap question, not today's blocker (consistent with the existing long-term item "Evaluate FHE-based selective disclosure for quantum resistance").
   2. **Optional hybrid** for high-value use cases: dual proof (Groth16 + lattice IVC) verified as an OR — the survey's "hybrid elliptic-curve–lattice" open problem; doubles cost but hedges the transition.
   3. **If quantum timelines shorten:** switch the IVC layer to a lattice folding (Lova first) + PQ compression + hash-based on-chain verifier, re-arithmetizing the step circuits for a small field.
-  4. **STARK/zkVM is the parallel PQ track** — see the industry context in [Implementation 10](#implementation-10-post-quantum-lattice-folding) (§Industry context — CIP-1242 (ZKPoSP) and Zcash's quantum-readiness roadmap): hash-based proofs are the other live PQ family, and a future PQ chain may pick lattice folding *or* a STARK/zkVM backend — both converge on a hash-based on-chain verifier.
+  4. **STARK/zkVM is the parallel PQ track** — see the industry context in [Implementation 12](#implementation-12-post-quantum-lattice-folding) (§Industry context — CIP-1242 (ZKPoSP) and Zcash's quantum-readiness roadmap): hash-based proofs are the other live PQ family, and a future PQ chain may pick lattice folding *or* a STARK/zkVM backend — both converge on a hash-based on-chain verifier.
 - **Status:** ⏳ **Research direction.** Post-quantum counterpart of the now-shipped Implementation 9; not committed.
 - **Reference:** LatticeFold (Boneh, Chen, eprint 2024/257), Lova (Fenzi et al., ASIACRYPT 2024, eprint 2024/1964), ProtogaLattice (eprint 2026/1317), Sakwa et al. survey §4 (quantum-secure folding), [SSRN 5293078](https://doi.org/10.2139/ssrn.5293078).
 
