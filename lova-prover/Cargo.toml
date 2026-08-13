@@ -1,0 +1,8 @@
+[package]
+name = "lova-prover"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Lattice-based (post-quantum) IVC folding prover — Lova research track"
+
+[dependencies]
