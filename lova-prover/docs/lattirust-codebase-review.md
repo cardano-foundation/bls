@@ -9,7 +9,7 @@ A source-level review of the authors' implementation behind the Lova paper ([epr
 
 Review was done against local clones (`/tmp/opencode/{lattirust,lova}`), compiled and tested with the pinned `nightly-2025-03-10` toolchain, and cross-checked against `docs/lova-folding-design.md`.
 
-> **Status:** 🔬 **Research / evaluation.** Findings for the post-quantum track (`nova-prover` Implementation 12 / Pending item (v)). No code from lattirust has been copied into this repo — everything below is a candidate list to port or adapt.
+> **Status:** 🔬 **Research / evaluation.** Findings for the post-quantum track (this crate, the PQ counterpart of `nova-prover`'s Impl 9). No code from lattirust has been copied into this repo — everything below is a candidate list to port or adapt.
 
 ## Repository layout
 
