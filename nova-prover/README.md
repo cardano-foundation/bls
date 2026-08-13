@@ -59,6 +59,55 @@ The complete Nova explanation — folding mechanics, comparison with recursive
 arguments (Halo2, CIRCOM-recursive), design decisions for our stack — is in
 [`docs/nova-folding-design.md`](docs/nova-folding-design.md).
 
+## High-level data flow (setup → folding → verification)
+
+The scheme has four phases: **setup**, **per-step instances**, the **folding loop**, and **final verification**. One fold consumes two Relaxed-R1CS instances `(U₁, U₂)` and produces one `(U′, W′)`; the verifier folds the instance commitments in O(1) per step, the prover in O(step size) per step. The diagram shows the Implementation 9 NIFS flow (`nova fold --nifs` → `compress` → `verify`).
+
+```mermaid
+flowchart TB
+    subgraph SETUP["Setup — one-time, per step shape; only the compression circuit needs a ceremony (Groth16 keys)"]
+        S1["step circuit: R1CS (A, B, C) over BLS12-381 Fr, n_pub_in == n_pub_out<br/>e.g. 7,724 constraints / step (cardano_ed25519_ownership_nova)"]
+        S2["compression circuit (2·n_constraints, built in Rust — nova-prover/src/compression.rs)"]
+        S3["trusted-setup ceremony-dev → compression.pk / compression.vk<br/>(reusable for any step shape)"]
+        S4["Pedersen commitment bases — deterministic hash-to-scalar, no trusted setup<br/>(nova-prover/src/nifs.rs)"]
+    end
+
+    subgraph STEP["Each step of the IVC chain"]
+        W["step witness W_i — private wires + public state<br/>state_{i+1} = f(step_i, state_i)"]
+        INS["instance_i = (x_i, u_i = 1, W̄_i = com(W_i), Ē_i = com(0))"]
+        W --> INS
+    end
+
+    subgraph FOLD["Folding loop — N folds, 2 instances → 1 (NIFS, transparent, no proving key)"]
+        subgraph P["Prover (nifs.rs)"]
+            direction TB
+            PM["fold running instance U_acc and new step instance U_i"]
+            PR1["cross term T = (AZ₁)∘(BZ₂) + (AZ₂)∘(BZ₁) − u₁(CZ₂) − u₂(CZ₁) → com(T)"]
+            PR2["Fiat–Shamir challenge r = H(fold-prefix ‖ acc ‖ U_acc ‖ U_i)<br/>(domain-separated BLAKE2b512)"]
+            PR3["fold witness: Z ← Z₁ + r·Z₂, u ← u₁ + r·u₂, E ← E₁ + r·E₂ + r·T"]
+            PM --> PR1 --> PR2 --> PR3
+        end
+        subgraph V["Verifier (verifier.rs) — O(1) per fold"]
+            direction TB
+            VM["read commitments W̄, Ē and the cross-term commitment com(T)"]
+            VR1["squeeze the same challenge r from the domain-separated transcript"]
+            VR2["fold instance: W̄ ← W̄₁ + r·W̄₂, Ē ← Ē₁ + r·Ē₂ + r·com(T)"]
+            VM --> VR1 --> VR2
+        end
+    end
+
+    subgraph FIN["Final verification (compression.rs + nova verify)"]
+        F1["compression circuit checks the relaxed equation (AZ)∘(BZ) = u(CZ) + E for the final U"]
+        F2["one Groth16 compression proof → one pairing check"]
+        F3["native com(W)/com(E) MSM re-commitment cross-check + state chain / transcript"]
+        F1 --> F2 --> F3
+    end
+
+    SETUP --> STEP --> FOLD
+    P -. "proof transcript (Fiat–Shamir)" .-> V
+    FOLD --> FIN
+```
+
 ## Implementation 8 (Nova IVC + compression SNARK)
 
 <details>
@@ -236,7 +285,7 @@ Implementation 9 sits in the **R1CS + elliptic-curve-MSM** quadrant of the foldi
 
 - **CCS/Plonkish folding (HyperNova):** generalizes folding beyond fixed-R1CS (custom gates, lookups) — relevant only if a step must mix constraint shapes.
 - **AIR folding (Cairo-style):** CPU/trace-based steps; not our model.
-- **Post-quantum lattice folding (LatticeFold, Lova, Neo, ProtogaLattice):** our Pedersen commitments are DLOG-based and break under Shor; the PQ track replaces EC-MSM with SIS/Ajtai commitments (Lova even runs on power-of-two moduli, no field arithmetic). Long-term only — it would also mean replacing our Groth16 compression (equally non-PQ), and it is tracked as Implementation 12 / item (v).
+- **Post-quantum lattice folding (LatticeFold, Lova, Neo, ProtogaLattice):** our Pedersen commitments are DLOG-based and break under Shor; the PQ track replaces EC-MSM with SIS/Ajtai commitments (Lova even runs on power-of-two moduli, no field arithmetic). Long-term only — it would also mean replacing our Groth16 compression (equally non-PQ); the track lives in [`lova-prover`](../lova-prover/README.md).
 - **CycleFold** (also surveyed) relaxes the full 2-cycle requirement: only the secondary curve's base field must equal the primary scalar field, and only a single scalar multiplication per fold runs on it. It is the closest published route toward in-circuit recursion *near* BLS12-381 — whether a curve over `Fr1` (e.g. Bandersnatch) instantiates it is an open research question, not scope.
 - **Memory-bounded proving** is an open engineering problem in the survey; our per-step O(step) memory design is exactly that target.
 - **ZK layer:** folding itself is not ZK, but our Groth16 compression proof *is* — zero-knowledge for the final proof comes for free, where Nova+Spartan needs a separate ZK add-on.
@@ -328,92 +377,15 @@ The fix is to replace the Groth16 compression — which must open `Z`/`E` so the
 | **Impl 10 sumcheck final SNARK** | **O(1)**: ~200 B + small state | higher (sumcheck + hashing rounds) | native field ops, no pairing, more ops | **Yes** | ⏳ This impl |
 | **Shrink step + binary serialization** | O(step) but ~10× smaller | unchanged | unchanged | No | ✅ Do first |
 | **Proof aggregation (item q)** | per-proof unchanged | unchanged | amortised one pairing per batch | No | Complementary |
-| **Impl 12 PQ (lattice folding)** | changes commitment; not obviously smaller | — | hash-based, heavier | — | Long-term |
+| **PQ lattice folding** ([lova-prover](../lova-prover/README.md)) | changes commitment; not obviously smaller | — | hash-based, heavier | — | Long-term |
 
 ### Cryptographic remarks
 
 - **Q: Can we just make `Z`/`E` private and hash them inside the compression circuit?** No — a plain hash is not additively homomorphic, so it cannot replace Pedersen in the fold; and if the compression circuit does not check the commitments, soundness collapses (the error vector absorbs any discrepancy). This is exactly the tension the sumcheck-based SNARK resolves: it proves knowledge of a witness *consistent with the committed instance* without opening it.
 - **Q: Is a sumcheck-based compression a drop-in replacement?** Not a drop-in — the Aiken verifier and the compression prover change, but the fold, transcript, bundle format and step circuits are untouched. It is the pairing-free, single-curve route to constant-size Nova proofs (Spartan, and the `Nova+Spartan` design mentioned in the Implementation 9 section).
-- **Q: What about the post-quantum track?** The PQ track (now Implementation 12) replaces the Pedersen commitment itself with an SIS/Ajtai lattice commitment — a different axis. The sumcheck-based compression is commitment-agnostic and compatible with either.
+- **Q: What about the post-quantum track?** The PQ track (now in [`lova-prover`](../lova-prover/README.md)) replaces the Pedersen commitment itself with an SIS/Ajtai lattice commitment — a different axis. The sumcheck-based compression is commitment-agnostic and compatible with either.
 
 </details>
-
-## Implementation 12 (Post-quantum lattice folding)
-
-<details>
-<summary><b>Implementation 12 — click to expand</b></summary>
-
-> **Status:** 🔨 **Under the work.** Post-quantum counterpart of Implementation 9, tracked as **Pending item (v)** below. Implementation 9's folding is *commitment-agnostic* — swapping its Pedersen commitments (DLOG-based, broken by Shor) for an **SIS/Ajtai lattice commitment** yields a post-quantum folding scheme with the same IVC structure (the LatticeFold / Lova / ProtogaLattice line of the folding survey).
->
-> **Goal:** a lattice-based IVC chain — lattice folding + PQ compression SNARK + hash-based on-chain verifier — as the long-term quantum-resistance path.
-
-### What gets adapted (full detail in [Pending item (v)](#pending))
-
-1. **Folding layer:** replace the Pedersen commitment with an SIS/Ajtai commitment (Lova's power-of-two modulus q=2⁶⁴ is the easiest fit; the folding math is otherwise unchanged).
-2. **Compression:** Groth16 is equally non-PQ, so the compression SNARK must also go lattice/hash-based (sumcheck/GKR with hash- or lattice-polynomial commitments).
-3. **On-chain verifier:** replace the Aiken Groth16 verifier with a hash-based (STARK-like) verifier — heavier, trading gas for PQ security.
-4. **Steps:** re-arithmetize the step circuits for a small field (circom already supports `--prime goldilocks`).
-
-### Candidate lattice schemes (from [Pending item (v)](#pending))
-
-| Scheme | Assumption | Notes |
-|---|---|---|
-| LatticeFold (Boneh–Chen 2024) | Module-SIS | Sumcheck-heavy → large verifier circuits, bad per-step overhead |
-| **Lova** (ASIACRYPT 2024) | Unstructured SIS, q=2⁶⁴ | Easiest to add; no finite-field modular arithmetic — [exact flow in `lova-prover`](../lova-prover/README.md) |
-| ProtogaLattice (2026) | SIS, constant-round | Algebraic folding, no sumcheck; supports CCS/Plonkish steps |
-
-**Reality check:** a chain is only as PQ as its weakest link, so partial PQ buys nothing — the compression SNARK must go PQ too. A hybrid dual proof (Groth16 OR lattice IVC) hedges the transition at double cost. Full status and trade-offs are in **item (v)**.
-
-### Lova in detail (moved to `lova-prover`)
-
-The Lova walkthrough — exact flow (setup → verification) with overlap vs Impl 10 at every step, the trustless analysis, and the concrete-efficiency caveats — now lives in its own crate: [`lova-prover/README.md`](../lova-prover/README.md) and [`lova-prover/docs/lova-folding-design.md`](../lova-prover/docs/lova-folding-design.md). Bottom line: **Lova is fully transparent/trustless** — public random matrix `A`, public-coin Fiat–Shamir, unstructured SIS; no ceremony, trapdoor, or SRS — but the authors report *large* concrete proofs (dozens of MB) and prover times &gt; 10 min, so it is a research foundation rather than a production scheme.
-
-### Industry context — CIP-1242 (ZKPoSP) and Zcash's quantum-readiness roadmap
-
-This PQ track is not hypothetical — two production-grade references have committed to exactly the staged posture item (v) recommends (document the risk, keep the classical stack as the default, hedge, migrate when standards mature).
-
-- **CIP-1242 — ZKPoSP, post-quantum ZK signatures for Cardano HD wallets** (Botta, Pospieszalski, Ragnoli, Ranvier, IACR ePrint [2026/1508](https://eprint.iacr.org/2026/1508); CIP draft in [cardano-foundation/CIPs PR 1242](https://github.com/cardano-foundation/CIPs/pull/1242)). Replaces/augments the classical Ed25519 ownership witness with a ZK proof that a public key was derived from a seed along the Cardano BIP-32-Ed25519 path, using a **STARK** (RISC Zero zkVM). Two-phase deployment: Phase 1 verifies proofs **off-chain** (wallets, exchanges, indexers) with no ledger change; Phase 2 adds a **native STARK verifier** on-chain, gated on proof size dropping from ~219 KB toward a few KB. The CIP lists this repo as its classical comparison point — efficient, but pairing-based and not quantum-safe — "useful as a performance bound and for a possible **hybrid**" with the STARK path.
-- **Zcash — committed three-step quantum-readiness path** (CoinDesk Research, June 2026). (1) Quantum recoverability (ZIP 2005, Ironwood pool) → (2) ML-KEM (FIPS 203) + Tachyon to close the harvest-and-decrypt window → (3) a fully post-quantum pool with **hybrid classical+PQ signatures** and "hash-based or STARK-style proof hardening" of Halo2. Zcash explicitly defers the SNARK swap: PQ proofs are "much larger" and the primitives are "improving almost weekly" — the same Phase-1-then-Phase-2 discipline as ZKPoSP.
-
-**What this means for item (v):** both references validate the "keep the classical stack, hedge, migrate later" posture, and they broaden the PQ target **beyond lattice folding**. Hash-based / STARK-style proof systems (FRI-STARK, zkVMs like RISC Zero, Halo2-with-FRI) are the other live PQ track — transparent (no trusted setup) and natively post-quantum, at the cost of large proofs. Lattice folding and a STARK/zkVM backend are complementary candidates for a future PQ chain; in both cases the on-chain verifier ends up hash-based.
-
-### Cryptographic remarks
-
-- **Q: Is replacing Groth16's pairing-based compression SNARK with a sumcheck/GKR-based PQ SNARK a drop-in replacement, or does it require a fundamentally different verification stack?** It is not a drop-in replacement. Groth16 verification is a single pairing check (~2 ms on Aiken/Plutus). A hash-based or sumcheck-based verifier is significantly heavier (hundreds of field operations per round, multiple rounds). The on-chain verification cost will increase, trading gas for PQ security. The Aiken verifier would need a complete rewrite, and the Plutus V3 budget may not accommodate a complex hash-based verification circuit.
-
-- **Q: Does the hybrid dual proof (Groth16 OR lattice IVC) actually provide meaningful PQ security, or is it just a hedge that doubles cost?** The hybrid provides meaningful PQ security only if the lattice IVC path is fully implemented and verified. A dual proof where only one path is PQ-secure and the other is classically secure does not raise the overall security level — an attacker who breaks the classical path still forges proofs via the Groth16 path. The hybrid is only useful as a transition mechanism during a migration period, not as a permanent solution.
-
-- **Q: If partial PQ (folding only) buys nothing, should we commit to the full PQ stack or not start down this path at all?** The current recommendation in the README is correct: document the risk and keep the classical stack as the default. The PQ path should only be pursued if quantum timelines shorten significantly. However, the design work for the PQ compression SNARK (sumcheck/GKR with lattice commitments) should be started early enough to inform the classical stack's design decisions — for example, choosing a compression circuit structure that can be adapted to a hash-based verifier later.
-
-</details>
-
-## Pending
-
-### (v) Post-quantum path — lattice folding as the PQ counterpart of Implementation 9
-
-- **Why:** every component of the current stack is broken by Shor's algorithm once large-scale quantum computing arrives — Groth16 is pairing-based (BLS12-381), and the Nova folding commitments are Pedersen over G1 (DLOG-based). Both Implementation 8 and Implementation 9 are classically secure only.
-- **The structural fact that makes a PQ adaptation feasible:** Nova's folding scheme is *commitment-agnostic* — it works with **any additively-homomorphic commitment** with O(1)-sized commitments; Pedersen (EC-MSM) is just the standard instantiation. Swapping in an **SIS/Ajtai lattice commitment** yields a post-quantum folding scheme with the same IVC structure — this is exactly the LatticeFold / Lova line covered in the folding survey (§4).
-- **Candidate instantiations:**
-
-  | Scheme | Assumption | Notes |
-  |---|---|---|
-  | LatticeFold (Boneh–Chen 2024) | Module-SIS (MSIS) | First lattice folding; sumcheck-heavy → large verifier circuits, bad for per-step recursion overhead |
-  | **Lova** (ASIACRYPT 2024) | Unstructured SIS | Power-of-two modulus q=2⁶⁴, no finite-field modular arithmetic at all, simple linear algebra — easiest to add to our Rust repo; decompose-and-fold + exact Euclidean norm proof |
-  | ProtogaLattice (2026) | SIS, constant-round | Protogalaxy-style algebraic folding, no sumcheck, ~1 RO call + range proofs; supports general high-degree relations (→ CCS/Plonkish steps) |
-  | Neo / SuperNeo / Cyclo | ring-SIS / MSIS | Newer variants; simpler arithmetic, larger proofs |
-
-- **What we would adapt (proposed shape):**
-  1. **Folding layer:** replace the Pedersen commitment in the NIFS module with an SIS/Ajtai commitment (Lova-style power-of-two modulus q=2⁶⁴ is the most hardware-friendly; folding math is otherwise unchanged).
-  2. **Compression:** our Groth16 compression proof is equally non-PQ, so a PQ chain needs a PQ compression SNARK (sumcheck/GKR-based, hash- or lattice-polynomial-commitment based). The one-pairing verifier becomes a hash/sumcheck verifier.
-  3. **On-chain verifier:** the Aiken Groth16 verifier is replaced by a hash-based (STARK-like) verifier — on-chain verification gets heavier, trading gas/cost for PQ security.
-  4. **Steps:** lattice folding runs over small moduli/rings, not a 381-bit prime. Our Circom steps must be re-arithmetized for a small field — circom already supports `--prime goldilocks` (a 64-bit prime), and small fields are *faster* (Lova's design exploits this).
-- **Near-term reality check:** a chain is only as PQ as its weakest link, so partial PQ (e.g., folding only) buys nothing — the compression SNARK must also go PQ. Realistic posture:
-  1. **Document the risk** (this item) and keep the classical stack — quantum-safe migration is a research/roadmap question, not today's blocker (consistent with the existing long-term item "Evaluate FHE-based selective disclosure for quantum resistance").
-  2. **Optional hybrid** for high-value use cases: dual proof (Groth16 + lattice IVC) verified as an OR — the survey's "hybrid elliptic-curve–lattice" open problem; doubles cost but hedges the transition.
-  3. **If quantum timelines shorten:** switch the IVC layer to a lattice folding (Lova first) + PQ compression + hash-based on-chain verifier, re-arithmetizing the step circuits for a small field.
-  4. **STARK/zkVM is the parallel PQ track** — see the industry context in [Implementation 12](#implementation-12-post-quantum-lattice-folding) (§Industry context — CIP-1242 (ZKPoSP) and Zcash's quantum-readiness roadmap): hash-based proofs are the other live PQ family, and a future PQ chain may pick lattice folding *or* a STARK/zkVM backend — both converge on a hash-based on-chain verifier.
-- **Status:** ⏳ **Research direction.** Post-quantum counterpart of the now-shipped Implementation 9; not committed.
-- **Reference:** LatticeFold (Boneh, Chen, eprint 2024/257), Lova (Fenzi et al., ASIACRYPT 2024, eprint 2024/1964), ProtogaLattice (eprint 2026/1317), Sakwa et al. survey §4 (quantum-secure folding), [SSRN 5293078](https://doi.org/10.2139/ssrn.5293078).
 
 ## Benchmarks — Nova IVC (Implementation 8 step-chain vs Implementation 9 NIFS)
 
@@ -474,15 +446,12 @@ cargo run --release --bin benchmark_nova -- --nifs --circuit <step.r1cs> --steps
 3. Abhiram Kothapalli, Srinath Setty. *SuperNova: Proving Universal Machine Executions without Universal Circuits.* IACR ePrint [2022/1758](https://eprint.iacr.org/2022/1758).
 4. Abhiram Kothapalli, Srinath Setty. *CycleFold: Folding-Scheme-Based Recursive Arguments over a Cycle of Elliptic Curves.* IACR ePrint [2023/1192](https://eprint.iacr.org/2023/1192).
 5. Abhiram Kothapalli, Srinath Setty. *HyperNova: Recursive Arguments for Customizable Constraint Systems.* CRYPTO 2024. IACR ePrint [2023/573](https://eprint.iacr.org/2023/573).
-6. Dan Boneh, Binyi Chen. *LatticeFold: A Lattice-based Folding Scheme and its Applications to Succinct Proof Systems.* IACR ePrint [2024/257](https://eprint.iacr.org/2024/257).
-7. Giacomo Fenzi, Christian Knabenhans, Ngoc Khanh Nguyen, Duc Tu Pham. *Lova: Lattice-Based Folding Scheme from Unstructured Lattices.* ASIACRYPT 2024. IACR ePrint [2024/1964](https://eprint.iacr.org/2024/1964).
-8. Wilson Nguyen, Srinath Setty. *Neo: Lattice-based Folding Scheme for CCS over Small Fields and Pay-per-Bit Commitments.* IACR ePrint [2025/294](https://eprint.iacr.org/2025/294).
-9. David Balbás, Anca Nitulescu, Maxime Plançon. *ProtogaLattice: Constant-Round Lattice-based Folding for General Polynomial Relations.* IACR ePrint [2026/1317](https://eprint.iacr.org/2026/1317).
-10. Cyprian Omukhwaya Sakwa, Anyembe Andrew Omala, Fagen Li. *A Survey of Folding-Based Zero-Knowledge Proofs.* Information Sciences 724 (2026) 122698. DOI [10.1016/j.ins.2025.122698](https://doi.org/10.1016/j.ins.2025.122698); [SSRN 5293078](https://doi.org/10.2139/ssrn.5293078).
-11. Ryan Lavin, Xuekai Liu, Hardhik Mohanty, Logan Norman, Giovanni Zaarour, Bhaskar Krishnamachari. *A Survey on the Applications of Zero-Knowledge Proofs.* arXiv [2408.00243](https://arxiv.org/abs/2408.00243) (2024).
-12. Sean Bowe, Jack Grigg, Daira Hopwood. *Recursive Proof Composition without a Trusted Setup* (Halo / Halo2). IACR ePrint [2019/1021](https://eprint.iacr.org/2019/1021).
-13. Liam Eagen. *Bulletproofs++: Next Generation Confidential Transactions Based on Proofs of Statement and Knowledge.* IACR ePrint [2022/510](https://eprint.iacr.org/2022/510).
-14. Vincenzo Botta, Michał Pospieszalski, Emanuele Ragnoli, John Ranvier. *ZKPoSP: Post-Quantum Zero-Knowledge Proofs for Hierarchical Deterministic Wallets.* IACR ePrint [2026/1508](https://eprint.iacr.org/2026/1508); CIP draft in [cardano-foundation/CIPs PR 1242](https://github.com/cardano-foundation/CIPs/pull/1242).
+6. Cyprian Omukhwaya Sakwa, Anyembe Andrew Omala, Fagen Li. *A Survey of Folding-Based Zero-Knowledge Proofs.* Information Sciences 724 (2026) 122698. DOI [10.1016/j.ins.2025.122698](https://doi.org/10.1016/j.ins.2025.122698); [SSRN 5293078](https://doi.org/10.2139/ssrn.5293078).
+7. Ryan Lavin, Xuekai Liu, Hardhik Mohanty, Logan Norman, Giovanni Zaarour, Bhaskar Krishnamachari. *A Survey on the Applications of Zero-Knowledge Proofs.* arXiv [2408.00243](https://arxiv.org/abs/2408.00243) (2024).
+8. Sean Bowe, Jack Grigg, Daira Hopwood. *Recursive Proof Composition without a Trusted Setup* (Halo / Halo2). IACR ePrint [2019/1021](https://eprint.iacr.org/2019/1021).
+9. Liam Eagen. *Bulletproofs++: Next Generation Confidential Transactions Based on Proofs of Statement and Knowledge.* IACR ePrint [2022/510](https://eprint.iacr.org/2022/510).
+
+For the post-quantum lattice-folding literature (LatticeFold, Lova, Neo, ProtogaLattice) and the quantum-readiness track (ZKPoSP/CIP-1242, Zcash/Tachyon), see [`lova-prover/README.md`](../lova-prover/README.md) and [`lova-prover/docs/lova-folding-design.md`](../lova-prover/docs/lova-folding-design.md).
 
 ### Software, specifications, and ceremonies
 
@@ -491,9 +460,6 @@ cargo run --release --bin benchmark_nova -- --nifs --circuit <step.r1cs> --steps
 - [Sonobe](https://github.com/privacy-scaling-explorations/sonobe) — experimental arkworks-based folding-schemes library (Nova, CycleFold, HyperNova, ProtoGalaxy).
 - [Halo2 (Zcash)](https://github.com/zcash/halo2) — PLONKish recursive proof system.
 - [arkworks](https://arkworks.rs/) — Rust ecosystem for pairing-based cryptography (R1CS, Groth16, FFT, MSM).
-- [RISC Zero zkVM](https://dev.risczero.com/) — STARK proof system over a Rust zkVM; the proving backend used by CIP-1242 (ZKPoSP).
-- [Tachyon (Kroma)](https://github.com/kroma-network/tachyon) — modular ZK backend with a Halo2 + FRI polynomial-commitment scheme and GPU acceleration; the Zcash quantum-readiness track.
-- [CoinDesk Research, "Building the Zcash Machine: Tachyon and Quantum Readiness"](https://www.coindesk.com/research/building-the-zcash-machine-tachyon-and-quantum-readiness) — Zcash's three-step path to post-quantum security (June 2026).
 
 ---
 
