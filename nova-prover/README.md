@@ -328,7 +328,7 @@ The fix is to replace the Groth16 compression — which must open `Z`/`E` so the
 | **Impl 10 sumcheck final SNARK** | **O(1)**: ~200 B + small state | higher (sumcheck + hashing rounds) | native field ops, no pairing, more ops | **Yes** | ⏳ This impl |
 | **Shrink step + binary serialization** | O(step) but ~10× smaller | unchanged | unchanged | No | ✅ Do first |
 | **Proof aggregation (item q)** | per-proof unchanged | unchanged | amortised one pairing per batch | No | Complementary |
-| **Impl 11 PQ (lattice folding)** | changes commitment; not obviously smaller | — | hash-based, heavier | — | Long-term |
+| **Impl 12 PQ (lattice folding)** | changes commitment; not obviously smaller | — | hash-based, heavier | — | Long-term |
 
 ### Cryptographic remarks
 
@@ -359,10 +359,42 @@ The fix is to replace the Groth16 compression — which must open `Z`/`E` so the
 | Scheme | Assumption | Notes |
 |---|---|---|
 | LatticeFold (Boneh–Chen 2024) | Module-SIS | Sumcheck-heavy → large verifier circuits, bad per-step overhead |
-| **Lova** (ASIACRYPT 2024) | Unstructured SIS, q=2⁶⁴ | Easiest to add; no finite-field modular arithmetic |
+| **Lova** (ASIACRYPT 2024) | Unstructured SIS, q=2⁶⁴ | Easiest to add; no finite-field modular arithmetic — [exact flow below](#lova-in-detail--exact-flow-with-overlap-vs-impl-10) |
 | ProtogaLattice (2026) | SIS, constant-round | Algebraic folding, no sumcheck; supports CCS/Plonkish steps |
 
 **Reality check:** a chain is only as PQ as its weakest link, so partial PQ buys nothing — the compression SNARK must go PQ too. A hybrid dual proof (Groth16 OR lattice IVC) hedges the transition at double cost. Full status and trade-offs are in **item (v)**.
+
+### Lova in detail — exact flow, with overlap vs Impl 10
+
+Source: *Lova: Lattice-Based Folding Scheme from Unstructured Lattices* (Fenzi, Knabenhans, Nguyen, Pham — ASIACRYPT 2024, [eprint 2024/1964](https://eprint.iacr.org/2024/1964); official Rust implementation in [lattirust/lova](https://github.com/lattirust/lova), built on the authors' [lattirust](https://github.com/cknabs/lattirust) library). Every step below is annotated with how it overlaps with / diverges from **Impl 10** (BLS12-381 Nova folding + sumcheck final SNARK).
+
+1. **Setup — transparent.** Sample a uniformly random matrix `A` over `Z_q` with `q = 2^64` (power-of-two, no field library needed) and fix norm parameters (witness chunk size `B`, digit base `b`, bounds `β`).
+   - *Overlap w/ Impl 10:* both are setup-free/trustless — our Pedersen basis is already derived deterministically from a fixed seed; no ceremony in either.
+   - *Discrepancy:* Lova uses `A·s mod 2^64` (Ajtai commitment, integer arithmetic, no inversions); Impl 10 uses Pedersen in G1 over BLS12-381 (DLOG-based).
+
+2. **Arithmetization.** The step function becomes relaxed R1CS over `Z_{2^64}`: `(A∘B)·Z = u·(C·Z) + E`, `Z = (W, x, u)`, with the witness `W` split into chunks of size `B` and the slack `E` written in base-`b` digits `E = Σ b^i·E_i`, each digit entry bounded by `b`.
+   - *Overlap:* identical relaxed-R1CS shape as Nova/Impl 10 — same `(u, E)` relaxation trick.
+   - *Discrepancy:* Lova additionally enforces **norm bounds** (chunked witness, digit-decomposed error) because an SIS commitment only binds short vectors — Nova/Impl 10 has no norm requirement, so our existing circom/2^85-limb step circuits would need a full re-arithmetization to `Z_{2^64}` bounded-norm constraints. Impl 10 keeps the existing BLS12-381 circuits unchanged.
+
+3. **Per-step instances.** Each step `i` produces a non-relaxed instance `(u=1, E=0)` with witness `W_i`.
+   - *Overlap:* same as Nova/Impl 10.
+
+4. **Fold (prover).** For a public-coin challenge `r` (drawn from a bounded range `[0, R)` via Fiat–Shamir): `Z3 = Z1 + r·Z2`, `u3 = u1 + r·u2`, `E3 = E1 + r·E2 + r·T`, where `T` is the cross term `(A·Z1)∘(B·Z2) + (A·Z2)∘(B·Z1) − u1·(C·Z2) − u2·(C·Z1)` computed by the prover only. The prover then **re-chunks** `W3` and **re-decomposes** `E3` into base-`b` digits so the committed norm bounds stay constant.
+   - *Overlap:* identical fold equation and Fiat–Shamir structure as Impl 10; the verifier's commitment update is O(1) per fold in both.
+   - *Discrepancy (the core difference):* the cross term `T` has entries ~`β·poly(n)`, so without re-decomposition the error norm would grow ~quadratically per fold and quickly exceed what SIS commits to — Lova's digit/chunk machinery is exactly what prevents this, at the cost of larger prover work and instance data (`O(#digits)` per fold). Pedersen commitments (Impl 10) have no norm constraint, so Nova's plain `E` folding needs no decomposition.
+
+5. **IVC output.** After `N` steps: final relaxed instance `U_final`, final witness `(W_final, E_final)`, and the transcript of all fold challenges.
+   - *Overlap:* same bundle shape as Impl 10's folded instance + transcript.
+
+6. **Verification.** (a) Re-check the transcript — each `r_i = Fiat–Shamir(transcript)` — in `O(N·δ)` small ops; (b) plug the **revealed** final witness into the relaxed equation and check all norm bounds (`‖E_final‖∞ ≤ β`, each `W` chunk ≤ `B`) — `O(|C|)`. No SNARK needed for the base IVC.
+   - *Overlap:* final check cost `O(|circuit|)` mirrors Impl 10's native re-check of `com(Z)`/`com(E)`; both avoid per-step Groth16.
+   - *Discrepancy:* Lova's verifier must replay the whole `O(N)` transcript and the final **witness is public** — same "reveal-the-witness" limitation as our Impl 9 (with a norm-bound check instead of a Pedersen re-commit). Impl 10's sumcheck final SNARK instead proves knowledge of the witness, giving an O(1), witness-hiding proof.
+
+7. **Succinctness (optional).** To get `O(1)` proofs, Lova appends a transparent lattice/hash-based final SNARK ("folding the verifier") — the same role Impl 10's sumcheck + hash-PC compression plays.
+   - *Overlap:* this is conceptually exactly Impl 10's final argument — sumcheck family, transparent, pairing-free verifier. The Impl 10 compression design (folding-transcript handling, hash-based polynomial commitment) carries over almost unchanged.
+   - *Discrepancy:* Lova's final argument runs over `Z_{2^64}` with a lattice/hash PC; Impl 10's runs over `Fr`. Impl 10 reuses the existing NIFS transcript and commitments; Lova's final SNARK must additionally handle the chunk/digit commitments of the final instance.
+
+**Is Lova trustless?** **Yes** — it is fully transparent. Concretely: the only setup is sampling a uniformly random matrix `A` from public randomness (no secret, no trapdoor, no ceremony, no SRS); folding and the final SNARK are public-coin via Fiat–Shamir; soundness rests on the unstructured SIS assumption (post-quantum). No entity ever holds secret setup material. Caveats to keep honest: it is *transparent*, not *verified-cryptographically-forever* — trust in SIS parameters is younger than for Groth16-era curves, and `q = 2^64` SIS parameters are non-standard vs. deployed lattice schemes (Kyber/Dilithium), so they want extra scrutiny. By contrast our Impl 8/9 Groth16 compression requires a (single-party) trusted ceremony; Impl 10's sumcheck swap removes that ceremony, and Impl 12/Lova removes both the ceremony and the DLOG/Shor vulnerability.
 
 ### Industry context — CIP-1242 (ZKPoSP) and Zcash's quantum-readiness roadmap
 
