@@ -82,7 +82,7 @@ Succinct ZK proof (~100-110KB)
 | **ZK** | ✅ Built-in | ❌ Not yet |
 | **Maturity** | Implemented (LaZer) | Research only |
 
-## Relevance to lova-prover
+## Relevance to lattice-prover (Lova implementation)
 
 ### Why This Matters
 

@@ -427,7 +427,7 @@ Nova-based Incremental Verifiable Computation (IVC) splits a long computation in
 
 The Nova IVC command-line interface is [here](./clis/nova/) (`clis/nova`, `nova params / ceremony / fold / verify`), with the underlying IVC logic in the [`nova-prover`](./nova-prover/) crate, which also holds the design doc, the Relaxed-R1CS folding + compression SNARK roadmap, and the benchmarks. The steps reuse the classical Groth16 stack ([`groth16-prover`](./groth16-prover/)).
 
-The post-quantum research track — lattice-based folding (Lova) as the PQ counterpart of the Nova stack — lives in the [`lova-prover`](./lova-prover/) crate (findings, design, and sources; no code yet).
+The post-quantum research track — lattice-based folding as the PQ counterpart of the Nova stack — lives in the [`lattice-prover`](./lattice-prover/) crate (findings, design, and sources; no code yet). Lova is the first implementation, with LatticeFold, ProtogaLattice, and IBM Toolkit approaches planned.
 
 <details>
 <summary><b>Simplest end-to-end workflow (click to expand)</b></summary>
