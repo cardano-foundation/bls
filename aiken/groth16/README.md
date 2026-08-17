@@ -448,6 +448,46 @@ Whether your circuit is 3 constraints or 3 million constraints, the on-chain ver
 
 ---
 
+## Formal Verification with EasyCrypt
+
+### Objective
+
+Formally verify the correctness of this Aiken Groth16 on-chain verifier using [EasyCrypt](https://github.com/EasyCrypt/easycrypt).
+
+### Properties to Verify
+
+- **Honesty:** Verifier implementation behaves exactly as specified
+- **Soundness:** Invalid proofs are rejected (under computational assumptions)
+- **Completeness:** Valid proofs are accepted
+
+### Approach
+
+1. Model the verifier in EasyCrypt's probabilistic programming language
+2. Formalize Groth16 verification as a relational property between abstract specification and concrete implementation
+3. Prove correspondence that the implementation matches the specification
+
+### Why EasyCrypt
+
+- Purpose-built for cryptographic protocol verification
+- Handles probabilistic reasoning and game-playing proofs
+- Active development with ZKProof.org endorsement
+- Successful track record: Nethermind verified ZKsync's on-chain verifier (first formal proof of its kind)
+
+### Expected Deliverables
+
+1. EasyCrypt model of Aiken verifier
+2. Formal proof of verifier honesty
+3. Documentation of verification methodology
+4. Reusable infrastructure for future verifier verifications
+
+### References
+
+- [Nethermind: "We Verified the Verifier"](https://www.nethermind.io/blog/we-verified-the-verifier-a-first-for-zero-knowledge-proof-systems) (2025)
+- [ZKProof Verified Verifiers initiative](https://zkproof.org/verifier)
+- [EasyCrypt Zero-Knowledge formalization](https://ieeexplore.ieee.org/document/10221929) (IEEE 2023)
+
+---
+
 ## License
 
 Apache-2.0
