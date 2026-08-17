@@ -1,15 +1,38 @@
-# lova-prover
+# lattice-prover
 
-Lattice-based (post-quantum) IVC folding — research track for **Lova** (Fenzi, Knabenhans, Nguyen, Pham, ASIACRYPT 2024), the first folding scheme whose security relies on the *unstructured* SIS assumption. This crate is the post-quantum counterpart of the classical Nova stack in [`nova-prover`](../nova-prover/).
+Lattice-based (post-quantum) IVC folding — research track for post-quantum proof systems. This crate is the post-quantum counterpart of the classical Nova stack in [`nova-prover`](../nova-prover/).
 
-> **Status:** 🔬 **Research / evaluation.** No code yet. Lova is the post-quantum counterpart of the classical Nova stack in [`nova-prover`](../nova-prover/) — a long-term item, not a committed path. This crate holds the research track and will host the lattice IVC prover if/when it is pursued.
+> **Status:** 🔬 **Research / evaluation.** This crate holds the lattice-based proof system research track and will host multiple implementations as the field matures.
 
-## Why Lova
+## Implementations
 
-- **Unstructured SIS** (vs. Module-SIS for LatticeFold) — a simpler, standard lattice assumption; no ring arithmetic.
-- **Power-of-two modulus `q = 2^64`** — hardware-friendly integer arithmetic only; no finite-field library, no inversions, no `Fr` big-int ops.
-- **Fully transparent / trustless** — public random matrix `A`, public-coin Fiat–Shamir, no ceremony, trapdoor, or SRS.
-- **Drop-in-compatible shape** — Nova folding is commitment-agnostic (any additively-homomorphic commitment); swapping Pedersen (DLOG-based, Shor-broken) for an Ajtai commitment makes the fold post-quantum with the same IVC structure.
+| # | Name | Assumption | Status | Description |
+|---|------|------------|--------|-------------|
+| 1 | **Lova** | Unstructured SIS | Research | First folding scheme from unstructured lattices (ASIACRYPT 2024) |
+| 2 | **LatticeFold** | Module-SIS | Planned | Efficient folding with structured commitments |
+| 3 | **ProtogaLattice** | Module-SIS | Planned | Constant-round, sumcheck-free algebraic folding |
+| 4 | **IBM Toolkit** | Module-SIS/LWE | Planned | Practical succinct ZKPs (< 100KB proofs) |
+
+### Impl 1: Lova
+
+**Lova** (Fenzi, Knabenhans, Nguyen, Pham, ASIACRYPT 2024) — the first folding scheme whose security relies on the *unstructured* SIS assumption.
+
+- **Unstructured SIS** — simpler, standard lattice assumption; no ring arithmetic
+- **Power-of-two modulus `q = 2^64`** — hardware-friendly integer arithmetic only
+- **Fully transparent / trustless** — no ceremony, trapdoor, or SRS
+- **Drop-in-compatible shape** — Nova folding with Ajtai commitments
+
+See [`docs/lova-folding-design.md`](docs/lova-folding-design.md) for detailed design and [`docs/lattirust-codebase-review.md`](docs/lattirust-codebase-review.md) for implementation review.
+
+## Why Lattice-Based?
+
+| Property | Classical (Nova/Groth16) | Lattice-Based |
+|----------|--------------------------|---------------|
+| **Post-quantum** | ❌ Shor breaks DLOG | ✅ SIS/LWE resistant |
+| **Trusted setup** | ⚠️ Required (Groth16) | ✅ None (transparent) |
+| **Proof size** | ~192 B (Groth16) | KB–MB range |
+| **Prover time** | Fast | Varies by scheme |
+| **Security assumption** | Well-established | Newer, but standardized |
 
 ## Post-Quantum Signature Comparison
 
@@ -41,21 +64,14 @@ Ed25519 (classical) is **not quantum-secure** — Shor's algorithm breaks it. Fo
 3. **VRF/KDF** — Replace Ed25519-based constructions with PQ alternatives
 4. **Groth16/Nova** — Use PQ signatures for setup ceremony authentication
 
-### References
-
-- [NIST FIPS 203: ML-KEM](https://csrc.nist.gov/pubs/fips/203/final)
-- [NIST FIPS 204: ML-DSA](https://csrc.nist.gov/pubs/fips/204/final)
-- [NIST FIPS 205: SLH-DSA](https://csrc.nist.gov/pubs/fips/205/final)
-- [NIST FIPS 206: FN-DSA (draft)](https://csrc.nist.gov/projects/post-quantum-cryptography)
-
-## High-level data flow (startup → verification)
+## High-level data flow (Lova)
 
 The scheme has four phases: **setup**, **per-step instances**, the **folding loop**, and **final verification**. One fold consumes two instances `(W₁, W₂)` and produces one `(W′, instance′)`; the verifier does this in O(1) per round, the prover in O(n·λ²·ℓ) per round.
 
 ```mermaid
 flowchart TB
     subgraph SETUP["Setup — once, fully transparent (PublicParameters::new)"]
-        S1["estimate SIS params: modulus q, norm bound β → h = #commitment rows<br/>(lova/src/sis.rs via lattice-estimator)"]
+        S1["estimate SIS params: modulus q, norm bound β → h = #commitment rows<br/>(lattice/src/sis.rs via lattice-estimator)"]
         S2["decomposition basis b (b = 2 → smallest proofs), digits ℓ = balanced_decomposition_max_length(b, β)"]
         S3["sample random commitment matrix A ← Z_q^(h×n)"]
     end
@@ -161,7 +177,7 @@ A source-level review of the authors' implementation (lattirust + lova), includi
 ## Relationship to `nova-prover`
 
 - Classical stack (the default): [`nova-prover`](../nova-prover/) — Impl 8 step-chain, Impl 9 NIFS + Groth16 compression, Impl 10 sumcheck final SNARK.
-- PQ track: lattice folding (this crate) + PQ compression SNARK + hash-based on-chain verifier. Context and status: [Why Lova](#why-lova) and [`docs/lova-folding-design.md`](docs/lova-folding-design.md).
+- PQ track: lattice folding (this crate) + PQ compression SNARK + hash-based on-chain verifier. Context and status: [Implementations](#implementations) and [`docs/lova-folding-design.md`](docs/lova-folding-design.md).
 
 ## License
 

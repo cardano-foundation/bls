@@ -285,7 +285,7 @@ Implementation 9 sits in the **R1CS + elliptic-curve-MSM** quadrant of the foldi
 
 - **CCS/Plonkish folding (HyperNova):** generalizes folding beyond fixed-R1CS (custom gates, lookups) — relevant only if a step must mix constraint shapes.
 - **AIR folding (Cairo-style):** CPU/trace-based steps; not our model.
-- **Post-quantum lattice folding (LatticeFold, Lova, Neo, ProtogaLattice):** our Pedersen commitments are DLOG-based and break under Shor; the PQ track replaces EC-MSM with SIS/Ajtai commitments (Lova even runs on power-of-two moduli, no field arithmetic). Long-term only — it would also mean replacing our Groth16 compression (equally non-PQ); the track lives in [`lova-prover`](../lova-prover/README.md).
+- **Post-quantum lattice folding (LatticeFold, Lova, Neo, ProtogaLattice):** our Pedersen commitments are DLOG-based and break under Shor; the PQ track replaces EC-MSM with SIS/Ajtai commitments (Lova even runs on power-of-two moduli, no field arithmetic). Long-term only — it would also mean replacing our Groth16 compression (equally non-PQ); the track lives in [`lattice-prover`](../lattice-prover/README.md).
 - **CycleFold** (also surveyed) relaxes the full 2-cycle requirement: only the secondary curve's base field must equal the primary scalar field, and only a single scalar multiplication per fold runs on it. It is the closest published route toward in-circuit recursion *near* BLS12-381 — whether a curve over `Fr1` (e.g. Bandersnatch) instantiates it is an open research question, not scope.
 - **Memory-bounded proving** is an open engineering problem in the survey; our per-step O(step) memory design is exactly that target.
 - **ZK layer:** folding itself is not ZK, but our Groth16 compression proof *is* — zero-knowledge for the final proof comes for free, where Nova+Spartan needs a separate ZK add-on.
@@ -377,13 +377,13 @@ The fix is to replace the Groth16 compression — which must open `Z`/`E` so the
 | **Impl 10 sumcheck final SNARK** | **O(1)**: ~200 B + small state | higher (sumcheck + hashing rounds) | native field ops, no pairing, more ops | **Yes** | ⏳ This impl |
 | **Shrink step + binary serialization** | O(step) but ~10× smaller | unchanged | unchanged | No | ✅ Do first |
 | **Proof aggregation (item q)** | per-proof unchanged | unchanged | amortised one pairing per batch | No | Complementary |
-| **PQ lattice folding** ([lova-prover](../lova-prover/README.md)) | changes commitment; not obviously smaller | — | hash-based, heavier | — | Long-term |
+| **PQ lattice folding** ([lattice-prover](../lattice-prover/README.md)) | changes commitment; not obviously smaller | — | hash-based, heavier | — | Long-term |
 
 ### Cryptographic remarks
 
 - **Q: Can we just make `Z`/`E` private and hash them inside the compression circuit?** No — a plain hash is not additively homomorphic, so it cannot replace Pedersen in the fold; and if the compression circuit does not check the commitments, soundness collapses (the error vector absorbs any discrepancy). This is exactly the tension the sumcheck-based SNARK resolves: it proves knowledge of a witness *consistent with the committed instance* without opening it.
 - **Q: Is a sumcheck-based compression a drop-in replacement?** Not a drop-in — the Aiken verifier and the compression prover change, but the fold, transcript, bundle format and step circuits are untouched. It is the pairing-free, single-curve route to constant-size Nova proofs (Spartan, and the `Nova+Spartan` design mentioned in the Implementation 9 section).
-- **Q: What about the post-quantum track?** The PQ track (now in [`lova-prover`](../lova-prover/README.md)) replaces the Pedersen commitment itself with an SIS/Ajtai lattice commitment — a different axis. The sumcheck-based compression is commitment-agnostic and compatible with either.
+- **Q: What about the post-quantum track?** The PQ track (now in [`lattice-prover`](../lattice-prover/README.md)) replaces the Pedersen commitment itself with an SIS/Ajtai lattice commitment — a different axis. The sumcheck-based compression is commitment-agnostic and compatible with either.
 
 </details>
 
@@ -451,7 +451,7 @@ cargo run --release --bin benchmark_nova -- --nifs --circuit <step.r1cs> --steps
 8. Sean Bowe, Jack Grigg, Daira Hopwood. *Recursive Proof Composition without a Trusted Setup* (Halo / Halo2). IACR ePrint [2019/1021](https://eprint.iacr.org/2019/1021).
 9. Liam Eagen. *Bulletproofs++: Next Generation Confidential Transactions Based on Proofs of Statement and Knowledge.* IACR ePrint [2022/510](https://eprint.iacr.org/2022/510).
 
-For the post-quantum lattice-folding literature (LatticeFold, Lova, Neo, ProtogaLattice) and the quantum-readiness track (ZKPoSP/CIP-1242, Zcash/Tachyon), see [`lova-prover/README.md`](../lova-prover/README.md) and [`lova-prover/docs/lova-folding-design.md`](../lova-prover/docs/lova-folding-design.md).
+For the post-quantum lattice-folding literature (LatticeFold, Lova, Neo, ProtogaLattice) and the quantum-readiness track (ZKPoSP/CIP-1242, Zcash/Tachyon), see [`lattice-prover/README.md`](../lattice-prover/README.md) and [`lattice-prover/docs/lova-folding-design.md`](../lattice-prover/docs/lova-folding-design.md).
 
 ### Software, specifications, and ceremonies
 

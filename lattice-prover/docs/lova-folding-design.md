@@ -71,7 +71,7 @@ Lova is a *foundation*, not a practically fast scheme yet. The authors note:
 - **Large security parameter:** because of the high soundness error, `t > 300` is required, which yields **concretely large proof sizes** — *dozens of megabytes* for witnesses of length `> 2^17` — and prover times **`> 10 minutes`**.
 - The authors position Lova as the "algebraic folding" foundation for lattices and expect more efficient follow-ups using the same techniques with more structured assumptions (e.g. LatticeFold / ProtogaLattice / Neo).
 
-For our evaluation: Lova is the right *conceptual* template for a trustless PQ folding layer, but a production PQ chain would likely pick a more efficient lattice folding scheme (LatticeFold-class) or a hash/STARK-based track — see the scheme comparison in [`lova-prover/README.md`](../README.md) and the references at the bottom of this document.
+For our evaluation: Lova is the right *conceptual* template for a trustless PQ folding layer, but a production PQ chain would likely pick a more efficient lattice folding scheme (LatticeFold-class) or a hash/STARK-based track — see the scheme comparison in [`lattice-prover/README.md`](../README.md) and the references at the bottom of this document.
 
 ## Practical Roadmap: From Lova to Production
 

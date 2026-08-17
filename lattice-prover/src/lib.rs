@@ -1,4 +1,4 @@
-//! `lova-prover` — lattice-based (post-quantum) IVC folding, research track.
+//! `lattice-prover` — lattice-based (post-quantum) IVC folding, research track.
 //!
 //! Evaluation of **Lova** (Fenzi, Knabenhans, Nguyen, Pham — ASIACRYPT 2024), the
 //! first folding scheme whose security relies on the unstructured SIS assumption,
