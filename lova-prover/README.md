@@ -11,6 +11,43 @@ Lattice-based (post-quantum) IVC folding — research track for **Lova** (Fenzi,
 - **Fully transparent / trustless** — public random matrix `A`, public-coin Fiat–Shamir, no ceremony, trapdoor, or SRS.
 - **Drop-in-compatible shape** — Nova folding is commitment-agnostic (any additively-homomorphic commitment); swapping Pedersen (DLOG-based, Shor-broken) for an Ajtai commitment makes the fold post-quantum with the same IVC structure.
 
+## Post-Quantum Signature Comparison
+
+Ed25519 (classical) is **not quantum-secure** — Shor's algorithm breaks it. For benchmarks and future implementations, here are the NIST-standardized post-quantum alternatives:
+
+| Scheme | NIST Standard | Security Basis | Public Key | Signature | Verification | Use Case |
+|--------|---------------|----------------|------------|-----------|--------------|----------|
+| **Ed25519** | — | Discrete Log (Shor-broken) | 32 B | 64 B | Fast | ⚠️ Not PQ-secure |
+| **ML-DSA-65** | FIPS 204 | Module-LWE/Lattice | 1,952 B | 3,309 B | Fast | General-purpose (recommended) |
+| **ML-DSA-87** | FIPS 204 | Module-LWE/Lattice | 2,592 B | 4,627 B | Fast | Highest security level |
+| **SLH-DSA-128s** | FIPS 205 | Hash functions only | 32 B | 7,856 B | Fast | Conservative fallback |
+| **SLH-DSA-128f** | FIPS 205 | Hash functions only | 32 B | 17,088 B | Fast | Fast signing |
+| **FN-DSA-512** | FIPS 206 (draft) | NTRU/Lattice | 897 B | 666 B | Fast | Compact signatures |
+| **FN-DSA-1024** | FIPS 206 (draft) | NTRU/Lattice | 1,793 B | 1,280 B | Fast | Highest FN security |
+
+### Recommendation for Cardano/BLS12-381 Project
+
+| Priority | Scheme | Rationale |
+|----------|--------|-----------|
+| **Primary** | ML-DSA-65 | Best balance of size, speed, and security; NIST-recommended |
+| **Backup** | SLH-DSA-128s | Hash-only security; no lattice assumptions |
+| **Compact** | FN-DSA-512 | Smallest signatures; good for on-chain constraints |
+| **Avoid** | Ed25519 | Not post-quantum secure |
+
+### Integration Points
+
+1. **On-chain verification** — ML-DSA/FN-DSA verification in Aiken/Plutus
+2. **Key aggregation** — BLS12-381 signature aggregation with PQ signatures
+3. **VRF/KDF** — Replace Ed25519-based constructions with PQ alternatives
+4. **Groth16/Nova** — Use PQ signatures for setup ceremony authentication
+
+### References
+
+- [NIST FIPS 203: ML-KEM](https://csrc.nist.gov/pubs/fips/203/final)
+- [NIST FIPS 204: ML-DSA](https://csrc.nist.gov/pubs/fips/204/final)
+- [NIST FIPS 205: SLH-DSA](https://csrc.nist.gov/pubs/fips/205/final)
+- [NIST FIPS 206: FN-DSA (draft)](https://csrc.nist.gov/projects/post-quantum-cryptography)
+
 ## High-level data flow (startup → verification)
 
 The scheme has four phases: **setup**, **per-step instances**, the **folding loop**, and **final verification**. One fold consumes two instances `(W₁, W₂)` and produces one `(W′, instance′)`; the verifier does this in O(1) per round, the prover in O(n·λ²·ℓ) per round.
@@ -85,9 +122,30 @@ The price: everything scales with `λ`, `ℓ` (digits), and the number of rounds
 4. **Shrink the inner-product term** — it is quadratic in `λℓ`; `b = 2` already minimizes total bits (the authors' analysis), so the only levers are smaller `λ` (above) or fewer digits `ℓ` via a larger basis at the cost of more bits per entry.
 5. **Structured commitment matrix** — a ring-structured `A` (Module-SIS) would cut `h` and `q` drastically, but abandons the *unstructured* SIS selling point (that is the LatticeFold-class direction, not Lova).
 
+### Key Research: IBM Toolkit for Succinct Lattice-Based ZKPs (2026)
+
+**Proof sizes under 100KB** — The IBM Research team demonstrated practical lattice-based ZKPs with:
+- ~100KB proofs (non-ZK), ~110KB (ZK-enabled)
+- Constant proof size across use cases
+- Fast prover/verifier on single core
+- Built on LaZer library (C++)
+
+**Architecture:** LaBRADOS (succinct) + LNP-Lite (ZK) → compresses witness then proves in zero-knowledge.
+
+**Relevance:** This shows lattice-based ZKPs *can* be practical. The gap between Lova (MB) and IBM (KB) is due to:
+- Module-SIS (structured) vs unstructured SIS
+- Fewer rounds vs t > 300
+- Optimized commitment scheme
+
+**Trade-off:** Lova's unstructured SIS is more conservative but less efficient. Module-SIS schemes (LatticeFold, ProtogaLattice) offer better concrete efficiency.
+
+See [`docs/toolkit-lattice-zkp-2026-summary.md`](docs/toolkit-lattice-zkp-2026-summary.md) for full analysis.
+
 ## Findings / design
 
 The full walkthrough — setup → folding → verification, annotated with overlap vs nova-prover's **Impl 10** (BLS12-381 Nova folding + sumcheck final SNARK) at every step, the trustless analysis, and the concrete-efficiency caveats — is in [`docs/lova-folding-design.md`](docs/lova-folding-design.md).
+
+**Practical roadmap** — concrete steps to get from Lova (theoretical) to production-ready lattice ZKP: [`docs/lova-folding-design.md#practical-roadmap-from-lova-to-production`](docs/lova-folding-design.md#practical-roadmap-from-lova-to-production).
 
 A source-level review of the authors' implementation (lattirust + lova), including what actually builds and passes tests, the ring/transcript/folding abstractions worth porting, and the bugs to avoid (Goldilocks prime, loose operator-norm bound), is in [`docs/lattirust-codebase-review.md`](docs/lattirust-codebase-review.md).
 
@@ -97,6 +155,8 @@ A source-level review of the authors' implementation (lattirust + lova), includi
 - **Official Rust implementation:** [lattirust/lova](https://github.com/lattirust/lova), built on the authors' [lattirust](https://github.com/cknabs/lattirust) library.
 - **Codebase review (this repo):** [`docs/lattirust-codebase-review.md`](docs/lattirust-codebase-review.md).
 - **Related scheme:** David Balbás, Anca Nitulescu, Maxime Plançon. *ProtogaLattice: Constant-Round Lattice-based Folding for General Polynomial Relations.* IACR ePrint [2026/1317](https://eprint.iacr.org/2026/1317) — the constant-round, sumcheck-free algebraic alternative to Lova's fold (see [Where Lova could improve](#where-lova-could-improve--especially-proof-size)).
+- **IBM Toolkit:** Beatrice Biasioli et al. *A Toolkit for Succinct Lattice-Based Zero Knowledge Proofs.* IBM Research, 2026. Demonstrates **proof sizes under 100KB** using LaBRADOS + LNP-Lite (see [`docs/toolkit-lattice-zkp-2026-summary.md`](docs/toolkit-lattice-zkp-2026-summary.md)).
+- **NIST PQC Standards:** [FIPS 203 (ML-KEM)](https://csrc.nist.gov/pubs/fips/203/final), [FIPS 204 (ML-DSA)](https://csrc.nist.gov/pubs/fips/204/final), [FIPS 205 (SLH-DSA)](https://csrc.nist.gov/pubs/fips/205/final), [FIPS 206 (FN-DSA, draft)](https://csrc.nist.gov/projects/post-quantum-cryptography).
 
 ## Relationship to `nova-prover`
 

@@ -73,9 +73,148 @@ Lova is a *foundation*, not a practically fast scheme yet. The authors note:
 
 For our evaluation: Lova is the right *conceptual* template for a trustless PQ folding layer, but a production PQ chain would likely pick a more efficient lattice folding scheme (LatticeFold-class) or a hash/STARK-based track — see the scheme comparison in [`lova-prover/README.md`](../README.md) and the references at the bottom of this document.
 
-## References
+## Practical Roadmap: From Lova to Production
+
+### Current State: Lova (Theoretical Foundation)
+
+| Metric | Current | Target |
+|--------|---------|--------|
+| **Proof size** | Dozens of MB | < 100KB |
+| **Prover time** | > 10 minutes | < 1 second |
+| **Rounds** | t > 300 | O(1) or small constant |
+| **Assumption** | Unstructured SIS | Module-SIS (practical) |
+| **Maturity** | Research only | Production-ready |
+
+### Phase 1: Foundation
+
+**Goal:** Understand and prototype Lova's core mechanics
+
+1. **Study existing implementations**
+   - [lattirust/lova](https://github.com/lattirust/lova) — official Rust implementation
+   - [LaZer library](https://github.com/AnttiMekkanen/lazer) — C++ implementation of LNP
+   - IBM Toolkit paper (2026) — practical lattice ZKP blueprint
+
+2. **Port core components to Rust**
+   - Ring arithmetic over `Z_{2^64}` (power-of-two modulus)
+   - Ajtai commitment scheme (`A·s mod q`)
+   - Decompose-and-fold mechanism
+   - Fiat-Shamir transcript
+
+3. **Benchmark Lova as-is**
+   - Measure proof size, prover time, verifier time
+   - Identify bottlenecks (likely: number of rounds, matrix operations)
+
+### Phase 2: Optimize Proof Size
+
+**Goal:** Reduce proof size from MB to KB range
+
+1. **Implement final SNARK compression**
+   - Transparent sumcheck + hash-based polynomial commitment
+   - Prove knowledge of final folded instance (O(1) proof)
+   - Reference: Impl 10's compression design in `nova-prover`
+
+2. **Tune SIS parameters**
+   - Use lattice-estimator to optimize `(q, β, h)`
+   - Smaller modulus → smaller commitments
+   - Fewer rounds → smaller transcript
+
+3. **Explore Module-SIS variant**
+   - Switch from unstructured to structured SIS
+   - Polynomial ring `R = Z[X]/(X^d + 1)` with NTT
+   - Expect 10-100x proof size reduction
+
+### Phase 3: Accelerate Prover
+
+**Goal:** Reduce prover time from minutes to seconds
+
+1. **NTT acceleration**
+   - Use Number Theoretic Transform for ring multiplication
+   - Parallelize matrix operations with Rayon
+
+2. **Batch processing**
+   - Process multiple folds in parallel
+   - SIMD instructions for small-ring arithmetic
+
+3. **Memory optimization**
+   - Streaming decomposition (avoid materializing full matrices)
+   - Cache-friendly matrix layouts
+
+### Phase 4: Production Hardening
+
+**Goal:** Enterprise-grade reliability and security
+
+1. **Security audit**
+   - Parameter validation
+   - Side-channel resistance
+   - Formal verification of critical components
+
+2. **Integration with Cardano**
+   - On-chain verifier in Aiken/Plutus
+   - Transaction cost analysis
+   - Benchmark against Groth16 verifier
+
+3. **Post-quantum signature integration**
+   - Replace Ed25519 with ML-DSA-65 (NIST FIPS 204) for key signing
+   - Implement PQ signature verification in Aiken
+   - Benchmark: ML-DSA vs FN-DSA vs SLH-DSA for on-chain use
+   - Use PQ signatures for trusted setup ceremony authentication
+
+4. **API and tooling**
+   - CLI for proof generation/verification
+   - Library for integration with existing Rust codebase
+   - Documentation and examples
+
+### Alternative Paths
+
+#### Path A: Module-SIS (LatticeFold-class)
+
+**Best for:** Production deployment with acceptable security trade-offs
+
+- Switch to LatticeFold or ProtogaLattice
+- Use Module-SIS with polynomial ring arithmetic
+- Expected: < 100KB proofs, fast provers
+- Trade-off: More structured assumption (still post-quantum)
+
+#### Path B: Hash/STARK-based (Conservative)
+
+**Best for:** Maximum security, no lattice assumptions
+
+- Use hash-based commitments (e.g., FRI, Merkle trees)
+- STARK-like proof system
+- Expected: Larger proofs (MB range) but simpler security
+- Trade-off: Larger proofs, slower verification
+
+#### Path C: Hybrid (Recommended)
+
+**Best for:** Balanced approach
+
+- Lova for theoretical foundation
+- Module-SIS for practical deployment
+- Hash-based fallback for high-security applications
+- Gradual migration path
+
+### Key Decision Points
+
+| Decision | Option A | Option B | Recommendation |
+|----------|----------|----------|----------------|
+| **Assumption** | Unstructured SIS | Module-SIS | Module-SIS (practical) |
+| **Commitment** | Ajtai | Ring-LWE | Ring-LWE (faster) |
+| **Compression** | Sumcheck | LaBRADOR | LaBRADOR (smaller) |
+| **On-chain** | Aiken verifier | Plutus script | Aiken (cheaper) |
+
+### Success Metrics
+
+| Metric | Minimum Viable | Target | Stretch |
+|--------|----------------|--------|---------|
+| **Proof size** | < 1MB | < 100KB | < 10KB |
+| **Prover time** | < 60s | < 1s | < 100ms |
+| **Verifier time** | < 1s | < 10ms | < 1ms |
+| **On-chain cost** | < 50% budget | < 20% budget | < 10% budget |
+
+### References
 
 1. Giacomo Fenzi, Christian Knabenhans, Ngoc Khanh Nguyen, Duc Tu Pham. *Lova: Lattice-Based Folding Scheme from Unstructured Lattices.* ASIACRYPT 2024. IACR ePrint [2024/1964](https://eprint.iacr.org/2024/1964).
 2. Official Rust implementation: [lattirust/lova](https://github.com/lattirust/lova); underlying library [lattirust](https://github.com/cknabs/lattirust).
 3. Christian Knabenhans. *Lova: Lattice-Based Folding Scheme from Unstructured Lattices* — [author's blog](https://cknabs.github.io/post/lova).
 4. Dan Boneh, Binyi Chen. *LatticeFold: A Lattice-based Folding Scheme and its Applications to Succinct Proof Systems.* IACR ePrint [2024/257](https://eprint.iacr.org/2024/257).
+5. IBM Research. *A Toolkit for Succinct Lattice-Based Zero Knowledge Proofs.* 2026. (See [`toolkit-lattice-zkp-2026-summary.md`](toolkit-lattice-zkp-2026-summary.md)).
