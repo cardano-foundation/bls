@@ -6,3 +6,12 @@ license = "Apache-2.0"
 description = "Lattice-based (post-quantum) IVC folding prover — research track"
 
 [dependencies]
+lattirust-arithmetic = { git = "https://github.com/lattirust/lattirust.git", package = "lattirust-arithmetic" }
+lattirust-util = { git = "https://github.com/lattirust/lattirust.git", package = "lattirust-util" }
+nimue = "0.1.0"
+ark-ff = "0.5.0"
+ark-serialize = "0.5.0"
+rand = "0.8.5"
+
+[dev-dependencies]
+proptest = "1.4"
