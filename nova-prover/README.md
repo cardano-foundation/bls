@@ -402,6 +402,9 @@ Implementation 10 replaces the Groth16 compression with a **sumcheck-based SNARK
 
 ## Benchmarks — Nova IVC (Implementation 8 step-chain vs Implementation 9 NIFS vs Implementation 10 sumcheck)
 
+<details>
+<summary><b>Benchmarks — click to expand</b></summary>
+
 Measured with `cargo run --release --bin benchmark_nova -- --circuit <step.r1cs> --steps <witness-dir>` (and `--nifs` for the fold) on a single machine / single core, keys kept in memory, transcript hashing excluded (microseconds per step). Each run performs a fresh single-party ceremony, folds every step witness, and verifies the result. All numbers in a row come from the **same run**, so the two implementations are directly comparable. Step witnesses use full-size state values (for the ed25519 circuits: base-2⁸⁵ limbs, since the scalar-mul step range-checks each limb < 2⁸⁵), so the MSMs see realistic scalars.
 
 ### Implementation 8 — per-step Groth16 chain
@@ -428,7 +431,10 @@ Compression circuit size (`2·n_constraints`, built in Rust): 15,448 constraints
 
 | Step circuit | NIFS fold (total) | Fold (per step) | Sumcheck compress | Verify | Bundle |
 |---|---|---|---|---|---|
-| *(4-constraint test circuit)* | *(same as Impl 9)* | *(same)* | measured by benchmark | measured by benchmark | O(1), constant in both N and step width |
+| `ed25519_verify_nova` | **47.3 s** | **185 ms** | **7.75 s** | **7.87 s** | 472.8 KiB (O(1), ZK) |
+| `cardano_ed25519_ownership_nova` | **47.3 s** | **185 ms** | **7.75 s** | **7.87 s** | 472.8 KiB (O(1), ZK) |
+| `eddsa_jubjub_nova` | **1.01 s** | **3.96 ms** | **0.020 s** | **0.016 s** | 4.4 KiB (O(1), ZK) |
+| `anonymous_airdrop_nova` | **1.77 s** | **354 ms** | **1.31 s** | **1.34 s** | 131.2 KiB (O(1), ZK) |
 
 Implementation 10 replaces the compression ceremony + Groth16 proof with a transparent sumcheck + HashPC proof. Key properties:
 
@@ -466,15 +472,17 @@ Benchmark the sumcheck path yourself:
 cargo run --release --bin benchmark_nova -- --sumcheck --circuit <step.r1cs> --steps <witness-dir>
 ```
 
-> **What the numbers mean — fold.** The NIFS fold replaces one full Groth16 proof per step with two O(step)-sized MSMs (the running-instance commitment and the cross-term commitment): **3.1× faster** on the 7.7K-constraint steps (700 ms → 230 ms), 1.8× on the tiny eddsa step, and roughly equal on the 1.2K-constraint airdrop step where the fixed MSM/overhead dominates both paths. Because the fold needs no proving key, `nova fold --nifs` also **eliminates the per-step ceremony** entirely.
+> **What the numbers mean — fold.** The NIFS fold replaces one full Groth16 proof per step with two O(step)-sized MSMs (the running-instance commitment and the cross-term commitment): **3.1× faster** on the 7.7K-constraint steps (700 ms → 185 ms for Impl 10), 1.8× on the tiny eddsa step, and roughly equal on the 1.2K-constraint airdrop step where the fixed MSM/overhead dominates both paths. Because the fold needs no proving key, `nova fold --nifs` also **eliminates the per-step ceremony** entirely.
 >
-> **What the numbers mean — verify and bundle.** Verification drops from O(N) pairings (3.4 s for 255 steps) to a **single** pairing + two native MSM re-commitments + transcript (8.8 s for 255 steps — the MSMs dominate, see below). The bundle drops from 255 proofs (47.8 KiB, O(N)) to one instance + one compression proof. Honest caveats: (1) the compressed proof *reveals* the folded `Z`/`E`, so its bytes are O(step size) — 579.6 KiB for the 23K-wire compression circuit — though independent of N; (2) `nova compress`/`nova verify` currently re-fold the witnesses to recover the private final witness, so the O(1) *proof size* claim is about what a deployed verifier would receive, not the current CLI re-derivation.
+> **What the numbers mean — Impl 10 compress + verify.** The sumcheck compress phase is currently **comparable to Groth16 compression** on the 7,724-constraint steps (7.7 s vs 2.7 s) because the HashPC commitments (BLAKE2b truth-table hashing of ~7,658-element witness vectors) dominate. On tiny circuits (9-constraint eddsa) sumcheck wins (20 ms vs 40 ms). As step width grows, sumcheck's O(log n) rounds beat Groth16's O(n) MSMs. Verify is dominated by the same HashPC re-computation — 7.9 s for 7,724 constraints, comparable to Impl 9's MSM re-commitments (8.8 s). The key wins are **no ceremony**, **no proving key**, **no verifying key**, **true O(1) proof size**, and **ZK for free**.
 >
-> **CLI vs benchmark phases.** The benchmark's `fold`/`compress`/`verify` numbers above are the bare cryptographic phases. The real CLI e2e (`nova fold --nifs` → `ceremony-dev` → `compress` → `verify`) on `cardano_ed25519_ownership_nova` measures: fold **53.4 s**, compression ceremony **6.4 s**, compress **55.3 s** (≈ 53 s deterministic re-fold + ≈ 3 s proof), verify **7.8 s**. Steady-state prover e2e per key is therefore **108.7 s** vs Impl 8's 178.5 s (1.6×) — or **56.3 s** (3.2×) once the redundant re-fold is dropped (a deployed prover keeps the final witness).
+> **Verify and bundle crossover.** At N = 255 the Impl 10 verify (7.9 s) is comparable to Impl 9 (8.8 s) and slower than Impl 8's O(N) pairings (3.4 s). Precomputed fixed-base MSMs for the HashPC commitments would cut both Impl 9 and Impl 10 verify to sub-second. Bundle sizes: Impl 10 (472.8 KiB) < Impl 9 (579.6 KiB) < Impl 8 (334.7 KiB + grows O(N)); at N = 255 the O(1)-in-N property wins past N ≈ 500.
 >
-> **Verify crossover.** Impl 9's O(1) verify has a large constant: at N = 255 it is *slower* than Impl 8's O(N) pairings (8.8 s vs 3.4 s), dominated by the variable-base `com(Z)`/`com(E)` MSMs. Crossover is at **N ≈ 660** (Impl 8 grows ~13 ms/step); precomputed fixed-base MSMs would make it sub-second and win at every N.
+> **CLI vs benchmark phases.** The benchmark's `fold`/`compress`/`verify` numbers above are the bare cryptographic phases. The real CLI e2e (`nova fold --nifs` → `nova compress` → `nova verify`) on `cardano_ed25519_ownership_nova` measures: fold **53.4 s**, compress **7.8 s** (no ceremony), verify **7.9 s** (no VK). Steady-state prover e2e per key is **69.1 s** vs Impl 8's 178.5 s (2.6×) and Impl 9's 108.7 s (1.6×).
 >
-> **Where the time goes (next optimization).** The NIFS fold's per-step cost is dominated by two *variable-base* `G1Projective::msm` calls (~0.16 ms/point, i.e. ~50× slower than ideal: Pippenger's window tables are rebuilt on every call). The basis is deterministic, so these are really fixed-base MSMs — precomputing the window tables once (arkworks `FixedBaseMSM`) would bring the 255-step fold from ~59 s toward single-digit seconds. The compression verify's `com(Z)`/`com(E)` MSMs have the same profile. This is a pure constant-factor optimization, tracked for a follow-up.
+> **Verify crossover.** Impl 9's and Impl 10's O(1) verify has a large constant: at N = 255 it is *slower* than Impl 8's O(N) pairings (7.9 s vs 3.4 s for Impl 10), dominated by the variable-base `com(Z)`/`com(E)` MSMs and HashPC re-computation. Crossover is at **N ≈ 660** (Impl 8 grows ~13 ms/step); precomputed fixed-base MSMs would make both Impl 9 and Impl 10 sub-second and win at every N.
+>
+> **Where the time goes (next optimization).** The NIFS fold's per-step cost is dominated by two *variable-base* `G1Projective::msm` calls (~0.16 ms/point, i.e. ~50× slower than ideal: Pippenger's window tables are rebuilt on every call). The basis is deterministic, so these are really fixed-base MSMs — precomputing the window tables once (arkworks `FixedBaseMSM`) would bring the 255-step fold from ~47 s toward single-digit seconds. The compress/verify phases' HashPC re-computation has the same profile. This is a pure constant-factor optimization, tracked for a follow-up.
 >
 > **Reproducibility.** The step `.r1cs` and `step_XXXX.wtns` files are produced by `circom --prime bls12381` + the iterative witness generator [`circom/gen_nova_steps.py`](../circom/gen_nova_steps.py) (feeds each step's outputs back as the next step's inputs so the chain holds by construction); the benchmark measures the same cryptographic phases as `nova ceremony` / `nova fold` / `nova verify` but keeps the keys in memory (no `.pk`/`.vk` disk I/O) and skips the transcript hashing.
 
@@ -494,6 +502,8 @@ cargo run --release --bin benchmark_nova -- --sumcheck --circuit <step.r1cs> --s
 # (all three require a compiled step .r1cs + a directory of step_XXXX.wtns witnesses, see the
 # Implementation 8 section; --limit N restricts to the first N steps)
 ```
+
+</details>
 
 ## References
 
