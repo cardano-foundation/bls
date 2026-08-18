@@ -11,4 +11,5 @@ pub mod commitment;
 pub mod decompose;
 pub mod fold;
 pub mod params;
+pub mod rns;
 pub mod transcript;
