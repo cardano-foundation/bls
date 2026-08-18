@@ -372,9 +372,7 @@ fn params_rejects_non_step_circuit() {
     fs::write(r1cs.path(), build_synthetic_r1cs()).unwrap();
 
     let mut cmd = Command::cargo_bin("nova").unwrap();
-    cmd.arg("params")
-        .arg("--circuit")
-        .arg(r1cs.path());
+    cmd.arg("params").arg("--circuit").arg(r1cs.path());
 
     cmd.assert()
         .failure()
@@ -400,9 +398,7 @@ fn params_invalid_circuit() {
     fs::write(bad_r1cs.path(), b"not_a_valid_r1cs_file").unwrap();
 
     let mut cmd = Command::cargo_bin("nova").unwrap();
-    cmd.arg("params")
-        .arg("--circuit")
-        .arg(bad_r1cs.path());
+    cmd.arg("params").arg("--circuit").arg(bad_r1cs.path());
 
     cmd.assert()
         .failure()
@@ -645,7 +641,9 @@ fn help_ceremony() {
         .success()
         .stdout(predicate::str::contains("--h-scalar"))
         .stdout(predicate::str::contains("h-query scalar compression"))
-        .stdout(predicate::str::contains("Use h-query scalar compression (Implementation 7)"));
+        .stdout(predicate::str::contains(
+            "Use h-query scalar compression (Implementation 7)",
+        ));
 }
 
 // ------------------------------------------------------------------
@@ -754,16 +752,12 @@ fn fold_nifs_end_to_end() {
     // the structure and that folding is deterministic.
     assert_eq!(bundle["final_instance"]["x"].as_array().unwrap().len(), 2);
     assert_ne!(bundle["final_instance"]["u"].as_str().unwrap(), "1");
-    assert!(
-        bundle["final_instance"]["w_commit"]
-            .as_str()
-            .is_some_and(|s| !s.is_empty())
-    );
-    assert!(
-        bundle["final_instance"]["e_commit"]
-            .as_str()
-            .is_some_and(|s| !s.is_empty())
-    );
+    assert!(bundle["final_instance"]["w_commit"]
+        .as_str()
+        .is_some_and(|s| !s.is_empty()));
+    assert!(bundle["final_instance"]["e_commit"]
+        .as_str()
+        .is_some_and(|s| !s.is_empty()));
     assert_eq!(bundle["transcript_final"].as_str().unwrap().len(), 128);
 
     // Folding is deterministic: re-folding the same witnesses yields the
@@ -923,7 +917,8 @@ fn fold_nifs_emits_compression_r1cs() {
     // Step circuit: 4 wires, 1 constraint, 1 public out + 1 public in.
     // Compression circuit: 2 constraints, n_public = 1+4+1+1 = 7,
     // n_wires_total = 8, n_pub_out = 6, n_prv_in = 1.
-    let c = nova_prover::load_circuit(compression_r1cs.path()).expect("compression .r1cs must parse");
+    let c =
+        nova_prover::load_circuit(compression_r1cs.path()).expect("compression .r1cs must parse");
     assert_eq!(c.n_wires, 8);
     assert_eq!(c.n_constraints, 2);
     assert_eq!(c.n_pub_out, 6);

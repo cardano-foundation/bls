@@ -158,6 +158,18 @@ the root, and the keys never have to be revealed to it.
        --proving-key smt_nova.pk --steps steps --out smt_nova_ivc.json
    $ ../../clis/groth16/target/release/groth16 nova verify --ivc smt_nova_ivc.json --verifying-key smt_nova.vk
    # → Verified 255 steps: 255 pairings OK, state chain OK, transcript OK
+
+   (or, for the transparent sumcheck alternative — see Implementation 10 below:)
+
+   $ ../../clis/nova/target/release/nova fold --nifs \
+       --circuit cardano_key_ownership_smt_nova.r1cs \
+       --steps steps --out smt_ivc.json
+   $ ../../clis/nova/target/release/nova compress --sumcheck \
+       --circuit cardano_key_ownership_smt_nova.r1cs \
+       --steps steps --out smt_sumcheck_proof.json
+   $ ../../clis/nova/target/release/nova verify \
+       --ivc smt_ivc.json --sumcheck-proof smt_sumcheck_proof.json
+   # → Verified 255 steps: sumcheck compression proof OK, commitments OK, state chain OK
 ```
 
 ### End-to-end flow — Implementation 7 (monolithic + h-scalar)
@@ -378,7 +390,7 @@ EOF
 ```
 
 > **Note:** `nova` verification here is still **O(N)** — it re-checks every step
-> proof. The O(1)-verify path is shipped as [Implementation 9](../../nova-prover/README.md#implementation-9-relaxed-r1cs-folding--single-compression-snark): `nova fold --nifs` → `trusted-setup ceremony-dev` on the emitted compression circuit → `nova compress` → `nova verify --compression-proof` — see the [Implementation 9 e2e flow](../../nova-prover/README.md#e2e-flow--implementation-9-nifs). The step circuit here is byte-identical to `cardano_ed25519_ownership_nova` (7,724 constraints), so the Impl 9 numbers measured for it apply; the worked SMT e2e and full tradeoffs are in the [Impl 8 vs Impl 9 comparison](#end-to-end-comparison--implementation-8-step-chain-vs-implementation-9-nifs) below.
+> proof. The O(1)-verify path is shipped as [Implementation 9](../../nova-prover/README.md#implementation-9-relaxed-r1cs-folding--single-compression-snark): `nova fold --nifs` → `trusted-setup ceremony-dev` on the emitted compression circuit → `nova compress` → `nova verify --compression-proof` — see the [Implementation 9 e2e flow](../../nova-prover/README.md#e2e-flow--implementation-9-nifs). For a **transparent** O(1)-verify path with no ceremony, see [Implementation 10](../../nova-prover/README.md#implementation-10-constant-size-nova-proofs): `nova fold --nifs` → `nova compress --sumcheck` → `nova verify --sumcheck-proof` — no proving or verifying key needed for compression. The step circuit here is byte-identical to `cardano_ed25519_ownership_nova` (7,724 constraints), so the Impl 9/10 numbers measured for it apply; the worked SMT e2e and full tradeoffs are in the [Impl 8 vs Impl 9 comparison](#end-to-end-comparison--implementation-8-step-chain-vs-implementation-9-nifs) below.
 
 ## CLI vs shell/Python
 
@@ -495,6 +507,76 @@ Reading the table:
   Impl 9 needs a 6.6 s compression ceremony (built from the step's A/B/C
   matrices, so per step shape in this build). Both are one-time and reusable
   across runs; Impl 9 additionally eliminates the per-step proving key.
+
+### End-to-end flow — Implementation 10 (sumcheck compression, no ceremony)
+
+Implementation 10 replaces the Groth16 compression proof of Implementation 9
+with a **transparent sumcheck argument** — no trusted setup needed. The fold
+phase is identical to Implementation 9; only the compress and verify steps
+change. The step circuit here is byte-identical to
+`cardano_ed25519_ownership_nova.r1cs` (7,724 constraints), so the fold
+numbers are the same.
+
+**Steps 1–5 are the same as Implementation 8** (key derivation via
+`cardano-address` + `smt` CLI, step circuit compilation, step ceremony,
+step witness generation with `gen_smt_nova_steps.py`). Then:
+
+**6. NIFS fold** — same as Implementation 9 (no proving key):
+
+```bash
+../../clis/nova/target/release/nova fold --nifs \
+  --circuit cardano_key_ownership_smt_nova.r1cs \
+  --steps steps --out smt_ivc.json
+# → NIFS bundle written to smt_ivc.json (255 steps → one instance)
+```
+
+**7. Compress with sumcheck** — no ceremony, no proving key:
+
+```bash
+../../clis/nova/target/release/nova compress --sumcheck \
+  --circuit cardano_key_ownership_smt_nova.r1cs \
+  --steps steps --out smt_sumcheck_proof.json
+# → Sumcheck proof written to smt_sumcheck_proof.json
+```
+
+**8. Verify** — no verifying key needed:
+
+```bash
+../../clis/nova/target/release/nova verify \
+  --ivc smt_ivc.json --sumcheck-proof smt_sumcheck_proof.json
+# → Verified 255 steps: sumcheck compression proof OK, commitments OK, state chain OK
+# → Final transcript: <64-byte hex>
+```
+
+**9. Application-level final check** (outside the fold — same as Impl 8):
+
+```bash
+# final addOut (from step_0254.wtns) must equal 2·PointA projectively
+python3 - <<'EOF'
+from gen_smt_nova_steps import read_wtns, limbs_to_int, ext_add, projective_eq
+n8, w = read_wtns("steps/step_0254.wtns")
+add_out = tuple(limbs_to_int([w[13 + c*3 + l] for l in range(3)]) for c in range(4))
+import json; d = json.load(open("input.json"))
+point_a = tuple(limbs_to_int([int(v) for v in limb]) for limb in d["PointA"])
+assert projective_eq(add_out, ext_add(point_a, point_a))
+print("addOut == 2*PointA: OK")
+EOF
+```
+
+**Key differences from Implementation 9:**
+
+- **No compression ceremony.** Implementation 9 requires `trusted-setup ceremony-dev` on the compression circuit (15,448 constraints); Implementation 10 needs nothing.
+- **No proving key.** `compress --sumcheck` needs only the step circuit and witnesses.
+- **No verifying key.** `verify --sumcheck-proof` needs only the NIFS bundle and sumcheck proof.
+- **True O(1) proof size.** Implementation 9's bundle is O(1) in N but O(step size) in constraints; Implementation 10's bundle is O(1) in both.
+- **ZK for free.** The verifier never sees the folded witness or error vector.
+
+The NIFS fold phase is **identical** to Implementation 9 (~224 ms/step on
+the 7,724-constraint step circuit). See the
+[Impl 10 benchmarks](../../nova-prover/README.md#implementation-10--nifs-fold--sumcheck-compression-no-ceremony)
+for measured numbers. The SMT membership half of the combined statement
+remains in the monolithic circuit — the fold covers the scalar multiplication
+only.
 
 ## Design
 

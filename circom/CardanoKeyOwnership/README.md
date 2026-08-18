@@ -108,7 +108,7 @@ This is a minimal subset of the full `Ed25519Verify` circuit: one scalar multipl
 > ../../clis/nova/target/release/nova verify --ivc cko255_ivc.json --verifying-key cko255.vk
 > ```
 >
-> Full worked example (witness generation, flags, expected output): the **End-to-end flow — Implementation 8 (Nova step-chain)** section below. The monolithic Implementation 7 flow that follows remains available as the reference single-proof path.
+> Full worked example (witness generation, flags, expected output): the **End-to-end flow — Implementation 8 (Nova step-chain)** section below. The monolithic Implementation 7 flow that follows remains available as the reference single-proof path. For a transparent, ceremony-free compression alternative, see **Implementation 10** (sumcheck compression): `nova fold --nifs` → `nova compress --sumcheck` → `nova verify --sumcheck-proof`.
 
 ### End-to-end flow — Implementation 7 (monolithic + h-scalar)
 
@@ -254,7 +254,7 @@ The `sel` bits come from the same clamped scalar `sk` as in the Implementation 7
 # → Verified 255 steps: 255 pairings OK, state chain OK, transcript OK
 ```
 
-> **Note:** `nova` verification here is still **O(N)** — it re-checks every step proof. The O(1)-verify path is shipped as [Implementation 9](../../nova-prover/README.md#implementation-9-relaxed-r1cs-folding--single-compression-snark): `nova fold --nifs` → `trusted-setup ceremony-dev` on the emitted compression circuit → `nova compress` → `nova verify --compression-proof` — see the [Implementation 9 e2e flow](../../nova-prover/README.md#e2e-flow--implementation-9-nifs). On the 255-step 7,724-constraint circuit the NIFS fold measures **~230 ms/step vs ~700 ms/step** for the Groth16 chain (3×, no per-step proving key), and the single-pairing verify is O(1) — but at N = 255 its MSM re-commitments make it *slower* than the 255-pairing chain (7.8 s vs 3.2 s, crossover at N ≈ 620). Full measured tradeoffs: the [Impl 8 vs Impl 9 comparison](#end-to-end-comparison--implementation-8-step-chain-vs-implementation-9-nifs) below.
+> **Note:** `nova` verification here is still **O(N)** — it re-checks every step proof. The O(1)-verify path is shipped as [Implementation 9](../../nova-prover/README.md#implementation-9-relaxed-r1cs-folding--single-compression-snark): `nova fold --nifs` → `trusted-setup ceremony-dev` on the emitted compression circuit → `nova compress` → `nova verify --compression-proof` — see the [Implementation 9 e2e flow](../../nova-prover/README.md#e2e-flow--implementation-9-nifs). For a **transparent** O(1)-verify path with no ceremony, see [Implementation 10](../../nova-prover/README.md#implementation-10-constant-size-nova-proofs): `nova fold --nifs` → `nova compress --sumcheck` → `nova verify --sumcheck-proof` — no proving or verifying key needed for compression. On the 255-step 7,724-constraint circuit the NIFS fold measures **~230 ms/step vs ~700 ms/step** for the Groth16 chain (3×, no per-step proving key), and the single-pairing verify is O(1) — but at N = 255 its MSM re-commitments make it *slower* than the 255-pairing chain (7.8 s vs 3.2 s, crossover at N ≈ 620). Full measured tradeoffs: the [Impl 8 vs Impl 9 comparison](#end-to-end-comparison--implementation-8-step-chain-vs-implementation-9-nifs) below.
 
 ### Benchmarks — pre-Nova vs Nova
 
@@ -304,6 +304,54 @@ Reading the table:
 - **Verify is O(1) but not yet cheaper at N = 255.** Impl 9's single-pairing verify (7.8 s) is dominated by the native `com(Z)`/`com(E)` re-commitment MSMs (variable-base, ~0.16 ms/point) and is *slower* than Impl 8's 255 pairings (3.2 s) at this N. Crossover is at **N ≈ 620 steps**; beyond that the O(1) verify wins (Impl 8 grows ~12.5 ms/step). Switching these to precomputed fixed-base MSMs would make Impl 9's verify sub-second and win at all N.
 - **Bundle is O(1) but the constant is larger than Impl 8 at N = 255.** The compression proof reveals the folded `Z`/`E` (650 KB for the 23K-wire compression circuit), so the ~656 KB constant bundle beats Impl 8's O(N) bundle (334.7 KiB + ~1.3 KB/step) only past **N ≈ 500**. The O(1)-in-N property — not the byte count at small N — is the win.
 - **Ceremony moves, doesn't disappear.** Impl 8 needs a 2.7 s step ceremony; Impl 9 needs a 6.4 s compression ceremony (built from the step's A/B/C matrices, so per step shape in this build). Both are one-time and reusable across runs; Impl 9 additionally eliminates the per-step proving key.
+
+</details>
+
+---
+
+<details>
+<summary><b>End-to-end flow — Implementation 10 (sumcheck compression, no ceremony) — click to expand</b></summary>
+
+Implementation 10 replaces the Groth16 compression proof of Implementation 9 with a **transparent sumcheck argument** — no trusted setup needed. The fold phase is identical to Implementation 9; only the compress and verify steps change.
+
+**Steps 1–5 are the same as Implementation 8** (key derivation, input generation, compile step circuit, ceremony, generate step witnesses). Then:
+
+**6. NIFS fold** — same as Implementation 9 (no proving key):
+
+```bash
+../../clis/nova/target/release/nova fold --nifs \
+  --circuit cardano_ed25519_ownership_nova.r1cs \
+  --steps <witness-dir> --out cko255_ivc.json
+# → NIFS bundle written to cko255_ivc.json (255 steps → one instance)
+```
+
+**7. Compress with sumcheck** — no ceremony, no proving key:
+
+```bash
+../../clis/nova/target/release/nova compress --sumcheck \
+  --circuit cardano_ed25519_ownership_nova.r1cs \
+  --steps <witness-dir> --out cko255_sumcheck_proof.json
+# → Sumcheck proof written to cko255_sumcheck_proof.json
+```
+
+**8. Verify** — no verifying key needed:
+
+```bash
+../../clis/nova/target/release/nova verify \
+  --ivc cko255_ivc.json --sumcheck-proof cko255_sumcheck_proof.json
+# → Verified 255 steps: sumcheck compression proof OK, commitments OK, state chain OK
+# → Final transcript: <64-byte hex>
+```
+
+**Key differences from Implementation 9:**
+
+- **No compression ceremony.** Implementation 9 requires `trusted-setup ceremony-dev` on the compression circuit (15,448 constraints); Implementation 10 needs nothing.
+- **No proving key.** `compress --sumcheck` needs only the step circuit and witnesses.
+- **No verifying key.** `verify --sumcheck-proof` needs only the NIFS bundle and sumcheck proof.
+- **True O(1) proof size.** Implementation 9's bundle is O(1) in N but O(step size) in constraints (the compression proof reveals `Z`/`E`). Implementation 10's bundle is O(1) in both — proof size is O(log(n_constraints)) field elements.
+- **ZK for free.** The verifier never sees the folded witness or error vector.
+
+The NIFS fold phase is **identical** to Implementation 9 (~230 ms/step on 7,724-constraint circuits). The sumcheck compress/verify phases are currently slower than Groth16 for small circuits but scale better as step width grows. See the [Impl 10 benchmarks](../../nova-prover/README.md#implementation-10--nifs-fold--sumcheck-compression-no-ceremony) for measured numbers.
 
 </details>
 
