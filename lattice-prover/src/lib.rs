@@ -6,6 +6,7 @@
 //! This crate implements the core Lova primitives using the `lattirust-arithmetic`
 //! library for ring arithmetic, vector/matrix operations, and Fiat-Shamir transcripts.
 
+pub mod bls12_381_adapter;
 pub mod commitment;
 pub mod decompose;
 pub mod fold;

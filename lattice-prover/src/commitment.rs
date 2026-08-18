@@ -37,7 +37,11 @@ impl AjtaiParams {
     }
 }
 
-pub fn verify_commitment(params: &AjtaiParams, s: &Vector<Z2_64>, commitment: &AjtaiCommitment) -> bool {
+pub fn verify_commitment(
+    params: &AjtaiParams,
+    s: &Vector<Z2_64>,
+    commitment: &AjtaiCommitment,
+) -> bool {
     let expected = params.commit(s);
     expected == *commitment
 }

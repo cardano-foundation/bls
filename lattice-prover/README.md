@@ -123,6 +123,101 @@ flowchart TB
 
 The price: everything scales with `λ`, `ℓ` (digits), and the number of rounds `t > 300`, which is why proofs are megabytes, not kilobytes.
 
+## CLI — `lattice --lova`
+
+A command-line interface for the Lova folding scheme lives in [`clis/lattice`](../clis/lattice/).
+
+### Usage
+
+```bash
+cd clis/lattice
+
+# Display Lova parameters
+lattice --lova params --m 256 --n 128
+
+# Fold 32 steps with default parameters
+lattice --lova fold --steps 32 --m 256 --n 128
+
+# Fold with toy parameters (fast)
+lattice --lova fold --steps 256 --m 16 --n 8
+```
+
+### Benchmarks
+
+The benchmark binary measures Lova folding performance across parameter configurations:
+
+```bash
+cd clis/lattice
+
+# Run all parameter configurations
+cargo run --release --bin benchmark_lova -- --all
+
+# Custom configuration
+cargo run --release --bin benchmark_lova -- --m 64 --n 32 --steps 128
+```
+
+### Lova-native benchmark results (release mode, single core)
+
+Measured on a single machine with synthetic random witnesses (no circom circuits). Proof size is constant — independent of step count.
+
+| Parameters | Steps | Fold (total) | Fold/step | Verify (total) | Verify/step | Proof size |
+|------------|-------|-------------|-----------|----------------|-------------|------------|
+| **toy** (m=16, n=8) | 8 | 0.35 ms | 0.04 ms | 0.02 ms | 0.00 ms | 4.4 KiB |
+| **toy** (m=16, n=8) | 32 | 1.49 ms | 0.05 ms | 0.06 ms | 0.00 ms | 4.4 KiB |
+| **toy** (m=16, n=8) | 256 | 14.3 ms | 0.06 ms | 0.54 ms | 0.00 ms | 4.4 KiB |
+| **toy** (m=16, n=8) | 1024 | 53.6 ms | 0.05 ms | 2.12 ms | 0.00 ms | 4.4 KiB |
+| **small** (m=32, n=16) | 8 | 0.64 ms | 0.08 ms | 0.03 ms | 0.00 ms | 8.8 KiB |
+| **small** (m=32, n=16) | 128 | 13.6 ms | 0.11 ms | 0.70 ms | 0.01 ms | 8.8 KiB |
+| **medium** (m=64, n=32) | 8 | 1.59 ms | 0.20 ms | 0.17 ms | 0.02 ms | 17.5 KiB |
+| **medium** (m=64, n=32) | 128 | 21.0 ms | 0.16 ms | 1.08 ms | 0.01 ms | 17.5 KiB |
+| **default** (m=256, n=128) | 8 | 6.12 ms | 0.77 ms | 0.95 ms | 0.12 ms | 70.0 KiB |
+| **default** (m=256, n=128) | 32 | 45.8 ms | 1.43 ms | 8.93 ms | 0.28 ms | 70.0 KiB |
+
+Key observations:
+
+- **Fold scales linearly** with both step count and matrix dimensions (O(n) per step).
+- **Proof size is constant** — independent of step count, as expected for Lova.
+- **Verify is fast** — dominated by commitment re-computation, scales with m×n.
+- **Toy parameters (16×8)** fold at 0.05 ms/step — ~50× faster than Nova NIFS (185 ms/step on 7,724 constraints).
+- **Default parameters (256×128)** fold at 1.43 ms/step — still ~130× faster than Nova NIFS.
+- Proof size at default parameters (70 KiB) is comparable to Nova Impl 10's 472.8 KiB — and truly O(1).
+
+### Comparison with Nova (same machine)
+
+| Metric | Nova NIFS (Impl 9/10) | Lova (default params) |
+|--------|----------------------|----------------------|
+| Fold/step | 185 ms | 1.43 ms |
+| Verify | 7.87 s (sumcheck) | 8.93 ms |
+| Proof size | 472.8 KiB (sumcheck) | 70.0 KiB |
+| Ceremony | 6.4 s (Groth16) or none (sumcheck) | None |
+| Post-quantum | ❌ | ✅ |
+
+**Note:** Nova benchmarks use real circom circuits (7,724 constraints, 255 steps); Lova benchmarks use synthetic witnesses with toy parameters (128 dimensions). The comparison is directional — Lova's parameters are much smaller and don't yet represent a real circuit workload.
+
+### R1CS-to-Lova adapter
+
+The adapter in `src/bls12_381_adapter.rs` converts Circom witnesses (BLS12-381 field elements) to Lova's Z_{2^64} vectors via 4-limb decomposition, enabling Lova folding on real circuit witnesses.
+
+Each BLS12-381 field element (32 bytes, ~255 bits) is split into 4 × u64 limbs: low 64 bits, next 64 bits, next 64 bits, and high 64 bits. This expands the witness dimension by 4× but keeps all arithmetic in Z_{2^64}.
+
+#### Benchmark results (R1CS circuits via 4-limb adapter)
+
+Measured with `benchmark_lova_r1cs` binary, release mode, single core:
+
+| Circuit | Signals | Lova limbs (n) | Steps | Fold/step | Verify/step | Proof size |
+|---------|---------|----------------|-------|-----------|-------------|------------|
+| **Airdrop** | 1,210 | 4,840 | 4 | 1,197 ms | 285 ms | 2,571 KiB |
+| **EdDSA** | 15 | 60 | 31 | 0.60 ms | 0.03 ms | 31.9 KiB |
+| **Ed25519** | 7,658 | 30,632 | 7 | ~33 s | ~11 s | 16,273 KiB |
+
+Key observations:
+
+- **Performance scales with witness dimension** — the 15-signal EdDSA circuit is fast (0.60 ms/step), while the 7,658-signal Ed25519 circuit is ~50,000× slower per step.
+- **Proof size is constant** regardless of step count — a key Lova advantage over Nova's linear-in-step-count proofs.
+- **The 4-limb expansion is the bottleneck** — BLS12-381 limbs can be up to ~2^63, requiring generous norm bounds that increase decomposition cost.
+- **Small circuits are practical** — EdDSA (15 signals) folds faster than Nova's NIFS (0.60 ms vs 185 ms), while remaining post-quantum secure.
+- **Large circuits need optimization** — module-SIS commitments or RNS decomposition could reduce the 4× limb expansion overhead.
+
 ## Main cost centers
 
 1. **Per-fold proof size** — each round sends the commitment `Ĉ` (h×2λℓ over Z_q), the inner-product matrix `IP̃` ((2λℓ)²/2 integers), the cross terms (λ²), and the challenge (2λℓ×λ trits). Summed over `t` rounds → the dominant cost (`proof_size_bytes`, `util.rs:279`).
@@ -156,6 +251,28 @@ The price: everything scales with `λ`, `ℓ` (digits), and the number of rounds
 **Trade-off:** Lova's unstructured SIS is more conservative but less efficient. Module-SIS schemes (LatticeFold, ProtogaLattice) offer better concrete efficiency.
 
 See [`docs/toolkit-lattice-zkp-2026-summary.md`](docs/toolkit-lattice-zkp-2026-summary.md) for full analysis.
+
+### API — BLS12-381 adapter
+
+```rust
+use lattice_prover::bls12_381_adapter;
+
+// Convert a 32-byte BLS12-381 field element to 4 Z_{2^64} limbs
+let be_bytes = [0xff; 32];
+let limbs = bls12_381_adapter::bls12381_bytes_to_limbs(&be_bytes);
+assert_eq!(limbs.len(), 4);
+
+// Convert 4 limbs back to 32-byte BLS12-381 encoding
+let recovered = bls12_381_adapter::limbs_to_bls12381_bytes(&limbs);
+assert_eq!(recovered, be_bytes);
+
+// Load a Circom .wtns file as a flat Z_{2^64} vector (4 limbs per signal)
+let path = std::path::Path::new("step_0000.wtns");
+let witness_limbs = bls12_381_adapter::load_witness_as_limbs(&path)?;
+
+// Load all step witnesses from a directory
+let witnesses = bls12_381_adapter::load_step_witnesses_as_limbs(&dir, Some(32))?;
+```
 
 ## Findings / design
 

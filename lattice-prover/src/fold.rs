@@ -35,7 +35,8 @@ pub fn init_instance(
 ) -> RelaxedInstance {
     let com_z = ajtai.commit(witness);
     let com_e = ajtai.commit(error);
-    let e_digits = decompose::decompose_vector(error, params.decompose_base as i64, params.decompose_digits);
+    let e_digits =
+        decompose::decompose_vector(error, params.decompose_base as i64, params.decompose_digits);
 
     RelaxedInstance {
         u: Z2_64::ONE,
@@ -73,7 +74,11 @@ pub fn fold_instances(
 ) -> (RelaxedInstance, Vector<Z2_64>, Vector<Z2_64>) {
     let n = witness1.len();
     let c1 = challenge[0];
-    let c2 = if challenge.len() > 1 { challenge[1] } else { Z2_64::ONE };
+    let c2 = if challenge.len() > 1 {
+        challenge[1]
+    } else {
+        Z2_64::ONE
+    };
 
     let u_prime = c1 * inst1.u + c2 * inst2.u;
 
@@ -86,7 +91,11 @@ pub fn fold_instances(
 
     let com_z_prime = ajtai.commit(&witness_prime);
     let com_e_prime = ajtai.commit(&error_prime);
-    let e_digits = decompose::decompose_vector(&error_prime, params.decompose_base as i64, params.decompose_digits);
+    let e_digits = decompose::decompose_vector(
+        &error_prime,
+        params.decompose_base as i64,
+        params.decompose_digits,
+    );
 
     let inst_prime = RelaxedInstance {
         u: u_prime,
@@ -115,7 +124,10 @@ pub fn verify_folded_instance(
 
     let error_linf = error.linf_norm();
     if error_linf > params.error_norm_bound.into() {
-        return Err(format!("error norm {} exceeds bound {}", error_linf, params.error_norm_bound));
+        return Err(format!(
+            "error norm {} exceeds bound {}",
+            error_linf, params.error_norm_bound
+        ));
     }
 
     let chunk_size = params.witness_chunk_size;
@@ -170,8 +182,9 @@ mod tests {
         let inst2 = init_instance(&params, &ajtai, &w2, &e2);
 
         let challenge = sample_ternary_challenge(2);
-        let (inst_prime, w_prime, e_prime) =
-            fold_instances(&params, &ajtai, &inst1, &w1, &e1, &inst2, &w2, &e2, &challenge);
+        let (inst_prime, w_prime, e_prime) = fold_instances(
+            &params, &ajtai, &inst1, &w1, &e1, &inst2, &w2, &e2, &challenge,
+        );
 
         let c1 = challenge[0];
         let c2 = challenge[1];
@@ -200,10 +213,7 @@ mod tests {
             let challenge = sample_ternary_challenge(2);
 
             let (inst_prime, w_prime, e_prime) = fold_instances(
-                &params, &ajtai,
-                &inst, &w, &e,
-                &inst_new, &w_new, &e_new,
-                &challenge,
+                &params, &ajtai, &inst, &w, &e, &inst_new, &w_new, &e_new, &challenge,
             );
 
             inst = inst_prime;
