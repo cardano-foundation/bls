@@ -52,6 +52,10 @@ pub mod nifs;
 /// proves the final relaxed instance satisfiable, reusing the step A/B/C.
 pub mod compression;
 
+/// Sumcheck-based constant-size compression (Implementation 10) —
+/// replaces Groth16 compression with a sumcheck argument + HashPC openings.
+pub mod sumcheck;
+
 /// JSON descriptor of a step circuit (emitted by the `params` operation).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CircuitDescriptor {
