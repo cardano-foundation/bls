@@ -1,5 +1,6 @@
-//! Nova benchmarks — Implementation 8 (step-chain) and Implementation 9
-//! (NIFS folding + single compression proof) for a compiled step circuit and
+//! Nova benchmarks — Implementation 8 (step-chain), Implementation 9
+//! (NIFS folding + single compression proof), and Implementation 10
+//! (NIFS folding + sumcheck compression) for a compiled step circuit and
 //! a directory of chained step witnesses.
 //!
 //! Implementation 8 (default) measures the three phases of the `nova` IVC
@@ -18,12 +19,19 @@
 //!   3. compress           — one Groth16 proof over the final relaxed instance
 //!   4. verify             — one pairing check + recomputed com(Z)/com(E)/V MSMs
 //!
-//! Both modes keep the keys/witnesses in memory (no `.pk`/`.vk`/`.wtns` disk
-//! I/O beyond the initial read) and exclude transcript hashing — it is
-//! microseconds per step, negligible next to the MSMs.  Usage:
+//! Implementation 10 (`--sumcheck`) replaces steps 2–4 of Impl 9 with a
+//! transparent sumcheck + HashPC path (no trusted setup required):
+//!
+//!   1. nifs fold          — same as Impl 9
+//!   2. sumcheck compress  — one sumcheck proof + HashPC opening proofs
+//!   3. verify             — sumcheck verification + HashPC checks
+//!
+//! All modes keep the keys/witnesses in memory (no `.pk`/`.vk`/`.wtns` disk
+//! I/O beyond the initial read) and exclude transcript hashing.  Usage:
 //!
 //!   cargo run --release --bin benchmark_nova -- --circuit step.r1cs --steps DIR [--limit N]
 //!   cargo run --release --bin benchmark_nova -- --nifs --circuit step.r1cs --steps DIR [--limit N]
+//!   cargo run --release --bin benchmark_nova -- --sumcheck --circuit step.r1cs --steps DIR [--limit N]
 
 use ark_bls12_381::{Fr, G1Affine};
 use ark_ec::AffineRepr;
@@ -38,7 +46,8 @@ use groth16_prover::engine::FftQapEngine;
 use groth16_prover::prover::{PippengerProver, Proof, Prover, PublicInput};
 use nova_prover::nifs;
 use nova_prover::{
-    prove_compression, verify_compression, fr_to_string, NifsBundle, NifsFinalInstance,
+    prove_compression, verify_compression, prove_sumcheck_compression, verify_sumcheck_compression,
+    fr_to_string, NifsBundle, NifsFinalInstance,
     NifsFoldOutput, NIFS_PARAMS_SEED, NIFS_TRANSCRIPT_PREFIX,
 };
 use std::fs;
@@ -48,6 +57,7 @@ use std::time::Instant;
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let nifs_mode = args.iter().any(|a| a == "--nifs");
+    let sumcheck_mode = args.iter().any(|a| a == "--sumcheck");
     let circuit_path = args
         .windows(2)
         .find(|w| w[0] == "--circuit")
@@ -58,7 +68,7 @@ fn main() {
         .map(|w| w[1].clone());
     let (Some(circuit_path), Some(steps_dir)) = (circuit_path, steps_dir) else {
         eprintln!(
-            "usage: benchmark_nova [--nifs] --circuit <step.r1cs> --steps <witness-dir> [--limit N]"
+            "usage: benchmark_nova [--nifs|--sumcheck] --circuit <step.r1cs> --steps <witness-dir> [--limit N]"
         );
         std::process::exit(2);
     };
@@ -109,6 +119,8 @@ fn main() {
 
     if nifs_mode {
         benchmark_nifs(&engine, &mut circuit, &wtns);
+    } else if sumcheck_mode {
+        benchmark_sumcheck(&engine, &mut circuit, &wtns);
     } else {
         benchmark_step_chain(&engine, &prover, &mut circuit, &wtns, n_public, n_constraints);
     }
@@ -290,6 +302,66 @@ fn benchmark_nifs(
         (bundle_json.len() + proof_json.len()) as f64 / 1024.0
     );
     println!("compression proof verified OK");
+}
+
+/// Implementation 10: NIFS fold → sumcheck compression → O(log N) verify
+/// (no trusted setup required for compression).
+fn benchmark_sumcheck(
+    _engine: &FftQapEngine,
+    circuit: &mut SparseCircomCircuit,
+    wtns: &[PathBuf],
+) {
+    let n_steps = wtns.len();
+
+    // 1. NIFS fold — same as Impl 9.
+    let t = Instant::now();
+    let folded = nifs_fold(circuit, wtns);
+    let fold_s = t.elapsed().as_secs_f64();
+    println!(
+        "nifs fold: {fold_s:.3} s total, {:.3} ms/step over {n_steps} steps (2 O(step)-sized MSMs)",
+        fold_s * 1000.0 / n_steps as f64
+    );
+
+    // 2. Sumcheck compress — one sumcheck proof + HashPC opening proofs
+    //    (no ceremony needed!).
+    let mut rng = rand::thread_rng();
+    let t = Instant::now();
+    let sc_proof = prove_sumcheck_compression(circuit, &folded, &mut rng)
+        .unwrap_or_else(|e| panic!("failed to build sumcheck compression proof: {e}"));
+    let compress_s = t.elapsed().as_secs_f64();
+    println!(
+        "sumcheck compress: {:.3} s (no ceremony, O(log N) sumcheck rounds)",
+        compress_s
+    );
+
+    // 3. Verify — sumcheck verification + HashPC checks.
+    let t = Instant::now();
+    verify_sumcheck_compression(&folded.bundle, &sc_proof)
+        .unwrap_or_else(|e| panic!("sumcheck compression verification failed: {e}"));
+    let verify_s = t.elapsed().as_secs_f64();
+    println!("verify: {verify_s:.4} s (sumcheck + HashPC checks, O(log N))");
+
+    // Proof size comparison.
+    let n_pub_out = circuit.n_pub_out as usize;
+    let state_bytes = n_steps * n_pub_out * 48;
+    let step_proof_bytes = n_steps * 192;
+    let impl8_bytes = step_proof_bytes + state_bytes;
+    let bundle_json = serde_json::to_string(&folded.bundle)
+        .expect("NIFS bundle serialization should not fail");
+    let proof_json = serde_json::to_string(&sc_proof)
+        .expect("sumcheck proof serialization should not fail");
+    println!(
+        "bundle (Impl 8): {n_steps} proofs × 192 B + state = {impl8_bytes} B ({:.1} KiB), grows O(N)",
+        impl8_bytes as f64 / 1024.0
+    );
+    println!(
+        "bundle (Impl 10): final instance {} B (O(1)) + sumcheck proof {} B = {} B ({:.1} KiB), constant in N (logarithmic in constraints)",
+        bundle_json.len(),
+        proof_json.len(),
+        bundle_json.len() + proof_json.len(),
+        (bundle_json.len() + proof_json.len()) as f64 / 1024.0
+    );
+    println!("sumcheck compression proof verified OK");
 }
 
 /// Fold every step witness into one Relaxed-R1CS running instance, exactly as
