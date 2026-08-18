@@ -181,19 +181,17 @@ Key observations:
 - **Toy parameters (16×8)** fold at 0.05 ms/step — ~50× faster than Nova NIFS (185 ms/step on 7,724 constraints).
 - **Default parameters (256×128)** fold at 1.43 ms/step — still ~130× faster than Nova NIFS.
 - Proof size at default parameters (70 KiB) is comparable to Nova Impl 10's 472.8 KiB — and truly O(1).
-- **RNS mode (`--rns`)** halves `decompose_digits` (32 vs 64) but doubles the witness dimension (2×n). Currently slower for these circuit sizes because O(n²) matrix operations dominate — see RNS analysis in [`clis/lattice/README.md`](../clis/lattice/README.md).
+- **RNS mode (`--rns`)** halves `decompose_digits` (32 vs 64) but doubles the witness dimension (2×n). Currently slower for all circuit sizes because O(n²) matrix operations dominate — see RNS analysis in [`clis/lattice/README.md`](../clis/lattice/README.md).
 
 ### Comparison with Nova (same machine)
 
-| Metric | Nova NIFS (Impl 9/10) | Lova (default params) |
-|--------|----------------------|----------------------|
-| Fold/step | 185 ms | 1.43 ms |
-| Verify | 7.87 s (sumcheck) | 8.93 ms |
-| Proof size | 472.8 KiB (sumcheck) | 70.0 KiB |
-| Ceremony | 6.4 s (Groth16) or none (sumcheck) | None |
-| Post-quantum | ❌ | ✅ |
-
-**Note:** Nova benchmarks use real circom circuits (7,724 constraints, 255 steps); Lova benchmarks use synthetic witnesses with toy parameters (128 dimensions). The comparison is directional — Lova's parameters are much smaller and don't yet represent a real circuit workload.
+| Metric | Nova NIFS (Impl 9/10) | Lova (EdDSA, 4-limb) | Lova (Ed25519, 4-limb) |
+|--------|----------------------|----------------------|------------------------|
+| Fold/step | 185 ms | **0.45 ms** | 35.5 s |
+| Verify | 7.87 s (sumcheck) | **0.03 ms** | 10.7 s |
+| Proof size | 472.8 KiB (sumcheck) | **31.9 KiB** | 16,273 KiB |
+| Ceremony | 6.4 s (Groth16) or none (sumcheck) | None | None |
+| Post-quantum | No | **Yes** | **Yes** |
 
 ### R1CS-to-Lova adapter
 
@@ -207,16 +205,31 @@ Measured with `benchmark_lova_r1cs` binary, release mode, single core:
 
 | Circuit | Signals | Lova limbs (n) | Steps | Fold/step | Verify/step | Proof size |
 |---------|---------|----------------|-------|-----------|-------------|------------|
-| **Airdrop** | 1,210 | 4,840 | 4 | 1,197 ms | 285 ms | 2,571 KiB |
-| **EdDSA** | 15 | 60 | 31 | 0.60 ms | 0.03 ms | 31.9 KiB |
-| **Ed25519** | 7,658 | 30,632 | 7 | ~33 s | ~11 s | 16,273 KiB |
+| **EdDSA** | 15 | 60 | 63 | 0.45 ms | 0.03 ms | 31.9 KiB |
+| **Airdrop** | 1,210 | 4,840 | 4 | 1,204 ms | 282 ms | 2,571 KiB |
+| **Ed25519** | 7,658 | 30,632 | 15 | 35.5 s | 10.7 s | 16,273 KiB |
+
+#### RNS vs 4-limb comparison
+
+RNS mode (`--rns` flag) decomposes each BLS12-381 element into 8 × 32-bit residues. This halves `decompose_digits` (32 vs 64) but doubles the witness dimension (2×n):
+
+| Circuit | Mode | n | decompose_digits | Fold/step | Verify/step |
+|---------|------|---|-----------------|-----------|-------------|
+| **EdDSA** | 4-limb | 60 | 64 | **0.45 ms** | **0.03 ms** |
+| **EdDSA** | RNS | 120 | 32 | 0.63 ms | 0.09 ms |
+| **Airdrop** | 4-limb | 4,840 | 64 | **1,204 ms** | **282 ms** |
+| **Airdrop** | RNS | 9,680 | 32 | 4,909 ms | 1,133 ms |
+| **Ed25519** | 4-limb | 30,632 | 64 | **35.5 s** | **10.7 s** |
+| **Ed25519** | RNS | 61,264 | 32 | 283.5 s | 65.5 s |
+
+RNS is currently slower for all sizes because the 2× dimension increase (O(n²) matrix ops) outweighs the 2× decompose_digits reduction. See Phase 2 below for the fix.
 
 Key observations:
 
-- **Performance scales with witness dimension** — the 15-signal EdDSA circuit is fast (0.60 ms/step), while the 7,658-signal Ed25519 circuit is ~50,000× slower per step.
+- **Performance scales with witness dimension** — the 15-signal EdDSA circuit folds at 0.45 ms/step, while the 7,658-signal Ed25519 circuit is ~79,000× slower per step (35.5 s/step).
 - **Proof size is constant** regardless of step count — a key Lova advantage over Nova's linear-in-step-count proofs.
 - **The 4-limb expansion is the bottleneck** — BLS12-381 limbs can be up to ~2^63, requiring generous norm bounds that increase decomposition cost.
-- **Small circuits are practical** — EdDSA (15 signals) folds faster than Nova's NIFS (0.60 ms vs 185 ms), while remaining post-quantum secure.
+- **Small circuits are practical** — EdDSA (15 signals) folds faster than Nova's NIFS (0.45 ms vs 185 ms), while remaining post-quantum secure.
 - **Large circuits need optimization** — module-SIS commitments or RNS decomposition could reduce the 4× limb expansion overhead.
 
 ## Main cost centers
