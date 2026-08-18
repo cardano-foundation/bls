@@ -1,4 +1,4 @@
-use lattirust_arithmetic::challenge_set::ternary::{Trit, TernaryChallengeSet};
+use lattirust_arithmetic::challenge_set::ternary::{TernaryChallengeSet, Trit};
 use lattirust_arithmetic::linear_algebra::Vector;
 use lattirust_arithmetic::nimue::traits::ChallengeFromRandomBytes;
 use lattirust_arithmetic::ring::Z2_64;
@@ -25,7 +25,10 @@ pub fn folding_iopattern(params: &LovaParams) -> IOPattern<Keccak> {
         .absorb(params.n * 8, "witness")
         .absorb(params.n * 8, "error")
         .ratchet()
-        .squeeze(params.decompose_digits * TRIT_BYTE_SIZE, "ternary_challenge")
+        .squeeze(
+            params.decompose_digits * TRIT_BYTE_SIZE,
+            "ternary_challenge",
+        )
         .ratchet()
 }
 
@@ -45,7 +48,8 @@ pub fn squeeze_ternary_challenge(
 ) -> Result<Vector<Z2_64>, nimue::IOPatternError> {
     let trits: Vec<Trit> = merlin.challenge_vec::<Trit, TernaryChallengeSet<Trit>>(k)?;
     Ok(Vector::from_vec(
-        trits.into_iter()
+        trits
+            .into_iter()
             .map(|t| match t {
                 Trit::MinusOne => Z2_64::from(-1i64),
                 Trit::Zero => Z2_64::from(0i64),
@@ -138,7 +142,8 @@ mod tests {
             assert!(
                 val >= -1 && val <= 1,
                 "challenge[{}] = {} is not ternary",
-                j, val
+                j,
+                val
             );
         }
     }

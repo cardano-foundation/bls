@@ -42,10 +42,7 @@ fn test_full_ivc_chain_4_steps() {
         let challenge = fold::sample_ternary_challenge(2);
 
         let (inst_prime, w_prime, e_prime) = fold::fold_instances(
-            &params, &ajtai,
-            &inst, &w, &e,
-            &inst_new, &w_new, &e_new,
-            &challenge,
+            &params, &ajtai, &inst, &w, &e, &inst_new, &w_new, &e_new, &challenge,
         );
 
         assert!(
@@ -83,10 +80,7 @@ fn test_fold_with_ternary_challenges_only() {
         }
 
         let (inst_prime, w_prime, e_prime) = fold::fold_instances(
-            &params, &ajtai,
-            &inst, &w, &e,
-            &inst_new, &w_new, &e_new,
-            &challenge,
+            &params, &ajtai, &inst, &w, &e, &inst_new, &w_new, &e_new, &challenge,
         );
 
         assert!(

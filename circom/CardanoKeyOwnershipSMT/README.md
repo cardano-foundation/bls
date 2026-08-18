@@ -570,6 +570,33 @@ for measured numbers. The SMT membership half of the combined statement
 remains in the monolithic circuit — the fold covers the scalar multiplication
 only.
 
+---
+
+<details>
+<summary><b>Post-quantum alternative — Lova folding (lattice-prover) — click to expand</b></summary>
+
+The post-quantum track replaces Nova's Pedersen commitments with Ajtai/SIS lattice commitments. The `lattice-prover` crate implements the Lova folding scheme (ASIACRYPT 2024), which runs on Z_{2^64} — no field arithmetic, fully transparent.
+
+**R1CS-to-Lova adapter:** Circom witnesses (BLS12-381 field elements) are converted to Lova vectors via 4-limb decomposition (each 32-byte element → 4 × u64 limbs). This enables folding real circuit witnesses through the Lova pipeline.
+
+| Metric | Nova Impl 10 (sumcheck) | Lova (EdDSA, 15 signals) | Lova (Airdrop, 1,210 signals) |
+|--------|-------------------------|--------------------------|-------------------------------|
+| Fold/step | 185 ms | **0.60 ms** | 1,197 ms |
+| Verify/step | 7.87 s | **0.03 ms** | 285 ms |
+| Proof size | 472.8 KiB | **31.9 KiB** | 2,571 KiB |
+| Post-quantum | ❌ | ✅ | ✅ |
+
+**Key observations:**
+
+- **Small circuits are practical** — EdDSA (15 signals) folds at 0.60 ms/step, faster than Nova's NIFS (185 ms/step), while remaining post-quantum secure.
+- **Proof size is constant** regardless of step count — a key Lova advantage over Nova's linear-in-step-count proofs.
+- **Large circuits need optimization** — the 4-limb BLS12-381 expansion multiplies the effective dimension by 4×, making Ed25519 (7,658 signals) ~50,000× slower per step.
+- **No trusted setup** — Lova is fully transparent (no ceremony, no proving/verifying key).
+
+See [`lattice-prover/README.md`](../../lattice-prover/README.md) for full Lova documentation and [`clis/lattice/README.md`](../../clis/lattice/README.md) for CLI usage.
+
+</details>
+
 ## Design
 
 ### Circuit Structure

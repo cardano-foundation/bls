@@ -1,18 +1,14 @@
 use lattirust_arithmetic::linear_algebra::Vector;
+use lattirust_arithmetic::ring::representatives::WithSignedRepresentative;
 use lattirust_arithmetic::ring::Ring;
 use lattirust_arithmetic::ring::Z2_64;
-use lattirust_arithmetic::ring::representatives::WithSignedRepresentative;
 
 /// Decompose a vector into base-`b` balanced digits.
 ///
 /// Given `v ∈ Z_q^n`, returns a vector of `k` digit-vectors `D[0..k]`
 /// such that `v = Σ_{i=0}^{k-1} b^i * D[i]` (mod q), with each digit
 /// in `[-(b-1)/2, (b-1)/2]`.
-pub fn decompose_vector(
-    v: &Vector<Z2_64>,
-    base: i64,
-    num_digits: usize,
-) -> Vec<Vector<Z2_64>> {
+pub fn decompose_vector(v: &Vector<Z2_64>, base: i64, num_digits: usize) -> Vec<Vector<Z2_64>> {
     let n = v.len();
     let mut digits: Vec<Vector<Z2_64>> = (0..num_digits)
         .map(|_| Vector::from_element(n, Z2_64::ZERO))
@@ -40,10 +36,7 @@ pub fn decompose_vector(
 /// Recompose a vector from base-`b` digits.
 ///
 /// Returns `v = Σ_{i=0}^{k-1} b^i * D[i]` (mod q).
-pub fn recompose_vector(
-    digits: &[Vector<Z2_64>],
-    base: i64,
-) -> Vector<Z2_64> {
+pub fn recompose_vector(digits: &[Vector<Z2_64>], base: i64) -> Vector<Z2_64> {
     let n = digits[0].len();
     let b = Z2_64::from(base);
     let mut result = Vector::from_element(n, Z2_64::ZERO);
@@ -106,7 +99,9 @@ mod tests {
                 assert!(
                     val >= -1 && val <= 1,
                     "digit D[{}][{}] = {} out of bounds [-1, 1]",
-                    i, j, val,
+                    i,
+                    j,
+                    val,
                 );
             }
         }

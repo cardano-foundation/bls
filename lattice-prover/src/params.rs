@@ -61,7 +61,10 @@ impl LovaParams {
     /// Verify that the parameters satisfy the Lova norm constraint:
     /// `2 * k * b * sqrt(m) <= beta` where `beta` is the witness norm bound.
     pub fn check_norm_constraint(&self) -> bool {
-        let lhs = 2.0 * self.decompose_digits as f64 * self.decompose_base as f64 * (self.m as f64).sqrt();
+        let lhs = 2.0
+            * self.decompose_digits as f64
+            * self.decompose_base as f64
+            * (self.m as f64).sqrt();
         lhs <= self.witness_norm_bound as f64
     }
 }

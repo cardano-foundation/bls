@@ -1,0 +1,134 @@
+# lattice CLI
+
+Command-line interface for the Lova post-quantum folding scheme. This binary wraps the [`lattice-prover`](../lattice-prover/) crate, providing `fold`, `verify`, and `params` subcommands.
+
+> **Status:** 🔬 Research / evaluation — part of the post-quantum proof system track.
+
+## Prerequisites
+
+Requires Rust nightly toolchain `nightly-2025-05-01` (or compatible). The `lattice-prover` crate depends on `lattirust-arithmetic` which needs nightly features.
+
+## Usage
+
+```bash
+cd clis/lattice
+
+# Display Lova parameters for given dimensions
+lattice --lova params --m 256 --n 128
+
+# Fold 32 steps with specified dimensions
+lattice --lova fold --steps 32 --m 256 --n 128
+
+# Fold with toy parameters (fast, for testing)
+lattice --lova fold --steps 256 --m 16 --n 8
+
+# Verify a folded instance
+lattice --lova verify --m 256 --n 128
+```
+
+### Flags
+
+| Flag | Description |
+|------|-------------|
+| `--lova` | Use Lova post-quantum folding scheme (required) |
+| `--m` | Commitment matrix rows (default: 256) |
+| `--n` | Witness dimension (default: 128) |
+| `--steps` | Number of folding steps (default: 8) |
+| `--rounds` | Decomposition rounds (default: 64) |
+
+## Benchmarks
+
+### Lova-native benchmarks
+
+Run synthetic benchmarks with random witnesses across parameter configurations:
+
+```bash
+cd clis/lattice
+
+# Run all parameter configurations (toy/small/medium/default + scaling)
+cargo run --release --bin benchmark_lova -- --all
+
+# Custom configuration
+cargo run --release --bin benchmark_lova -- --m 64 --n 32 --steps 128
+```
+
+### R1CS-to-Lova benchmarks
+
+Run benchmarks using real Circom circuit witnesses, converted via 4-limb BLS12-381 → Z_{2^64} decomposition:
+
+```bash
+cd clis/lattice
+
+# Benchmark with EdDSA circuit (15 signals, fast)
+cargo run --release --bin benchmark_lova_r1cs -- \
+  --steps-dir /tmp/opencode/bench/eddsa_steps --limit 32
+
+# Benchmark with Airdrop circuit (1,210 signals)
+cargo run --release --bin benchmark_lova_r1cs -- \
+  --steps-dir /tmp/opencode/bench/airdrop_steps
+
+# Benchmark with Ed25519 circuit (7,658 signals, slow)
+cargo run --release --bin benchmark_lova_r1cs -- \
+  --steps-dir /tmp/opencode/bench/ed25519_steps --limit 16
+```
+
+#### Lova-native benchmark results
+
+Measured on a single machine with synthetic random witnesses (release mode, single core). Proof size is constant — independent of step count.
+
+| Parameters | Steps | Fold/step | Verify/step | Proof size |
+|------------|-------|-----------|-------------|------------|
+| **toy** (m=16, n=8) | 8 | 0.04 ms | 0.00 ms | 4.4 KiB |
+| **toy** (m=16, n=8) | 256 | 0.06 ms | 0.00 ms | 4.4 KiB |
+| **small** (m=32, n=16) | 128 | 0.11 ms | 0.01 ms | 8.8 KiB |
+| **medium** (m=64, n=32) | 128 | 0.16 ms | 0.01 ms | 17.5 KiB |
+| **default** (m=256, n=128) | 32 | 1.43 ms | 0.28 ms | 70.0 KiB |
+
+#### R1CS-to-Lova benchmark results
+
+Measured with real Circom circuit witnesses via 4-limb adapter (release mode, single core):
+
+| Circuit | Signals | Lova limbs (n) | Steps | Fold/step | Verify/step | Proof size |
+|---------|---------|----------------|-------|-----------|-------------|------------|
+| **EdDSA** | 15 | 60 | 31 | 0.60 ms | 0.03 ms | 31.9 KiB |
+| **Airdrop** | 1,210 | 4,840 | 4 | 1,197 ms | 285 ms | 2,571 KiB |
+| **Ed25519** | 7,658 | 30,632 | 7 | ~33 s | ~11 s | 16,273 KiB |
+
+Key observations:
+
+- **Small circuits are practical** — EdDSA (15 signals) folds at 0.60 ms/step, faster than Nova's NIFS (185 ms/step).
+- **Proof size is constant** regardless of step count — a key Lova advantage over Nova's linear-in-step-count proofs.
+- **Performance scales with witness dimension** — the 4-limb BLS12-381 expansion multiplies the effective dimension by 4×.
+- **Large circuits need optimization** — module-SIS commitments or RNS decomposition could reduce the expansion overhead.
+
+## Comparison with Nova (same machine)
+
+| Metric | Nova NIFS (Impl 9/10) | Lova (default params) | Lova (EdDSA R1CS) |
+|--------|----------------------|----------------------|-------------------|
+| Fold/step | 185 ms | 1.43 ms | 0.60 ms |
+| Verify/step | 7.87 s (sumcheck) | 0.28 ms | 0.03 ms |
+| Proof size | 472.8 KiB (sumcheck) | 70.0 KiB | 31.9 KiB |
+| Post-quantum | ❌ | ✅ | ✅ |
+
+## Project structure
+
+```
+clis/lattice/
+├── Cargo.toml
+├── Cargo.lock          # Pinned from lattice-prover for dependency compatibility
+├── rust-toolchain.toml # nightly-2025-05-01
+├── src/
+│   ├── main.rs         # CLI entry point (lattice --lova <SUBCOMMAND>)
+│   ├── lib.rs          # run_fold_lova, run_verify_lova, run_params wrappers
+│   └── cmd/
+│       ├── fold.rs     # fold subcommand
+│       ├── verify.rs   # verify subcommand
+│       └── params.rs   # params subcommand
+└── src/bin/
+    ├── benchmark_lova.rs        # Lova-native benchmark (synthetic witnesses)
+    └── benchmark_lova_r1cs.rs   # R1CS-to-Lova benchmark (real circuits)
+```
+
+## License
+
+Apache-2.0
