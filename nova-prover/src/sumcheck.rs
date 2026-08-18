@@ -735,3 +735,266 @@ mod tests {
         assert!(!verify_opening(&hash, &proof, &wrong_eval, &r));
     }
 }
+
+// ── Property-based tests (proptest) ────────────────────────────────
+
+#[cfg(test)]
+mod proptests {
+    use super::*;
+    use crate::nifs::PedersenParams;
+    use proptest::prelude::*;
+
+    fn arb_fr() -> impl Strategy<Value = Fr> {
+        any::<u64>().prop_map(Fr::from)
+    }
+
+    proptest! {
+        /// Property: for k independent multipliers with random witness values,
+        /// if we compute E correctly, the sumcheck prover+verifier always accepts.
+        #[test]
+        fn prop_sumcheck_satisfying_witness_accepted(
+            a1 in 1u64..1000,
+            b1 in 1u64..1000,
+            a2 in 1u64..1000,
+            b2 in 1u64..1000,
+        ) {
+            // Two multipliers: w[1]*w[2]=w[3], w[4]*w[5]=w[6]
+            let l = vec![
+                vec![(1u32, Fr::from(1u64))],
+                vec![(4u32, Fr::from(1u64))],
+            ];
+            let r_mat = vec![
+                vec![(2u32, Fr::from(1u64))],
+                vec![(5u32, Fr::from(1u64))],
+            ];
+            let o = vec![
+                vec![(3u32, Fr::from(1u64))],
+                vec![(6u32, Fr::from(1u64))],
+            ];
+            let z = vec![
+                Fr::from(1u64),
+                Fr::from(a1),
+                Fr::from(b1),
+                Fr::from(a1) * Fr::from(b1),
+                Fr::from(a2),
+                Fr::from(b2),
+                Fr::from(a2) * Fr::from(b2),
+            ];
+            let u = Fr::from(1u64);
+            let e = vec![Fr::zero(); 2];
+
+            let (proof, r_challenges) = prove(&l, &r_mat, &o, &z, u, &e);
+            let (ok, v_r, final_claim) = verify(&proof);
+            prop_assert!(ok, "sumcheck verifier rejected for satisfying witness");
+            prop_assert_eq!(&v_r, &r_challenges);
+
+            let products: Vec<Fr> = (0..2).map(|j| {
+                let az = eval_row_mle(&l[j], &z);
+                let bz = eval_row_mle(&r_mat[j], &z);
+                let cz = eval_row_mle(&o[j], &z);
+                az * bz - u * cz - e[j]
+            }).collect();
+            let mut products_padded = products;
+            products_padded.resize(next_power_of_two(2), Fr::zero());
+            let expected_at_r = if v_r.is_empty() {
+                products_padded[0]
+            } else {
+                eval_dense_mle(&products_padded, &v_r)
+            };
+            prop_assert_eq!(final_claim, expected_at_r);
+        }
+
+        /// Property: for a single multiplier with random witness,
+        /// u=1, e=0, the sumcheck roundtrip always succeeds.
+        #[test]
+        fn prop_sumcheck_single_multiplier(
+            a in 1u64..10000,
+            b in 1u64..10000,
+        ) {
+            let l = vec![vec![(1u32, Fr::from(1u64))]];
+            let r_mat = vec![vec![(2u32, Fr::from(1u64))]];
+            let o = vec![vec![(3u32, Fr::from(1u64))]];
+            let z = vec![
+                Fr::from(1u64),
+                Fr::from(a),
+                Fr::from(b),
+                Fr::from(a) * Fr::from(b),
+            ];
+            let u = Fr::from(1u64);
+            let e = vec![Fr::zero()];
+
+            let (proof, _) = prove(&l, &r_mat, &o, &z, u, &e);
+            let (ok, _, _) = verify(&proof);
+            prop_assert!(ok);
+        }
+
+        /// Property: with random nonzero error, the prover+verifier roundtrip
+        /// still accepts (error absorbs the slack).
+        #[test]
+        fn prop_sumcheck_with_arbitrary_error(
+            a in 1u64..500,
+            b in 1u64..500,
+            u_val in 1u64..10,
+            _e_val in 0u64..500,
+        ) {
+            let l = vec![vec![(1u32, Fr::from(1u64))]];
+            let r_mat = vec![vec![(2u32, Fr::from(1u64))]];
+            let o = vec![vec![(3u32, Fr::from(1u64))]];
+            let az = Fr::from(a);
+            let bz = Fr::from(b);
+            let cz = az * bz;
+            // E = az*bz - u*cz => the equation (AZ)∘(BZ) = u·(CZ) + E holds by construction
+            let e_actual = az * bz - Fr::from(u_val) * cz;
+            let z = vec![
+                Fr::from(1u64),
+                az,
+                bz,
+                cz,
+            ];
+            let e = vec![e_actual];
+
+            let (proof, _) = prove(&l, &r_mat, &o, &z, Fr::from(u_val), &e);
+            let (ok, _, _) = verify(&proof);
+            prop_assert!(ok);
+        }
+
+        /// Property: tampered sumcheck proof is always rejected.
+        #[test]
+        fn prop_sumcheck_tamper_rejects(
+            a1 in 1u64..500,
+            b1 in 1u64..500,
+            a2 in 1u64..500,
+            b2 in 1u64..500,
+            flip_val in 1u64..1000,
+        ) {
+            let l = vec![
+                vec![(1u32, Fr::from(1u64))],
+                vec![(4u32, Fr::from(1u64))],
+            ];
+            let r_mat = vec![
+                vec![(2u32, Fr::from(1u64))],
+                vec![(5u32, Fr::from(1u64))],
+            ];
+            let o = vec![
+                vec![(3u32, Fr::from(1u64))],
+                vec![(6u32, Fr::from(1u64))],
+            ];
+            let z = vec![
+                Fr::from(1u64),
+                Fr::from(a1),
+                Fr::from(b1),
+                Fr::from(a1) * Fr::from(b1),
+                Fr::from(a2),
+                Fr::from(b2),
+                Fr::from(a2) * Fr::from(b2),
+            ];
+            let u = Fr::from(1u64);
+            let e = vec![Fr::zero(); 2];
+
+            let (proof, _) = prove(&l, &r_mat, &o, &z, u, &e);
+            let mut bad_proof = proof.clone();
+            // Flip claimed sum.
+            bad_proof.claims[0] += Fr::from(flip_val);
+            let (ok, _, _) = verify(&bad_proof);
+            prop_assert!(!ok, "tampered sumcheck proof must be rejected");
+        }
+
+        /// Property: two different vectors produce different HashPC commitments.
+        #[test]
+        fn prop_hashpc_binding(
+            v1 in proptest::collection::vec(arb_fr(), 4),
+            v2 in proptest::collection::vec(arb_fr(), 4),
+        ) {
+            prop_assume!(v1 != v2, "need distinct vectors");
+            let params = PedersenParams::from_seed(b"binding-test", 4, 1);
+            let (h1, _) = poly_commit(&v1, &params.basis_w);
+            let (h2, _) = poly_commit(&v2, &params.basis_w);
+            prop_assert_ne!(h1, h2, "different vectors must produce different commitments");
+        }
+
+        /// Property: HashPC commitment is deterministic.
+        #[test]
+        fn prop_hashpc_deterministic(
+            v in proptest::collection::vec(arb_fr(), 4),
+        ) {
+            let params = PedersenParams::from_seed(b"det-test", 4, 1);
+            let (h1, p1) = poly_commit(&v, &params.basis_w);
+            let (h2, p2) = poly_commit(&v, &params.basis_w);
+            prop_assert_eq!(h1, h2);
+            prop_assert_eq!(p1, p2);
+        }
+
+        /// Property: HashPC opening verifies for random vectors and random r.
+        #[test]
+        fn prop_hashpc_opening_verifies(
+            v in proptest::collection::vec(arb_fr(), 4),
+        ) {
+            let params = PedersenParams::from_seed(b"opening-test", 4, 1);
+            let (hash, _) = poly_commit(&v, &params.basis_w);
+            let proof = create_opening(&v);
+            let r = vec![Fr::from(3u64), Fr::from(5u64)];
+            let claimed = eval_dense_mle(&v, &r);
+            prop_assert!(verify_opening(&hash, &proof, &claimed, &r));
+        }
+
+        /// Property: HashPC opening rejects tampered table.
+        #[test]
+        fn prop_hashpc_tamper_rejects(
+            v in proptest::collection::vec(arb_fr(), 4),
+            flip in 1u64..1000,
+        ) {
+            let params = PedersenParams::from_seed(b"tamper-test", 4, 1);
+            let (hash, _) = poly_commit(&v, &params.basis_w);
+            let mut proof = create_opening(&v);
+            proof.table[0] += Fr::from(flip);
+            let r = vec![Fr::from(3u64), Fr::from(5u64)];
+            let claimed = eval_dense_mle(&v, &r);
+            prop_assert!(!verify_opening(&hash, &proof, &claimed, &r));
+        }
+
+        /// Property: eval_dense_mle at a Boolean point matches direct index access.
+        #[test]
+        fn prop_dense_mle_boolean_point(
+            vals in proptest::collection::vec(arb_fr(), 4),
+        ) {
+            // For index i, the Boolean point r has r[bit] = (i >> bit) & 1.
+            // i=0 → [0,0], i=1 → [1,0], i=2 → [0,1], i=3 → [1,1]
+            let r0 = vec![Fr::from(0u64), Fr::from(0u64)];
+            let r1 = vec![Fr::from(1u64), Fr::from(0u64)];
+            let r2 = vec![Fr::from(0u64), Fr::from(1u64)];
+            let r3 = vec![Fr::from(1u64), Fr::from(1u64)];
+            prop_assert_eq!(eval_dense_mle(&vals, &r0), vals[0]);
+            prop_assert_eq!(eval_dense_mle(&vals, &r1), vals[1]);
+            prop_assert_eq!(eval_dense_mle(&vals, &r2), vals[2]);
+            prop_assert_eq!(eval_dense_mle(&vals, &r3), vals[3]);
+        }
+
+        /// Property: sumcheck proof round count = log2ceil(next_power_of_two(n_constraints)).
+        #[test]
+        fn prop_proof_round_count(
+            n_constraints in 1usize..32,
+        ) {
+            let mut l = Vec::new();
+            let mut r_mat = Vec::new();
+            let mut o = Vec::new();
+            for i in 0..n_constraints {
+                l.push(vec![((1 + 3 * i) as u32, Fr::from(1u64))]);
+                r_mat.push(vec![((2 + 3 * i) as u32, Fr::from(1u64))]);
+                o.push(vec![((3 + 3 * i) as u32, Fr::from(1u64))]);
+            }
+            let mut z = vec![Fr::from(1u64)];
+            for i in 0..n_constraints {
+                let a = Fr::from((i + 2) as u64);
+                let b = Fr::from((i + 3) as u64);
+                z.push(a);
+                z.push(b);
+                z.push(a * b);
+            }
+            let e = vec![Fr::zero(); n_constraints];
+            let (proof, _) = prove(&l, &r_mat, &o, &z, Fr::from(1u64), &e);
+
+            let expected_rounds = log2ceil(next_power_of_two(n_constraints));
+            prop_assert_eq!(proof.polys.len(), expected_rounds);
+        }
+    }
+}
