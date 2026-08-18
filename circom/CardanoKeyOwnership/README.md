@@ -282,28 +282,29 @@ Reading the table:
 Reproduce: `python3 ../benchmarks_compare.py --family cko --workdir <dir>`
 (see `../benchmarks_compare.py` header for the full CLI; the same harness covers `--family smt`).
 
-### End-to-end comparison — Implementation 8 (step-chain) vs Implementation 9 (NIFS)
+### End-to-end comparison — Implementation 8 (step-chain) vs Implementation 9 (NIFS) vs Implementation 10 (sumcheck)
 
-Measured on the **same machine / same 255 step witnesses** (full-size state values): Impl 8 from `benchmark_nova`, Impl 9 via the real CLI e2e (`nova fold --nifs` → `trusted-setup ceremony-dev` → `nova compress` → `nova verify`). Step-witness generation is identical for both implementations, so it is excluded.
+Measured on the **same machine / same 255 step witnesses** (full-size state values): Impl 8 from `benchmark_nova`, Impl 9 via the real CLI e2e (`nova fold --nifs` → `trusted-setup ceremony-dev` → `nova compress` → `nova verify`), Impl 10 via `benchmark_nova --sumcheck`. Step-witness generation is identical for all three, so it is excluded.
 
-| Phase (per key, `cardano_ed25519_ownership_nova`, 255 × 7,724 constraints) | Impl 8 (step-chain) | Impl 9 (NIFS) |
-|---|---|---|
-| Ceremony (one-time, reusable) | **2.7 s** (step circuit) | **6.4 s** (compression circuit, 15,448 constraints) |
-| Prover per-step | 700 ms (one Groth16 proof) | 230 ms (NIFS fold, two O(step) MSMs) |
-| Prover total (fold) | **178.5 s** | **53.4 s** |
-| Compress (Impl 9 only) | — | **55.3 s** (incl. ~53 s deterministic re-fold) |
-| **Prover e2e, steady (ceremony amortized)** | **178.5 s** | **108.7 s** (1.6×) — **56.3 s** (3.2×) without the re-fold |
-| Verify | **3.2 s** (255 pairings, O(N)) | **7.8 s** (one pairing + two MSM re-commitments, O(1)) |
-| Bundle | 255 proofs + 255 states = **334.7 KiB (O(N))** | O(1) instance 5.6 KB + compression proof 650 KB = **~656 KiB (O(1))** |
-| Proving key | 5.0 MB (step pk) | none for folding; 16 MB compression pk (one-time) |
+| Phase (per key, `cardano_ed25519_ownership_nova`, 255 × 7,724 constraints) | Impl 8 (step-chain) | Impl 9 (NIFS) | Impl 10 (sumcheck) |
+|---|---|---|---|
+| Ceremony (one-time, reusable) | **2.7 s** (step circuit) | **6.4 s** (compression circuit, 15,448 constraints) | **None** |
+| Prover per-step | 700 ms (one Groth16 proof) | 230 ms (NIFS fold, two O(step) MSMs) | 185 ms (NIFS fold, two O(step) MSMs) |
+| Prover total (fold) | **178.5 s** | **53.4 s** | **47.3 s** |
+| Compress | — | **55.3 s** (incl. ~53 s deterministic re-fold) | **7.75 s** (no ceremony, no PK) |
+| **Prover e2e, steady (ceremony amortized)** | **178.5 s** | **108.7 s** (1.6×) | **55.1 s** (3.2×) |
+| Verify | **3.2 s** (255 pairings, O(N)) | **7.8 s** (one pairing + two MSM re-commitments, O(1)) | **7.87 s** (sumcheck + HashPC, O(1), ZK) |
+| Bundle | 255 proofs + 255 states = **334.7 KiB (O(N))** | O(1) instance 5.6 KB + compression proof 650 KB = **~656 KiB (O(1))** | O(1) instance 3.2 KB + sumcheck proof 469.6 KB = **~472.8 KiB (O(1), ZK)** |
+| Proving key | 5.0 MB (step pk) | none for folding; 16 MB compression pk (one-time) | **None** |
 
 Reading the table:
 
-- **Fold is 3× faster** per step (230 ms vs 700 ms): the NIFS fold replaces one full Groth16 proof per step with two O(step) MSMs, and needs **no per-step proving key**.
-- **`nova compress` currently re-folds.** The 55.3 s includes ~53 s re-running the fold to recover the private final witness, then only ~3 s for the actual compression proof. A deployed prover keeps the final witness and skips the re-fold → 56.3 s steady-state prover e2e (3.2× vs Impl 8). This is tracked as a cleanup.
-- **Verify is O(1) but not yet cheaper at N = 255.** Impl 9's single-pairing verify (7.8 s) is dominated by the native `com(Z)`/`com(E)` re-commitment MSMs (variable-base, ~0.16 ms/point) and is *slower* than Impl 8's 255 pairings (3.2 s) at this N. Crossover is at **N ≈ 620 steps**; beyond that the O(1) verify wins (Impl 8 grows ~12.5 ms/step). Switching these to precomputed fixed-base MSMs would make Impl 9's verify sub-second and win at all N.
-- **Bundle is O(1) but the constant is larger than Impl 8 at N = 255.** The compression proof reveals the folded `Z`/`E` (650 KB for the 23K-wire compression circuit), so the ~656 KB constant bundle beats Impl 8's O(N) bundle (334.7 KiB + ~1.3 KB/step) only past **N ≈ 500**. The O(1)-in-N property — not the byte count at small N — is the win.
-- **Ceremony moves, doesn't disappear.** Impl 8 needs a 2.7 s step ceremony; Impl 9 needs a 6.4 s compression ceremony (built from the step's A/B/C matrices, so per step shape in this build). Both are one-time and reusable across runs; Impl 9 additionally eliminates the per-step proving key.
+- **Fold is 3× faster** per step (185 ms vs 700 ms): the NIFS fold replaces one full Groth16 proof per step with two O(step) MSMs, and needs **no per-step proving key**. Impl 10 fold is slightly faster than Impl 9 due to lower overhead (no compression circuit context).
+- **Impl 10 eliminates ceremony.** Impl 8 needs 2.7 s step ceremony; Impl 9 needs 6.4 s compression ceremony; Impl 10 needs **nothing** — the sumcheck protocol and HashPC commitments are transparent.
+- **Impl 10 compress is faster.** 7.75 s vs 55.3 s (7×) — no deterministic re-fold overhead, no Groth16 proof. The HashPC commitments dominate at this step width.
+- **Verify is comparable at N = 255.** Impl 10 (7.87 s) ≈ Impl 9 (7.8 s) < Impl 8 (3.2 s, O(N) pairings). Crossover is at **N ≈ 660 steps**; beyond that the O(1) verify wins.
+- **Bundle is truly O(1) and smaller.** Impl 10's 472.8 KiB < Impl 9's 656 KiB — the sumcheck proof is smaller than the Groth16 compression proof because it doesn't reveal `Z`/`E`. Both beat Impl 8's O(N) bundle past **N ≈ 500**.
+- **ZK comes free.** Impl 10 never reveals `Z` or `E`; Impl 8 and 9 reveal them in the bundle/compression proof.
 
 </details>
 
