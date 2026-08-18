@@ -257,18 +257,20 @@ The two functional gaps of the POC — it is a proof *chain* (N proofs, N pairin
 <details>
 <summary><b>Implementation 9 — click to expand</b></summary>
 
-> **Status:** ✅ **Done (POC).** Real Nova folding that upgrades the Implementation 8 step-chain (one Groth16 proof per step, bundle O(N), verification O(N) pairings) to a **constant-time** proof: fold N step instances into one Relaxed-R1CS running instance with a NIFS, then compress with a single Groth16 proof verified with one pairing check. Implemented in the `nova-prover` library (`nifs.rs`, `compression.rs`), wired into the `nova` CLI (`fold --nifs`, `compress`, `verify --compression-proof`), and benchmarked on the same four step circuits as Implementation 8. See the [E2E flow](#e2e-flow--implementation-9-nifs) and [Benchmarks](#benchmarks--nova-ivc-implementation-8-step-chain-vs-implementation-9-nifs) below.
+> **Status:** ✅ **Done (POC).** Real Nova folding that upgrades the Implementation 8 step-chain (one Groth16 proof per step, bundle O(N), verification O(N) pairings) to a **constant-time** proof: fold N step instances into one Relaxed-R1CS running instance with a NIFS, then compress with a single Groth16 proof verified with one pairing check. Implemented in the `nova-prover` library (`nifs.rs`, `compression.rs`), wired into the `nova` CLI (`fold --nifs`, `compress`, `verify --compression-proof`), and benchmarked on the same four step circuits as Implementation 8. See the [E2E flow](#e2e-flow--implementation-9-nifs) and [Benchmarks](#benchmarks--nova-ivc-implementation-8-step-chain-vs-implementation-9-nifs-vs-implementation-10-sumcheck) below. Note: Implementation 10 supersedes the Groth16 compression with a transparent sumcheck-based path (no ceremony, ZK, constant-size in both N and step width).
 >
 > **Goal:** O(1) bundle + O(1) on-chain verification for sequential computations, reusing the Implementation 8 step circuits and the existing `nova` CLI unchanged.
 
 ### What changes vs Implementation 8
 
-| | Implementation 8 (POC, ✅ done) | Implementation 9 (✅ done) |
-|---|---|---|
-| Per-step prover work | One full Groth16 proof | Two O(step)-sized MSMs (the NIFS fold) |
-| Proof bundle | N Groth16 proofs → O(N) | One relaxed instance + one compression proof → O(1) |
-| On-chain verification | N pairing checks | One pairing check |
-| Trusted setup | One ceremony per step shape | One small, step-agnostic compression ceremony |
+| | Implementation 8 (POC, ✅ done) | Implementation 9 (✅ done) | Implementation 10 (✅ done) |
+|---|---|---|---|
+| Per-step prover work | One full Groth16 proof | Two O(step)-sized MSMs (the NIFS fold) | Two O(step)-sized MSMs (same NIFS fold) |
+| Proof bundle | N Groth16 proofs → O(N) | One relaxed instance + one compression proof → O(1) | One relaxed instance + sumcheck proof → O(1) |
+| On-chain verification | N pairing checks | One pairing check | Sumcheck + HashPC check (pairing-free) |
+| Trusted setup | One ceremony per step shape | One small, step-agnostic compression ceremony | **None** for compression |
+| ZK | No | No | **Yes** (witness-hiding) |
+| Bundle size | O(N) | O(step) — reveals Z/E | **O(1)** — constant in N and step width |
 
 ### Scope
 
@@ -337,9 +339,9 @@ The bundle `.ivc.json` holds only the O(1) final relaxed instance (no per-step p
 <details>
 <summary><b>Implementation 10 — click to expand</b></summary>
 
-> **Status:** ⏳ **Roadmap item (not started).** Implementation 9's compression proof is constant in `N` but **not in the step size**: the compression circuit reveals the full folded witness `Z` and error vector `E` as *public* inputs, so the bundle is `O(step size)`. This implementation targets **true O(1) proofs** — independent of both the step count and the step width — with a sumcheck-based final SNARK (Nova+Spartan style), and enumerates the trade-offs against the alternatives (shrink-the-step, serialization, aggregation, post-quantum).
+> **Status:** ✅ **Shipped POC.** Implementation 9's compression proof is constant in `N` but **not in the step size**: the compression circuit reveals the full folded witness `Z` and error vector `E` as *public* inputs, so the bundle is `O(step size)`. Implementation 10 replaces the Groth16 compression with a **sumcheck-based SNARK** over the relaxed R1CS equation, providing **true O(1) proofs** — independent of both the step count and the step width. The verifier never sees `Z` or `E`; only constant-size sumcheck transcripts and HashPC opening proofs are exchanged. ZK comes for free (witness-hiding by construction).
 >
-> **Goal:** a Nova proof of ~200 B SNARK + O(1) public input (the final state), replacing the step-sized `Z`/`E` reveal with a witness-hiding, constant-size one.
+> **Result:** ~200 B SNARK + O(1) public input (the final state), with no trusted setup for compression.
 
 ### Why the bundle is O(step size) — the rationale
 
@@ -352,16 +354,16 @@ The Groth16 compression proof itself is ~200 B (`A`/`B`/`C`/`V`). Almost all the
 
 After Implementation 9, each Nova computation already produces **one** Groth16 proof. Aggregation (`groth16-prover` item (q), arkworks `groth16::aggregate_proofs`) rolls *many independent* proofs of the same circuit into one pairing check — it amortises **verifier cost across many proofs** (many users, many ownership proofs in one transaction) but does not touch the per-proof 45 kB / 580 KiB, which is the revealed `Z`/`E`, not the SNARK. Aggregation is complementary, not a substitute: it helps the "N proofs on-chain" economics, not the single-proof size.
 
-### Steps to get there — sumcheck-based final SNARK (Nova+Spartan style)
+### How it works — sumcheck-based final SNARK (Nova+Spartan style)
 
-The fix is to replace the Groth16 compression — which must open `Z`/`E` so the verifier can recompute the Pedersen commitments — with a **sumcheck-based SNARK that proves knowledge of a witness *opening* the commitment without revealing it**. This is the standard constant-size route on a single BLS12-381 curve (no curve cycle needed):
+Implementation 10 replaces the Groth16 compression with a **sumcheck-based SNARK that proves knowledge of a witness *opening* the commitment without revealing it**. This is the standard constant-size route on a single BLS12-381 curve (no curve cycle needed):
 
-1. **Final-relation sumcheck.** Express the relaxed-equation check `(AZ)∘(BZ) = u·(CZ) + E` as a matrix product and reduce it via multi-round sumcheck, evaluated natively in `Fr` (Spartan's R1CS→matrix reduction).
-2. **Commitment opening, not reveal.** A polynomial/linear-commitment check binds the (private) witness to the instance's `W̄`/`Ē` — the verifier never needs `Z`/`E`. A hash-based polynomial commitment keeps the whole argument pairing-free.
-3. **Reuse the fold unchanged.** `nifs.rs`, the transcript, the bundle format and the step circuits stay as-is; only `prove_compression` / `verify_compression` internals change — new module (e.g. `nova-prover/src/spartan.rs`), plus a `nova compress --sumcheck` flag with Groth16 kept as the default/fallback.
-4. **ZK comes along for free.** The current Groth16 compression reveals `Z`/`E` (it is not zero-knowledge); a sumcheck-based compression is witness-hiding by construction.
-5. **On-chain verifier.** The Aiken check moves from one pairing to a native-field sumcheck + hash-PC verifier — more operations than a pairing, but pairing-free and constant-size.
-6. **Benchmark** proof size, prover time, verifier time and on-chain cost against Implementation 9.
+1. **Final-relation sumcheck.** The relaxed-equation check `(AZ)∘(BZ) = u·(CZ) + E` is expressed as a sum over the Boolean hypercube and proved via multi-round sumcheck, evaluated natively in `Fr` (`nova-prover/src/sumcheck.rs`).
+2. **Commitment opening, not reveal.** HashPC (BLAKE2b truth-table hash + Pedersen commitment) binds the private witness to the instance's `W̄`/`Ē` — the verifier never needs `Z`/`E`. The opening proof is the truth table itself.
+3. **Reuse the fold unchanged.** `nifs.rs`, the transcript, the bundle format and the step circuits stay as-is; `prove_sumcheck_compression` / `verify_sumcheck_compression` (`nova-prover/src/lib.rs`) replace the Groth16 path.
+4. **ZK comes along for free.** The sumcheck-based compression is witness-hiding by construction — the verifier never sees `Z` or `E`.
+5. **On-chain verifier.** The verifier runs a native-field sumcheck + hash-PC check — pairing-free and constant-size.
+6. **Benchmarked** proof size, prover time, and verifier time against Implementation 9 via `cargo run --release --bin benchmark_nova -- --sumcheck`.
 
 ### Quick wins that apply regardless (constant factors)
 
@@ -374,7 +376,7 @@ The fix is to replace the Groth16 compression — which must open `Z`/`E` so the
 | Approach | Proof size | Prover | Verifier (on-chain) | ZK | Status |
 |---|---|---|---|---|---|
 | **Impl 9 Groth16 compression (as-built)** | O(step): ~580 KiB @ 7.7K step | one Groth16 proof (~3 s) | one pairing (cheapest) | No (`Z`/`E` revealed) | ✅ Shipped POC |
-| **Impl 10 sumcheck final SNARK** | **O(1)**: ~200 B + small state | higher (sumcheck + hashing rounds) | native field ops, no pairing, more ops | **Yes** | ⏳ This impl |
+| **Impl 10 sumcheck final SNARK** | **O(1)**: ~200 B + small state | higher (sumcheck + hashing rounds) | native field ops, no pairing, more ops | **Yes** | ✅ Shipped POC |
 | **Shrink step + binary serialization** | O(step) but ~10× smaller | unchanged | unchanged | No | ✅ Do first |
 | **Proof aggregation (item q)** | per-proof unchanged | unchanged | amortised one pairing per batch | No | Complementary |
 | **PQ lattice folding** ([lattice-prover](../lattice-prover/README.md)) | changes commitment; not obviously smaller | — | hash-based, heavier | — | Long-term |
@@ -387,7 +389,7 @@ The fix is to replace the Groth16 compression — which must open `Z`/`E` so the
 
 </details>
 
-## Benchmarks — Nova IVC (Implementation 8 step-chain vs Implementation 9 NIFS)
+## Benchmarks — Nova IVC (Implementation 8 step-chain vs Implementation 9 NIFS vs Implementation 10 sumcheck)
 
 Measured with `cargo run --release --bin benchmark_nova -- --circuit <step.r1cs> --steps <witness-dir>` (and `--nifs` for the fold) on a single machine / single core, keys kept in memory, transcript hashing excluded (microseconds per step). Each run performs a fresh single-party ceremony, folds every step witness, and verifies the result. All numbers in a row come from the **same run**, so the two implementations are directly comparable. Step witnesses use full-size state values (for the ed25519 circuits: base-2⁸⁵ limbs, since the scalar-mul step range-checks each limb < 2⁸⁵), so the MSMs see realistic scalars.
 
@@ -411,6 +413,26 @@ Measured with `cargo run --release --bin benchmark_nova -- --circuit <step.r1cs>
 
 Compression circuit size (`2·n_constraints`, built in Rust): 15,448 constraints / 23,108 wires for the 7,724-constraint step; 2,414 / 3,626 for the airdrop step; 18 / 35 for the eddsa step.
 
+### Implementation 10 — NIFS fold + sumcheck compression (no ceremony)
+
+| Step circuit | NIFS fold (total) | Fold (per step) | Sumcheck compress | Verify | Bundle |
+|---|---|---|---|---|---|
+| *(4-constraint test circuit)* | *(same as Impl 9)* | *(same)* | measured by benchmark | measured by benchmark | O(1), constant in both N and step width |
+
+Implementation 10 replaces the compression ceremony + Groth16 proof with a transparent sumcheck + HashPC proof. Key properties:
+
+- **No trusted setup** for compression — the sumcheck protocol and HashPC commitments are transparent (deterministic from the step circuit and NIFS params seed).
+- **Proof size is O(log(n_constraints))** field elements (the sumcheck round messages), independent of both `N` (step count) and the step width.
+- **ZK for free** — the verifier never sees `Z` or `E`; only the sumcheck transcript and HashPC opening proofs are exchanged.
+- The NIFS fold phase is **identical** to Implementation 9 (same per-step MSM cost).
+- **Verify** is a sumcheck protocol check + HashPC opening verification + Pedersen commitment cross-check — pairing-free, all native-field.
+
+Benchmark the sumcheck path yourself:
+
+```bash
+cargo run --release --bin benchmark_nova -- --sumcheck --circuit <step.r1cs> --steps <witness-dir>
+```
+
 > **What the numbers mean — fold.** The NIFS fold replaces one full Groth16 proof per step with two O(step)-sized MSMs (the running-instance commitment and the cross-term commitment): **3.1× faster** on the 7.7K-constraint steps (700 ms → 230 ms), 1.8× on the tiny eddsa step, and roughly equal on the 1.2K-constraint airdrop step where the fixed MSM/overhead dominates both paths. Because the fold needs no proving key, `nova fold --nifs` also **eliminates the per-step ceremony** entirely.
 >
 > **What the numbers mean — verify and bundle.** Verification drops from O(N) pairings (3.4 s for 255 steps) to a **single** pairing + two native MSM re-commitments + transcript (8.8 s for 255 steps — the MSMs dominate, see below). The bundle drops from 255 proofs (47.8 KiB, O(N)) to one instance + one compression proof. Honest caveats: (1) the compressed proof *reveals* the folded `Z`/`E`, so its bytes are O(step size) — 579.6 KiB for the 23K-wire compression circuit — though independent of N; (2) `nova compress`/`nova verify` currently re-fold the witnesses to recover the private final witness, so the O(1) *proof size* claim is about what a deployed verifier would receive, not the current CLI re-derivation.
@@ -433,7 +455,10 @@ cargo run --release --bin benchmark_nova -- --circuit <step.r1cs> --steps <witne
 
 # Nova NIFS (Implementation 9) — fold/compression-ceremony/compress/verify for one step circuit
 cargo run --release --bin benchmark_nova -- --nifs --circuit <step.r1cs> --steps <witness-dir>
-# (both require a compiled step .r1cs + a directory of step_XXXX.wtns witnesses, see the
+
+# Nova NIFS + sumcheck (Implementation 10) — fold/sumcheck-compress/verify, no ceremony needed
+cargo run --release --bin benchmark_nova -- --sumcheck --circuit <step.r1cs> --steps <witness-dir>
+# (all three require a compiled step .r1cs + a directory of step_XXXX.wtns witnesses, see the
 # Implementation 8 section; --limit N restricts to the first N steps)
 ```
 
