@@ -611,6 +611,134 @@ mod tests {
         assert!(full_protocol(&l, &r, &o, &z, u, &e));
     }
 
+    /// Golden test: 1-constraint multiplier (3 × 5 = 15).
+    ///
+    /// This is a regression snapshot.  If any change to the sumcheck prover
+    /// or Fiat-Shamir hash modifies the proof, this test will break — which
+    /// forces a deliberate review of the change.
+    #[test]
+    fn golden_single_multiplier_3x5() {
+        let (l, r_mat, o) = simple_r1cs();
+        let z = vec![
+            Fr::from(1u64),  // constant
+            Fr::from(3u64),  // wire 1
+            Fr::from(5u64),  // wire 2
+            Fr::from(15u64), // wire 3 = 3×5
+        ];
+        let u = Fr::from(1u64);
+        let e = vec![Fr::zero()];
+
+        let (proof, r_challenges) = prove(&l, &r_mat, &o, &z, u, &e);
+
+        // 1 constraint → 0 sumcheck rounds (trivial case).
+        assert_eq!(proof.polys.len(), 0, "1-constraint must have 0 rounds");
+        assert!(r_challenges.is_empty(), "no Fiat-Shamir challenges for 0 rounds");
+
+        // The single claimed product is az*bz - u*cz - e = 3*5 - 1*15 - 0 = 0.
+        assert_eq!(proof.claims.len(), 1);
+        assert_eq!(proof.claims[0], Fr::zero(), "product must be zero for satisfied constraint");
+
+        // Verify passes.
+        let (ok, v_r, final_claim) = verify(&proof);
+        assert!(ok, "sumcheck verification must pass");
+        assert!(v_r.is_empty());
+        assert_eq!(final_claim, Fr::zero());
+
+        // Golden snapshot: the proof hash must match.
+        let golden_hash = "9ab7a73a97a1a3031406b6c169634a9c06cfb81dec3323bb4de5ce6f4b7ca107de534442a7eaeafbaf366ccfdde1cb97d7c884e4344cd0a23039de71a56d630a";
+        let h = hex::encode(proof_hash(&proof));
+        assert_eq!(h, golden_hash,
+            "golden hash mismatch — proof has changed since this snapshot was recorded");
+
+        // Structural golden checks.
+        assert_eq!(proof.claims.len(), 1);
+        assert_eq!(proof.polys.len(), 0);
+    }
+
+    /// Golden test: 2-constraint circuit (3×5 + 7×11).
+    ///
+    /// This exercises the sumcheck with exactly 1 round (2 constraints →
+    /// padded to 2 → log2ceil(2) = 1 round).
+    #[test]
+    fn golden_two_constraints_3x5_7x11() {
+        let l = vec![
+            vec![(1u32, Fr::from(1u64))],
+            vec![(4u32, Fr::from(1u64))],
+        ];
+        let r_mat = vec![
+            vec![(2u32, Fr::from(1u64))],
+            vec![(5u32, Fr::from(1u64))],
+        ];
+        let o = vec![
+            vec![(3u32, Fr::from(1u64))],
+            vec![(6u32, Fr::from(1u64))],
+        ];
+        let z = vec![
+            Fr::from(1u64),
+            Fr::from(3u64), Fr::from(5u64), Fr::from(15u64),
+            Fr::from(7u64), Fr::from(11u64), Fr::from(77u64),
+        ];
+        let u = Fr::from(1u64);
+        let e = vec![Fr::zero(); 2];
+
+        let (proof, r_challenges) = prove(&l, &r_mat, &o, &z, u, &e);
+
+        // 2 constraints → 1 round.
+        assert_eq!(proof.polys.len(), 1, "2-constraint must have 1 round");
+        assert_eq!(r_challenges.len(), 1);
+
+        // Both products are zero (3×5=15 and 7×11=77).
+        assert_eq!(proof.claims.len(), 2, "2 constraints → 2 initial claims");
+        assert_eq!(proof.claims[0], Fr::zero());
+        assert_eq!(proof.claims[1], Fr::zero());
+
+        // Verify passes.
+        let (ok, v_r, final_claim) = verify(&proof);
+        assert!(ok);
+        assert_eq!(v_r.len(), 1);
+        assert_eq!(final_claim, Fr::zero());
+
+        // Golden snapshot.
+        let golden_hash = "865939e120e6805438478841afb739ae4250cf372653078a065cdcfffca4caf798e6d462b65d658fc165782640eded70963449ae1500fb0f24981d7727e22c41";
+        let h = hex::encode(proof_hash(&proof));
+        assert_eq!(h, golden_hash,
+            "golden hash mismatch — proof has changed since this snapshot was recorded");
+
+        // Round polynomial structure: f(0) + f(1) = 0.
+        let poly = &proof.polys[0];
+        assert_eq!(poly.len(), 2);
+        assert_eq!(poly[0] + poly[1], Fr::zero(),
+            "f(0)+f(1) must equal the claimed sum (0)");
+    }
+
+    /// Golden test: HashPC commitment for a known vector.
+    #[test]
+    fn golden_hashpc_commitment() {
+        use crate::nifs::PedersenParams;
+        let v = vec![
+            Fr::from(10u64),
+            Fr::from(20u64),
+            Fr::from(30u64),
+            Fr::from(40u64),
+        ];
+        let params = PedersenParams::from_seed(b"golden-test", 4, 1);
+        let (hash, _point) = poly_commit(&v, &params.basis_w);
+
+        // BLAKE2b-512 truth-table hash of [10,20,30,40].
+        let golden_hash_hex = "98ffc304e408f37324d82098fd13b60d603a4428c1113a45d748e4737ae90f43ada23f608676b3ab02ed2a3b0d7b8da7c010f37f57e825f8ef8734df1bf69174";
+        assert_eq!(hex::encode(&hash), golden_hash_hex,
+            "HashPC commitment hash mismatch");
+
+        // Opening proof.
+        let opening = create_opening(&v);
+        assert_eq!(opening.table, v, "opening truth table must equal the vector");
+
+        // Verify opening.
+        let r = vec![Fr::from(3u64), Fr::from(7u64)];
+        let claimed = eval_dense_mle(&v, &r);
+        assert!(verify_opening(&hash, &opening, &claimed, &r));
+    }
+
     #[test]
     fn proof_deterministic_for_same_witness() {
         let (l, r, o) = simple_r1cs();
