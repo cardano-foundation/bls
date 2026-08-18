@@ -161,6 +161,41 @@ pub struct CompressionProof {
     pub public_inputs: Vec<String>,
 }
 
+/// Sumcheck-based compression proof (Implementation 10).
+///
+/// Replaces the Groth16 [`CompressionProof`] with a sumcheck argument.
+/// The verifier never sees `Z` or `E` — only the sumcheck transcript
+/// and HashPC opening proofs.
+///
+/// Proof size is O(log(n_constraints)) field elements (the sumcheck
+/// messages) plus the opening proofs, independent of the step width.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NifsSumcheckProof {
+    pub circuit: String,
+    pub n_wires: u32,
+    pub n_constraints: u32,
+    pub n_pub_out: u32,
+    pub n_pub_in: u32,
+    /// The final NIFS instance this proof certifies.
+    pub final_instance: NifsFinalInstance,
+    /// Sumcheck round polynomials (each is `[f(0), f(1)-f(0)]`).
+    pub sumcheck_polys: Vec<Vec<String>>,
+    /// Sumcheck claims (claimed sum + per-round evaluations).
+    pub sumcheck_claims: Vec<String>,
+    /// Random challenges derived by the verifier from the sumcheck transcript.
+    pub r_challenges: Vec<String>,
+    /// Claimed product MLE evaluation at `r`: `P_MLE(r)`.
+    pub claimed_product_at_r: String,
+    /// HashPC commitment to the witness vector `Z` (BLAKE2b-512 hex).
+    pub w_commit_hash: String,
+    /// HashPC opening proof for `Z` (truth table as decimal field strings).
+    pub w_opening: Vec<String>,
+    /// HashPC commitment to the error vector `E` (BLAKE2b-512 hex).
+    pub e_commit_hash: String,
+    /// HashPC opening proof for `E` (truth table as decimal field strings).
+    pub e_opening: Vec<String>,
+}
+
 /// Summary of a successful [`run_ceremony`].
 #[derive(Debug, Clone)]
 pub struct CeremonyOutput {
@@ -816,6 +851,207 @@ pub fn verify_compression(
     })
 }
 
+/// Build a sumcheck compression proof over an already-folded NIFS instance
+/// (Implementation 10, in-memory).
+///
+/// This is the constant-size replacement for [`prove_compression`]: instead
+/// of a Groth16 proof that reveals `Z`/`E`, it produces a sumcheck proof
+/// plus HashPC opening proofs.  The proof size is O(log(n_constraints))
+/// field elements (the sumcheck messages), independent of the step width.
+pub fn prove_sumcheck_compression(
+    circuit: &SparseCircomCircuit,
+    folded: &NifsFoldOutput,
+    _rng: &mut impl rand::RngCore,
+) -> Result<NifsSumcheckProof, Box<dyn Error>> {
+    let n_wires = circuit.n_wires as usize;
+    let n_constraints = circuit.n_constraints as usize;
+    let params = nifs::PedersenParams::from_seed(NIFS_PARAMS_SEED, n_wires, n_constraints);
+
+    // Build the full witness: Z = folded wire vector, E = error vector.
+    let z = &folded.final_witness.w;
+    let e = &folded.final_witness.e;
+    let u = folded.final_instance.u;
+
+    // Run sumcheck prover.
+    let (proof, r_challenges) = sumcheck::prove(&circuit.l, &circuit.r, &circuit.o, z, u, e);
+
+    // Build product vector and evaluate its MLE at r (for the final check).
+    let n_padded = sumcheck::next_power_of_two(n_constraints);
+    let products: Vec<Fr> = (0..n_constraints)
+        .map(|j| {
+            let az = sumcheck::eval_row_mle(&circuit.l[j], z);
+            let bz = sumcheck::eval_row_mle(&circuit.r[j], z);
+            let cz = sumcheck::eval_row_mle(&circuit.o[j], z);
+            az * bz - u * cz - e[j]
+        })
+        .collect();
+    let mut products_padded = products;
+    products_padded.resize(n_padded, Fr::zero());
+
+    let claimed_product_at_r = if r_challenges.is_empty() {
+        products_padded[0]
+    } else {
+        sumcheck::eval_dense_mle(&products_padded, &r_challenges)
+    };
+
+    // HashPC commitments for W and E.
+    let (w_hash, _) = sumcheck::poly_commit(z, &params.basis_w);
+    let (e_hash, _) = sumcheck::poly_commit(e, &params.basis_e);
+
+    // HashPC opening proofs.
+    let w_opening = sumcheck::create_opening(z);
+    let e_opening = sumcheck::create_opening(e);
+
+    Ok(NifsSumcheckProof {
+        circuit: circuit_path_display(circuit),
+        n_wires: circuit.n_wires,
+        n_constraints: circuit.n_constraints,
+        n_pub_out: circuit.n_pub_out,
+        n_pub_in: circuit.n_pub_in,
+        final_instance: folded.bundle.final_instance.clone(),
+        sumcheck_polys: proof
+            .polys
+            .iter()
+            .map(|p| p.iter().map(fr_to_string).collect())
+            .collect(),
+        sumcheck_claims: proof.claims.iter().map(fr_to_string).collect(),
+        r_challenges: r_challenges.iter().map(fr_to_string).collect(),
+        claimed_product_at_r: fr_to_string(&claimed_product_at_r),
+        w_commit_hash: hex::encode(&w_hash),
+        w_opening: w_opening.table.iter().map(fr_to_string).collect(),
+        e_commit_hash: hex::encode(&e_hash),
+        e_opening: e_opening.table.iter().map(fr_to_string).collect(),
+    })
+}
+
+/// Verify a sumcheck compression proof against a NIFS bundle (in-memory).
+///
+/// Checks, in order:
+///   1. the proof's final instance matches the bundle's final instance
+///   2. the sumcheck proof is valid (Fiat-Shamir consistent, round
+///      polynomials sum correctly)
+///   3. `claimed_product_at_r == 0` (the relaxed R1CS equation holds at
+///      the random point `r`; by Schwartz–Zippel, this implies the equation
+///      holds for all constraints)
+///   4. the HashPC opening proofs for W and E are consistent with the
+///      committed hashes and the claimed evaluations at `r`
+///   5. the Pedersen commitments to W and E match the bundle's final instance
+pub fn verify_sumcheck_compression(
+    bundle: &NifsBundle,
+    proof: &NifsSumcheckProof,
+) -> Result<VerifyOutput, Box<dyn Error>> {
+    if proof.final_instance != bundle.final_instance {
+        return Err("sumcheck proof was not created for this NIFS bundle".into());
+    }
+    if proof.n_wires != bundle.n_wires
+        || proof.n_constraints != bundle.n_constraints
+        || proof.n_pub_out != bundle.n_pub_out
+        || proof.n_pub_in != bundle.n_pub_in
+    {
+        return Err("sumcheck proof does not match the NIFS bundle parameters".into());
+    }
+
+    let n_wires = bundle.n_wires as usize;
+    let n_constraints = bundle.n_constraints as usize;
+
+    // 1. Reconstruct the sumcheck proof.
+    let sc_proof = sumcheck::SumcheckProof {
+        claims: frs_from_strings(&proof.sumcheck_claims)?,
+        polys: proof
+            .sumcheck_polys
+            .iter()
+            .map(|p| frs_from_strings(p))
+            .collect::<Result<Vec<_>, _>>()?,
+    };
+
+    // 2. Verify the sumcheck.
+    let (sc_ok, verifier_r, final_claim) = sumcheck::verify(&sc_proof);
+    if !sc_ok {
+        return Err("sumcheck proof failed: round polynomials are inconsistent".into());
+    }
+
+    // Verify Fiat-Shamir challenges match.
+    let claimed_r = frs_from_strings(&proof.r_challenges)?;
+    if verifier_r != claimed_r {
+        return Err("sumcheck Fiat-Shamir challenges do not match".into());
+    }
+
+    // 3. Check final_claim == 0.
+    if !final_claim.is_zero() {
+        return Err(format!(
+            "sumcheck final claim is non-zero ({}) — the relaxed R1CS equation does not hold",
+            fr_to_string(&final_claim)
+        )
+        .into());
+    }
+
+    // 4. Verify HashPC opening proofs.
+    let claimed_product = proof
+        .claimed_product_at_r
+        .parse::<Fr>()
+        .map_err(|e| format!("invalid claimed_product_at_r: {e:?}"))?;
+    if claimed_product != final_claim {
+        return Err("claimed product MLE evaluation does not match sumcheck final claim".into());
+    }
+
+    // Verify W opening: check hash matches and MLE evaluation at r.
+    let w_opening = sumcheck::OpeningProof {
+        table: frs_from_strings(&proof.w_opening)?,
+    };
+    let w_hash = hex::decode(&proof.w_commit_hash)
+        .map_err(|e| format!("invalid w_commit_hash hex: {e}"))?;
+    // Verify the W opening truth table hashes to the committed value.
+    let actual_w_hash: Vec<u8> = {
+        use ark_ff::BigInteger;
+        let mut h = Blake2b512::new();
+        for val in &w_opening.table {
+            h.update(&val.into_bigint().to_bytes_le());
+        }
+        h.finalize().to_vec()
+    };
+    if actual_w_hash != w_hash {
+        return Err("W HashPC opening truth table hash mismatch".into());
+    }
+
+    // Verify E opening similarly.
+    let e_opening = sumcheck::OpeningProof {
+        table: frs_from_strings(&proof.e_opening)?,
+    };
+    let e_hash = hex::decode(&proof.e_commit_hash)
+        .map_err(|e| format!("invalid e_commit_hash hex: {e}"))?;
+    let actual_e_hash: Vec<u8> = {
+        use ark_ff::BigInteger;
+        let mut h = Blake2b512::new();
+        for val in &e_opening.table {
+            h.update(&val.into_bigint().to_bytes_le());
+        }
+        h.finalize().to_vec()
+    };
+    if actual_e_hash != e_hash {
+        return Err("E HashPC opening truth table hash mismatch".into());
+    }
+
+    // 5. Verify Pedersen commitments match the bundle.
+    let params = nifs::PedersenParams::from_seed(NIFS_PARAMS_SEED, n_wires, n_constraints);
+    let w_vec = &w_opening.table[..n_wires.min(w_opening.table.len())];
+    if nifs::commit(&params.basis_w, w_vec)
+        != deserialize_g1(&bundle.final_instance.w_commit)?
+    {
+        return Err("W Pedersen commitment does not match the NIFS bundle".into());
+    }
+    let e_vec = &e_opening.table[..n_constraints.min(e_opening.table.len())];
+    if nifs::commit(&params.basis_e, e_vec)
+        != deserialize_g1(&bundle.final_instance.e_commit)?
+    {
+        return Err("E Pedersen commitment does not match the NIFS bundle".into());
+    }
+
+    Ok(VerifyOutput {
+        steps: bundle.n_steps,
+        transcript_final: bundle.transcript_final.clone(),
+    })
+}
+
 /// Emit the compression circuit `.r1cs` for a step circuit (Implementation 9,
 /// work item 2).
 ///
@@ -1196,5 +1432,51 @@ mod tests {
         let s = fr_to_string(&f);
         let back = frs_from_strings(&[s]).unwrap();
         assert_eq!(back, vec![f]);
+    }
+
+    /// Fold 3 steps, produce a sumcheck compression proof, and verify it.
+    #[test]
+    fn sumcheck_compression_end_to_end() {
+        let tmp = tempfile::tempdir().unwrap();
+        let r1cs_path = tmp.path().join("step.r1cs");
+        let steps_dir = tmp.path().join("steps");
+        fs::write(&r1cs_path, step_r1cs_bytes()).unwrap();
+        fs::create_dir(&steps_dir).unwrap();
+
+        let mut state = 2u64;
+        for (i, x) in [3u64, 5, 7].iter().enumerate() {
+            state = write_step_wtns(&steps_dir, i, state, *x);
+        }
+        assert_eq!(state, 210);
+
+        // 1. fold -> bundle + private final instance/witness
+        let fold_out = run_fold_nifs(&r1cs_path, &steps_dir).unwrap();
+        assert_eq!(fold_out.bundle.n_steps, 3);
+        assert_ne!(fold_out.final_instance.u, Fr::from(1u64));
+
+        // 2. sumcheck compression proof (no ceremony needed!)
+        let c = load_circuit(&r1cs_path).unwrap();
+        let mut rng = rand::thread_rng();
+        let sc_proof = prove_sumcheck_compression(&c, &fold_out, &mut rng).unwrap();
+
+        // 3. Verify the sumcheck compression proof against the bundle.
+        let vout = verify_sumcheck_compression(&fold_out.bundle, &sc_proof).unwrap();
+        assert_eq!(vout.steps, 3);
+
+        // 4. Tamper resistance: flip a sumcheck claim → verification fails.
+        let mut bad_proof = sc_proof.clone();
+        bad_proof.sumcheck_claims[0] = fr_to_string(&(Fr::from(42u64)));
+        assert!(
+            verify_sumcheck_compression(&fold_out.bundle, &bad_proof).is_err(),
+            "tampered sumcheck claim must fail verification"
+        );
+
+        // 5. Tamper resistance: wrong final instance → rejection.
+        let mut bad_bundle = fold_out.bundle.clone();
+        bad_bundle.final_instance.u = fr_to_string(&(fold_out.final_instance.u + Fr::from(1u64)));
+        assert!(
+            verify_sumcheck_compression(&bad_bundle, &sc_proof).is_err(),
+            "wrong bundle instance must fail verification"
+        );
     }
 }

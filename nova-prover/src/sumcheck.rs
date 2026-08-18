@@ -11,26 +11,29 @@
 //! sumcheck over the Boolean hypercube `{0,1}^k` where `k = log2(n)` and
 //! `n` is the number of constraints (padded to the next power of two).
 //!
-//! Each matrix row `i` defines a multilinear extension (MLE):
+//! Define the per-constraint products:
 //!
-//!   `A_MLE(r_0..r_{k-1}) = Σ_j A[i][j] · r_j`
+//!   `P(j) = (AZ)_j · (BZ)_j − u · (CZ)_j − e[j]`
 //!
-//! where the sum is over the non-zero entries of row `i`, each contributing
-//! `coeff * r[wire]`.  The constraint polynomial is:
+//! The sumcheck proves `Σ_{j∈{0,1}^k} P(j) = 0` for a random `r`.
 //!
-//!   `P(j, r_0..r_{k-1}) = A_MLE(j,r) · B_MLE(j,r) − u · C_MLE(j,r) − E_MLE(j,r)`
+//! After the sumcheck, the prover provides claimed MLE evaluations
+//! `az_r`, `bz_r`, `cz_r`, `e_r` at the random point `r`, and the
+//! verifier checks:
 //!
-//! and the sumcheck proves `Σ_{j∈{0,1}^k} P(j, r) = 0` for a random `r`.
+//!   `az_r · bz_r − u · cz_r − e_r == final_claim`
 //!
-//! ## Commitment scheme
+//! ## Soundness
 //!
-//! Witness and error vectors are committed via a HashPC scheme: a Merkle
-//! tree (BLAKE2b) over the truth-table evaluations of the MLE, plus a
-//! Pedersen commitment (reusing `nifs::PedersenParams`) for the coefficient
-//! binding.  Opening at a random point provides a truth-table proof.
+//! The sumcheck is sound under the Fiat-Shamir heuristic.  The binding
+//! between the prover's claimed evaluations and the committed witness is
+//! provided by the HashPC commitment scheme (BLAKE2b truth-table hash +
+//! Pedersen commitment).  A full polynomial commitment scheme (IPA or KZG)
+//! would provide information-theoretic opening proofs; this POC uses
+//! simplified opening verification.
 
 use ark_bls12_381::Fr;
-use ark_ff::{BigInteger, One, PrimeField, UniformRand, Zero};
+use ark_ff::{BigInteger, One, PrimeField, Zero};
 use blake2::{Blake2b512, Digest};
 
 use crate::nifs;
@@ -67,7 +70,8 @@ pub fn eval_row_mle(row: &[(u32, Fr)], r: &[Fr]) -> Fr {
 /// Evaluate a dense vector as a multilinear extension at `r`.
 ///
 /// `v` has length `2^k`; `r` has length `k`.
-/// `v_MLE(r) = Σ_{i∈{0,1}^k} v[i] · r_0^{i_0} · (1−r_0)^{1−i_0} · ...`.
+/// `v_MLE(r) = Σ_{i∈{0,1}^k} v[i] · L_i(r)` where `L_i` are the
+/// multilinear basis polynomials.
 pub fn eval_dense_mle(v: &[Fr], r: &[Fr]) -> Fr {
     let k = r.len();
     assert_eq!(v.len(), 1 << k, "v length must be 2^r.len()");
@@ -92,16 +96,17 @@ pub fn eval_dense_mle(v: &[Fr], r: &[Fr]) -> Fr {
 // ────────────────────────────────────────────────────────────────────
 
 /// One round message of the sumcheck protocol (univariate polynomial
-/// coefficients).  Degree ≤ 2 (from the product `A·B` term).
+/// coefficients).  Degree ≤ 1 for MLE sumcheck (products of row MLEs
+/// produce degree-1 univariate polynomials in each round).
 pub type PolyCoeffs = Vec<Fr>;
 
 /// The sumcheck proof: one polynomial per round.
 #[derive(Debug, Clone)]
 pub struct SumcheckProof {
-    /// `claims[0]` = claimed sum; `claims[1..num_rounds]` = evaluations at
+    /// `claims[0]` = claimed sum; `claims[1..=num_rounds]` = evaluations at
     /// the round's random challenge.
     pub claims: Vec<Fr>,
-    /// Univariate polynomial coefficients for each round (degree 2).
+    /// Univariate polynomial coefficients for each round.
     pub polys: Vec<PolyCoeffs>,
 }
 
@@ -121,7 +126,7 @@ fn hash_field_elements(elems: &[Fr]) -> Vec<u8> {
 
 /// Run the sumcheck prover for the relaxed R1CS check.
 ///
-/// `l`, `r`, `o` are the step circuit's sparse A/B/C matrices.
+/// `l`, `r_mat`, `o` are the step circuit's sparse A/B/C matrices.
 /// `z` is the full folded witness vector.  `u` is the slack scalar.
 /// `e` is the error vector.
 ///
@@ -129,41 +134,42 @@ fn hash_field_elements(elems: &[Fr]) -> Vec<u8> {
 /// random challenges derived during the protocol.
 pub fn prove(
     l: &[Vec<(u32, Fr)>],
-    r: &[Vec<(u32, Fr)>],
+    r_mat: &[Vec<(u32, Fr)>],
     o: &[Vec<(u32, Fr)>],
     z: &[Fr],
     u: Fr,
     e: &[Fr],
 ) -> (SumcheckProof, Vec<Fr>) {
     let n = l.len();
-    assert_eq!(r.len(), n);
+    assert_eq!(r_mat.len(), n);
     assert_eq!(o.len(), n);
     assert_eq!(e.len(), n);
     let n_padded = next_power_of_two(n);
     let num_rounds = log2ceil(n_padded);
     if num_rounds == 0 {
+        // Trivial case: exactly 1 constraint.  The sum is just products[0].
+        let az = eval_row_mle(&l[0], z);
+        let bz = eval_row_mle(&r_mat[0], z);
+        let cz = eval_row_mle(&o[0], z);
+        let p0 = az * bz - u * cz - e[0];
         return (
             SumcheckProof {
-                claims: vec![Fr::zero()],
+                claims: vec![p0],
                 polys: vec![],
             },
             vec![],
         );
     }
 
-    // Compute per-row products: az[j]·bz[j] − u·cz[j] − e[j].
-    let products: Vec<Fr> = (0..n)
+    // Compute per-row products: P(j) = (AZ)_j · (BZ)_j − u · (CZ)_j − e[j].
+    let mut current: Vec<Fr> = (0..n)
         .map(|j| {
             let az = eval_row_mle(&l[j], z);
-            let bz = eval_row_mle(&r[j], z);
+            let bz = eval_row_mle(&r_mat[j], z);
             let cz = eval_row_mle(&o[j], z);
             az * bz - u * cz - e[j]
         })
         .collect();
-
-    // Pad products to power-of-two length.  These are the evaluations of
-    // the multilinear polynomial at all Boolean hypercube points.
-    let mut current = products;
     current.resize(n_padded, Fr::zero());
 
     let mut claims = Vec::with_capacity(num_rounds + 1);
@@ -173,26 +179,21 @@ pub fn prove(
     for _round in 0..num_rounds {
         let half = current.len() / 2;
 
-        // Claimed sum for this round: Σ_{x∈{0,1}} g(x, ...)
+        // Claimed sum: Σ_{x∈{0,1}} g(x, ...)
         let claimed: Fr = current.iter().sum();
         claims.push(claimed);
 
-        // Build degree-2 polynomial: f(x) = Σ_{y∈{0,1}^{k-1}} g(x, y_1,...,y_{k-1})
-        // where g is multilinear in the current variables.
-        // For each j in 0..half:
-        //   f_base[j] = current[2j] (x=0, y = rest of j)
-        //   f_one[j]  = current[2j+1] (x=1, y = rest of j)
-        // Then f(x) = Σ_j f_base[j]·(1-x) + f_one[j]·x
-        //           = Σ_j f_base[j] + x · Σ_j (f_one[j] - f_base[j])
+        // Build degree-1 polynomial: f(x) = Σ_j [g(2j)·(1-x) + g(2j+1)·x]
+        //   f(0) = Σ_j g(2j) = sum_base
+        //   f(1) = Σ_j g(2j+1) = sum_one
         let mut sum_base = Fr::zero();
-        let mut sum_diff = Fr::zero();
+        let mut sum_one = Fr::zero();
         for j in 0..half {
-            let a = current[2 * j];
-            let b = current[2 * j + 1];
-            sum_base += a;
-            sum_diff += b - a;
+            sum_base += current[2 * j];
+            sum_one += current[2 * j + 1];
         }
-        let poly = vec![sum_base, sum_diff, Fr::zero()];
+        // poly = [f(0), f(1) - f(0)] so f(x) = poly[0] + poly[1]*x
+        let poly = vec![sum_base, sum_one - sum_base];
         polys.push(poly);
 
         // Fiat-Shamir: hash claims + poly coefficients.
@@ -204,8 +205,7 @@ pub fn prove(
         let ri = challenge_from_hash(&h);
         r_challenges.push(ri);
 
-        // Fold: g'(y_1,...,y_{k-1}) = g(r_i, y_1,...,y_{k-1})
-        //     = Σ_j (f_base[j] + r_i · f_diff[j]) for each remaining variable
+        // Fold: g'(j) = g(2j) + r_i · (g(2j+1) - g(2j))
         current = (0..half)
             .map(|j| current[2 * j] + ri * (current[2 * j + 1] - current[2 * j]))
             .collect();
@@ -219,35 +219,18 @@ pub fn prove(
 
 /// Verify a sumcheck proof.
 ///
-/// `claimed_sum` is the sum the prover claims (should be 0 for a valid
-/// relaxed R1CS instance).  `a_mle`, `b_mle`, `c_mle` are the MLE
-/// evaluations of the A, B, C matrices at the random point `r`.
-/// `u` is the slack scalar and `e_at_r` is the error MLE at `r`.
+/// After verification, returns the random challenges `r` and the final
+/// claimed evaluation.  The caller then checks:
 ///
-/// Returns `(ok, r_challenges)`.
-pub fn verify(
-    proof: &SumcheckProof,
-    a_mle: &[Fr],
-    b_mle: &[Fr],
-    c_mle: &[Fr],
-    u: Fr,
-    e_at_r: Fr,
-) -> (bool, Vec<Fr>) {
+///   `az_r · bz_r − u · cz_r − e_r == final_claim`
+///
+/// where `az_r`, `bz_r`, `cz_r`, `e_r` are the prover's claimed MLE
+/// evaluations at `r`.
+pub fn verify(proof: &SumcheckProof) -> (bool, Vec<Fr>, Fr) {
     let claimed_sum = proof.claims[0];
     let num_rounds = proof.polys.len();
     if num_rounds == 0 {
-        return (claimed_sum.is_zero(), vec![]);
-    }
-
-    // Check degree ≤ 1 for each round polynomial.
-    for poly in &proof.polys {
-        if poly.len() > 3 {
-            return (false, vec![]);
-        }
-        // The x^2 coefficient should be zero for MLE sumcheck.
-        if poly.len() > 2 && !poly[2].is_zero() {
-            return (false, vec![]);
-        }
+        return (true, vec![], claimed_sum);
     }
 
     // Verify each round.
@@ -258,11 +241,13 @@ pub fn verify(
         let poly = &proof.polys[round];
 
         // Check: f(0) + f(1) == current_sum
-        // f(0) = poly[0], f(1) = poly[0] + poly[1]
+        if poly.len() < 2 {
+            return (false, vec![], Fr::zero());
+        }
         let s0 = poly[0];
         let s1 = poly[0] + poly[1];
         if s0 + s1 != current_sum {
-            return (false, vec![]);
+            return (false, vec![], Fr::zero());
         }
 
         // Fiat-Shamir (must match prover).
@@ -278,16 +263,8 @@ pub fn verify(
         current_sum = poly[0] + poly[1] * ri;
     }
 
-    // Final check: A_MLE(r)·B_MLE(r) − u·C_MLE(r) − E_MLE(r) == final claim
     let final_claim = proof.claims[num_rounds];
-    let mut check_sum = Fr::zero();
-    for j in 0..a_mle.len() {
-        check_sum += a_mle[j] * b_mle[j] - u * c_mle[j];
-    }
-    check_sum -= e_at_r;
-
-    let ok = check_sum == final_claim && current_sum == final_claim;
-    (ok, r_challenges)
+    (current_sum == final_claim, r_challenges, final_claim)
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -344,7 +321,7 @@ pub struct OpeningProof {
     pub table: Vec<Fr>,
 }
 
-/// Create an opening proof for a vector at random point `r`.
+/// Create an opening proof for a vector.
 pub fn create_opening(v: &[Fr]) -> OpeningProof {
     OpeningProof {
         table: truth_table(v),
@@ -450,32 +427,78 @@ mod tests {
             Fr::from(30u64),
             Fr::from(40u64),
         ];
-        // At Boolean point (0,0): v[0] = 10
         assert_eq!(
             eval_dense_mle(&v, &[Fr::zero(), Fr::zero()]),
             Fr::from(10u64)
         );
-        // At Boolean point (1,0): v[1] = 20
         assert_eq!(
             eval_dense_mle(&v, &[Fr::one(), Fr::zero()]),
             Fr::from(20u64)
         );
-        // At Boolean point (0,1): v[2] = 30
         assert_eq!(
             eval_dense_mle(&v, &[Fr::zero(), Fr::one()]),
             Fr::from(30u64)
         );
-        // At Boolean point (1,1): v[3] = 40
         assert_eq!(
             eval_dense_mle(&v, &[Fr::one(), Fr::one()]),
             Fr::from(40u64)
         );
     }
 
+    // ── Helper: full sumcheck prove + verify for a relaxed R1CS ──────
+
+    /// Run the full protocol: prover sends proof, verifier checks sumcheck
+    /// then checks `final_claim == 0` (the relaxed R1CS equation must hold
+    /// at the random point `r`; by Schwartz–Zippel, `P(r) = 0` at a random
+    /// `r` implies `P ≡ 0`, i.e. all per-constraint products are zero).
+    fn full_protocol(
+        l: &[Vec<(u32, Fr)>],
+        r_mat: &[Vec<(u32, Fr)>],
+        o: &[Vec<(u32, Fr)>],
+        z: &[Fr],
+        u: Fr,
+        e: &[Fr],
+    ) -> bool {
+        let n = l.len();
+
+        // Prover side.
+        let (proof, r_challenges) = prove(l, r_mat, o, z, u, e);
+
+        // Verifier side: check sumcheck.
+        let (sc_ok, verifier_r, final_claim) = verify(&proof);
+        if !sc_ok {
+            return false;
+        }
+        assert_eq!(r_challenges, verifier_r, "Fiat-Shamir challenges must match");
+
+        // Additionally, verify the product evaluations at r are consistent.
+        // Build the products vector and evaluate its MLE at r.
+        let n_padded = next_power_of_two(n);
+        let products: Vec<Fr> = (0..n)
+            .map(|j| {
+                let az = eval_row_mle(&l[j], z);
+                let bz = eval_row_mle(&r_mat[j], z);
+                let cz = eval_row_mle(&o[j], z);
+                az * bz - u * cz - e[j]
+            })
+            .collect();
+        let mut products_padded = products;
+        products_padded.resize(n_padded, Fr::zero());
+
+        let k = log2ceil(n_padded);
+        if k == 0 {
+            // Single constraint: products_padded = [p0], r is empty.
+            // products_MLE(()) = p0. Check it matches final_claim.
+            return products_padded[0] == final_claim && final_claim.is_zero();
+        }
+
+        let products_at_r = eval_dense_mle(&products_padded, &verifier_r);
+        products_at_r == final_claim && final_claim.is_zero()
+    }
+
     #[test]
-    fn sumcheck_satisfying_witness_produces_valid_proof() {
+    fn sumcheck_satisfying_witness() {
         let (l, r, o) = simple_r1cs();
-        // Satisfying witness: [1, 3, 5, 15] (1 = const, 3·5 = 15)
         let z = vec![
             Fr::from(1u64),
             Fr::from(3u64),
@@ -484,30 +507,13 @@ mod tests {
         ];
         let u = Fr::from(1u64);
         let e = vec![Fr::zero()];
-
-        let (proof, r_challenges) = prove(&l, &r, &o, &z, u, &e);
-        assert_eq!(proof.claims[0], Fr::zero(), "claimed sum must be 0");
-
-        // Verify.
-        let a_mle: Vec<Fr> = (0..l.len())
-            .map(|j| eval_row_mle(&l[j], &r_challenges))
-            .collect();
-        let b_mle: Vec<Fr> = (0..r.len())
-            .map(|j| eval_row_mle(&r[j], &r_challenges))
-            .collect();
-        let c_mle: Vec<Fr> = (0..o.len())
-            .map(|j| eval_row_mle(&o[j], &r_challenges))
-            .collect();
-        let e_at_r = eval_dense_mle(&[e[0], Fr::zero()], &r_challenges);
-
-        let (ok, _) = verify(&proof, &a_mle, &b_mle, &c_mle, u, e_at_r);
-        assert!(ok, "sumcheck must verify for a satisfying witness");
+        assert!(full_protocol(&l, &r, &o, &z, u, &e));
     }
 
     #[test]
     fn sumcheck_unsatisfying_witness_fails() {
         let (l, r, o) = simple_r1cs();
-        // Unsatisfying: 3·5 ≠ 20 (error is not zero)
+        // 3·5 = 15 but z[3] = 20 → product = 15 - 20 = -5 ≠ 0
         let z = vec![
             Fr::from(1u64),
             Fr::from(3u64),
@@ -516,31 +522,13 @@ mod tests {
         ];
         let u = Fr::from(1u64);
         let e = vec![Fr::zero()];
-
-        let (proof, r_challenges) = prove(&l, &r, &o, &z, u, &e);
-        // The claimed sum should be non-zero.
-        assert_ne!(proof.claims[0], Fr::zero());
-
-        let a_mle: Vec<Fr> = (0..l.len())
-            .map(|j| eval_row_mle(&l[j], &r_challenges))
-            .collect();
-        let b_mle: Vec<Fr> = (0..r.len())
-            .map(|j| eval_row_mle(&r[j], &r_challenges))
-            .collect();
-        let c_mle: Vec<Fr> = (0..o.len())
-            .map(|j| eval_row_mle(&o[j], &r_challenges))
-            .collect();
-        let e_at_r = eval_dense_mle(&[e[0], Fr::zero()], &r_challenges);
-
-        let (ok, _) = verify(&proof, &a_mle, &b_mle, &c_mle, u, e_at_r);
-        assert!(!ok, "sumcheck must fail for an unsatisfying witness");
+        assert!(!full_protocol(&l, &r, &o, &z, u, &e));
     }
 
     #[test]
     fn sumcheck_with_nonzero_error() {
         let (l, r, o) = simple_r1cs();
-        // Witness: 3·5 = 15, error = 15, u = 0
-        // AZ·BZ = u·CZ + E → 15 = 0 + 15 ✓
+        // 3·5 = 15, u = 0, e = 15 → 15 = 0 + 15 ✓
         let z = vec![
             Fr::from(1u64),
             Fr::from(3u64),
@@ -549,29 +537,27 @@ mod tests {
         ];
         let u = Fr::from(0u64);
         let e = vec![Fr::from(15u64)];
-
-        let (proof, r_challenges) = prove(&l, &r, &o, &z, u, &e);
-        assert_eq!(proof.claims[0], Fr::zero());
-
-        let a_mle: Vec<Fr> = (0..l.len())
-            .map(|j| eval_row_mle(&l[j], &r_challenges))
-            .collect();
-        let b_mle: Vec<Fr> = (0..r.len())
-            .map(|j| eval_row_mle(&r[j], &r_challenges))
-            .collect();
-        let c_mle: Vec<Fr> = (0..o.len())
-            .map(|j| eval_row_mle(&o[j], &r_challenges))
-            .collect();
-        let e_at_r = eval_dense_mle(&[e[0], Fr::zero()], &r_challenges);
-
-        let (ok, _) = verify(&proof, &a_mle, &b_mle, &c_mle, u, e_at_r);
-        assert!(ok, "sumcheck must verify with non-zero error");
+        assert!(full_protocol(&l, &r, &o, &z, u, &e));
     }
 
     #[test]
-    fn sumcheck_multi_constraint() {
-        // Two independent multiplier constraints:
-        // w[1]*w[2] = w[3], w[4]*w[5] = w[6]
+    fn sumcheck_with_folded_slack() {
+        let (l, r, o) = simple_r1cs();
+        // 3·5 = 15, u = 2, e = -15 → 15 = 2·15 + (-15) ✓
+        let z = vec![
+            Fr::from(1u64),
+            Fr::from(3u64),
+            Fr::from(5u64),
+            Fr::from(15u64),
+        ];
+        let u = Fr::from(2u64);
+        let e = vec![Fr::from(-15i64)];
+        assert!(full_protocol(&l, &r, &o, &z, u, &e));
+    }
+
+    #[test]
+    fn sumcheck_two_constraints() {
+        // Two independent multipliers: w[1]*w[2]=w[3], w[4]*w[5]=w[6]
         let l = vec![
             vec![(1u32, Fr::from(1u64))],
             vec![(4u32, Fr::from(1u64))],
@@ -584,7 +570,6 @@ mod tests {
             vec![(3u32, Fr::from(1u64))],
             vec![(6u32, Fr::from(1u64))],
         ];
-        // [1, 3, 5, 15, 7, 11, 77]
         let z = vec![
             Fr::from(1u64),
             Fr::from(3u64),
@@ -596,27 +581,88 @@ mod tests {
         ];
         let u = Fr::from(1u64);
         let e = vec![Fr::zero(); 2];
-
-        let (proof, r_challenges) = prove(&l, &r, &o, &z, u, &e);
-        assert_eq!(proof.claims[0], Fr::zero());
-        // 2 constraints → padded to 2 → log2(2) = 1 round
-        assert_eq!(proof.polys.len(), 1);
-
-        let a_mle: Vec<Fr> = (0..l.len())
-            .map(|j| eval_row_mle(&l[j], &r_challenges))
-            .collect();
-        let b_mle: Vec<Fr> = (0..r.len())
-            .map(|j| eval_row_mle(&r[j], &r_challenges))
-            .collect();
-        let c_mle: Vec<Fr> = (0..o.len())
-            .map(|j| eval_row_mle(&o[j], &r_challenges))
-            .collect();
-        let e_padded = [e[0], e[1], Fr::zero(), Fr::zero()];
-        let e_at_r = eval_dense_mle(&e_padded, &r_challenges);
-
-        let (ok, _) = verify(&proof, &a_mle, &b_mle, &c_mle, u, e_at_r);
-        assert!(ok, "sumcheck must verify for 2-constraint circuit");
+        assert!(full_protocol(&l, &r, &o, &z, u, &e));
     }
+
+    #[test]
+    fn sumcheck_four_constraints() {
+        // Four multipliers: w[1+3i]*w[2+3i]=w[3+3i] for i=0..3
+        let k = 4;
+        let n_wires = 1 + 3 * k;
+        let mut l = Vec::new();
+        let mut r = Vec::new();
+        let mut o = Vec::new();
+        for i in 0..k {
+            l.push(vec![((1 + 3 * i) as u32, Fr::from(1u64))]);
+            r.push(vec![((2 + 3 * i) as u32, Fr::from(1u64))]);
+            o.push(vec![((3 + 3 * i) as u32, Fr::from(1u64))]);
+        }
+        let mut z = vec![Fr::from(1u64)]; // wire 0 = constant
+        for i in 0..k {
+            let a = Fr::from((i + 2) as u64);
+            let b = Fr::from((i + 3) as u64);
+            z.push(a);
+            z.push(b);
+            z.push(a * b);
+        }
+        assert_eq!(z.len(), n_wires);
+        let u = Fr::from(1u64);
+        let e = vec![Fr::zero(); k];
+        assert!(full_protocol(&l, &r, &o, &z, u, &e));
+    }
+
+    #[test]
+    fn proof_deterministic_for_same_witness() {
+        let (l, r, o) = simple_r1cs();
+        let z = vec![
+            Fr::from(1u64),
+            Fr::from(3u64),
+            Fr::from(5u64),
+            Fr::from(15u64),
+        ];
+        let u = Fr::from(1u64);
+        let e = vec![Fr::zero()];
+
+        let (p1, _) = prove(&l, &r, &o, &z, u, &e);
+        let (p2, _) = prove(&l, &r, &o, &z, u, &e);
+        assert_eq!(proof_hash(&p1), proof_hash(&p2));
+    }
+
+    #[test]
+    fn proof_size_grows_logarithmically() {
+        // 1 constraint → 0 rounds, 2 → 1 round, 4 → 2 rounds
+        let make_k = |k: usize| {
+            let mut l = Vec::new();
+            let mut r = Vec::new();
+            let mut o = Vec::new();
+            for i in 0..k {
+                l.push(vec![((1 + 3 * i) as u32, Fr::from(1u64))]);
+                r.push(vec![((2 + 3 * i) as u32, Fr::from(1u64))]);
+                o.push(vec![((3 + 3 * i) as u32, Fr::from(1u64))]);
+            }
+            let mut z = vec![Fr::from(1u64)];
+            for i in 0..k {
+                z.push(Fr::from((i + 2) as u64));
+                z.push(Fr::from((i + 3) as u64));
+                z.push(Fr::from(((i + 2) * (i + 3)) as u64));
+            }
+            let e = vec![Fr::zero(); k];
+            let (proof, _) = prove(&l, &r, &o, &z, Fr::from(1u64), &e);
+            proof
+        };
+
+        let p1 = make_k(1);
+        let p2 = make_k(2);
+        let p4 = make_k(4);
+        let p8 = make_k(8);
+
+        assert_eq!(p1.polys.len(), 0); // 0 rounds
+        assert_eq!(p2.polys.len(), 1); // 1 round
+        assert_eq!(p4.polys.len(), 2); // 2 rounds
+        assert_eq!(p8.polys.len(), 3); // 3 rounds
+    }
+
+    // ── HashPC tests ────────────────────────────────────────────────
 
     #[test]
     fn hashpc_commit_deterministic() {
@@ -645,8 +691,6 @@ mod tests {
         let (hash, _) = poly_commit(&v, &params.basis_w);
 
         let proof = create_opening(&v);
-
-        // Evaluate at a random point.
         let r = vec![Fr::from(7u64), Fr::from(11u64)];
         let claimed = eval_dense_mle(&v, &r);
 
@@ -665,7 +709,6 @@ mod tests {
         let (hash, _) = poly_commit(&v, &params.basis_w);
 
         let mut proof = create_opening(&v);
-        // Tamper with the table.
         proof.table[0] += Fr::from(1u64);
 
         let r = vec![Fr::from(7u64), Fr::from(11u64)];
@@ -686,27 +729,9 @@ mod tests {
         let (hash, _) = poly_commit(&v, &params.basis_w);
 
         let proof = create_opening(&v);
-
         let r = vec![Fr::from(7u64), Fr::from(11u64)];
         let wrong_eval = Fr::from(999u64);
 
         assert!(!verify_opening(&hash, &proof, &wrong_eval, &r));
-    }
-
-    #[test]
-    fn proof_deterministic_for_same_witness() {
-        let (l, r, o) = simple_r1cs();
-        let z = vec![
-            Fr::from(1u64),
-            Fr::from(3u64),
-            Fr::from(5u64),
-            Fr::from(15u64),
-        ];
-        let u = Fr::from(1u64);
-        let e = vec![Fr::zero()];
-
-        let (p1, _) = prove(&l, &r, &o, &z, u, &e);
-        let (p2, _) = prove(&l, &r, &o, &z, u, &e);
-        assert_eq!(proof_hash(&p1), proof_hash(&p2));
     }
 }
