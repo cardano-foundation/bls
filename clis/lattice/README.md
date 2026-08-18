@@ -105,7 +105,8 @@ Measured with real Circom circuit witnesses via 4-limb adapter (release mode, si
 | Circuit | Signals | Lova limbs (n) | Steps | Fold/step | Verify/step | Proof size |
 |---------|---------|----------------|-------|-----------|-------------|------------|
 | **EdDSA** | 15 | 60 | 63 | 0.45 ms | 0.03 ms | 31.9 KiB |
-| **Airdrop** | 1,210 | 4,840 | 3 | 1,175 ms | 250 ms | 2,571 KiB |
+| **Airdrop** | 1,210 | 4,840 | 4 | 1,204 ms | 282 ms | 2,571 KiB |
+| **Ed25519** | 7,658 | 30,632 | 15 | 35.5 s | 10.7 s | 16,273 KiB |
 
 #### RNS decomposition mode (`--rns`)
 
@@ -118,30 +119,37 @@ RNS decomposes each BLS12-381 element into 8 × 32-bit residues instead of 4 × 
 | **4-limb** (default) | 60 | 64 | **0.45 ms** | **0.03 ms** | **31.9 KiB** |
 | **RNS** (8×32-bit) | 120 | 32 | 0.63 ms | 0.09 ms | 33.8 KiB |
 
-**RNS vs 4-limb comparison (Airdrop, 1,210 signals, 3 steps):**
+**RNS vs 4-limb comparison (Airdrop, 1,210 signals, 4 steps):**
 
 | Mode | n | decompose_digits | Fold/step | Verify/step | Proof size |
 |------|---|-----------------|-----------|-------------|------------|
-| **4-limb** (default) | 4,840 | 64 | **1,175 ms** | **250 ms** | **2,571 KiB** |
-| **RNS** (8×32-bit) | 9,680 | 32 | 4,192 ms | 712 ms | 2,723 KiB |
+| **4-limb** (default) | 4,840 | 64 | **1,204 ms** | **282 ms** | **2,571 KiB** |
+| **RNS** (8×32-bit) | 9,680 | 32 | 4,909 ms | 1,133 ms | 2,723 KiB |
 
-**Finding:** RNS is currently slower for these circuit sizes because the 2× dimension increase (O(n²) matrix operations) outweighs the 2× decompose_digits reduction. The real RNS benefit would come from integrating RNS into the commitment scheme itself (multiple smaller matrix multiplications instead of one large one) — a deeper architectural change tracked as Phase 2 in the roadmap.
+**RNS vs 4-limb comparison (Ed25519, 7,658 signals, 15 steps):**
+
+| Mode | n | decompose_digits | Fold/step | Verify/step | Proof size |
+|------|---|-----------------|-----------|-------------|------------|
+| **4-limb** (default) | 30,632 | 64 | **35.5 s** | **10.7 s** | **16,273 KiB** |
+| **RNS** (8×32-bit) | 61,264 | 32 | 283.5 s | 65.5 s | 17,231 KiB |
+
+**Finding:** RNS is currently slower for all circuit sizes because the 2× dimension increase (O(n²) matrix operations) outweighs the 2× decompose_digits reduction. The real RNS benefit would come from integrating RNS into the commitment scheme itself (multiple smaller matrix multiplications instead of one large one) — a deeper architectural change tracked as Phase 2 in the roadmap.
 
 Key observations:
 
-- **Small circuits are practical** — EdDSA (15 signals) folds at 0.60 ms/step, faster than Nova's NIFS (185 ms/step).
+- **Small circuits are practical** — EdDSA (15 signals) folds at 0.45 ms/step, faster than Nova's NIFS (185 ms/step).
 - **Proof size is constant** regardless of step count — a key Lova advantage over Nova's linear-in-step-count proofs.
 - **Performance scales with witness dimension** — the 4-limb BLS12-381 expansion multiplies the effective dimension by 4×.
 - **Large circuits need optimization** — module-SIS commitments or RNS decomposition could reduce the expansion overhead.
 
 ## Comparison with Nova (same machine)
 
-| Metric | Nova NIFS (Impl 9/10) | Lova (default params) | Lova (EdDSA R1CS) |
-|--------|----------------------|----------------------|-------------------|
-| Fold/step | 185 ms | 1.43 ms | 0.60 ms |
-| Verify/step | 7.87 s (sumcheck) | 0.28 ms | 0.03 ms |
-| Proof size | 472.8 KiB (sumcheck) | 70.0 KiB | 31.9 KiB |
-| Post-quantum | ❌ | ✅ | ✅ |
+| Metric | Nova NIFS (Impl 9/10) | Lova (EdDSA, 4-limb) | Lova (Ed25519, 4-limb) |
+|--------|----------------------|----------------------|------------------------|
+| Fold/step | 185 ms | **0.45 ms** | 35.5 s |
+| Verify/step | 7.87 s (sumcheck) | **0.03 ms** | 10.7 s |
+| Proof size | 472.8 KiB (sumcheck) | **31.9 KiB** | 16,273 KiB |
+| Post-quantum | No | **Yes** | **Yes** |
 
 ## Project structure
 
@@ -161,6 +169,13 @@ clis/lattice/
     ├── benchmark_lova.rs        # Lova-native benchmark (synthetic witnesses)
     └── benchmark_lova_r1cs.rs   # R1CS-to-Lova benchmark (real circuits)
 ```
+
+## Next steps
+
+1. **Phase 2: RNS in commitment scheme** — instead of converting RNS→Z_{2^64} before folding, run the Ajtai commitment as 8 smaller matrix multiplications (each mod 32-bit prime). This eliminates the 2× dimension overhead and is the real RNS speedup.
+2. **Streaming decomposition** — decompose witnesses on-the-fly during fold instead of all-up-front, reducing peak memory.
+3. **Parallelization** — use Rayon for multi-core fold (matrix operations are embarrassingly parallel).
+4. **Generate more Airdrop witnesses** — only 5 available; need 37 for full IVC chain benchmark.
 
 ## License
 
