@@ -78,12 +78,12 @@ pub fn eval_dense_mle(v: &[Fr], r: &[Fr]) -> Fr {
     let mut result = Fr::zero();
     for (i, &val) in v.iter().enumerate() {
         let mut term = val;
-        for bit in 0..k {
+        for (bit, &r_bit) in r.iter().enumerate().take(k) {
             let b = (i >> bit) & 1;
             if b == 0 {
-                term *= Fr::one() - r[bit];
+                term *= Fr::one() - r_bit;
             } else {
-                term *= r[bit];
+                term *= r_bit;
             }
         }
         result += term;
@@ -119,7 +119,7 @@ fn challenge_from_hash(hash: &[u8]) -> Fr {
 fn hash_field_elements(elems: &[Fr]) -> Vec<u8> {
     let mut h = Blake2b512::new();
     for e in elems {
-        h.update(&e.into_bigint().to_bytes_le());
+        h.update(e.into_bigint().to_bytes_le());
     }
     h.finalize().to_vec()
 }
@@ -303,7 +303,7 @@ pub fn poly_commit(
     let hash: Vec<u8> = {
         let mut h = Blake2b512::new();
         for val in &tt {
-            h.update(&val.into_bigint().to_bytes_le());
+            h.update(val.into_bigint().to_bytes_le());
         }
         h.finalize().to_vec()
     };
@@ -343,7 +343,7 @@ pub fn verify_opening(
     let actual_hash: Vec<u8> = {
         let mut h = Blake2b512::new();
         for val in &proof.table {
-            h.update(&val.into_bigint().to_bytes_le());
+            h.update(val.into_bigint().to_bytes_le());
         }
         h.finalize().to_vec()
     };
@@ -360,11 +360,11 @@ pub fn verify_opening(
 pub fn proof_hash(p: &SumcheckProof) -> Vec<u8> {
     let mut h = Blake2b512::new();
     for c in &p.claims {
-        h.update(&c.into_bigint().to_bytes_le());
+        h.update(c.into_bigint().to_bytes_le());
     }
     for poly in &p.polys {
         for c in poly {
-            h.update(&c.into_bigint().to_bytes_le());
+            h.update(c.into_bigint().to_bytes_le());
         }
     }
     h.finalize().to_vec()
@@ -376,7 +376,11 @@ mod tests {
     use crate::nifs::PedersenParams;
 
     /// One-constraint multiplier: Z[1]·Z[2] = Z[3], wire 0 = constant 1.
-    fn simple_r1cs() -> (Vec<Vec<(u32, Fr)>>, Vec<Vec<(u32, Fr)>>, Vec<Vec<(u32, Fr)>>) {
+    fn simple_r1cs() -> (
+        Vec<Vec<(u32, Fr)>>,
+        Vec<Vec<(u32, Fr)>>,
+        Vec<Vec<(u32, Fr)>>,
+    ) {
         (
             vec![vec![(1u32, Fr::from(1u64))]],
             vec![vec![(2u32, Fr::from(1u64))]],
@@ -439,10 +443,7 @@ mod tests {
             eval_dense_mle(&v, &[Fr::zero(), Fr::one()]),
             Fr::from(30u64)
         );
-        assert_eq!(
-            eval_dense_mle(&v, &[Fr::one(), Fr::one()]),
-            Fr::from(40u64)
-        );
+        assert_eq!(eval_dense_mle(&v, &[Fr::one(), Fr::one()]), Fr::from(40u64));
     }
 
     // ── Helper: full sumcheck prove + verify for a relaxed R1CS ──────
@@ -469,7 +470,10 @@ mod tests {
         if !sc_ok {
             return false;
         }
-        assert_eq!(r_challenges, verifier_r, "Fiat-Shamir challenges must match");
+        assert_eq!(
+            r_challenges, verifier_r,
+            "Fiat-Shamir challenges must match"
+        );
 
         // Additionally, verify the product evaluations at r are consistent.
         // Build the products vector and evaluate its MLE at r.
@@ -558,18 +562,9 @@ mod tests {
     #[test]
     fn sumcheck_two_constraints() {
         // Two independent multipliers: w[1]*w[2]=w[3], w[4]*w[5]=w[6]
-        let l = vec![
-            vec![(1u32, Fr::from(1u64))],
-            vec![(4u32, Fr::from(1u64))],
-        ];
-        let r = vec![
-            vec![(2u32, Fr::from(1u64))],
-            vec![(5u32, Fr::from(1u64))],
-        ];
-        let o = vec![
-            vec![(3u32, Fr::from(1u64))],
-            vec![(6u32, Fr::from(1u64))],
-        ];
+        let l = vec![vec![(1u32, Fr::from(1u64))], vec![(4u32, Fr::from(1u64))]];
+        let r = vec![vec![(2u32, Fr::from(1u64))], vec![(5u32, Fr::from(1u64))]];
+        let o = vec![vec![(3u32, Fr::from(1u64))], vec![(6u32, Fr::from(1u64))]];
         let z = vec![
             Fr::from(1u64),
             Fr::from(3u64),
@@ -632,11 +627,18 @@ mod tests {
 
         // 1 constraint → 0 sumcheck rounds (trivial case).
         assert_eq!(proof.polys.len(), 0, "1-constraint must have 0 rounds");
-        assert!(r_challenges.is_empty(), "no Fiat-Shamir challenges for 0 rounds");
+        assert!(
+            r_challenges.is_empty(),
+            "no Fiat-Shamir challenges for 0 rounds"
+        );
 
         // The single claimed product is az*bz - u*cz - e = 3*5 - 1*15 - 0 = 0.
         assert_eq!(proof.claims.len(), 1);
-        assert_eq!(proof.claims[0], Fr::zero(), "product must be zero for satisfied constraint");
+        assert_eq!(
+            proof.claims[0],
+            Fr::zero(),
+            "product must be zero for satisfied constraint"
+        );
 
         // Verify passes.
         let (ok, v_r, final_claim) = verify(&proof);
@@ -647,8 +649,10 @@ mod tests {
         // Golden snapshot: the proof hash must match.
         let golden_hash = "9ab7a73a97a1a3031406b6c169634a9c06cfb81dec3323bb4de5ce6f4b7ca107de534442a7eaeafbaf366ccfdde1cb97d7c884e4344cd0a23039de71a56d630a";
         let h = hex::encode(proof_hash(&proof));
-        assert_eq!(h, golden_hash,
-            "golden hash mismatch — proof has changed since this snapshot was recorded");
+        assert_eq!(
+            h, golden_hash,
+            "golden hash mismatch — proof has changed since this snapshot was recorded"
+        );
 
         // Structural golden checks.
         assert_eq!(proof.claims.len(), 1);
@@ -661,22 +665,17 @@ mod tests {
     /// padded to 2 → log2ceil(2) = 1 round).
     #[test]
     fn golden_two_constraints_3x5_7x11() {
-        let l = vec![
-            vec![(1u32, Fr::from(1u64))],
-            vec![(4u32, Fr::from(1u64))],
-        ];
-        let r_mat = vec![
-            vec![(2u32, Fr::from(1u64))],
-            vec![(5u32, Fr::from(1u64))],
-        ];
-        let o = vec![
-            vec![(3u32, Fr::from(1u64))],
-            vec![(6u32, Fr::from(1u64))],
-        ];
+        let l = vec![vec![(1u32, Fr::from(1u64))], vec![(4u32, Fr::from(1u64))]];
+        let r_mat = vec![vec![(2u32, Fr::from(1u64))], vec![(5u32, Fr::from(1u64))]];
+        let o = vec![vec![(3u32, Fr::from(1u64))], vec![(6u32, Fr::from(1u64))]];
         let z = vec![
             Fr::from(1u64),
-            Fr::from(3u64), Fr::from(5u64), Fr::from(15u64),
-            Fr::from(7u64), Fr::from(11u64), Fr::from(77u64),
+            Fr::from(3u64),
+            Fr::from(5u64),
+            Fr::from(15u64),
+            Fr::from(7u64),
+            Fr::from(11u64),
+            Fr::from(77u64),
         ];
         let u = Fr::from(1u64);
         let e = vec![Fr::zero(); 2];
@@ -701,14 +700,19 @@ mod tests {
         // Golden snapshot.
         let golden_hash = "865939e120e6805438478841afb739ae4250cf372653078a065cdcfffca4caf798e6d462b65d658fc165782640eded70963449ae1500fb0f24981d7727e22c41";
         let h = hex::encode(proof_hash(&proof));
-        assert_eq!(h, golden_hash,
-            "golden hash mismatch — proof has changed since this snapshot was recorded");
+        assert_eq!(
+            h, golden_hash,
+            "golden hash mismatch — proof has changed since this snapshot was recorded"
+        );
 
         // Round polynomial structure: f(0) + f(1) = 0.
         let poly = &proof.polys[0];
         assert_eq!(poly.len(), 2);
-        assert_eq!(poly[0] + poly[1], Fr::zero(),
-            "f(0)+f(1) must equal the claimed sum (0)");
+        assert_eq!(
+            poly[0] + poly[1],
+            Fr::zero(),
+            "f(0)+f(1) must equal the claimed sum (0)"
+        );
     }
 
     /// Golden test: HashPC commitment for a known vector.
@@ -726,12 +730,18 @@ mod tests {
 
         // BLAKE2b-512 truth-table hash of [10,20,30,40].
         let golden_hash_hex = "98ffc304e408f37324d82098fd13b60d603a4428c1113a45d748e4737ae90f43ada23f608676b3ab02ed2a3b0d7b8da7c010f37f57e825f8ef8734df1bf69174";
-        assert_eq!(hex::encode(&hash), golden_hash_hex,
-            "HashPC commitment hash mismatch");
+        assert_eq!(
+            hex::encode(&hash),
+            golden_hash_hex,
+            "HashPC commitment hash mismatch"
+        );
 
         // Opening proof.
         let opening = create_opening(&v);
-        assert_eq!(opening.table, v, "opening truth table must equal the vector");
+        assert_eq!(
+            opening.table, v,
+            "opening truth table must equal the vector"
+        );
 
         // Verify opening.
         let r = vec![Fr::from(3u64), Fr::from(7u64)];

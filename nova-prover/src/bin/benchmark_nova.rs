@@ -13,9 +13,9 @@
 //! Implementation 9 (`--nifs`) measures the constant-size path:
 //!
 //!   1. nifs fold          — per-step Relaxed-R1CS NIFS fold (two O(step)-sized
-//!                           MSMs), averaged
+//!      MSMs), averaged
 //!   2. compression ceremony — single-party trusted setup on the compression
-//!                           circuit (≈ 2·n_constraints constraints)
+//!      circuit (≈ 2·n_constraints constraints)
 //!   3. compress           — one Groth16 proof over the final relaxed instance
 //!   4. verify             — one pairing check + recomputed com(Z)/com(E)/V MSMs
 //!
@@ -46,9 +46,9 @@ use groth16_prover::engine::FftQapEngine;
 use groth16_prover::prover::{PippengerProver, Proof, Prover, PublicInput};
 use nova_prover::nifs;
 use nova_prover::{
-    prove_compression, verify_compression, prove_sumcheck_compression, verify_sumcheck_compression,
-    fr_to_string, NifsBundle, NifsFinalInstance,
-    NifsFoldOutput, NIFS_PARAMS_SEED, NIFS_TRANSCRIPT_PREFIX,
+    fr_to_string, prove_compression, prove_sumcheck_compression, verify_compression,
+    verify_sumcheck_compression, NifsBundle, NifsFinalInstance, NifsFoldOutput, NIFS_PARAMS_SEED,
+    NIFS_TRANSCRIPT_PREFIX,
 };
 use std::fs;
 use std::path::PathBuf;
@@ -72,13 +72,10 @@ fn main() {
         );
         std::process::exit(2);
     };
-    let limit = args
-        .windows(2)
-        .find(|w| w[0] == "--limit")
-        .map(|w| {
-            w[1].parse::<usize>()
-                .expect("--limit must be a positive integer")
-        });
+    let limit = args.windows(2).find(|w| w[0] == "--limit").map(|w| {
+        w[1].parse::<usize>()
+            .expect("--limit must be a positive integer")
+    });
 
     let mut circuit = SparseCircomCircuit::from_r1cs(&circuit_path)
         .unwrap_or_else(|e| panic!("failed to load circuit {circuit_path}: {e}"));
@@ -122,7 +119,14 @@ fn main() {
     } else if sumcheck_mode {
         benchmark_sumcheck(&engine, &mut circuit, &wtns);
     } else {
-        benchmark_step_chain(&engine, &prover, &mut circuit, &wtns, n_public, n_constraints);
+        benchmark_step_chain(
+            &engine,
+            &prover,
+            &mut circuit,
+            &wtns,
+            n_public,
+            n_constraints,
+        );
     }
 }
 
@@ -217,11 +221,7 @@ fn benchmark_step_chain(
 
 /// Implementation 9: NIFS fold → compression ceremony → one compression proof
 /// → O(1) verify.
-fn benchmark_nifs(
-    engine: &FftQapEngine,
-    circuit: &mut SparseCircomCircuit,
-    wtns: &[PathBuf],
-) {
+fn benchmark_nifs(engine: &FftQapEngine, circuit: &mut SparseCircomCircuit, wtns: &[PathBuf]) {
     let n_steps = wtns.len();
     let n_wires = circuit.n_wires as usize;
 
@@ -239,10 +239,7 @@ fn benchmark_nifs(
     //    circuit (≈ 2·n_constraints constraints, one per relaxed-equation
     //    product plus the t_i = u·(CZ)_i bindings).
     let cc = nova_prover::compression::CompressionCircuit::new(
-        &circuit.l,
-        &circuit.r,
-        &circuit.o,
-        n_wires,
+        &circuit.l, &circuit.r, &circuit.o, n_wires,
     );
     let mut rng = rand::thread_rng();
     let t = Instant::now();
@@ -286,10 +283,10 @@ fn benchmark_nifs(
     let state_bytes = n_steps * n_pub_out * 48;
     let step_proof_bytes = n_steps * 192;
     let impl8_bytes = step_proof_bytes + state_bytes;
-    let bundle_json = serde_json::to_string(&folded.bundle)
-        .expect("NIFS bundle serialization should not fail");
-    let proof_json = serde_json::to_string(&cproof)
-        .expect("compression proof serialization should not fail");
+    let bundle_json =
+        serde_json::to_string(&folded.bundle).expect("NIFS bundle serialization should not fail");
+    let proof_json =
+        serde_json::to_string(&cproof).expect("compression proof serialization should not fail");
     println!(
         "bundle (Impl 8): {n_steps} proofs × 192 B + {n_steps} × {state_bytes} B state = {impl8_bytes} B ({:.1} KiB), grows O(N)",
         impl8_bytes as f64 / 1024.0
@@ -306,11 +303,7 @@ fn benchmark_nifs(
 
 /// Implementation 10: NIFS fold → sumcheck compression → O(log N) verify
 /// (no trusted setup required for compression).
-fn benchmark_sumcheck(
-    _engine: &FftQapEngine,
-    circuit: &mut SparseCircomCircuit,
-    wtns: &[PathBuf],
-) {
+fn benchmark_sumcheck(_engine: &FftQapEngine, circuit: &mut SparseCircomCircuit, wtns: &[PathBuf]) {
     let n_steps = wtns.len();
 
     // 1. NIFS fold — same as Impl 9.
@@ -346,10 +339,10 @@ fn benchmark_sumcheck(
     let state_bytes = n_steps * n_pub_out * 48;
     let step_proof_bytes = n_steps * 192;
     let impl8_bytes = step_proof_bytes + state_bytes;
-    let bundle_json = serde_json::to_string(&folded.bundle)
-        .expect("NIFS bundle serialization should not fail");
-    let proof_json = serde_json::to_string(&sc_proof)
-        .expect("sumcheck proof serialization should not fail");
+    let bundle_json =
+        serde_json::to_string(&folded.bundle).expect("NIFS bundle serialization should not fail");
+    let proof_json =
+        serde_json::to_string(&sc_proof).expect("sumcheck proof serialization should not fail");
     println!(
         "bundle (Impl 8): {n_steps} proofs × 192 B + state = {impl8_bytes} B ({:.1} KiB), grows O(N)",
         impl8_bytes as f64 / 1024.0
@@ -393,7 +386,10 @@ fn nifs_fold(circuit: &mut SparseCircomCircuit, wtns: &[PathBuf]) -> NifsFoldOut
         let state_in: Vec<String> = in_fr.iter().map(fr_to_string).collect();
         let state_out: Vec<String> = out_fr.iter().map(fr_to_string).collect();
         if let Some(prev) = &prev_out {
-            assert_eq!(&state_in, prev, "state_in does not chain to previous state_out");
+            assert_eq!(
+                &state_in, prev,
+                "state_in does not chain to previous state_out"
+            );
         } else {
             initial_state = state_in.clone();
             acc_hash = Some(transcript_nifs_init(in_fr));
@@ -421,14 +417,7 @@ fn nifs_fold(circuit: &mut SparseCircomCircuit, wtns: &[PathBuf]) -> NifsFoldOut
                 let acc = acc_hash.as_ref().expect("transcript initialized");
                 let challenge = nifs::fold_challenge(acc, &u_acc, &step_u);
                 let (u3, w3) = nifs::fold(
-                    &params,
-                    &circuit.l,
-                    &circuit.r,
-                    &circuit.o,
-                    &u_acc,
-                    &w_acc,
-                    &step_u,
-                    &step_w,
+                    &params, &circuit.l, &circuit.r, &circuit.o, &u_acc, &w_acc, &step_u, &step_w,
                     challenge,
                 );
                 acc_u = Some(u3);

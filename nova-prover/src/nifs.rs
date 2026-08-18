@@ -162,30 +162,27 @@ pub fn fold(
     assert_eq!(w1.e.len(), w2.e.len(), "error widths must match");
     assert_eq!(w1.e.len(), l.len(), "error length must equal n_constraints");
 
-    let x3: Vec<Fr> = u1
-        .x
-        .iter()
-        .zip(&u2.x)
-        .map(|(a, b)| *a + challenge * *b)
-        .collect();
+    let x3: Vec<Fr> =
+        u1.x.iter()
+            .zip(&u2.x)
+            .map(|(a, b)| *a + challenge * *b)
+            .collect();
     let u3 = u1.u + challenge * u2.u;
 
-    let w3: Vec<Fr> = w1
-        .w
-        .iter()
-        .zip(&w2.w)
-        .map(|(a, b)| *a + challenge * *b)
-        .collect();
+    let w3: Vec<Fr> =
+        w1.w.iter()
+            .zip(&w2.w)
+            .map(|(a, b)| *a + challenge * *b)
+            .collect();
 
     let e3_cross = cross_term(l, r, o, &w1.w, &w2.w, u1.u, u2.u);
-    let e3: Vec<Fr> = w1
-        .e
-        .iter()
-        .zip(&w2.e)
-        .map(|(a, b)| *a + challenge * *b)
-        .zip(&e3_cross)
-        .map(|(s, c)| s + challenge * c)
-        .collect();
+    let e3: Vec<Fr> =
+        w1.e.iter()
+            .zip(&w2.e)
+            .map(|(a, b)| *a + challenge * *b)
+            .zip(&e3_cross)
+            .map(|(s, c)| s + challenge * c)
+            .collect();
 
     let w_commit3 = G1Affine::from(
         G1Projective::from(u1.w_commit) + G1Projective::from(u2.w_commit) * challenge,
@@ -250,7 +247,11 @@ mod tests {
     }
 
     /// One-constraint multiplier: `Z[1]·Z[2] = Z[3]`, wire 0 = constant 1.
-    fn simple_r1cs() -> (Vec<Vec<(u32, Fr)>>, Vec<Vec<(u32, Fr)>>, Vec<Vec<(u32, Fr)>>) {
+    fn simple_r1cs() -> (
+        Vec<Vec<(u32, Fr)>>,
+        Vec<Vec<(u32, Fr)>>,
+        Vec<Vec<(u32, Fr)>>,
+    ) {
         (
             vec![vec![(1, Fr::from(1u64))]],
             vec![vec![(2, Fr::from(1u64))]],
@@ -258,7 +259,10 @@ mod tests {
         )
     }
 
-    fn make_instance(params: &PedersenParams, w: &[Fr]) -> (RelaxedR1csInstance, RelaxedR1csWitness) {
+    fn make_instance(
+        params: &PedersenParams,
+        w: &[Fr],
+    ) -> (RelaxedR1csInstance, RelaxedR1csWitness) {
         let e = vec![Fr::zero(); 1];
         let u = Fr::from(1u64);
         (
@@ -268,33 +272,48 @@ mod tests {
                 w_commit: commit(&params.basis_w, w),
                 e_commit: commit(&params.basis_e, &e),
             },
-            RelaxedR1csWitness {
-                w: w.to_vec(),
-                e,
-            },
+            RelaxedR1csWitness { w: w.to_vec(), e },
         )
     }
 
     #[test]
     fn fold_challenge_is_deterministic_and_distinct() {
         let params = PedersenParams::from_seed(b"fold-test", 4, 1);
-        let (u1, _) = make_instance(&params, &[Fr::from(1), Fr::from(2), Fr::from(3), Fr::from(6)]);
-        let (u2, _) = make_instance(&params, &[Fr::from(1), Fr::from(5), Fr::from(7), Fr::from(35)]);
+        let (u1, _) = make_instance(
+            &params,
+            &[Fr::from(1), Fr::from(2), Fr::from(3), Fr::from(6)],
+        );
+        let (u2, _) = make_instance(
+            &params,
+            &[Fr::from(1), Fr::from(5), Fr::from(7), Fr::from(35)],
+        );
 
         assert_eq!(
             fold_challenge(b"acc", &u1, &u2),
             fold_challenge(b"acc", &u1, &u2)
         );
-        assert_ne!(fold_challenge(b"acc", &u1, &u2), fold_challenge(b"other", &u1, &u2));
-        assert_ne!(fold_challenge(b"acc", &u1, &u2), fold_challenge(b"acc", &u2, &u1));
+        assert_ne!(
+            fold_challenge(b"acc", &u1, &u2),
+            fold_challenge(b"other", &u1, &u2)
+        );
+        assert_ne!(
+            fold_challenge(b"acc", &u1, &u2),
+            fold_challenge(b"acc", &u2, &u1)
+        );
     }
 
     #[test]
     fn fold_combines_instances() {
         let (l, r, o) = simple_r1cs();
         let params = PedersenParams::from_seed(b"fold-test", 4, 1);
-        let (u1, w1) = make_instance(&params, &[Fr::from(1), Fr::from(2), Fr::from(3), Fr::from(6)]);
-        let (u2, w2) = make_instance(&params, &[Fr::from(1), Fr::from(5), Fr::from(7), Fr::from(35)]);
+        let (u1, w1) = make_instance(
+            &params,
+            &[Fr::from(1), Fr::from(2), Fr::from(3), Fr::from(6)],
+        );
+        let (u2, w2) = make_instance(
+            &params,
+            &[Fr::from(1), Fr::from(5), Fr::from(7), Fr::from(35)],
+        );
         let challenge = Fr::from(11u64);
 
         let (u3, w3) = fold(&params, &l, &r, &o, &u1, &w1, &u2, &w2, challenge);
@@ -317,7 +336,13 @@ mod tests {
 
     /// `k` independent multiplier constraints: for `i in 0..k`,
     /// `w[1+3i] * w[2+3i] = w[3+3i]`, `w[0] = 1`.
-    fn chain_r1cs(k: usize) -> (Vec<Vec<(u32, Fr)>>, Vec<Vec<(u32, Fr)>>, Vec<Vec<(u32, Fr)>>) {
+    fn chain_r1cs(
+        k: usize,
+    ) -> (
+        Vec<Vec<(u32, Fr)>>,
+        Vec<Vec<(u32, Fr)>>,
+        Vec<Vec<(u32, Fr)>>,
+    ) {
         let mut l = Vec::with_capacity(k);
         let mut r = Vec::with_capacity(k);
         let mut o = Vec::with_capacity(k);
@@ -397,7 +422,9 @@ mod tests {
             let step_w = random_satisfying_witness(k, &mut rng);
             let (step_u, step_w) = make_instance_chain(&params, &step_w, k);
             let challenge = fold_challenge(b"chain-acc", &acc_u, &step_u);
-            let (next_u, next_w) = fold(&params, &l, &r, &o, &acc_u, &acc_w, &step_u, &step_w, challenge);
+            let (next_u, next_w) = fold(
+                &params, &l, &r, &o, &acc_u, &acc_w, &step_u, &step_w, challenge,
+            );
             assert_valid(&l, &r, &o, &params, &next_u, &next_w);
             acc_u = next_u;
             acc_w = next_w;

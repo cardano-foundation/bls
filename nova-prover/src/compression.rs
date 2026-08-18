@@ -147,7 +147,11 @@ impl CompressionCircuit {
     /// `t_i = u·(CZ)_i` are computed from the circuit's own B rows.
     pub fn witness(&self, z: &[Fr], u: Fr, e: &[Fr]) -> Vec<Fr> {
         assert_eq!(z.len(), self.n_wires, "z length must equal step n_wires");
-        assert_eq!(e.len(), self.n_constraints, "e length must equal n_constraints");
+        assert_eq!(
+            e.len(),
+            self.n_constraints,
+            "e length must equal n_constraints"
+        );
 
         let mut v = vec![Fr::zero(); self.n_wires_total];
         v[0] = Fr::one();
@@ -207,7 +211,11 @@ mod tests {
     use crate::nifs::{self, PedersenParams};
 
     /// One step-constraint matrix: `A`, `B`, `C` (sparse `(wire, coeff)` rows).
-    type StepR1cs = (Vec<Vec<(u32, Fr)>>, Vec<Vec<(u32, Fr)>>, Vec<Vec<(u32, Fr)>>);
+    type StepR1cs = (
+        Vec<Vec<(u32, Fr)>>,
+        Vec<Vec<(u32, Fr)>>,
+        Vec<Vec<(u32, Fr)>>,
+    );
 
     /// One-constraint multiplier step: `Z[1]·Z[2] = Z[3]`, wire 0 = constant 1.
     fn step_r1cs() -> StepR1cs {
@@ -238,11 +246,21 @@ mod tests {
     }
 
     /// Fold two multiplier steps into a non-trivial relaxed instance.
-    fn folded_instance() -> (nifs::RelaxedR1csInstance, nifs::RelaxedR1csWitness, StepR1cs) {
+    fn folded_instance() -> (
+        nifs::RelaxedR1csInstance,
+        nifs::RelaxedR1csWitness,
+        StepR1cs,
+    ) {
         let (l, r, o) = step_r1cs();
         let params = PedersenParams::from_seed(b"compression-test", 4, 1);
-        let (u1, w1) = make_instance(&params, &[Fr::from(1), Fr::from(2), Fr::from(3), Fr::from(6)]);
-        let (u2, w2) = make_instance(&params, &[Fr::from(1), Fr::from(5), Fr::from(7), Fr::from(35)]);
+        let (u1, w1) = make_instance(
+            &params,
+            &[Fr::from(1), Fr::from(2), Fr::from(3), Fr::from(6)],
+        );
+        let (u2, w2) = make_instance(
+            &params,
+            &[Fr::from(1), Fr::from(5), Fr::from(7), Fr::from(35)],
+        );
         let challenge = nifs::fold_challenge(b"acc", &u1, &u2);
         let (u3, w3) = nifs::fold(&params, &l, &r, &o, &u1, &w1, &u2, &w2, challenge);
         (u3, w3, (l, r, o))
@@ -279,7 +297,10 @@ mod tests {
 
         assert_ne!(u3.u, Fr::from(1u64), "the folded slack must be non-trivial");
         let v = c.witness(&w3.w, u3.u, &w3.e);
-        assert!(c.is_satisfied(&v), "honest folded witness must satisfy the circuit");
+        assert!(
+            c.is_satisfied(&v),
+            "honest folded witness must satisfy the circuit"
+        );
 
         // The public-input prefix is [1, Z..., u, E...].
         let pub_in = c.public_inputs(&v);
@@ -287,10 +308,7 @@ mod tests {
         assert_eq!(pub_in[0], Fr::one());
         assert_eq!(pub_in[z_wire(0)], w3.w[0]);
         assert_eq!(pub_in[CompressionCircuit::u_wire(c.n_wires)], u3.u);
-        assert_eq!(
-            pub_in[CompressionCircuit::e_wire(c.n_wires, 0)],
-            w3.e[0]
-        );
+        assert_eq!(pub_in[CompressionCircuit::e_wire(c.n_wires, 0)], w3.e[0]);
     }
 
     #[test]
@@ -323,10 +341,7 @@ mod tests {
 
         let v = c.witness(&w3.w, u3.u, &w3.e);
         parsed
-            .load_witness_from_bytes(
-                &groth16_prover::circom_adapter::wtns_to_bytes(&v),
-                32,
-            )
+            .load_witness_from_bytes(&groth16_prover::circom_adapter::wtns_to_bytes(&v), 32)
             .expect("witness must load");
         assert_eq!(parsed.witness, v);
     }
