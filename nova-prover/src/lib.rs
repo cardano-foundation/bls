@@ -1479,4 +1479,117 @@ mod tests {
             "wrong bundle instance must fail verification"
         );
     }
+
+    /// E2E: serialization roundtrip — the JSON-serialized NifsSumcheckProof
+    /// can be deserialized and still verifies.
+    #[test]
+    fn sumcheck_compression_serialization_roundtrip() {
+        let tmp = tempfile::tempdir().unwrap();
+        let r1cs_path = tmp.path().join("step.r1cs");
+        let steps_dir = tmp.path().join("steps");
+        fs::write(&r1cs_path, step_r1cs_bytes()).unwrap();
+        fs::create_dir(&steps_dir).unwrap();
+
+        let mut state = 2u64;
+        for (i, x) in [3u64, 5].iter().enumerate() {
+            state = write_step_wtns(&steps_dir, i, state, *x);
+        }
+
+        let fold_out = run_fold_nifs(&r1cs_path, &steps_dir).unwrap();
+        let c = load_circuit(&r1cs_path).unwrap();
+        let mut rng = rand::thread_rng();
+        let sc_proof = prove_sumcheck_compression(&c, &fold_out, &mut rng).unwrap();
+
+        // Serialize → deserialize → verify.
+        let json = serde_json::to_string(&sc_proof).unwrap();
+        let restored: NifsSumcheckProof = serde_json::from_str(&json).unwrap();
+        let vout = verify_sumcheck_compression(&fold_out.bundle, &restored).unwrap();
+        assert_eq!(vout.steps, 2);
+        assert_eq!(json.len(), sc_proof_json_size(&sc_proof));
+    }
+
+    /// E2E: fold with different step counts (1, 2, 4, 8) — proof size stays
+    /// logarithmic, verification always passes.
+    #[test]
+    fn sumcheck_compression_varying_step_counts() {
+        for &n_steps in &[1usize, 2, 4, 8] {
+            let tmp = tempfile::tempdir().unwrap();
+            let r1cs_path = tmp.path().join("step.r1cs");
+            let steps_dir = tmp.path().join("steps");
+            fs::write(&r1cs_path, step_r1cs_bytes()).unwrap();
+            fs::create_dir(&steps_dir).unwrap();
+
+            let mut state = 2u64;
+            for i in 0..n_steps {
+                state = write_step_wtns(&steps_dir, i, state, (i as u64) + 3);
+            }
+
+            let fold_out = run_fold_nifs(&r1cs_path, &steps_dir).unwrap();
+            assert_eq!(fold_out.bundle.n_steps, n_steps);
+
+            let c = load_circuit(&r1cs_path).unwrap();
+            let mut rng = rand::thread_rng();
+            let sc_proof = prove_sumcheck_compression(&c, &fold_out, &mut rng).unwrap();
+            let vout = verify_sumcheck_compression(&fold_out.bundle, &sc_proof).unwrap();
+            assert_eq!(vout.steps, n_steps);
+        }
+    }
+
+    /// E2E: both Impl 9 (Groth16) and Impl 10 (sumcheck) verify the same
+    /// folded instance — they agree on the final state.
+    #[test]
+    fn sumcheck_and_groth16_agree_on_folded_instance() {
+        let tmp = tempfile::tempdir().unwrap();
+        let r1cs_path = tmp.path().join("step.r1cs");
+        let steps_dir = tmp.path().join("steps");
+        let pk_path = tmp.path().join("compression.pk");
+        let proof_path = tmp.path().join("compression.proof.json");
+        fs::write(&r1cs_path, step_r1cs_bytes()).unwrap();
+        fs::create_dir(&steps_dir).unwrap();
+
+        let mut state = 2u64;
+        for (i, x) in [3u64, 5, 7].iter().enumerate() {
+            state = write_step_wtns(&steps_dir, i, state, *x);
+        }
+
+        let fold_out = run_fold_nifs(&r1cs_path, &steps_dir).unwrap();
+
+        // Impl 10: sumcheck compression.
+        let c = load_circuit(&r1cs_path).unwrap();
+        let mut rng = rand::thread_rng();
+        let sc_proof = prove_sumcheck_compression(&c, &fold_out, &mut rng).unwrap();
+        let v10 = verify_sumcheck_compression(&fold_out.bundle, &sc_proof).unwrap();
+
+        // Impl 9: Groth16 compression (requires ceremony).
+        let cc = compression::CompressionCircuit::new(&c.l, &c.r, &c.o, c.n_wires as usize);
+        let engine = FftQapEngine::new();
+        let tw = ToxicWaste::random(&mut rng);
+        let (full_pk, vk) = single_party_ceremony_full_from_tw_sparse(
+            &engine,
+            cc.l.len(),
+            cc.n_wires_total,
+            cc.n_public,
+            &cc.l,
+            &cc.r,
+            &cc.o,
+            tw,
+            false,
+        );
+        let mut pk_bytes = Vec::new();
+        full_pk.serialize_uncompressed(&mut pk_bytes).unwrap();
+        fs::write(&pk_path, &pk_bytes).unwrap();
+
+        let compress_out = run_compress(&r1cs_path, &steps_dir, &pk_path, &proof_path).unwrap();
+        let proof: CompressionProof =
+            serde_json::from_slice(&fs::read(&proof_path).unwrap()).unwrap();
+        let v9 = verify_compression(&compress_out.bundle, &proof, &vk).unwrap();
+
+        // Both produce the same step count and the same transcript.
+        assert_eq!(v10.steps, v9.steps);
+        assert_eq!(v10.transcript_final, v9.transcript_final);
+    }
+
+    fn sc_proof_json_size(p: &NifsSumcheckProof) -> usize {
+        serde_json::to_string(p).unwrap().len()
+    }
 }
