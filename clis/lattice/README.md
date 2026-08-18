@@ -72,6 +72,20 @@ cargo run --release --bin benchmark_lova_r1cs -- \
   --steps-dir /tmp/opencode/bench/ed25519_steps --limit 16
 ```
 
+#### `--rns` flag
+
+Use RNS (Residue Number System) decomposition instead of 4-limb. Decomposes each BLS12-381 element into 8 × 32-bit residues, halving `decompose_digits` (32 vs 64) but doubling the witness dimension (2×n):
+
+```bash
+# RNS mode — add --rns to any benchmark command
+cargo run --release --bin benchmark_lova_r1cs -- \
+  --steps-dir /tmp/opencode/bench/eddsa_steps --limit 64 --rns
+
+# Compare: 4-limb vs RNS on the same circuit
+cargo run --release --bin benchmark_lova_r1cs -- --steps-dir /tmp/opencode/bench/eddsa_steps --limit 64
+cargo run --release --bin benchmark_lova_r1cs -- --steps-dir /tmp/opencode/bench/eddsa_steps --limit 64 --rns
+```
+
 #### Lova-native benchmark results
 
 Measured on a single machine with synthetic random witnesses (release mode, single core). Proof size is constant — independent of step count.
@@ -90,9 +104,28 @@ Measured with real Circom circuit witnesses via 4-limb adapter (release mode, si
 
 | Circuit | Signals | Lova limbs (n) | Steps | Fold/step | Verify/step | Proof size |
 |---------|---------|----------------|-------|-----------|-------------|------------|
-| **EdDSA** | 15 | 60 | 31 | 0.60 ms | 0.03 ms | 31.9 KiB |
-| **Airdrop** | 1,210 | 4,840 | 4 | 1,197 ms | 285 ms | 2,571 KiB |
-| **Ed25519** | 7,658 | 30,632 | 7 | ~33 s | ~11 s | 16,273 KiB |
+| **EdDSA** | 15 | 60 | 63 | 0.45 ms | 0.03 ms | 31.9 KiB |
+| **Airdrop** | 1,210 | 4,840 | 3 | 1,175 ms | 250 ms | 2,571 KiB |
+
+#### RNS decomposition mode (`--rns`)
+
+RNS decomposes each BLS12-381 element into 8 × 32-bit residues instead of 4 × 64-bit limbs. This halves `decompose_digits` (32 vs 64) but doubles the witness dimension (2×n).
+
+**RNS vs 4-limb comparison (EdDSA, 15 signals, 63 steps):**
+
+| Mode | n | decompose_digits | Fold/step | Verify/step | Proof size |
+|------|---|-----------------|-----------|-------------|------------|
+| **4-limb** (default) | 60 | 64 | **0.45 ms** | **0.03 ms** | **31.9 KiB** |
+| **RNS** (8×32-bit) | 120 | 32 | 0.63 ms | 0.09 ms | 33.8 KiB |
+
+**RNS vs 4-limb comparison (Airdrop, 1,210 signals, 3 steps):**
+
+| Mode | n | decompose_digits | Fold/step | Verify/step | Proof size |
+|------|---|-----------------|-----------|-------------|------------|
+| **4-limb** (default) | 4,840 | 64 | **1,175 ms** | **250 ms** | **2,571 KiB** |
+| **RNS** (8×32-bit) | 9,680 | 32 | 4,192 ms | 712 ms | 2,723 KiB |
+
+**Finding:** RNS is currently slower for these circuit sizes because the 2× dimension increase (O(n²) matrix operations) outweighs the 2× decompose_digits reduction. The real RNS benefit would come from integrating RNS into the commitment scheme itself (multiple smaller matrix multiplications instead of one large one) — a deeper architectural change tracked as Phase 2 in the roadmap.
 
 Key observations:
 

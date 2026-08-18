@@ -175,12 +175,13 @@ Measured on a single machine with synthetic random witnesses (no circom circuits
 
 Key observations:
 
-- **Fold scales linearly** with both step count and matrix dimensions (O(n) per step).
-- **Proof size is constant** — independent of step count, as expected for Lova.
+- **Performance scales with witness dimension** — the 4-limb BLS12-381 expansion multiplies the effective dimension by 4×.
+- **Proof size is constant** regardless of step count, as expected for Lova.
 - **Verify is fast** — dominated by commitment re-computation, scales with m×n.
 - **Toy parameters (16×8)** fold at 0.05 ms/step — ~50× faster than Nova NIFS (185 ms/step on 7,724 constraints).
 - **Default parameters (256×128)** fold at 1.43 ms/step — still ~130× faster than Nova NIFS.
 - Proof size at default parameters (70 KiB) is comparable to Nova Impl 10's 472.8 KiB — and truly O(1).
+- **RNS mode (`--rns`)** halves `decompose_digits` (32 vs 64) but doubles the witness dimension (2×n). Currently slower for these circuit sizes because O(n²) matrix operations dominate — see RNS analysis in [`clis/lattice/README.md`](../clis/lattice/README.md).
 
 ### Comparison with Nova (same machine)
 
@@ -251,6 +252,28 @@ Key observations:
 **Trade-off:** Lova's unstructured SIS is more conservative but less efficient. Module-SIS schemes (LatticeFold, ProtogaLattice) offer better concrete efficiency.
 
 See [`docs/toolkit-lattice-zkp-2026-summary.md`](docs/toolkit-lattice-zkp-2026-summary.md) for full analysis.
+
+### API — RNS decomposition
+
+```rust
+use lattice_prover::rns;
+
+// Create RNS config with 8 × 32-bit moduli (full BLS12-381 range)
+let config = rns::RnsConfig::mod_8x32();
+
+// Convert BLS12-381 element to RNS residues
+let be_bytes = [0xff; 32];
+let residues = config.to_rns(&be_bytes);
+assert_eq!(residues.len(), 8); // 8 residues per element
+
+// Reconstruct from RNS residues via CRT
+let recovered = config.from_rns(&residues);
+assert_eq!(recovered, be_bytes);
+
+// Load Circom witnesses as RNS residues (flat Z_{2^64} vector)
+let path = std::path::Path::new("step_0000.wtns");
+let witness_rns = rns::load_witness_as_rns(&path, &config)?;
+```
 
 ### API — BLS12-381 adapter
 
