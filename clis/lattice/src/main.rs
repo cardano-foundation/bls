@@ -61,10 +61,10 @@ Lova is the first folding scheme whose security relies on the unstructured SIS\n
 assumption (Fenzi, Knabenhans, Nguyen, Pham — ASIACRYPT 2024). This CLI provides\n\
 end-to-end folding and verification.\n\n\
 The core folding logic lives in the `lattice-prover` crate; this crate only\n\
-adds the command-line interface on top of it.\n\n\
-Usage: lattice --lova <SUBCOMMAND>"
+adds the command-line interface on top of it."
 )]
 pub struct Cli {
+    /// Use the Lova post-quantum folding scheme (required)
     #[arg(long)]
     pub lova: bool,
 
