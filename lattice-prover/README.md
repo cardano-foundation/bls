@@ -222,7 +222,7 @@ RNS mode (`--rns` flag) decomposes each BLS12-381 element into 8 × 32-bit resid
 | **Ed25519** | 4-limb | 30,632 | 64 | **35.5 s** | **10.7 s** |
 | **Ed25519** | RNS | 61,264 | 32 | 283.5 s | 65.5 s |
 
-RNS is currently slower for all sizes because the 2× dimension increase (O(n²) matrix ops) outweighs the 2× decompose_digits reduction. See Phase 2 below for the fix.
+RNS is currently slower for all sizes. The intuition: each BLS12-381 element (255 bits) can be represented as either 4 × 64-bit limbs or 8 × 32-bit residues. RNS gives smaller numbers (good) but twice as many of them (bad). Since Lova's matrix operations scale with n², doubling n makes them 4× slower — which overwhelms the 2× win from halving `decompose_digits`. The fix (Phase 2) is to run the matrix multiplication directly in RNS space: 8 small multiplications instead of one large one. See the full explanation with numeric examples in [`clis/lattice/README.md`](../clis/lattice/README.md#rns-decomposition-mode---rns).
 
 Key observations:
 
