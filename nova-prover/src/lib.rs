@@ -384,7 +384,8 @@ pub fn run_fold(
     let n_pub_in = circuit.n_pub_in as usize;
     let n_constraints = circuit.n_constraints as usize;
 
-    let full_pk = load_full_pk(proving_key).map_err(|e| format!("failed to load proving key: {e}"))?;
+    let full_pk =
+        load_full_pk(proving_key).map_err(|e| format!("failed to load proving key: {e}"))?;
     let engine = FftQapEngine::new();
     let prover = PippengerProver::new();
 
@@ -401,11 +402,7 @@ pub fn run_fold(
     wtns_paths.sort();
 
     if wtns_paths.is_empty() {
-        return Err(format!(
-            "no .wtns files found in steps dir {}",
-            steps.display()
-        )
-        .into());
+        return Err(format!("no .wtns files found in steps dir {}", steps.display()).into());
     }
     eprintln!(
         "Folding {} step witnesses from {}",
@@ -538,11 +535,7 @@ fn fold_nifs(circuit: &Path, steps: &Path) -> Result<NifsFoldOutput, Box<dyn Err
     wtns_paths.sort();
 
     if wtns_paths.is_empty() {
-        return Err(format!(
-            "no .wtns files found in steps dir {}",
-            steps.display()
-        )
-        .into());
+        return Err(format!("no .wtns files found in steps dir {}", steps.display()).into());
     }
     eprintln!(
         "Folding {} step witnesses (NIFS) from {}",
@@ -606,14 +599,7 @@ fn fold_nifs(circuit: &Path, steps: &Path) -> Result<NifsFoldOutput, Box<dyn Err
                 let acc = acc_hash.as_ref().expect("transcript initialized");
                 let challenge = nifs::fold_challenge(acc, &u_acc, &step_u);
                 let (u3, w3) = nifs::fold(
-                    &params,
-                    &circuit.l,
-                    &circuit.r,
-                    &circuit.o,
-                    &u_acc,
-                    &w_acc,
-                    &step_u,
-                    &step_w,
+                    &params, &circuit.l, &circuit.r, &circuit.o, &u_acc, &w_acc, &step_u, &step_w,
                     challenge,
                 );
                 acc_u = Some(u3);
@@ -681,13 +667,18 @@ pub fn run_compress(
     check_step_circuit(&c)?;
 
     let folded = fold_nifs(circuit, steps)?;
-    let full_pk = load_full_pk(proving_key).map_err(|e| format!("failed to load proving key: {e}"))?;
+    let full_pk =
+        load_full_pk(proving_key).map_err(|e| format!("failed to load proving key: {e}"))?;
     let cproof = prove_compression(&c, &folded, &full_pk)?;
 
     let json = serde_json::to_string_pretty(&cproof)
         .map_err(|e| format!("failed to serialize compression proof: {e}"))?;
-    fs::write(out, &json)
-        .map_err(|e| format!("failed to write compression proof to {}: {e}", out.display()))?;
+    fs::write(out, &json).map_err(|e| {
+        format!(
+            "failed to write compression proof to {}: {e}",
+            out.display()
+        )
+    })?;
     eprintln!(
         "Compression proof written to {} ({} bytes, u = {})",
         out.display(),
@@ -710,7 +701,12 @@ pub fn prove_compression(
     folded: &NifsFoldOutput,
     full_pk: &FullProvingKey,
 ) -> Result<CompressionProof, Box<dyn Error>> {
-    let cc = compression::CompressionCircuit::new(&circuit.l, &circuit.r, &circuit.o, circuit.n_wires as usize);
+    let cc = compression::CompressionCircuit::new(
+        &circuit.l,
+        &circuit.r,
+        &circuit.o,
+        circuit.n_wires as usize,
+    );
     let v = cc.witness(
         &folded.final_witness.w,
         folded.final_instance.u,
@@ -998,14 +994,14 @@ pub fn verify_sumcheck_compression(
     let w_opening = sumcheck::OpeningProof {
         table: frs_from_strings(&proof.w_opening)?,
     };
-    let w_hash = hex::decode(&proof.w_commit_hash)
-        .map_err(|e| format!("invalid w_commit_hash hex: {e}"))?;
+    let w_hash =
+        hex::decode(&proof.w_commit_hash).map_err(|e| format!("invalid w_commit_hash hex: {e}"))?;
     // Verify the W opening truth table hashes to the committed value.
     let actual_w_hash: Vec<u8> = {
         use ark_ff::BigInteger;
         let mut h = Blake2b512::new();
         for val in &w_opening.table {
-            h.update(&val.into_bigint().to_bytes_le());
+            h.update(val.into_bigint().to_bytes_le());
         }
         h.finalize().to_vec()
     };
@@ -1017,13 +1013,13 @@ pub fn verify_sumcheck_compression(
     let e_opening = sumcheck::OpeningProof {
         table: frs_from_strings(&proof.e_opening)?,
     };
-    let e_hash = hex::decode(&proof.e_commit_hash)
-        .map_err(|e| format!("invalid e_commit_hash hex: {e}"))?;
+    let e_hash =
+        hex::decode(&proof.e_commit_hash).map_err(|e| format!("invalid e_commit_hash hex: {e}"))?;
     let actual_e_hash: Vec<u8> = {
         use ark_ff::BigInteger;
         let mut h = Blake2b512::new();
         for val in &e_opening.table {
-            h.update(&val.into_bigint().to_bytes_le());
+            h.update(val.into_bigint().to_bytes_le());
         }
         h.finalize().to_vec()
     };
@@ -1034,15 +1030,11 @@ pub fn verify_sumcheck_compression(
     // 5. Verify Pedersen commitments match the bundle.
     let params = nifs::PedersenParams::from_seed(NIFS_PARAMS_SEED, n_wires, n_constraints);
     let w_vec = &w_opening.table[..n_wires.min(w_opening.table.len())];
-    if nifs::commit(&params.basis_w, w_vec)
-        != deserialize_g1(&bundle.final_instance.w_commit)?
-    {
+    if nifs::commit(&params.basis_w, w_vec) != deserialize_g1(&bundle.final_instance.w_commit)? {
         return Err("W Pedersen commitment does not match the NIFS bundle".into());
     }
     let e_vec = &e_opening.table[..n_constraints.min(e_opening.table.len())];
-    if nifs::commit(&params.basis_e, e_vec)
-        != deserialize_g1(&bundle.final_instance.e_commit)?
-    {
+    if nifs::commit(&params.basis_e, e_vec) != deserialize_g1(&bundle.final_instance.e_commit)? {
         return Err("E Pedersen commitment does not match the NIFS bundle".into());
     }
 
@@ -1067,8 +1059,12 @@ pub fn emit_compression_r1cs(circuit: &Path, out: &Path) -> Result<usize, Box<dy
 
     let cc = compression::CompressionCircuit::new(&c.l, &c.r, &c.o, c.n_wires as usize);
     let bytes = cc.to_r1cs_bytes();
-    fs::write(out, &bytes)
-        .map_err(|e| format!("failed to write compression .r1cs to {}: {e}", out.display()))?;
+    fs::write(out, &bytes).map_err(|e| {
+        format!(
+            "failed to write compression .r1cs to {}: {e}",
+            out.display()
+        )
+    })?;
     eprintln!(
         "Compression circuit (from {} step constraints): {} wires, {} constraints, {} public",
         c.n_constraints,
@@ -1101,8 +1097,8 @@ pub fn run_verify(
     compression_proof: Option<&Path>,
     compression_vk: Option<&Path>,
 ) -> Result<VerifyOutput, Box<dyn Error>> {
-    let bytes = fs::read(ivc)
-        .map_err(|e| format!("failed to read IVC bundle {}: {e}", ivc.display()))?;
+    let bytes =
+        fs::read(ivc).map_err(|e| format!("failed to read IVC bundle {}: {e}", ivc.display()))?;
     let bundle: IvcBundle = match serde_json::from_slice(&bytes) {
         Ok(b) => b,
         Err(_) => {
@@ -1127,7 +1123,11 @@ pub fn run_verify(
         h.update(TRANSCRIPT_PREFIX);
         h.finalize().to_vec()
     };
-    acc_hash = transcript_step(&acc_hash, &frs_bytes(&frs_from_strings(&bundle.initial_state)?), &[]);
+    acc_hash = transcript_step(
+        &acc_hash,
+        &frs_bytes(&frs_from_strings(&bundle.initial_state)?),
+        &[],
+    );
 
     let mut prev: Option<&Vec<String>> = None;
     for step in &bundle.steps {
@@ -1192,11 +1192,16 @@ fn verify_nifs_bundle(
          proof (--compression-proof) and the compression verifying key (--compression-vk)",
     )?;
 
-    let proof_bytes = fs::read(proof_path)
-        .map_err(|e| format!("failed to read compression proof {}: {e}", proof_path.display()))?;
+    let proof_bytes = fs::read(proof_path).map_err(|e| {
+        format!(
+            "failed to read compression proof {}: {e}",
+            proof_path.display()
+        )
+    })?;
     let cproof: CompressionProof = serde_json::from_slice(&proof_bytes)
         .map_err(|e| format!("failed to parse compression proof: {e}"))?;
-    let vk = load_vk(vk_path).map_err(|e| format!("failed to load compression verifying key: {e}"))?;
+    let vk =
+        load_vk(vk_path).map_err(|e| format!("failed to load compression verifying key: {e}"))?;
 
     verify_compression(nifs, &cproof, &vk)
 }
@@ -1400,7 +1405,10 @@ mod tests {
 
         // 3. compress -> one Groth16 proof, O(1) in the step count
         let compress_out = run_compress(&r1cs_path, &steps_dir, &pk_path, &proof_path).unwrap();
-        assert_eq!(compress_out.bundle.final_instance, fold_out.bundle.final_instance);
+        assert_eq!(
+            compress_out.bundle.final_instance,
+            fold_out.bundle.final_instance
+        );
         let proof: CompressionProof =
             serde_json::from_slice(&fs::read(&proof_path).unwrap()).unwrap();
         assert_eq!(proof.public_inputs.len(), cc.n_public);
@@ -1411,7 +1419,8 @@ mod tests {
 
         // 5. tamper resistance: a flipped public input fails the commitment check
         let mut bad = proof.clone();
-        bad.public_inputs[1 + c.n_wires as usize] = fr_to_string(&(fold_out.final_instance.u + Fr::from(1u64)));
+        bad.public_inputs[1 + c.n_wires as usize] =
+            fr_to_string(&(fold_out.final_instance.u + Fr::from(1u64)));
         assert!(
             verify_compression(&compress_out.bundle, &bad, &vk).is_err(),
             "tampered u must fail verification"
