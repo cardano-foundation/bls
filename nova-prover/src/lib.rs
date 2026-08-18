@@ -691,6 +691,64 @@ pub fn run_compress(
     })
 }
 
+/// Sumcheck-compress a NIFS bundle (Implementation 10, CLI path).
+///
+/// No proving key is needed — the sumcheck protocol is transparent.  Folds
+/// the step witnesses, builds the sumcheck compression proof (one sumcheck
+/// argument + HashPC openings), and writes the JSON proof to `out`.
+pub fn run_compress_sumcheck(
+    circuit: &Path,
+    steps: &Path,
+    out: &Path,
+) -> Result<CompressOutput, Box<dyn Error>> {
+    let c = load_circuit(circuit)?;
+    check_step_circuit(&c)?;
+
+    let folded = fold_nifs(circuit, steps)?;
+    let mut rng = rand::thread_rng();
+    let cproof = prove_sumcheck_compression(&c, &folded, &mut rng)?;
+
+    let json = serde_json::to_string_pretty(&cproof)
+        .map_err(|e| format!("failed to serialize sumcheck proof: {e}"))?;
+    fs::write(out, &json)
+        .map_err(|e| format!("failed to write sumcheck proof to {}: {e}", out.display()))?;
+    eprintln!(
+        "Sumcheck proof written to {} ({} bytes, u = {})",
+        out.display(),
+        json.len(),
+        fr_to_string(&folded.final_instance.u)
+    );
+    Ok(CompressOutput {
+        bytes: json.len(),
+        bundle: folded.bundle,
+    })
+}
+
+/// Verify a sumcheck compression proof against a NIFS bundle (CLI path).
+///
+/// Loads the NIFS bundle and the sumcheck proof JSON, then runs
+/// [`verify_sumcheck_compression`].  No verifying key is needed.
+pub fn run_verify_sumcheck(
+    ivc: &Path,
+    sumcheck_proof: &Path,
+) -> Result<VerifyOutput, Box<dyn Error>> {
+    let bundle_bytes =
+        fs::read(ivc).map_err(|e| format!("failed to read IVC bundle {}: {e}", ivc.display()))?;
+    let bundle: NifsBundle = serde_json::from_slice(&bundle_bytes)
+        .map_err(|e| format!("failed to parse IVC bundle as NIFS bundle: {e}"))?;
+
+    let proof_bytes = fs::read(sumcheck_proof).map_err(|e| {
+        format!(
+            "failed to read sumcheck proof {}: {e}",
+            sumcheck_proof.display()
+        )
+    })?;
+    let sc_proof: NifsSumcheckProof = serde_json::from_slice(&proof_bytes)
+        .map_err(|e| format!("failed to parse sumcheck proof: {e}"))?;
+
+    verify_sumcheck_compression(&bundle, &sc_proof)
+}
+
 /// Build the compression Groth16 proof over an already-folded NIFS instance
 /// (in-memory; the CLI path [`run_compress`] folds and serializes it).
 ///

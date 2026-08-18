@@ -76,39 +76,44 @@ pub enum Command {
     ///   $ nova fold --nifs --circuit step_circuit.r1cs --steps ./step_witnesses/ --out bundle.ivc.json --compression-r1cs compression.r1cs
     Fold(cmd::fold::Args),
 
-    /// Compress a NIFS bundle into a single Groth16 proof (Implementation 9)
+    /// Compress a NIFS bundle into a single proof
     ///
-    /// Re-folds the step witnesses deterministically, builds the compression
-    /// circuit (relaxed-equation check) and proves it with the compression
-    /// proving key — producing one O(1) proof instead of one proof per step.
+    /// Re-folds the step witnesses deterministically, then compresses the
+    /// final relaxed instance into one proof:
     ///
-    /// The proving key comes from:
-    ///
-    ///   $ trusted-setup ceremony-dev --sparse --circuit compression.r1cs --proving-key compression.pk --verifying-key compression.vk
+    /// - **Implementation 9** (default): Groth16 compression proof, needs
+    ///   a one-time trusted setup for the compression circuit.
+    /// - **Implementation 10** (`--sumcheck`): transparent sumcheck proof,
+    ///   no trusted setup, O(log N) proof size.
     ///
     /// The result is consumed by `nova verify` on the NIFS bundle.
     ///
-    /// Example:
+    /// Examples:
     ///
     ///   $ nova compress --circuit step_circuit.r1cs --steps ./step_witnesses/ --proving-key compression.pk --out compression.proof.json
+    ///   $ nova compress --sumcheck --circuit step_circuit.r1cs --steps ./step_witnesses/ --out sumcheck.proof.json
     Compress(cmd::compress::Args),
 
     /// Verify a folded IVC bundle
     ///
-    /// Loads an IVC bundle (`.ivc.json`), the step verifying key, and
-    /// checks:
-    ///   1. Each step's Groth16 pairing verification passes
-    ///   2. The state chain is consistent (step[i].state_out == step[i+1].state_in)
-    ///   3. The BLAKE2b transcript hashes match at every step
+    /// Loads an IVC bundle (`.ivc.json`) and checks:
+    ///   - For step-chain bundles: Groth16 pairings + state chain + transcript
+    ///   - For NIFS bundles: compression proof verification + commitments
     ///
-    /// For a NIFS bundle (from `fold --nifs`) pass the compression proof and
-    /// verifying key instead of the step verifying key:
+    /// For a NIFS bundle (Implementation 9), pass the Groth16 compression
+    /// proof and verifying key:
     ///
     ///   $ nova verify --ivc bundle.ivc.json --compression-proof compression.proof.json --compression-vk compression.vk
     ///
-    /// Example:
+    /// For a NIFS bundle (Implementation 10), pass the sumcheck proof
+    /// instead — no verifying key needed:
+    ///
+    ///   $ nova verify --ivc bundle.ivc.json --sumcheck-proof sumcheck.proof.json
+    ///
+    /// Examples:
     ///
     ///   $ nova verify --ivc bundle.ivc.json --verifying-key step.vk
+    ///   $ nova verify --ivc bundle.ivc.json --sumcheck-proof sumcheck.proof.json
     Verify(cmd::verify::Args),
 }
 
@@ -116,16 +121,20 @@ pub enum Command {
 #[clap(bin_name = "nova")]
 #[clap(author = "HAL Team <hal@cardanofoundation.org>")]
 #[clap(version = env!("CARGO_PKG_VERSION"))]
-#[clap(about = "Nova IVC folding CLI for BLS12-381",
-       long_about = "A command-line interface for the Nova step-chain IVC flow on BLS12-381.\n\n\
+#[clap(
+    about = "Nova IVC folding CLI for BLS12-381",
+    long_about = "A command-line interface for the Nova step-chain IVC flow on BLS12-381.\n\n\
 A long computation is decomposed into N identical step circuits and each step is proven\n\
 either as a standalone Groth16 proof bound together by a BLAKE2b512 transcript\n\
 (Implementation 8: params, ceremony, fold, verify) or folded into one Relaxed-R1CS\n\
-instance with a NIFS and compressed into a single Groth16 proof\n\
-(Implementation 9: fold --nifs, compress, verify --compression-proof).\n\n\
+instance with a NIFS and compressed into a single proof\n\
+(Implementation 9: fold --nifs, compress, verify --compression-proof)\n\
+or compressed with a transparent sumcheck argument requiring no trusted setup\n\
+(Implementation 10: fold --nifs, compress --sumcheck, verify --sumcheck-proof).\n\n\
 The core IVC logic lives in the `nova-prover` crate; the Groth16 proof-system core lives\n\
 in `groth16-prover` / `trusted-setup`. Step proofs use arkworks' canonical serialization\n\
-and are directly consumable by on-chain Aiken verifiers.")]
+and are directly consumable by on-chain Aiken verifiers."
+)]
 pub struct Cli {
     #[command(subcommand)]
     command: Command,

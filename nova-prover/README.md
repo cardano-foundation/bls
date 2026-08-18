@@ -48,6 +48,17 @@ nova compress --circuit step_circuit.r1cs --steps ./step_witnesses/ \
 nova verify --ivc bundle.ivc.json --compression-proof compression.proof.json --compression-vk compression.vk
 ```
 
+**Implementation 10 (sumcheck compression, no ceremony):**
+
+```bash
+# Fold + sumcheck-compress in two steps (no proving key, no ceremony)
+nova fold --nifs --circuit step_circuit.r1cs --steps ./step_witnesses/ --out bundle.ivc.json
+nova compress --sumcheck --circuit step_circuit.r1cs --steps ./step_witnesses/ --out sumcheck.proof.json
+
+# Verify (no verifying key needed)
+nova verify --ivc bundle.ivc.json --sumcheck-proof sumcheck.proof.json
+```
+
 The full step-by-step worked example (`cardano_ed25519_ownership_nova` — 255
 steps over the Cardano Ed25519 ownership circuit) is in
 [`circom/CardanoKeyOwnership/README.md`](../circom/CardanoKeyOwnership/README.md)
@@ -426,6 +437,28 @@ Implementation 10 replaces the compression ceremony + Groth16 proof with a trans
 - **ZK for free** — the verifier never sees `Z` or `E`; only the sumcheck transcript and HashPC opening proofs are exchanged.
 - The NIFS fold phase is **identical** to Implementation 9 (same per-step MSM cost).
 - **Verify** is a sumcheck protocol check + HashPC opening verification + Pedersen commitment cross-check — pairing-free, all native-field.
+
+### E2E flow — Implementation 10 (sumcheck compression, no ceremony)
+
+Worked end to end on the `eddsa_jubjub_nova` step circuit (254 steps, 9 constraints — runs in seconds; the same commands work for the 255-step `cardano_ed25519_ownership_nova` / `cardano_key_ownership_smt_nova` circuits). Step witnesses are generated the same way as Implementation 8/9.
+
+```bash
+# 1. Inspect the step circuit (n_pub_in == n_pub_out)
+nova params --circuit eddsa_jubjub_nova.r1cs
+
+# 2. Fold the step witnesses into one Relaxed-R1CS instance (no proving key)
+nova fold --nifs --circuit eddsa_jubjub_nova.r1cs --steps ./eddsa_steps/ --out bundle.ivc.json
+
+# 3. Compress with sumcheck (no ceremony needed!)
+nova compress --sumcheck --circuit eddsa_jubjub_nova.r1cs --steps ./eddsa_steps/ --out sumcheck.proof.json
+
+# 4. Verify (no verifying key needed!)
+nova verify --ivc bundle.ivc.json --sumcheck-proof sumcheck.proof.json
+# → Verified 254 steps: sumcheck compression proof OK, commitments OK, state chain OK
+# → Final transcript: <64-byte hex>
+```
+
+Steps 1 and 2 are identical to Implementation 9; steps 3 and 4 replace the `trusted-setup` ceremony + Groth16 compression with the transparent sumcheck path. The same flow works for `cardano_ed25519_ownership_nova` and `cardano_key_ownership_smt_nova` (the SMT step circuit is byte-identical to the CKO step circuit), substituting the step circuit and witness directory.
 
 Benchmark the sumcheck path yourself:
 
