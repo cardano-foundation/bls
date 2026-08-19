@@ -1,8 +1,8 @@
 # Zero Knowledge Proof from first principles
 
-> **Installment 1 of 5.** This article introduces the mathematical intuition behind zk-SNARKs, walks through the simplest possible non-trivial circuit, and shows how to generate and verify a Groth16 proof end-to-end on Cardano using nothing but first-principles code. No black boxes, no hand-waving — every intermediate value can be printed and inspected.
+> **Installment 1 of 6.** This article introduces the mathematical intuition behind zk-SNARKs, walks through the simplest possible non-trivial circuit, and shows how to generate and verify a Groth16 proof end-to-end on Cardano using nothing but first-principles code. No black boxes, no hand-waving — every intermediate value can be printed and inspected.
 >
-> In **Installment 2** we will explore the engineering optimizations that turn this slow-but-transparent pipeline into a production prover (FFT, Pippenger MSM, sparse matrices, trusted-setup ceremonies), survey competing proof systems (PLONK, Bulletproofs++, JOLT, STARKs, VM approaches), and map the trade-offs. In **Installment 3** we will show how the optimized prover can be used to prove ownership of cryptographic keys and how to marry this capability with Cardano addresses. In **Installment 4** we will apply the full production stack to **selective disclosure** — the pattern where a credential holder proves they satisfy a predicate (`age ≥ 21`, `country ∈ approved set`) without revealing any field values or their blockchain address. In the **fifth and final installment** we will look at what embracing a **zkVM** could gain us: the ability to prove arbitrary program execution without hand-writing circuits, and how that might reshape the developer experience for privacy-preserving applications on Cardano.
+> In **Installment 2** we will explore the engineering optimizations that turn this slow-but-transparent pipeline into a production prover (FFT, Pippenger MSM, sparse matrices, trusted-setup ceremonies), survey competing proof systems (PLONK, Bulletproofs++, JOLT, STARKs, VM approaches), and map the trade-offs. In **Installment 3** we will show how the optimized prover can be used to prove ownership of cryptographic keys and how to marry this capability with Cardano addresses. In **Installment 4** we will apply the full production stack to **selective disclosure** — the pattern where a credential holder proves they satisfy a predicate (`age ≥ 21`, `country ∈ approved set`) without revealing any field values or their blockchain address. In **Installment 5** we will look at what embracing a **zkVM** could gain us: the ability to prove arbitrary program execution without hand-writing circuits, and how that might reshape the developer experience for privacy-preserving applications on Cardano. In **Installment 6** we will survey **quantum-resistant ZKP systems** — especially lattice-based constructions — that aim to replace the elliptic-curve assumptions Groth16 relies on with post-quantum hard problems, and map the trade-offs against the pairing-based baseline we have built here.
 
 ---
 
@@ -1863,8 +1863,19 @@ In the fourth installment we will apply the full production Groth16 pipeline to 
 
 ### Installment 5 — Embracing zkVMs
 
-In the fifth and final installment we will look at what embracing a **zkVM** could gain us. Instead of hand-writing R1CS circuits in a domain-specific language, a zkVM lets developers prove the correct execution of arbitrary programs — written in familiar languages like Rust or C — by compiling them to a zero-knowledge virtual machine. We will explore the trade-offs (larger proof sizes, different security assumptions) and discuss how this paradigm might reshape the developer experience for privacy-preserving applications on Cardano.
+In the fifth installment we will look at what embracing a **zkVM** could gain us. Instead of hand-writing R1CS circuits in a domain-specific language, a zkVM lets developers prove the correct execution of arbitrary programs — written in familiar languages like Rust or C — by compiling them to a zero-knowledge virtual machine. We will explore the trade-offs (larger proof sizes, different security assumptions) and discuss how this paradigm might reshape the developer experience for privacy-preserving applications on Cardano.
 
-The code for all five installments is available in the [cardano-foundation/bls](https://github.com/cardano-foundation/bls) repository.
+### Installment 6 — Quantum-resistant ZKP systems
+
+Groth16 and the pairing-based constructions we have explored rely on the hardness of the discrete logarithm problem on elliptic curves — a problem that a fault-tolerant quantum computer would destroy via Shor's algorithm. In the sixth installment we will survey **quantum-resistant ZKP systems**, with a focus on **lattice-based** constructions that derive their security from hard lattice problems (Learning With Errors, Short Integer Solution) rather than pairings. We will examine:
+
+- **Lattice-based SNARKs** and their proof-size / verification-cost trade-offs compared to Groth16
+- **Transparent proof systems** (STARKs, Bulletproofs++) as a different post-quantum path that avoids trusted setups entirely
+- **Hybrid approaches** that combine pairing-based and lattice-based techniques
+- The practical question: *when will lattice ZKPs be production-ready on Cardano, and what will we gain or lose in the transition?*
+
+This installment will map the full landscape from the pairing-based baseline we have built here to the post-quantum frontier, so that builders can make informed choices about which proof system fits their threat model.
+
+The code for all six installments is available in the [cardano-foundation/bls](https://github.com/cardano-foundation/bls) repository.
 
 Stay tuned for the next ZKP installment!
