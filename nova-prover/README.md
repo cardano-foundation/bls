@@ -388,6 +388,7 @@ Implementation 10 replaces the Groth16 compression with a **sumcheck-based SNARK
 |---|---|---|---|---|---|
 | **Impl 9 Groth16 compression (as-built)** | O(step): ~580 KiB @ 7.7K step | one Groth16 proof (~3 s) | one pairing (cheapest) | No (`Z`/`E` revealed) | ✅ Shipped POC |
 | **Impl 10 sumcheck final SNARK** | **O(1)**: ~200 B + small state | higher (sumcheck + hashing rounds) | native field ops, no pairing, more ops | **Yes** | ✅ Shipped POC |
+| **Impl 11: Impl 10 + shrink step + binary + off-chain** | **O(1)**: ~1.5 KiB on-chain | unchanged from Impl 10 | native field ops, ~1.5 KiB input | **Yes** | Planned |
 | **Shrink step + binary serialization** | O(step) but ~10× smaller | unchanged | unchanged | No | ✅ Do first |
 | **Proof aggregation (item q)** | per-proof unchanged | unchanged | amortised one pairing per batch | No | Complementary |
 | **PQ lattice folding** ([lattice-prover](../lattice-prover/README.md)) | changes commitment; not obviously smaller | — | hash-based, heavier | — | Long-term |
@@ -397,6 +398,67 @@ Implementation 10 replaces the Groth16 compression with a **sumcheck-based SNARK
 - **Q: Can we just make `Z`/`E` private and hash them inside the compression circuit?** No — a plain hash is not additively homomorphic, so it cannot replace Pedersen in the fold; and if the compression circuit does not check the commitments, soundness collapses (the error vector absorbs any discrepancy). This is exactly the tension the sumcheck-based SNARK resolves: it proves knowledge of a witness *consistent with the committed instance* without opening it.
 - **Q: Is a sumcheck-based compression a drop-in replacement?** Not a drop-in — the Aiken verifier and the compression prover change, but the fold, transcript, bundle format and step circuits are untouched. It is the pairing-free, single-curve route to constant-size Nova proofs (Spartan, and the `Nova+Spartan` design mentioned in the Implementation 9 section).
 - **Q: What about the post-quantum track?** The PQ track (now in [`lattice-prover`](../lattice-prover/README.md)) replaces the Pedersen commitment itself with an SIS/Ajtai lattice commitment — a different axis. The sumcheck-based compression is commitment-agnostic and compatible with either.
+
+</details>
+
+## Implementation 11 — Cardano-ready Nova proofs (all three optimizations on Impl 10)
+
+<details>
+<summary><b>Implementation 11 — click to expand</b></summary>
+
+### Problem statement
+
+Impl 10 achieves O(1) proof size and ZK, but the measured **472.8 KiB** for the 7,724-constraint ed25519 step still exceeds Cardano's **16 KiB transaction size limit** by ~29×. The three quick-win optimizations (shrink the step, binary serialization, on/off-chain split) are orthogonal to the compression tier and can be applied on top of any of Impl 8/9/10 — but Impl 10 is the only tier where all three together can bring the on-chain footprint under 16 KiB while preserving ZK.
+
+### Why not Impl 8 or 9?
+
+| Tier | Can apply shrink step? | Can apply binary serialization? | Can apply on/off-chain split? | On-chain after all three? |
+|---|---|---|---|---|
+| **Impl 8** (step-chain) | ✓ (fewer bytes per step) | ✓ (~2.4×) | Partial (step proofs need on-chain for verification) | Still O(N) — 255 steps × reduced size still exceeds 16 KiB |
+| **Impl 9** (NIFS + Groth16) | ✓ (smaller Z/E reveal) | ✓ (~2.4× on Z/E) | **No** — Z/E are public inputs to Groth16; moving them off-chain breaks soundness | Z/E still revealed on-chain |
+| **Impl 10** (NIFS + sumcheck) | ✓ (smaller opening proofs) | ✓ (~2.4×) | **Yes** — opening proofs are not needed by the on-chain verifier; sumcheck proof proves commitment consistency | **Under 16 KiB** ✓ |
+
+Impl 9 *cannot* move Z/E off-chain because the Groth16 compression circuit uses them as public inputs — the verifier checks `com(W) = Pedersen(Z)` and `com(E) = Pedersen(E)` as part of the pairing equation. Impl 10's sumcheck-based compression avoids this: the verifier checks commitment consistency via the sumcheck proof itself, not by opening the commitments on-chain.
+
+### The three optimizations
+
+**1. Shrink the step.** The opening proof size is `∝` step width. A finer decomposition (e.g., limb-level steps for the ed25519 scalar-mul, or a single point operation per step) cuts the per-step constraint count. For example, a 1,000-constraint step would produce opening proofs ~7.7× smaller than the current 7,724-constraint step. This is a circuit-redesign exercise with zero new cryptography.
+
+**2. Binary serialization.** The current JSON + decimal-string encoding inflates field elements ~2.4× (77-char decimal string vs 32-byte compressed G1 point). Switching to a binary encoding (bincode, postcard, or raw bytes + zstd) is a constant-factor win across all tiers. Estimated savings: ~2.4× on all proof data.
+
+**3. On/off-chain split.** Only the sumcheck proof, Fiat-Shamir transcript, commitment hashes, and final IVC state need to be verified on-chain. The HashPC opening proofs (truth tables for Z and E) go to a relayer/aggregator off-chain. This is safe because the sumcheck proof already proves knowledge of a witness consistent with the committed instance — the opening proofs are only needed for a *separate* audit trail, not for soundness of the on-chain verification.
+
+### Projected on-chain size (ed25519, 255 steps)
+
+| Component | Current (Impl 10) | After Impl 11 | Notes |
+|---|---|---|---|
+| Sumcheck proof | ~200 B | ~200 B | Already O(log n), tiny |
+| Fiat-Shamir transcript + challenges | ~2 KiB | ~0.8 KiB | Binary serialization |
+| HashPC opening proofs (Z) | ~246 KiB | **off-chain** | Verifier only needs commitment hash |
+| HashPC opening proofs (E) | ~246 KiB | **off-chain** | Same |
+| Commitment hashes (2 × BLAKE2b-512) | — | 128 B | New: binds Z and E on-chain |
+| Final IVC state | ~1 KiB | ~0.4 KiB | Binary serialization |
+| **On-chain total** | **~473 KiB** | **~1.5 KiB** | **Under 16 KiB** ✓ |
+
+### What the on-chain verifier checks
+
+After Impl 11, the on-chain verifier (Aiken) receives:
+1. **Sumcheck proof** — proves ∃ Z, E such that `com(Z) = w_commit` and `com(E) = e_commit` and the relaxed-R1CS holds
+2. **Fiat-Shamir transcript** — deterministic from the fold; verifier recomputes challenges
+3. **Commitment hashes** — `w_commit_hash`, `e_commit_hash` (64 bytes each); verifier checks these match the final instance
+4. **Final IVC state** — the public output (e.g., ownership attestation)
+
+The opening proofs (Z and E truth tables) are submitted separately by a relayer for auditability but are *not* required for on-chain soundness.
+
+### Open questions
+
+- **Equivocation risk without on-chain openings?** The sumcheck proof binds the prover to *some* Z, E consistent with the commitments, but without on-chain openings, a malicious prover could potentially claim different Z/E values in different contexts (same commitment, different witnesses). The commitment hash binding prevents this for a single verification, but cross-transaction equivocation may need additional mechanisms (e.g., a nullifier or transcript binding).
+- **Relayer incentive design.** Who submits the opening proofs off-chain, and what guarantees availability? This is an infrastructure question, not a crypto question.
+- **Step decomposition for ed25519.** The current 7,724-constraint step processes a full scalar-mul. A limb-level decomposition (e.g., 8-bit windows) would give ~30 steps × ~250 constraints each, but requires redesigning the step circuit and IVC state.
+
+### Status
+
+**Planned — not yet implemented.** The cryptographic core (Impl 10 sumcheck compression) is shipped. The three optimizations are independent engineering tasks that can be implemented and benchmarked separately.
 
 </details>
 
