@@ -57,7 +57,7 @@ Groth's construction — now universally called **Groth16** — achieves somethi
 - **Proof size:** exactly **3 curve points** (2 in G1, 1 in G2). Compressed: **192 bytes**.
 - **Verification cost:** **3 pairings** and a handful of multi-scalar multiplications in G1. On modern hardware: a few milliseconds.
 - **CRS size:** The *Common Reference String* — also called the *Structured Reference String* (SRS); these two names refer to the same artifact — is the complete set of public parameters that both prover and verifier share. Without a CRS, the prover would have to send the full QAP polynomials to the verifier (destroying succinctness) and the polynomials would leak the witness (destroying zero-knowledge). The CRS solves both problems: it encodes the polynomials "in the exponent" on the curve, so the prover can evaluate them efficiently without revealing the underlying values. The CRS is produced by the trusted setup ceremony (introduced below); in Groth16, it grows linearly with the circuit size, but the *verifying key* (the subset the verifier needs) is constant-size for a given circuit.
-- **Security:** perfect zero-knowledge and computationally sound knowledge extraction under the standard q-PKE and q-SDH assumptions on pairing-friendly curves. The **q-PKE** (*q-Polynomial Knowledge Exponent*) assumption says that given the CRS points `g^{τ^i}` for `i = 0, ..., q`, it is hard to produce `g^{P(τ)}` for a polynomial `P` of degree ≤ `q` *unless* `P(τ)` can be built by combining the CRS points you already have — in other words, you cannot conjure up a new curve point that the CRS does not already "contain." This is what makes the trusted setup secure: the ceremony creates the CRS, and once the raw scalars (`τ`, `α`, `β`, ...) are destroyed, nobody can fabricate additional valid CRS points. The **q-SDH** (*q-Strong Diffie-Hellman*) assumption says that given `g, g^s, g^{s²}, ..., g^{s^q}` for an unknown `s`, it is hard to produce `(c, g^{1/(s+c)})` for any new `c` — this prevents an attacker from forging a valid pairing equation without knowing the trapdoor.
+- **Security:** perfect zero-knowledge and computationally sound knowledge extraction under the standard q-PKE and q-SDH assumptions on pairing-friendly curves. Here `q` is the *degree of the QAP polynomials*, which equals the number of constraints in the circuit — for our 5-constraint SumOfProducts example, `q = 5` (we need powers `τ⁰` through `τ⁴`). The **q-PKE** (*q-Polynomial Knowledge Exponent*) assumption says that given the CRS points `g^{τ^i}` for `i = 0, ..., q`, it is hard to produce `g^{P(τ)}` for a polynomial `P` of degree ≤ `q` *unless* `P(τ)` can be built by combining the CRS points you already have — in other words, you cannot conjure up a new curve point that the CRS does not already "contain." This is what makes the trusted setup secure: the ceremony creates the CRS, and once the raw scalars (`τ`, `α`, `β`, ...) are destroyed, nobody can fabricate additional valid CRS points. The **q-SDH** (*q-Strong Diffie-Hellman*) assumption says that given `g, g^s, g^{s²}, ..., g^{s^q}` for an unknown `s`, it is hard to produce `(c, g^{1/(s+c)})` for any new `c` — this prevents an attacker from forging a valid pairing equation without knowing the trapdoor.
 
 These numbers are not merely good — they are **optimal** for the pairing-based model. No scheme with the same trust assumptions can have asymptotically smaller proofs or faster verification. This is why Groth16 became the engine behind Zcash's shielded transactions, Filecoin's replication proofs, and dozens of other production systems.
 
@@ -106,7 +106,7 @@ There is one more constraint: each R1CS row can express only a *quadratic* relat
 
 ## A 5-constraint "hello world"
 
-Our repository already contains a 3-gate multiplication chain (`multiplier.circom`) that proves `a = x1·x2·x3·x4`. To make the pedagogical step slightly richer, we introduce a 5-constraint circuit that proves a *sum of pairwise products*. This is the same circuit we already saw when introducing the R1CS matrices — now we will trace it through every stage of the Groth16 pipeline, from R1CS to QAP to proof to verification. Let us start with the concrete problem.
+Our repository already contains a 3-gate multiplication chain (`multiplier.circom`) that proves `a = x1·x2·x3·x4`. To make the pedagogical step slightly richer, we introduce a 5-constraint circuit that proves a *sum of pairwise products*. Let us start with the concrete problem.
 
 **The equation.** We have eight secret numbers that must satisfy:
 
@@ -201,7 +201,7 @@ r(x) = Σ a_i · v_i(x)
 o(x) = Σ a_i · w_i(x)
 ```
 
-**Concrete example for constraint 1** (`t2 = c·d`, at point `x = 1`). To see how this works, let us first recall the R1CS matrices from the hello-world section. Each constraint picks two wires on the left and right, and one on the output:
+**Concrete example: all five constraints.** To see how this works, let us first recall the R1CS matrices from the hello-world section. Each constraint picks two wires on the left and right, and one on the output:
 
 ```
 Constraint 0:  L[0] picks a (col 2),  R[0] picks b (col 3),  O[0] picks t1 (col 10)
@@ -236,7 +236,33 @@ O[3]  = [  0    0  0  0  0  0  0  0  0  0   0  0  0  1 ]    picks t4
 O[4]  = [  0    1  0  0  0  0  0  0  0  0   0  0  0  0 ]    picks out
 ```
 
-The QAP transformation builds, for each wire `i`, three polynomials `u_i(x)`, `v_i(x)`, `w_i(x)` that reproduce these matrix columns at the constraint points. For our 5-constraint circuit with constraint points `{0, 1, 2, 3, 4}`, the Lagrange basis polynomial `L_1(x)` equals `1` at `x = 1` and `0` at the other four points. Because wire 4 (`c`) appears on the left side of constraint 1 only, `u_4(x) = L_1(x)`. Similarly, `v_5(x) = L_1(x)` for wire 5 (`d`), and `w_11(x) = L_1(x)` for wire 11 (`t2`). Evaluating at `x = 1`:
+The QAP transformation builds, for each wire `i`, three polynomials `u_i(x)`, `v_i(x)`, `w_i(x)` that reproduce these matrix columns at the constraint points — the x-values where each constraint is evaluated (one point per constraint, so `{0, 1, 2, 3, 4}` for our 5-constraint circuit). The Lagrange basis polynomial `L_0(x)` equals `1` at `x = 0` and `0` at the other four points. Its explicit expanded form is:
+
+```
+L_0(x) = (x−1)(x−2)(x−3)(x−4) / (0−1)(0−2)(0−3)(0−4)
+        = (x−1)(x−2)(x−3)(x−4) / 24
+        = (x⁴ − 10x³ + 35x² − 50x + 24) / 24
+```
+
+For constraint 0 (`t1 = a·b`), wire 2 (`a`) appears on the left, wire 3 (`b`) on the right, and wire 10 (`t1`) on the output. So:
+
+```
+u_2(x) = L_0(x)    v_3(x) = L_0(x)    w_10(x) = L_0(x)
+```
+
+Evaluating at `x = 0`:
+
+```
+u_2(0) = 1    v_3(0) = 1    w_10(0) = 1
+
+l(0) = ... + a_2 · u_2(0) + ... = ... + 1 · 1 + ... = 1    (picks a = 1)
+r(0) = ... + a_3 · v_3(0) + ... = ... + 2 · 1 + ... = 2    (picks b = 2)
+o(0) = ... + a_10 · w_10(0) + ... = ... + 2 · 1 + ... = 2  (picks t1 = 2)
+
+l(0) · r(0) = 1 · 2 = 2 = o(0)  ✓
+```
+
+The same pattern holds for constraint 1 (`t2 = c·d`, at point `x = 1`). The Lagrange basis polynomial `L_1(x)` equals `1` at `x = 1` and `0` at the other four points. Because wire 4 (`c`) appears on the left side of constraint 1 only, `u_4(x) = L_1(x)`. Similarly, `v_5(x) = L_1(x)` for wire 5 (`d`), and `w_11(x) = L_1(x)` for wire 11 (`t2`). Evaluating at `x = 1`:
 
 ```
 u_4(1) = 1   (by definition of Lagrange basis L_1(x))
@@ -273,6 +299,10 @@ h(x) = c₀ + c₁·x + c₂·x² + c₃·x³
 ```
 
 where the coefficients `c₀, c₁, c₂, c₃` are elements of the scalar field Fr (large 253-bit numbers). The prover evaluates this polynomial at the secret point `τ` to obtain the scalar `h(τ)` that appears in proof element `C`. We will see the exact numerical coefficients in Step 1.11.
+
+The verifier never sees `h(x)` or even `h(τ)` directly — it only sees `h(τ)·T(τ)/δ·G1` baked into proof element `C` as a single curve point. So how can the verifier be sure the prover computed the right `h`? The answer is: **the verifier does not need to trust the prover at all — the pairing equation itself is the check.** The pairing equation `e(A, B) = e(α·G1, β·G2) · e(C, δ·G2) · e(V, γ·G2)` encodes the algebraic relationship `l(τ)·r(τ) − o(τ) = h(τ)·T(τ)` in the exponent. If the prover puts in a wrong `h(τ)`, the two sides of the equation will not match, and the pairing check will fail. The prover cannot nudge `h(τ)` independently because all the proof elements (`A`, `B`, `C`) are algebraically locked together through the trusted setup parameters (`α`, `β`, `δ`) — changing one without knowing `τ` would break the others. This is the power of the "hidden in the exponent" trick: the verifier checks the *consequence* of the computation (the pairing equation), not the computation itself.
+
+To be precise about who uses `τ`: **neither the prover nor the verifier ever uses `τ` directly during proof generation or verification.** `τ` only appears during the trusted setup ceremony, where it is used to build the SRS power tables (`τⁱ·G1`, `τⁱ·G2`) and then destroyed. After that, `τ` is gone forever. The prover uses the SRS to evaluate polynomials "in the exponent" (e.g., `l(τ)·G1` is already a curve point in the SRS — the prover just takes a linear combination of these pre-computed points). The verifier never even touches the SRS — it only uses the verifying key (`α·G1`, `β·G2`, `γ·G2`, `δ·G2`, `Ψ_V_G1`), which are also curve points derived from the ceremony. Both sides of the pairing equation are curve points, not scalars. The pairing `e` checks the *relationship* between these points using bilinearity — `e(g^a, g^b) = e(g, g)^{a·b}` — without anyone ever learning `a` or `b`. This is why `τ` can remain secret while the math still works.
 
 This is also what makes Groth16 an *argument of knowledge* rather than a mere proof of existence: to produce the correct `h(τ)`, the prover must have actually computed the correct quotient polynomial, which in turn requires knowing the actual witness values. A prover who does not know a valid witness cannot fabricate a convincing `h(τ)` — the pairing check will fail. Moreover, the quotient `h(x)` is derived from the circuit's own QAP polynomials, so computing the correct `h(τ)` requires satisfying the exact constraint structure that both parties agreed on. In other words, the inclusion of `h(τ)` in the proof is what convinces the verifier that the prover genuinely *knows* a solution to *this specific circuit*, not merely that some solution to some problem exists.
 
