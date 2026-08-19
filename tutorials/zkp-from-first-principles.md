@@ -580,9 +580,9 @@ Run any step in isolation:
 
 ```bash
 cd groth16-prover
-cargo run --bin print_r1cs -- sumofproducts
-cargo run --bin print_qap -- sumofproducts
-cargo run --bin print_proof_a -- sumofproducts
+cargo run --features bins --bin print_r1cs -- sumofproducts
+cargo run --features bins --bin print_qap -- sumofproducts
+cargo run --features bins --bin print_proof_a -- sumofproducts
 ...
 ```
 
@@ -597,13 +597,13 @@ circom sum_of_products.circom --r1cs --wasm --sym --prime bls12381
 snarkjs wtns calculate sum_of_products.wasm input.json witness.wtns
 
 # 3. Dev ceremony → pk + vk
-cd ../../clis/groth16
 ../../clis/trusted-setup/target/release/trusted-setup ceremony-dev \
-  --circuit ../../circom/SumOfProducts/sum_of_products.r1cs \
+  --circuit sum_of_products.r1cs \
   --proving-key /tmp/sum_of_products.pk \
   --verifying-key /tmp/sum_of_products.vk
 
 # 4. Prove
+cd ../../clis/groth16
 cargo run --release -- prove \
   --circuit ../../circom/SumOfProducts/sum_of_products.r1cs \
   --witness ../../circom/SumOfProducts/witness.wtns \
@@ -689,7 +689,7 @@ All other entries are zero.
 
 ```bash
 cd groth16-prover
-cargo run --bin print_r1cs -- sumofproducts
+cargo run --features bins --bin print_r1cs -- sumofproducts
 ```
 
 **Actual output:**
@@ -907,7 +907,7 @@ T(x) = (x−0)(x−1)(x−2)(x−3)(x−4) = x⁵ − 10x⁴ + 35x³ − 50x² +
 **Running the code:**
 
 ```bash
-cargo run --bin print_qap -- sumofproducts
+cargo run --features bins --bin print_qap -- sumofproducts
 ```
 
 **Actual output (excerpt):**
@@ -1110,7 +1110,7 @@ This is the key scalar that appears in SRS3. The base scalar for SRS3 is `T(τ)/
 **Running the code:**
 
 ```bash
-cargo run --bin print_srs -- sumofproducts
+cargo run --features bins --bin print_srs -- sumofproducts
 ```
 
 **Actual output (excerpt):**
@@ -1313,7 +1313,7 @@ This also matches exactly. ✓
 **Running the code:**
 
 ```bash
-cargo run --bin print_psi -- sumofproducts
+cargo run --features bins --bin print_psi -- sumofproducts
 ```
 
 **Actual output (excerpt):**
@@ -1443,7 +1443,7 @@ Evaluating at the constraint points:
 **Running the code:**
 
 ```bash
-cargo run --bin print_witness_polys -- sumofproducts
+cargo run --features bins --bin print_witness_polys -- sumofproducts
 ```
 
 **Actual output:**
@@ -1505,7 +1505,7 @@ For the SumOfProducts circuit, the division `p(x) / T(x)` yields a degree-3 quot
 **Running the code:**
 
 ```bash
-cargo run --bin print_quotient -- sumofproducts
+cargo run --features bins --bin print_quotient -- sumofproducts
 ```
 
 **Actual output:**
@@ -1562,7 +1562,7 @@ A = (l(τ) + α) · G1
 **Running the code:**
 
 ```bash
-cargo run --bin print_proof_a -- sumofproducts
+cargo run --features bins --bin print_proof_a -- sumofproducts
 ```
 
 **Actual output (excerpt):**
@@ -1604,7 +1604,7 @@ B = (r(τ) + β) · G2
 **Running the code:**
 
 ```bash
-cargo run --bin print_proof_b -- sumofproducts
+cargo run --features bins --bin print_proof_b -- sumofproducts
 ```
 
 **Actual output:**
@@ -1661,7 +1661,7 @@ C_scalar = 242011731577505494520528033114704457712417934617819866873555347845870
 **Running the code:**
 
 ```bash
-cargo run --bin print_proof_c -- sumofproducts
+cargo run --features bins --bin print_proof_c -- sumofproducts
 ```
 
 **Actual output (excerpt):**
@@ -1723,7 +1723,7 @@ V = 1·(105/11) + 100·(15/11)
 **Running the code:**
 
 ```bash
-cargo run --bin print_public_input -- sumofproducts
+cargo run --features bins --bin print_public_input -- sumofproducts
 ```
 
 **Actual output:**
@@ -1795,7 +1795,7 @@ which is exactly the Groth16 verification equation. The library confirms this wi
 **Running the code:**
 
 ```bash
-cargo run --bin print_pairing -- sumofproducts
+cargo run --features bins --bin print_pairing -- sumofproducts
 ```
 
 **Actual output (excerpt):**
