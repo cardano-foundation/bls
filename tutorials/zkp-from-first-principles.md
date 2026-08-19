@@ -580,10 +580,11 @@ git clone https://github.com/cardano-foundation/bls.git
 cd bls
 ```
 
-Run any step in isolation:
+Run any step in isolation (set `REPO` to the path where you cloned the repo):
 
 ```bash
-cd groth16-prover
+REPO=/path/to/bls
+cd $REPO/groth16-prover
 cargo run --features bins --bin print_r1cs -- sumofproducts
 cargo run --features bins --bin print_qap -- sumofproducts
 cargo run --features bins --bin print_proof_a -- sumofproducts
@@ -593,24 +594,26 @@ cargo run --features bins --bin print_proof_a -- sumofproducts
 To see the full pipeline for the new `SumOfProducts` circuit:
 
 ```bash
+REPO=/path/to/bls
+
 # 1. Compile the circuit
-cd circom/SumOfProducts
+cd $REPO/circom/SumOfProducts
 circom sum_of_products.circom --r1cs --wasm --sym --prime bls12381
 
 # 2. Generate the witness (snarkjs, temporary)
 snarkjs wtns calculate sum_of_products.wasm input.json witness.wtns
 
 # 3. Dev ceremony → pk + vk
-../../clis/trusted-setup/target/release/trusted-setup ceremony-dev \
-  --circuit sum_of_products.r1cs \
+$REPO/clis/trusted-setup/target/release/trusted-setup ceremony-dev \
+  --circuit $REPO/circom/SumOfProducts/sum_of_products.r1cs \
   --proving-key /tmp/sum_of_products.pk \
   --verifying-key /tmp/sum_of_products.vk
 
 # 4. Prove
-cd ../../clis/groth16
+cd $REPO/clis/groth16
 cargo run --release -- prove \
-  --circuit ../../circom/SumOfProducts/sum_of_products.r1cs \
-  --witness ../../circom/SumOfProducts/witness.wtns \
+  --circuit $REPO/circom/SumOfProducts/sum_of_products.r1cs \
+  --witness $REPO/circom/SumOfProducts/witness.wtns \
   --proving-key /tmp/sum_of_products.pk \
   --out /tmp/proof.bin
 
