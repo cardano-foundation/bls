@@ -404,7 +404,9 @@ flowchart TB
     Check -->|Invalid| Reject
 ```
 
-**This works — but it is useless.** Without an SRS, the prover cannot evaluate polynomials at a secret point efficiently (no power table). The prover must send the full QAP polynomials to the verifier, who must recompute everything from scratch. The proof is no longer succinct — it is as large as the circuit itself. And there is no zero-knowledge: the polynomials encode the witness. This is not a proof system; it is just a complex way of restating the problem.
+**Vulnerability:** No SRS means no power table, so the prover cannot evaluate polynomials at a secret point efficiently. The prover must send the *full QAP polynomials* to the verifier, who must recompute everything from scratch.
+
+**Why it fails:** The proof is as large as the circuit itself (no succinctness), and the polynomials encode the witness directly (no zero-knowledge). This is not a proof system — it is just a complex way of restating the problem.
 
 ### Still insecure Groth16: public setup
 
@@ -450,15 +452,15 @@ flowchart TB
     Check -->|Invalid| Reject
 ```
 
-**This looks great — but it is completely broken.** Because `τ = 6` is public, anyone can compute `T(τ) = 720` directly. An attacker can pick a *fake* witness — say, `a=100, b=100, c=100, d=100, e=100, f=100, g=100, h=100` — which does not satisfy the real constraints, and then choose `h(τ)` to make the equation balance:
+**Vulnerability:** `τ` is public. Anyone can compute `T(τ) = 720` directly and evaluate the SRS power tables without restriction.
+
+**Attack:** An attacker picks a *fake* witness — say, `a=100, b=100, c=100, d=100, e=100, f=100, g=100, h=100` — which does not satisfy the real constraints, and then solves for `h(τ)` to make the equation balance:
 
 ```
 h(τ) = (l(τ)·r(τ) − o(τ)) / T(τ)
 ```
 
-The attacker builds proof elements `A, B, C` using the *legitimate* SRS points (which are public) and their chosen `h(τ)`. The verifier's pairing check will pass — because the equation is algebraically satisfied at `τ` — even though the witness violates the actual circuit constraints at every other point.
-
-**The secret evaluation point `τ` is the entire security foundation of Groth16.** If it is known, the proof system becomes a forgery factory. The trusted setup ceremony is the mechanism that creates `τ`, embeds it into curve points, and then destroys it.
+The attacker builds proof elements `A, B, C` using the *legitimate* SRS points (which are public) and their chosen `h(τ)`. The verifier's pairing check will pass — because the equation is algebraically satisfied at `τ` — even though the witness violates the actual circuit constraints at every other point. **The secret evaluation point `τ` is the entire security foundation of Groth16.** If it is known, the proof system becomes a forgery factory.
 
 ### Secure Groth16: trusted setup
 
@@ -505,6 +507,8 @@ flowchart TB
     Check -->|Invalid| Reject
 ```
 
+**Security guarantee:** `N` participants contribute independent randomness to produce `τ`. As long as **at least one** participant was honest and destroyed their contribution, `τ` is unrecoverable — even if all other `N-1` participants collude. This is the 1-of-N trust model: you do not need to trust every participant, only that *at least one* is honest.
+
 **What each box means:**
 
 | Box | Role | What it does |
@@ -517,7 +521,7 @@ flowchart TB
 | **Smart Contract** | On-chain | Receives `π` + public inputs, reconstructs the public-input commitment `V`, and runs the pairing check. |
 | **Proof π** | Cross-layer | 192 bytes: three curve points `A, B, C`. Sent in the transaction redeemer. |
 
-**Key insight: the secret never crosses the boundary.** The prover knows the witness but never reveals it. The verifier never sees the witness but is mathematically certain the constraints were satisfied. The randomness that created the SRS was destroyed long before any proof was generated. This is the architecture that makes zero-knowledge possible.
+**Why it works:** The ceremony solves all three problems simultaneously. The power table `τⁱ·G₁, τⁱ·G₂` gives the prover efficient polynomial evaluation (succinctness). The curve points hide `τ` "in the exponent" so the prover never sees the raw scalar (zero-knowledge). And because `τ` is destroyed, no one can compute `h(τ)` for a fake witness (soundness). The secret never crosses the boundary: the prover knows the witness but never reveals it, the verifier checks the proof without learning the witness, and the randomness that created the SRS was destroyed long before any proof was generated.
 
 ### Summary: why each layer matters
 
