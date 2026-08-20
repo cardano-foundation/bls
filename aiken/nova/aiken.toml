@@ -1,0 +1,18 @@
+name = "cardano-foundation/nova"
+version = "0.0.0"
+compiler = "v1.1.21"
+plutus = "v3"
+license = "Apache-2.0"
+description = "Aiken implementation of Nova IVC sumcheck verifier for BLS12-381"
+
+[repository]
+user = "cardano-foundation"
+project = "nova"
+platform = "github"
+
+[[dependencies]]
+name = "aiken-lang/stdlib"
+version = "v3.1.0"
+source = "github"
+
+[config]
