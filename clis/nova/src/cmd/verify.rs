@@ -2,7 +2,7 @@
 //! compression proof).
 
 use clap::Parser;
-use nova_prover::{run_verify, run_verify_sumcheck};
+use nova_prover::{run_verify, run_verify_slim, run_verify_sumcheck};
 use std::error::Error;
 use std::path::PathBuf;
 
@@ -15,12 +15,12 @@ pub struct Args {
 
     /// Path to the step verifying key (from `nova ceremony`).
     /// Not used for NIFS bundles.
-    #[arg(long, value_name = "FILE", required_unless_present_any = ["compression_proof", "sumcheck_proof"])]
+    #[arg(long, value_name = "FILE", required_unless_present_any = ["compression_proof", "sumcheck_proof", "slim_proof"])]
     pub verifying_key: Option<PathBuf>,
 
     /// (NIFS bundles, Impl 9) Path to the Groth16 compression proof
-    /// from `nova compress`
-    #[arg(long, value_name = "FILE", conflicts_with = "sumcheck_proof")]
+    /// from `nova compress --groth16`
+    #[arg(long, value_name = "FILE", conflicts_with_all = ["sumcheck_proof", "slim_proof"])]
     pub compression_proof: Option<PathBuf>,
 
     /// (NIFS bundles, Impl 9) Path to the compression verifying key
@@ -28,14 +28,30 @@ pub struct Args {
     #[arg(long, value_name = "FILE", requires = "compression_proof")]
     pub compression_vk: Option<PathBuf>,
 
-    /// (NIFS bundles, Impl 10) Path to the sumcheck compression proof
-    /// from `nova compress --sumcheck`
-    #[arg(long, value_name = "FILE", conflicts_with = "compression_proof")]
+    /// (NIFS bundles, Impl 10) Path to the full sumcheck compression proof
+    /// from `nova compress` (default) or `nova compress --sumcheck`
+    #[arg(long, value_name = "FILE", conflicts_with_all = ["compression_proof", "slim_proof"])]
     pub sumcheck_proof: Option<PathBuf>,
+
+    /// (NIFS bundles, Impl 11) Path to the slim on-chain proof
+    /// from `nova compress --slim`.  Verifies the sumcheck protocol
+    /// without the HashPC opening proofs (lightweight, Plutus-ready).
+    #[arg(long, value_name = "FILE", conflicts_with_all = ["compression_proof", "sumcheck_proof"])]
+    pub slim_proof: Option<PathBuf>,
 }
 
 /// Run the `verify` subcommand.
 pub fn run(args: Args) -> Result<(), Box<dyn Error>> {
+    if let Some(ref sp) = args.slim_proof {
+        let out = run_verify_slim(&args.ivc, sp)?;
+        eprintln!(
+            "Verified {} steps: slim sumcheck proof OK, state chain OK (no opening proofs — off-chain audit trail)",
+            out.steps
+        );
+        eprintln!("Final transcript: {}", out.transcript_final);
+        return Ok(());
+    }
+
     if let Some(ref sc_proof) = args.sumcheck_proof {
         let out = run_verify_sumcheck(&args.ivc, sc_proof)?;
         eprintln!(
