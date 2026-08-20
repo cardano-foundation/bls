@@ -16,6 +16,7 @@ use ark_ec::{AffineRepr, Group, VariableBaseMSM};
 use ark_ff::{PrimeField, Zero};
 use ark_serialize::{CanonicalSerialize, SerializationError};
 use blake2::{Blake2b512, Digest};
+use rayon::prelude::*;
 
 /// Domain separator for the folding challenge hash (distinct from the
 /// `"chain"` state-chain transcript).
@@ -130,6 +131,29 @@ fn cross_term(
         .collect()
 }
 
+/// Parallel version of [`cross_term`]: each sparse_eval and the final row
+/// mapping run in parallel via rayon.  Identical output for identical input.
+pub fn cross_term_parallel(
+    l: &[Vec<(u32, Fr)>],
+    r: &[Vec<(u32, Fr)>],
+    o: &[Vec<(u32, Fr)>],
+    z1: &[Fr],
+    z2: &[Fr],
+    u1: Fr,
+    u2: Fr,
+) -> Vec<Fr> {
+    let az1 = sparse_eval(l, z1);
+    let az2 = sparse_eval(l, z2);
+    let bz1 = sparse_eval(r, z1);
+    let bz2 = sparse_eval(r, z2);
+    let cz1 = sparse_eval(o, z1);
+    let cz2 = sparse_eval(o, z2);
+    (0..l.len())
+        .into_par_iter()
+        .map(|j| az1[j] * bz2[j] + az2[j] * bz1[j] - u1 * cz2[j] - u2 * cz1[j])
+        .collect()
+}
+
 /// Fiat-Shamir folding challenge `r = H(FOLD_PREFIX ‖ acc ‖ U1 ‖ U2)`.
 ///
 /// Domain-separated from the `"chain"` state-chain transcript.
@@ -157,6 +181,25 @@ pub fn fold(
     w2: &RelaxedR1csWitness,
     challenge: Fr,
 ) -> (RelaxedR1csInstance, RelaxedR1csWitness) {
+    fold_with_opts(params, l, r, o, u1, w1, u2, w2, challenge, false)
+}
+
+/// Fold with optimization flags.
+///
+/// When `parallel` is true, the cross-term computation uses rayon for
+/// parallel row evaluation.
+pub fn fold_with_opts(
+    params: &PedersenParams,
+    l: &[Vec<(u32, Fr)>],
+    r: &[Vec<(u32, Fr)>],
+    o: &[Vec<(u32, Fr)>],
+    u1: &RelaxedR1csInstance,
+    w1: &RelaxedR1csWitness,
+    u2: &RelaxedR1csInstance,
+    w2: &RelaxedR1csWitness,
+    challenge: Fr,
+    parallel: bool,
+) -> (RelaxedR1csInstance, RelaxedR1csWitness) {
     assert_eq!(u1.x.len(), u2.x.len(), "public input widths must match");
     assert_eq!(w1.w.len(), w2.w.len(), "witness widths must match");
     assert_eq!(w1.e.len(), w2.e.len(), "error widths must match");
@@ -175,7 +218,11 @@ pub fn fold(
             .map(|(a, b)| *a + challenge * *b)
             .collect();
 
-    let e3_cross = cross_term(l, r, o, &w1.w, &w2.w, u1.u, u2.u);
+    let e3_cross = if parallel {
+        cross_term_parallel(l, r, o, &w1.w, &w2.w, u1.u, u2.u)
+    } else {
+        cross_term(l, r, o, &w1.w, &w2.w, u1.u, u2.u)
+    };
     let e3: Vec<Fr> =
         w1.e.iter()
             .zip(&w2.e)
@@ -429,5 +476,44 @@ mod tests {
             acc_u = next_u;
             acc_w = next_w;
         }
+    }
+
+    #[test]
+    fn parallel_cross_term_matches_sequential() {
+        let k = 4;
+        let (l, r, o) = chain_r1cs(k);
+        let mut rng = rand::thread_rng();
+        let z1 = random_satisfying_witness(k, &mut rng);
+        let z2 = random_satisfying_witness(k, &mut rng);
+        let u1 = Fr::from(3u64);
+        let u2 = Fr::from(7u64);
+
+        let seq = cross_term(&l, &r, &o, &z1, &z2, u1, u2);
+        let par = cross_term_parallel(&l, &r, &o, &z1, &z2, u1, u2);
+        assert_eq!(seq, par);
+    }
+
+    #[test]
+    fn fold_with_opts_parallel_matches_sequential() {
+        let k = 4;
+        let n_wires = 1 + 3 * k;
+        let (l, r, o) = chain_r1cs(k);
+        let params = PedersenParams::from_seed(b"opt-test", n_wires, k);
+        let mut rng = rand::thread_rng();
+
+        let base_w = random_satisfying_witness(k, &mut rng);
+        let (acc_u, acc_w) = make_instance_chain(&params, &base_w, k);
+        let step_w = random_satisfying_witness(k, &mut rng);
+        let (step_u, step_w_r) = make_instance_chain(&params, &step_w, k);
+        let challenge = fold_challenge(b"opt-acc", &acc_u, &step_u);
+
+        let (u_seq, w_seq) = fold_with_opts(
+            &params, &l, &r, &o, &acc_u, &acc_w, &step_u, &step_w_r, challenge, false,
+        );
+        let (u_par, w_par) = fold_with_opts(
+            &params, &l, &r, &o, &acc_u, &acc_w, &step_u, &step_w_r, challenge, true,
+        );
+        assert_eq!(u_seq, u_par);
+        assert_eq!(w_seq, w_par);
     }
 }
