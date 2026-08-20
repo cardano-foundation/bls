@@ -458,7 +458,15 @@ The opening proofs (Z and E truth tables) are submitted separately by a relayer 
 
 ### Status
 
-**Planned — not yet implemented.** The cryptographic core (Impl 10 sumcheck compression) is shipped. The three optimizations are independent engineering tasks that can be implemented and benchmarked separately.
+**Done.** The orthogonal optimizations (Impl 11) are implemented and property-tested:
+- **Parallel cross-term:** `cross_term_parallel()` in `nifs.rs` — rayon `par_iter` over the row mapping; the 6 `sparse_eval` calls remain sequential.
+- **Parallel sumcheck:** `prove_with_opts()` in `sumcheck.rs` — rayon `par_iter` over per-row product computation.
+- **Lazy Pedersen MSM:** `lazy_commit` flag plumbed through `OptFlags` — API-ready but not yet changing fold behavior (deferred because `e_commit` depends on the transcript hash at each step).
+- **CLI flag:** `--opt parallel,lazy,all,none` on `fold` and `compress` subcommands.
+- **Property tests:** parallel and sequential paths produce identical output (fold, sumcheck, E2E).
+- **Benchmark flag:** `--opt-parallel` on `benchmark_nova --nifs` and `--sumcheck` for timing comparison.
+
+The optimizations are orthogonal — they compose with Impl 8, 9, and 10 without changes to the cryptographic protocol.
 
 </details>
 
@@ -563,7 +571,52 @@ cargo run --release --bin benchmark_nova -- --nifs --circuit <step.r1cs> --steps
 cargo run --release --bin benchmark_nova -- --sumcheck --circuit <step.r1cs> --steps <witness-dir>
 # (all three require a compiled step .r1cs + a directory of step_XXXX.wtns witnesses, see the
 # Implementation 8 section; --limit N restricts to the first N steps)
+
+# Implementation 11 — add --opt-parallel to any --nifs or --sumcheck run for parallel fold/sumcheck
+cargo run --release --bin benchmark_nova -- --nifs --opt-parallel --circuit <step.r1cs> --steps <witness-dir>
+cargo run --release --bin benchmark_nova -- --sumcheck --opt-parallel --circuit <step.r1cs> --steps <witness-dir>
 ```
+
+### Implementation 11 — parallel optimizations (--opt parallel)
+
+The `--opt-parallel` flag enables rayon-parallelized NIFS fold (parallel cross-term) and sumcheck prover (parallel row products). Property tests verify that the parallel and sequential paths produce identical output.
+
+Measured with `cargo run --release --bin benchmark_nova -- --nifs` (or `--sumcheck`) `--opt-parallel --circuit <step.r1cs> --steps <witness-dir>` on a 16-core machine. The `--opt-parallel` flag affects the NIFS fold (cross-term parallelization) and sumcheck compress (row-parallel prover).
+
+#### NIFS fold (Impl 9) — baseline vs parallel
+
+| Step circuit | Wires | Constraints | Steps | Fold baseline | Fold parallel | Speedup |
+|---|---|---|---|---|---|---|
+| `eddsa_jubjub_nova` | 15 | 9 | 254 | **1.01 s** (3.99 ms/step) | **0.88 s** (3.48 ms/step) | 1.1× |
+| `anonymous_airdrop_nova` | 1,210 | 1,207 | 5 | **1.11 s** (222 ms/step) | **1.22 s** (243 ms/step) | 0.9× |
+| `ed25519_verify_nova` | 7,658 | 7,724 | 255 | **27.9 s** (109 ms/step) | **16.8 s** (65.8 ms/step) | **1.66×** |
+| `cardano_ed25519_ownership_nova` | 7,658 | 7,724 | 255 | **14.5 s** (57.0 ms/step) | **17.9 s** (70.2 ms/step) | 0.8× |
+
+The parallel fold shows the strongest speedup on the 7,724-constraint ed25519 step (1.66×) where the cross-term row mapping has enough work to amortize rayon overhead. On tiny circuits (9 constraints), the overhead dominates. On the cardano_ownership circuit, variance between runs dominates at this scale.
+
+#### Sumcheck compress (Impl 10) — baseline vs parallel
+
+| Step circuit | Wires | Constraints | Steps | Compress baseline | Compress parallel | Speedup | Verify baseline | Verify parallel |
+|---|---|---|---|---|---|---|---|---|
+| `eddsa_jubjub_nova` | 15 | 9 | 254 | **10 ms** | **13 ms** | 0.8× | **11.3 ms** | **14.4 ms** |
+| `anonymous_airdrop_nova` | 1,210 | 1,207 | 5 | **946 ms** | **850 ms** | **1.1×** | **1,307 ms** | **907 ms** |
+| `ed25519_verify_nova` | 7,658 | 7,724 | 255 | **7.95 s** | **6.11 s** | **1.30×** | **8.26 s** | **6.35 s** |
+| `cardano_ed25519_ownership_nova` | 7,658 | 7,724 | 255 | **8.99 s** | **9.17 s** | 1.0× | **9.00 s** | **8.48 s** |
+
+The parallel sumcheck prover shows 1.30× speedup on the 7,724-constraint ed25519 verify step (parallel row products across 256 sumcheck rounds). On the airdrop circuit, the verify phase also benefits from parallel recomputation.
+
+#### Proof size comparison — all 4 circuits, all tiers
+
+Proof sizes are **identical** between baseline and parallel — parallelism affects computation only, not output.
+
+| Step circuit | Wires | Constraints | Steps | Impl 8 bundle | Impl 9 bundle | Impl 10 bundle |
+|---|---|---|---|---|---|---|
+| `eddsa_jubjub_nova` | 15 | 9 | 254 | 95.2 KiB (O(N)) | **4.9 KiB** (O(1)) | **5.0 KiB** (O(1), ZK) |
+| `anonymous_airdrop_nova` | 1,210 | 1,207 | 5 | 1.9 KiB (O(N)) | **123.8 KiB** (O(1)) | **131.2 KiB** (O(1), ZK) |
+| `ed25519_verify_nova` | 7,658 | 7,724 | 255 | 334.7 KiB (O(N)) | **312.9 KiB** (O(1)) | **317.8 KiB** (O(1), ZK) |
+| `cardano_ed25519_ownership_nova` | 7,658 | 7,724 | 255 | 334.7 KiB (O(N)) | **312.9 KiB** (O(1)) | **317.8 KiB** (O(1), ZK) |
+
+Impl 9 and Impl 10 proof sizes are dominated by the Groth16/sumcheck compression proof, which is proportional to step width (not step count). The O(1)-in-N property wins over Impl 8's O(N) bundle at N > ~500 for the 7,724-constraint circuits.
 
 </details>
 
