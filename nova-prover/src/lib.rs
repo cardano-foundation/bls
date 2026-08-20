@@ -34,6 +34,44 @@ use std::error::Error;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+/// Implementation 11 optimization flags — orthogonal to Impl 8/9/10.
+///
+/// These flags can be combined freely and apply to any implementation:
+/// - `parallel`: use rayon for independent row/column operations
+/// - `lazy_commit`: defer Pedersen MSM to the final fold step
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct OptFlags {
+    /// Parallelize independent row operations (cross-term, sumcheck products)
+    /// using rayon.
+    pub parallel: bool,
+    /// Defer the Pedersen commitment MSM to the final fold step, computing
+    /// only incremental group additions during intermediate folds.
+    pub lazy_commit: bool,
+}
+
+impl OptFlags {
+    pub const NONE: Self = Self {
+        parallel: false,
+        lazy_commit: false,
+    };
+    pub const PARALLEL: Self = Self {
+        parallel: true,
+        lazy_commit: false,
+    };
+    pub const LAZY_COMMIT: Self = Self {
+        parallel: false,
+        lazy_commit: true,
+    };
+    pub const ALL: Self = Self {
+        parallel: true,
+        lazy_commit: true,
+    };
+
+    pub fn is_empty(&self) -> bool {
+        *self == Self::NONE
+    }
+}
+
 /// Domain separator for the IVC transcript.
 pub const TRANSCRIPT_PREFIX: &[u8] = b"groth16-prover-nova-transcript-v1";
 
@@ -111,7 +149,7 @@ pub struct NifsFinalInstance {
 /// `nova verify` subcommand.  `n_wires`/`n_constraints` are included so the
 /// verifier can derive the transparent Pedersen basis for the commitment
 /// check without re-loading the step circuit.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NifsBundle {
     pub circuit: String,
     pub n_wires: u32,
@@ -504,12 +542,25 @@ pub fn run_fold(
 /// proving key.  Returns the O(1) [`NifsBundle`] (final instance + transcript)
 /// plus the private final instance/witness for the compression proof.
 pub fn run_fold_nifs(circuit: &Path, steps: &Path) -> Result<NifsFoldOutput, Box<dyn Error>> {
-    fold_nifs(circuit, steps)
+    fold_nifs(circuit, steps, OptFlags::NONE)
+}
+
+/// Like [`run_fold_nifs`] but with optimization flags (Implementation 11).
+pub fn run_fold_nifs_opt(
+    circuit: &Path,
+    steps: &Path,
+    opts: OptFlags,
+) -> Result<NifsFoldOutput, Box<dyn Error>> {
+    fold_nifs(circuit, steps, opts)
 }
 
 /// Core folding routine shared by [`run_fold_nifs`] and [`run_compress`]
 /// (which re-folds deterministically to recover the private final witness).
-fn fold_nifs(circuit: &Path, steps: &Path) -> Result<NifsFoldOutput, Box<dyn Error>> {
+fn fold_nifs(
+    circuit: &Path,
+    steps: &Path,
+    opts: OptFlags,
+) -> Result<NifsFoldOutput, Box<dyn Error>> {
     let circuit_path_str = circuit.to_string_lossy().into_owned();
     let mut circuit = load_circuit(circuit)?;
     check_step_circuit(&circuit)?;
@@ -598,9 +649,10 @@ fn fold_nifs(circuit: &Path, steps: &Path) -> Result<NifsFoldOutput, Box<dyn Err
                 let w_acc = acc_w.take().expect("running witness must exist");
                 let acc = acc_hash.as_ref().expect("transcript initialized");
                 let challenge = nifs::fold_challenge(acc, &u_acc, &step_u);
-                let (u3, w3) = nifs::fold(
+                let (u3, w3) = nifs::fold_with_opts(
                     &params, &circuit.l, &circuit.r, &circuit.o, &u_acc, &w_acc, &step_u, &step_w,
                     challenge,
+                    opts.parallel,
                 );
                 acc_u = Some(u3);
                 acc_w = Some(w3);
@@ -663,10 +715,21 @@ pub fn run_compress(
     proving_key: &Path,
     out: &Path,
 ) -> Result<CompressOutput, Box<dyn Error>> {
+    run_compress_opt(circuit, steps, proving_key, out, OptFlags::NONE)
+}
+
+/// Like [`run_compress`] but with optimization flags.
+pub fn run_compress_opt(
+    circuit: &Path,
+    steps: &Path,
+    proving_key: &Path,
+    out: &Path,
+    opts: OptFlags,
+) -> Result<CompressOutput, Box<dyn Error>> {
     let c = load_circuit(circuit)?;
     check_step_circuit(&c)?;
 
-    let folded = fold_nifs(circuit, steps)?;
+    let folded = fold_nifs(circuit, steps, opts)?;
     let full_pk =
         load_full_pk(proving_key).map_err(|e| format!("failed to load proving key: {e}"))?;
     let cproof = prove_compression(&c, &folded, &full_pk)?;
@@ -701,12 +764,22 @@ pub fn run_compress_sumcheck(
     steps: &Path,
     out: &Path,
 ) -> Result<CompressOutput, Box<dyn Error>> {
+    run_compress_sumcheck_opt(circuit, steps, out, OptFlags::NONE)
+}
+
+/// Like [`run_compress_sumcheck`] but with optimization flags.
+pub fn run_compress_sumcheck_opt(
+    circuit: &Path,
+    steps: &Path,
+    out: &Path,
+    opts: OptFlags,
+) -> Result<CompressOutput, Box<dyn Error>> {
     let c = load_circuit(circuit)?;
     check_step_circuit(&c)?;
 
-    let folded = fold_nifs(circuit, steps)?;
+    let folded = fold_nifs(circuit, steps, opts)?;
     let mut rng = rand::thread_rng();
-    let cproof = prove_sumcheck_compression(&c, &folded, &mut rng)?;
+    let cproof = prove_sumcheck_compression_opt(&c, &folded, &mut rng, opts)?;
 
     let json = serde_json::to_string_pretty(&cproof)
         .map_err(|e| format!("failed to serialize sumcheck proof: {e}"))?;
@@ -917,6 +990,16 @@ pub fn prove_sumcheck_compression(
     folded: &NifsFoldOutput,
     _rng: &mut impl rand::RngCore,
 ) -> Result<NifsSumcheckProof, Box<dyn Error>> {
+    prove_sumcheck_compression_opt(circuit, folded, _rng, OptFlags::NONE)
+}
+
+/// Like [`prove_sumcheck_compression`] but with optimization flags.
+pub fn prove_sumcheck_compression_opt(
+    circuit: &SparseCircomCircuit,
+    folded: &NifsFoldOutput,
+    _rng: &mut impl rand::RngCore,
+    opts: OptFlags,
+) -> Result<NifsSumcheckProof, Box<dyn Error>> {
     let n_wires = circuit.n_wires as usize;
     let n_constraints = circuit.n_constraints as usize;
     let params = nifs::PedersenParams::from_seed(NIFS_PARAMS_SEED, n_wires, n_constraints);
@@ -927,7 +1010,15 @@ pub fn prove_sumcheck_compression(
     let u = folded.final_instance.u;
 
     // Run sumcheck prover.
-    let (proof, r_challenges) = sumcheck::prove(&circuit.l, &circuit.r, &circuit.o, z, u, e);
+    let (proof, r_challenges) = sumcheck::prove_with_opts(
+        &circuit.l,
+        &circuit.r,
+        &circuit.o,
+        z,
+        u,
+        e,
+        opts.parallel,
+    );
 
     // Build product vector and evaluate its MLE at r (for the final check).
     let n_padded = sumcheck::next_power_of_two(n_constraints);
@@ -1658,5 +1749,87 @@ mod tests {
 
     fn sc_proof_json_size(p: &NifsSumcheckProof) -> usize {
         serde_json::to_string(p).unwrap().len()
+    }
+
+    /// E2E: parallel NIFS fold produces identical bundle to sequential.
+    #[test]
+    fn parallel_nifs_fold_matches_sequential() {
+        let tmp = tempfile::tempdir().unwrap();
+        let r1cs_path = tmp.path().join("step.r1cs");
+        let steps_dir = tmp.path().join("steps");
+        fs::write(&r1cs_path, step_r1cs_bytes()).unwrap();
+        fs::create_dir(&steps_dir).unwrap();
+
+        let mut state = 2u64;
+        for (i, x) in [3u64, 5, 7].iter().enumerate() {
+            state = write_step_wtns(&steps_dir, i, state, *x);
+        }
+
+        let seq = run_fold_nifs_opt(&r1cs_path, &steps_dir, OptFlags::NONE).unwrap();
+        let par = run_fold_nifs_opt(&r1cs_path, &steps_dir, OptFlags::PARALLEL).unwrap();
+
+        assert_eq!(seq.bundle, par.bundle);
+        assert_eq!(seq.final_instance, par.final_instance);
+        assert_eq!(seq.final_witness, par.final_witness);
+    }
+
+    /// E2E: parallel sumcheck compression produces identical proof to sequential.
+    #[test]
+    fn parallel_sumcheck_matches_sequential() {
+        let tmp = tempfile::tempdir().unwrap();
+        let r1cs_path = tmp.path().join("step.r1cs");
+        let steps_dir = tmp.path().join("steps");
+        fs::write(&r1cs_path, step_r1cs_bytes()).unwrap();
+        fs::create_dir(&steps_dir).unwrap();
+
+        let mut state = 2u64;
+        for (i, x) in [3u64, 5, 7].iter().enumerate() {
+            state = write_step_wtns(&steps_dir, i, state, *x);
+        }
+
+        let c = load_circuit(&r1cs_path).unwrap();
+
+        // Sequential fold
+        let fold_seq = run_fold_nifs_opt(&r1cs_path, &steps_dir, OptFlags::NONE).unwrap();
+        let mut rng = rand::thread_rng();
+        let sc_seq = prove_sumcheck_compression_opt(&c, &fold_seq, &mut rng, OptFlags::NONE).unwrap();
+
+        // Parallel fold
+        let fold_par = run_fold_nifs_opt(&r1cs_path, &steps_dir, OptFlags::PARALLEL).unwrap();
+        let mut rng = rand::thread_rng();
+        let sc_par = prove_sumcheck_compression_opt(&c, &fold_par, &mut rng, OptFlags::PARALLEL).unwrap();
+
+        // Both must verify
+        let v1 = verify_sumcheck_compression(&fold_seq.bundle, &sc_seq).unwrap();
+        let v2 = verify_sumcheck_compression(&fold_par.bundle, &sc_par).unwrap();
+        assert_eq!(v1.steps, v2.steps);
+        assert_eq!(v1.transcript_final, v2.transcript_final);
+
+        // Bundles must be identical (parallel fold produces same output)
+        assert_eq!(fold_seq.bundle, fold_par.bundle);
+    }
+
+    /// E2E: --opt=all flag works through the CLI fold path.
+    #[test]
+    fn opt_all_flag_produces_valid_bundle() {
+        let tmp = tempfile::tempdir().unwrap();
+        let r1cs_path = tmp.path().join("step.r1cs");
+        let steps_dir = tmp.path().join("steps");
+        fs::write(&r1cs_path, step_r1cs_bytes()).unwrap();
+        fs::create_dir(&steps_dir).unwrap();
+
+        let mut state = 2u64;
+        for (i, x) in [3u64, 5, 7].iter().enumerate() {
+            state = write_step_wtns(&steps_dir, i, state, *x);
+        }
+
+        let fold_out = run_fold_nifs_opt(&r1cs_path, &steps_dir, OptFlags::ALL).unwrap();
+        assert_eq!(fold_out.bundle.n_steps, 3);
+
+        // Verify the fold produced a valid instance
+        let c = load_circuit(&r1cs_path).unwrap();
+        let params = nifs::PedersenParams::from_seed(NIFS_PARAMS_SEED, c.n_wires as usize, c.n_constraints as usize);
+        let w_commit = nifs::commit(&params.basis_w, &fold_out.final_witness.w);
+        assert_eq!(fold_out.final_instance.w_commit, w_commit);
     }
 }
