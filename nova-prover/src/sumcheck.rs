@@ -35,6 +35,7 @@
 use ark_bls12_381::Fr;
 use ark_ff::{BigInteger, One, PrimeField, Zero};
 use blake2::{Blake2b512, Digest};
+use blake2::digest::consts::U32;
 use rayon::prelude::*;
 
 use crate::nifs;
@@ -117,8 +118,10 @@ fn challenge_from_hash(hash: &[u8]) -> Fr {
 }
 
 /// Hash a sequence of field elements (for Fiat-Shamir).
+///
+/// Uses BLAKE2b-256 to match the Aiken on-chain verifier's built-in blake2b_256.
 fn hash_field_elements(elems: &[Fr]) -> Vec<u8> {
-    let mut h = Blake2b512::new();
+    let mut h = blake2::Blake2b::<U32>::new();
     for e in elems {
         h.update(e.into_bigint().to_bytes_le());
     }

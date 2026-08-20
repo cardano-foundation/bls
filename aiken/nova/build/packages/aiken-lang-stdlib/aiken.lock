@@ -2,13 +2,13 @@
 # You typically do not need to edit this file
 
 [[requirements]]
-name = "aiken-lang/stdlib"
-version = "v3.1.0"
+name = "aiken-lang/fuzz"
+version = "v2.2.0"
 source = "github"
 
 [[packages]]
-name = "aiken-lang/stdlib"
-version = "v3.1.0"
+name = "aiken-lang/fuzz"
+version = "v2.2.0"
 requirements = []
 source = "github"
 
