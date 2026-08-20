@@ -470,6 +470,73 @@ The optimizations are orthogonal — they compose with Impl 8, 9, and 10 without
 
 </details>
 
+## VRF — E2E workflow (EC-VRF on JubJub/BLS12-381)
+
+<details>
+<summary><b>VRF E2E — click to expand</b></summary>
+
+End-to-end Verifiable Random Function (VRF) using the Cardano-compatible JubJub curve, folded with the Nova IVC pipeline and compressed with Impl 10 sumcheck compression.
+
+### Circuits
+
+| Circuit | Location | Constraints | Wires | Purpose |
+|---|---|---|---|---|
+| `vrf_verify.circom` | `circom/VRF/` | 17,528 | 21,802 | Monolithic VRF verify (EC-VRF: key gen, proof generation, point operations) |
+| `vrf_verify_nova.circom` | `circom/VRF/` | 9 | 15 | Nova IVC step: one bit of Montgomery ladder for `[s]·G` on JubJub |
+
+The step circuit decomposes `[s]·G` scalar multiplication into 254 identical steps (one Montgomery ladder bit each). State: `(dbl_in[2], add_in[2])` — 4 public in/out, 1 private `sel` bit. Same structure as `eddsa_jubjub_nova`.
+
+### Primitives used
+
+- **JubJub curve** (twisted Edwards, BLS12-381-friendly): scalar field L = 0x65544...254199
+- **Pedersen hash** (PoseidonBLS12_381) for challenge derivation
+- **Montgomery ladder** for per-step scalar multiplication
+
+### E2E workflow
+
+```bash
+# 1. Generate VRF key pair, proof, and 254 step witnesses
+python3 circom/VRF/gen_vrf_witnesses.py \
+  --wasm circom/VRF/vrf_verify_nova_js/vrf_verify_nova.wasm \
+  --dir /tmp/vrf_witnesses --steps 254
+
+# 2. Inspect the step circuit
+nova params --circuit circom/VRF/vrf_verify_nova.r1cs
+# → {"n_wires":15, "n_constraints":9, "n_pub_out":4, "n_pub_in":4, "n_prv_in":1}
+
+# 3. NIFS fold (no proving key needed)
+nova fold --nifs --circuit circom/VRF/vrf_verify_nova.r1cs \
+  --steps /tmp/vrf_witnesses --out /tmp/vrf_fold.json
+
+# 4. Sumcheck compress (no ceremony needed)
+nova compress --sumcheck --circuit circom/VRF/vrf_verify_nova.r1cs \
+  --steps /tmp/vrf_witnesses --out /tmp/vrf_compress.json
+
+# 5. Verify (no verifying key needed)
+nova verify --ivc /tmp/vrf_fold.json --sumcheck-proof /tmp/vrf_compress.json
+# → Verified 254 steps: sumcheck compression proof OK, commitments OK, state chain OK
+```
+
+### Results
+
+| Stage | Output | Size |
+|---|---|---|
+| NIFS fold | `/tmp/vrf_fold.json` | 1,760 bytes |
+| Sumcheck compress | `/tmp/vrf_compress.json` | 3,853 bytes |
+| **Total proof** | | **~3.9 KiB** |
+
+Verification passes. Total on-chain footprint is ~3.9 KiB — well within Cardano's 16 KiB transaction size limit.
+
+### Files
+
+- `circom/VRF/vrf_verify.circom` — monolithic VRF verify circuit
+- `circom/VRF/vrf_verify_nova.circom` — Nova IVC step circuit (Montgomery ladder bit)
+- `circom/VRF/vrf_verify.r1cs` / `vrf_verify_nova.r1cs` — compiled R1CS
+- `circom/VRF/vrf_verify_nova_js/vrf_verify_nova.wasm` — compiled WASM for witness gen
+- `circom/VRF/gen_vrf_witnesses.py` — Python witness generator (key gen, VRF proof, step witnesses)
+
+</details>
+
 ## Benchmarks — Nova IVC (Implementation 8 step-chain vs Implementation 9 NIFS vs Implementation 10 sumcheck)
 
 <details>
