@@ -164,12 +164,22 @@ the root, and the keys never have to be revealed to it.
    $ ../../clis/nova/target/release/nova fold --nifs \
        --circuit cardano_key_ownership_smt_nova.r1cs \
        --steps steps --out smt_ivc.json
-   $ ../../clis/nova/target/release/nova compress --sumcheck \
+   $ ../../clis/nova/target/release/nova compress \
        --circuit cardano_key_ownership_smt_nova.r1cs \
        --steps steps --out smt_sumcheck_proof.json
    $ ../../clis/nova/target/release/nova verify \
        --ivc smt_ivc.json --sumcheck-proof smt_sumcheck_proof.json
    # → Verified 255 steps: sumcheck compression proof OK, commitments OK, state chain OK
+
+   (or, for the slim on-chain proof — see Implementation 11 below:)
+
+   $ ../../clis/nova/target/release/nova compress --slim \
+       --circuit cardano_key_ownership_smt_nova.r1cs \
+       --steps steps --out smt_slim.json
+   $ ../../clis/nova/target/release/nova verify \
+       --ivc smt_ivc.json --slim-proof smt_slim.json
+   # → Verified 255 steps: slim sumcheck proof OK, state chain OK
+   #    (no opening proofs — off-chain audit trail)
 ```
 
 ### End-to-end flow — Implementation 7 (monolithic + h-scalar)
@@ -390,7 +400,7 @@ EOF
 ```
 
 > **Note:** `nova` verification here is still **O(N)** — it re-checks every step
-> proof. The O(1)-verify path is shipped as [Implementation 9](../../nova-prover/README.md#implementation-9-relaxed-r1cs-folding--single-compression-snark): `nova fold --nifs` → `trusted-setup ceremony-dev` on the emitted compression circuit → `nova compress` → `nova verify --compression-proof` — see the [Implementation 9 e2e flow](../../nova-prover/README.md#e2e-flow--implementation-9-nifs). For a **transparent** O(1)-verify path with no ceremony, see [Implementation 10](../../nova-prover/README.md#implementation-10-constant-size-nova-proofs): `nova fold --nifs` → `nova compress --sumcheck` → `nova verify --sumcheck-proof` — no proving or verifying key needed for compression. The step circuit here is byte-identical to `cardano_ed25519_ownership_nova` (7,724 constraints), so the Impl 9/10 numbers measured for it apply; the worked SMT e2e and full tradeoffs are in the [Impl 8 vs Impl 9 comparison](#end-to-end-comparison--implementation-8-step-chain-vs-implementation-9-nifs) below.
+> proof. The O(1)-verify path is shipped as [Implementation 9](../../nova-prover/README.md#implementation-9-relaxed-r1cs-folding--single-compression-snark): `nova fold --nifs` → `trusted-setup ceremony-dev` on the emitted compression circuit → `nova compress --groth16` → `nova verify --compression-proof` — see the [Implementation 9 e2e flow](../../nova-prover/README.md#e2e-flow--implementation-9-nifs). For a **transparent** O(1)-verify path with no ceremony, see [Implementation 10](../../nova-prover/README.md#implementation-10-constant-size-nova-proofs): `nova fold --nifs` → `nova compress` → `nova verify --sumcheck-proof` — no proving or verifying key needed for compression. For on-chain proof sizes under 16 KiB, see **Implementation 11** (slim proofs): `nova compress --slim` → `nova verify --slim-proof`.
 
 ## CLI vs shell/Python
 
@@ -525,7 +535,7 @@ step witness generation with `gen_smt_nova_steps.py`). Then:
 **7. Compress with sumcheck** — no ceremony, no proving key:
 
 ```bash
-../../clis/nova/target/release/nova compress --sumcheck \
+../../clis/nova/target/release/nova compress \
   --circuit cardano_key_ownership_smt_nova.r1cs \
   --steps steps --out smt_sumcheck_proof.json
 # → Sumcheck proof written to smt_sumcheck_proof.json
@@ -558,7 +568,7 @@ EOF
 **Key differences from Implementation 9:**
 
 - **No compression ceremony.** Implementation 9 requires `trusted-setup ceremony-dev` on the compression circuit (15,448 constraints); Implementation 10 needs nothing.
-- **No proving key.** `compress --sumcheck` needs only the step circuit and witnesses.
+- **No proving key.** `compress` (default: sumcheck) needs only the step circuit and witnesses.
 - **No verifying key.** `verify --sumcheck-proof` needs only the NIFS bundle and sumcheck proof.
 - **True O(1) proof size.** Implementation 9's bundle is O(1) in N but O(step size) in constraints; Implementation 10's bundle is O(1) in both.
 - **ZK for free.** The verifier never sees the folded witness or error vector.
@@ -569,6 +579,58 @@ the 7,724-constraint step circuit). See the
 for measured numbers. The SMT membership half of the combined statement
 remains in the monolithic circuit — the fold covers the scalar multiplication
 only.
+
+### Implementation 11 — Slim on-chain proof (Cardano ≤16 KiB)
+
+Implementation 11 strips the HashPC opening proofs (`w_opening`, `e_opening`)
+from the sumcheck bundle. These opening proofs are only needed for off-chain
+auditability — the sumcheck proof itself already proves knowledge of a witness
+consistent with the committed instance. Removing them reduces the on-chain
+proof from **~473 KiB** to **~4 KiB** — well under Cardano's **16 KiB**
+transaction size limit.
+
+The step circuit here is byte-identical to
+`cardano_ed25519_ownership_nova.r1cs` (7,724 constraints), so the same
+proof-size numbers apply.
+
+**Steps 1–6 are the same as Implementation 10** (fold → compress). Then:
+
+**7. Compress with slim flag** — strips opening proofs:
+
+```bash
+../../clis/nova/target/release/nova compress --slim \
+  --circuit cardano_key_ownership_smt_nova.r1cs \
+  --steps steps --out smt_slim.json
+# → Slim proof written to smt_slim.json (down from ~473 KiB to ~4 KiB)
+```
+
+**8. Verify slim proof** — no verifying key, no opening proofs:
+
+```bash
+../../clis/nova/target/release/nova verify \
+  --ivc smt_ivc.json --slim-proof smt_slim.json
+# → Verified 255 steps: slim sumcheck proof OK, state chain OK
+#    (no opening proofs — off-chain audit trail)
+```
+
+**9. Application-level final check** (outside the fold — same as Impl 8/10):
+
+```bash
+# final addOut (from step_0254.wtns) must equal 2·PointA projectively
+python3 - <<'EOF'
+from gen_smt_nova_steps import read_wtns, limbs_to_int, ext_add, projective_eq
+n8, w = read_wtns("steps/step_0254.wtns")
+add_out = tuple(limbs_to_int([w[13 + c*3 + l] for l in range(3)]) for c in range(4))
+import json; d = json.load(open("input.json"))
+point_a = tuple(limbs_to_int([int(v) for v in limb]) for limb in d["PointA"])
+assert projective_eq(add_out, ext_add(point_a, point_a))
+print("addOut == 2*PointA: OK")
+EOF
+```
+
+The slim proof is what goes on-chain. The full sumcheck proof (with opening
+proofs) is kept off-chain as an audit trail — a relayer or aggregator can
+provide it to anyone who wants to verify the commitment openings independently.
 
 ---
 

@@ -41,7 +41,7 @@ trusted-setup ceremony-dev --sparse --circuit compression.r1cs \
   --proving-key compression.pk --verifying-key compression.vk
 
 # Compress the final instance into one Groth16 proof
-nova compress --circuit step_circuit.r1cs --steps ./step_witnesses/ \
+nova compress --groth16 --circuit step_circuit.r1cs --steps ./step_witnesses/ \
   --proving-key compression.pk --out compression.proof.json
 
 # Verify: one pairing check + native commitments + transcript
@@ -53,10 +53,14 @@ nova verify --ivc bundle.ivc.json --compression-proof compression.proof.json --c
 ```bash
 # Fold + sumcheck-compress in two steps (no proving key, no ceremony)
 nova fold --nifs --circuit step_circuit.r1cs --steps ./step_witnesses/ --out bundle.ivc.json
-nova compress --sumcheck --circuit step_circuit.r1cs --steps ./step_witnesses/ --out sumcheck.proof.json
+nova compress --circuit step_circuit.r1cs --steps ./step_witnesses/ --out sumcheck.proof.json
 
 # Verify (no verifying key needed)
 nova verify --ivc bundle.ivc.json --sumcheck-proof sumcheck.proof.json
+
+# Slim on-chain proof (strips HashPC opening proofs — ~98% smaller)
+nova compress --slim --circuit step_circuit.r1cs --steps ./step_witnesses/ --out slim.proof.json
+nova verify --ivc bundle.ivc.json --slim-proof slim.proof.json
 ```
 
 The full step-by-step worked example (`cardano_ed25519_ownership_nova` — 255
@@ -330,8 +334,8 @@ nova fold --nifs --circuit eddsa_jubjub_nova.r1cs \
 trusted-setup ceremony-dev --sparse --circuit compression.r1cs \
   --proving-key compression.pk --verifying-key compression.vk
 
-# 4. Compress the final instance into one Groth16 proof (re-folds deterministically)
-nova compress --circuit eddsa_jubjub_nova.r1cs --steps ./eddsa_steps/ \
+# Compress the final instance into one Groth16 proof (re-folds deterministically)
+nova compress --groth16 --circuit eddsa_jubjub_nova.r1cs --steps ./eddsa_steps/ \
   --proving-key compression.pk --out compression.proof.json
 # → Compression proof written to compression.proof.json (u = <scalar>)
 
@@ -462,7 +466,8 @@ The opening proofs (Z and E truth tables) are submitted separately by a relayer 
 - **Parallel cross-term:** `cross_term_parallel()` in `nifs.rs` — rayon `par_iter` over the row mapping; the 6 `sparse_eval` calls remain sequential.
 - **Parallel sumcheck:** `prove_with_opts()` in `sumcheck.rs` — rayon `par_iter` over per-row product computation.
 - **Lazy Pedersen MSM:** `lazy_commit` flag plumbed through `OptFlags` — API-ready but not yet changing fold behavior (deferred because `e_commit` depends on the transcript hash at each step).
-- **CLI flag:** `--opt parallel,lazy,all,none` on `fold` and `compress` subcommands.
+- **Slim on-chain proofs:** `NifsSlimProof` struct + `verify_slim()` — strips HashPC opening proofs (w_opening, e_opening) from the sumcheck bundle, reducing proof size by ~98%. Only the sumcheck transcript, Fiat-Shamir challenges, and commitment digests remain.
+- **CLI:** `compress` defaults to sumcheck; `--groth16` for Groth16 compression; `--slim` for slim on-chain output. `verify` accepts `--slim-proof`, `--sumcheck-proof`, or `--compression-proof`.
 - **Property tests:** parallel and sequential paths produce identical output (fold, sumcheck, E2E).
 - **Benchmark flag:** `--opt-parallel` on `benchmark_nova --nifs` and `--sumcheck` for timing comparison.
 
@@ -509,7 +514,7 @@ nova fold --nifs --circuit circom/VRF/vrf_verify_nova.r1cs \
   --steps /tmp/vrf_witnesses --out /tmp/vrf_fold.json
 
 # 4. Sumcheck compress (no ceremony needed)
-nova compress --sumcheck --circuit circom/VRF/vrf_verify_nova.r1cs \
+nova compress --circuit circom/VRF/vrf_verify_nova.r1cs \
   --steps /tmp/vrf_witnesses --out /tmp/vrf_compress.json
 
 # 5. Verify (no verifying key needed)
@@ -666,16 +671,16 @@ nova params --circuit eddsa_jubjub_nova.r1cs
 # 2. Fold the step witnesses into one Relaxed-R1CS instance (no proving key)
 nova fold --nifs --circuit eddsa_jubjub_nova.r1cs --steps ./eddsa_steps/ --out bundle.ivc.json
 
-# 3. Compress with sumcheck (no ceremony needed!)
-nova compress --sumcheck --circuit eddsa_jubjub_nova.r1cs --steps ./eddsa_steps/ --out sumcheck.proof.json
+# 3. Compress with sumcheck (no ceremony needed — compress defaults to sumcheck)
+nova compress --circuit eddsa_jubjub_nova.r1cs --steps ./eddsa_steps/ --out sumcheck.proof.json
 
-# 4. Verify (no verifying key needed!)
+# 4. Verify (no verifying key needed)
 nova verify --ivc bundle.ivc.json --sumcheck-proof sumcheck.proof.json
 # → Verified 254 steps: sumcheck compression proof OK, commitments OK, state chain OK
 # → Final transcript: <64-byte hex>
 ```
 
-Steps 1 and 2 are identical to Implementation 9; steps 3 and 4 replace the `trusted-setup` ceremony + Groth16 compression with the transparent sumcheck path. The same flow works for `cardano_ed25519_ownership_nova` and `cardano_key_ownership_smt_nova` (the SMT step circuit is byte-identical to the CKO step circuit), substituting the step circuit and witness directory.
+Steps 1 and 2 are identical to Implementation 9; steps 3 and 4 replace the `trusted-setup` ceremony + Groth16 compression with the transparent sumcheck path (compress defaults to sumcheck — no `--sumcheck` flag needed). The same flow works for `cardano_ed25519_ownership_nova` and `cardano_key_ownership_smt_nova` (the SMT step circuit is byte-identical to the CKO step circuit), substituting the step circuit and witness directory.
 
 Benchmark the sumcheck path yourself:
 
@@ -716,6 +721,10 @@ cargo run --release --bin benchmark_nova -- --sumcheck --circuit <step.r1cs> --s
 # Implementation 11 — add --opt-parallel to any --nifs or --sumcheck run for parallel fold/sumcheck
 cargo run --release --bin benchmark_nova -- --nifs --opt-parallel --circuit <step.r1cs> --steps <witness-dir>
 cargo run --release --bin benchmark_nova -- --sumcheck --opt-parallel --circuit <step.r1cs> --steps <witness-dir>
+
+# Slim on-chain proofs (Impl 11) — compress --slim strips HashPC opening proofs (~98% smaller)
+nova compress --slim --circuit <step.r1cs> --steps <witness-dir> --out slim.proof.json
+nova verify --ivc bundle.ivc.json --slim-proof slim.proof.json
 ```
 
 ### Implementation 11 — parallel optimizations (--opt parallel)

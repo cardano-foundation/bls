@@ -1000,6 +1000,7 @@ fn nifs_compress_verify_end_to_end() {
     let mut compress = Command::cargo_bin("nova").unwrap();
     compress
         .arg("compress")
+        .arg("--groth16")
         .arg("--circuit")
         .arg(r1cs.path())
         .arg("--steps")

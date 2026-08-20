@@ -1317,6 +1317,31 @@ pub fn verify_slim(
     })
 }
 
+/// Verify a slim sumcheck compression proof against a NIFS bundle (CLI path).
+///
+/// Loads the NIFS bundle and the slim proof JSON, then runs
+/// [`verify_slim`].  No verifying key is needed.
+pub fn run_verify_slim(
+    ivc: &Path,
+    slim_proof: &Path,
+) -> Result<VerifyOutput, Box<dyn Error>> {
+    let bundle_bytes =
+        fs::read(ivc).map_err(|e| format!("failed to read IVC bundle {}: {e}", ivc.display()))?;
+    let bundle: NifsBundle = serde_json::from_slice(&bundle_bytes)
+        .map_err(|e| format!("failed to parse IVC bundle as NIFS bundle: {e}"))?;
+
+    let proof_bytes = fs::read(slim_proof).map_err(|e| {
+        format!(
+            "failed to read slim proof {}: {e}",
+            slim_proof.display()
+        )
+    })?;
+    let sp: NifsSlimProof = serde_json::from_slice(&proof_bytes)
+        .map_err(|e| format!("failed to parse slim proof: {e}"))?;
+
+    verify_slim(&bundle, &sp)
+}
+
 /// Emit the compression circuit `.r1cs` for a step circuit (Implementation 9,
 /// work item 2).
 ///
