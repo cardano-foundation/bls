@@ -46,9 +46,9 @@ use groth16_prover::engine::FftQapEngine;
 use groth16_prover::prover::{PippengerProver, Proof, Prover, PublicInput};
 use nova_prover::nifs;
 use nova_prover::{
-    fr_to_string, prove_compression, prove_sumcheck_compression, verify_compression,
-    verify_sumcheck_compression, NifsBundle, NifsFinalInstance, NifsFoldOutput, NIFS_PARAMS_SEED,
-    NIFS_TRANSCRIPT_PREFIX,
+    fr_to_string, prove_compression, prove_sumcheck_compression_opt, verify_compression,
+    verify_sumcheck_compression, NifsBundle, NifsFinalInstance, NifsFoldOutput, OptFlags,
+    NIFS_PARAMS_SEED, NIFS_TRANSCRIPT_PREFIX,
 };
 use std::fs;
 use std::path::PathBuf;
@@ -58,6 +58,7 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     let nifs_mode = args.iter().any(|a| a == "--nifs");
     let sumcheck_mode = args.iter().any(|a| a == "--sumcheck");
+    let opt_parallel = args.iter().any(|a| a == "--opt-parallel");
     let circuit_path = args
         .windows(2)
         .find(|w| w[0] == "--circuit")
@@ -68,7 +69,7 @@ fn main() {
         .map(|w| w[1].clone());
     let (Some(circuit_path), Some(steps_dir)) = (circuit_path, steps_dir) else {
         eprintln!(
-            "usage: benchmark_nova [--nifs|--sumcheck] --circuit <step.r1cs> --steps <witness-dir> [--limit N]"
+            "usage: benchmark_nova [--nifs|--sumcheck] [--opt-parallel] --circuit <step.r1cs> --steps <witness-dir> [--limit N]"
         );
         std::process::exit(2);
     };
@@ -115,9 +116,9 @@ fn main() {
     let prover = PippengerProver::new();
 
     if nifs_mode {
-        benchmark_nifs(&engine, &mut circuit, &wtns);
+        benchmark_nifs(&engine, &mut circuit, &wtns, opt_parallel);
     } else if sumcheck_mode {
-        benchmark_sumcheck(&engine, &mut circuit, &wtns);
+        benchmark_sumcheck(&engine, &mut circuit, &wtns, opt_parallel);
     } else {
         benchmark_step_chain(
             &engine,
@@ -221,23 +222,22 @@ fn benchmark_step_chain(
 
 /// Implementation 9: NIFS fold → compression ceremony → one compression proof
 /// → O(1) verify.
-fn benchmark_nifs(engine: &FftQapEngine, circuit: &mut SparseCircomCircuit, wtns: &[PathBuf]) {
+fn benchmark_nifs(engine: &FftQapEngine, circuit: &mut SparseCircomCircuit, wtns: &[PathBuf], parallel: bool) {
     let n_steps = wtns.len();
     let n_wires = circuit.n_wires as usize;
+    let opt = if parallel { "--opt-parallel " } else { "" };
+    println!("mode: NIFS fold + Groth16 compress ({opt}baseline{opt})");
 
-    // 1. NIFS fold — in-memory, per-step Relaxed-R1CS folding (state-chain
-    //    check + microsecond transcript included; MSM-dominated).
+    // 1. NIFS fold
     let t = Instant::now();
-    let folded = nifs_fold(circuit, wtns);
+    let folded = nifs_fold(circuit, wtns, parallel);
     let fold_s = t.elapsed().as_secs_f64();
     println!(
         "nifs fold: {fold_s:.3} s total, {:.3} ms/step over {n_steps} steps (2 O(step)-sized MSMs)",
         fold_s * 1000.0 / n_steps as f64
     );
 
-    // 2. Compression ceremony — single-party trusted setup on the compression
-    //    circuit (≈ 2·n_constraints constraints, one per relaxed-equation
-    //    product plus the t_i = u·(CZ)_i bindings).
+    // 2. Compression ceremony
     let cc = nova_prover::compression::CompressionCircuit::new(
         &circuit.l, &circuit.r, &circuit.o, n_wires,
     );
@@ -261,7 +261,7 @@ fn benchmark_nifs(engine: &FftQapEngine, circuit: &mut SparseCircomCircuit, wtns
         cc.n_wires_total
     );
 
-    // 3. Compress — one Groth16 proof over the final relaxed instance (O(1)).
+    // 3. Compress
     let t = Instant::now();
     let cproof = prove_compression(circuit, &folded, &full_pk)
         .unwrap_or_else(|e| panic!("failed to build the compression proof: {e}"));
@@ -271,14 +271,14 @@ fn benchmark_nifs(engine: &FftQapEngine, circuit: &mut SparseCircomCircuit, wtns
         compress_s
     );
 
-    // 4. Verify — one pairing check + recomputed com(Z)/com(E) and V MSMs.
+    // 4. Verify
     let t = Instant::now();
     verify_compression(&folded.bundle, &cproof, &vk)
         .unwrap_or_else(|e| panic!("compression verification failed: {e}"));
     let verify_s = t.elapsed().as_secs_f64();
     println!("verify: {verify_s:.4} s (one pairing + com(Z)/com(E)/V MSMs, O(1))");
 
-    // Bundle size: O(N) (Impl 8) vs constant-in-N (Impl 9).
+    // Bundle size.
     let n_pub_out = circuit.n_pub_out as usize;
     let state_bytes = n_steps * n_pub_out * 48;
     let step_proof_bytes = n_steps * 192;
@@ -303,12 +303,14 @@ fn benchmark_nifs(engine: &FftQapEngine, circuit: &mut SparseCircomCircuit, wtns
 
 /// Implementation 10: NIFS fold → sumcheck compression → O(log N) verify
 /// (no trusted setup required for compression).
-fn benchmark_sumcheck(_engine: &FftQapEngine, circuit: &mut SparseCircomCircuit, wtns: &[PathBuf]) {
+fn benchmark_sumcheck(_engine: &FftQapEngine, circuit: &mut SparseCircomCircuit, wtns: &[PathBuf], parallel: bool) {
     let n_steps = wtns.len();
+    let opt = if parallel { "parallel" } else { "baseline" };
+    println!("mode: NIFS fold + sumcheck compress ({opt})");
 
     // 1. NIFS fold — same as Impl 9.
     let t = Instant::now();
-    let folded = nifs_fold(circuit, wtns);
+    let folded = nifs_fold(circuit, wtns, parallel);
     let fold_s = t.elapsed().as_secs_f64();
     println!(
         "nifs fold: {fold_s:.3} s total, {:.3} ms/step over {n_steps} steps (2 O(step)-sized MSMs)",
@@ -319,7 +321,7 @@ fn benchmark_sumcheck(_engine: &FftQapEngine, circuit: &mut SparseCircomCircuit,
     //    (no ceremony needed!).
     let mut rng = rand::thread_rng();
     let t = Instant::now();
-    let sc_proof = prove_sumcheck_compression(circuit, &folded, &mut rng)
+    let sc_proof = prove_sumcheck_compression_opt(circuit, &folded, &mut rng, if parallel { OptFlags::PARALLEL } else { OptFlags::NONE })
         .unwrap_or_else(|e| panic!("failed to build sumcheck compression proof: {e}"));
     let compress_s = t.elapsed().as_secs_f64();
     println!(
@@ -360,7 +362,7 @@ fn benchmark_sumcheck(_engine: &FftQapEngine, circuit: &mut SparseCircomCircuit,
 /// Fold every step witness into one Relaxed-R1CS running instance, exactly as
 /// `nova fold --nifs` does (same transparent Pedersen params, FOLD_PREFIX
 /// challenge, and NIFS_TRANSCRIPT_PREFIX chain), but fully in memory.
-fn nifs_fold(circuit: &mut SparseCircomCircuit, wtns: &[PathBuf]) -> NifsFoldOutput {
+fn nifs_fold(circuit: &mut SparseCircomCircuit, wtns: &[PathBuf], parallel: bool) -> NifsFoldOutput {
     let n_pub_out = circuit.n_pub_out as usize;
     let n_pub_in = circuit.n_pub_in as usize;
     let n_wires = circuit.n_wires as usize;
@@ -416,9 +418,9 @@ fn nifs_fold(circuit: &mut SparseCircomCircuit, wtns: &[PathBuf]) -> NifsFoldOut
                 let w_acc = acc_w.take().expect("running witness must exist");
                 let acc = acc_hash.as_ref().expect("transcript initialized");
                 let challenge = nifs::fold_challenge(acc, &u_acc, &step_u);
-                let (u3, w3) = nifs::fold(
+                let (u3, w3) = nifs::fold_with_opts(
                     &params, &circuit.l, &circuit.r, &circuit.o, &u_acc, &w_acc, &step_u, &step_w,
-                    challenge,
+                    challenge, parallel,
                 );
                 acc_u = Some(u3);
                 acc_w = Some(w3);
