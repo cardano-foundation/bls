@@ -15,7 +15,7 @@ pub struct Args {
 
     /// Path to the step verifying key (from `nova ceremony`).
     /// Not used for NIFS bundles.
-    #[arg(long, value_name = "FILE", required_unless_present_all = ["compression_proof", "sumcheck_proof"])]
+    #[arg(long, value_name = "FILE", required_unless_present_any = ["compression_proof", "sumcheck_proof"])]
     pub verifying_key: Option<PathBuf>,
 
     /// (NIFS bundles, Impl 9) Path to the Groth16 compression proof
