@@ -517,15 +517,88 @@ nova verify --ivc /tmp/vrf_fold.json --sumcheck-proof /tmp/vrf_compress.json
 # → Verified 254 steps: sumcheck compression proof OK, commitments OK, state chain OK
 ```
 
-### Results
+### Benchmarks — VRF step circuit (9 constraints, 254 steps)
 
-| Stage | Output | Size |
+Measured with `benchmark_nova` on a single machine. All tiers fold the same 254 step witnesses from `vrf_verify_nova.circom` (15 wires, 9 constraints, 1 private `sel` bit).
+
+| Tier | Fold | Compress | Verify | Total prover e2e | Proof size | Trusted setup | ZK | On-chain (≤16 KiB) |
+|---|---|---|---|---|---|---|---|---|
+| **Impl 8** step-chain | 2.13 s (8.4 ms/step) | — | 2.30 s (9.1 ms/step) | **4.43 s** | **47.6 KiB** O(N) | per-step ceremony | No | No (grows O(N)) |
+| **Impl 9** NIFS + Groth16 | 1.07 s (4.2 ms/step) | 0.020 s | 0.030 s | **1.12 s** | **5.0 KiB** O(1) | compression ceremony | No | Yes (5.0 KiB) |
+| **Impl 10** NIFS + sumcheck | 1.10 s (4.3 ms/step) | 0.013 s | 0.013 s | **1.12 s** | **5.2 KiB** O(1) | **None** | **Yes** | **Yes** (5.2 KiB) |
+| **Impl 9** + parallel | 1.74 s (6.8 ms/step) | 0.031 s | 0.045 s | **1.82 s** | **5.0 KiB** O(1) | compression ceremony | No | Yes (5.0 KiB) |
+| **Impl 10** + parallel | 1.63 s (6.4 ms/step) | 0.015 s | 0.021 s | **1.67 s** | **5.2 KiB** O(1) | **None** | **Yes** | **Yes** (5.2 KiB) |
+
+> **Impl 8 → 9:** Fold drops 2× (NIFS vs full Groth16 per step); bundle shrinks from 47.6 KiB O(N) to 5.0 KiB O(1); verify drops from 2.3 s to 30 ms (one pairing vs N pairings). Requires a one-time compression ceremony (0.031 s for this 18-constraint compression circuit).
+>
+> **Impl 9 → 10:** Compression and verify become ceremony-free and pairing-free. Proof size stays comparable (5.2 KiB vs 5.0 KiB). ZK comes for free. The transparent sumcheck path is the recommended default for Cardano on-chain verification.
+>
+> **Parallel (Impl 11):** On this 9-constraint step circuit, parallelism adds overhead (rayon thread-pool setup dominates the tiny MSMs). Parallelism is beneficial on larger steps (1.3–1.66× on the 7,724-constraint ed25519 circuits). See the [Impl 11 benchmarks](#implementation-11--parallel-optimizations-opt-parallel) for the ed25519 circuits where it matters.
+>
+> **Trade-off summary:** Impl 10 (NIFS + sumcheck) is the recommended path for Cardano VRF — it has the smallest proof (5.2 KiB), no trusted setup, ZK, and pairing-free verification. Impl 9 is slightly faster to verify (one pairing vs sumcheck + HashPC) but requires a ceremony and is not ZK.
+
+### Comparison: ZKP folding vs native Aiken VRF
+
+Two VRF implementations exist in this repo — both verify the same RFC 9381 ECVRF scheme, but they serve fundamentally different use cases:
+
+| | **Aiken VRF** (`aiken/vrf/`) | **Nova VRF** (`circom/VRF/` + `nova-prover`) |
 |---|---|---|
-| NIFS fold | `/tmp/vrf_fold.json` | 1,760 bytes |
-| Sumcheck compress | `/tmp/vrf_compress.json` | 3,853 bytes |
-| **Total proof** | | **~3.9 KiB** |
+| **What runs on-chain** | Full ECVRF verify (4× G2 scalar muls + hash-to-curve) in a Plutus V3 script | Sumcheck compression proof check (~5 KiB, pairing-free) |
+| **Proof size** | **144 bytes** (96 B Γ + 16 B c + 32 B s) | **5.2 KiB** (sumcheck + commitments) |
+| **Public key size** | 96 bytes (compressed G2) | N/A (key is embedded in witnesses) |
+| **Trusted setup** | None | None (Impl 10 sumcheck) |
+| **ZK** | No — reveals α, π, salt publicly | **Yes** — input/secret stay hidden in the folded proof |
+| **Curve** | BLS12-381 G2 (Plutus builtins) | JubJub (BLS12-381-friendly twisted Edwards) |
+| **Standard compliance** | RFC 9381 ECVRF (drop-in, auditable) | Same scheme, different curve — not RFC-compliant |
+| **Prover work** | Minimal (local EC ops) | ~1.1 s off-chain (254-step IVC fold + compress) |
+| **On-chain cost** | 4× G2 scalar muls (~2–3× more than G1) + SHA-256 | Sumcheck + HashPC check (no pairings, no EC muls) |
+| **Execution budget** | ~20–40% of 10B CPU limit (estimated, G2 muls dominate) | Lower — sumcheck is native-field arithmetic |
+| **Script size** | Compiled Plutus script (needs CIP-33 ref scripts if >16 KiB) | Proof is 5.2 KiB data, not executable code |
+| **BLS key reuse** | **Yes** — same G2 pk as BLS signing keys | No — separate JubJub keypair |
+| **Maturity** | Production-ready Plutus V3 code | POC — benchmarks validated, not audited |
 
-Verification passes. Total on-chain footprint is ~3.9 KiB — well within Cardano's 16 KiB transaction size limit.
+#### When to use Aiken VRF
+
+Use the **native Aiken VRF** when:
+
+- **Public verifiability is required** — anyone can verify the VRF proof on-chain without knowing the secret; the proof and input are public.
+- **BLS key interoperability matters** — the same G2 public key serves both BLS signing and VRF (Ouroboros Praos, Cardano sidechains, drand).
+- **Proof size is critical** — 144 bytes vs 5.2 KiB; every byte costs fees and block space.
+- **No zero-knowledge needed** — the VRF input (α) and proof (π) are meant to be public (e.g., slot leader election, randomness beacons).
+- **Simplicity and auditability** — RFC 9381 compliance, standard Plutus builtins, no custom proving system.
+- **Low prover cost** — the prover just computes EC scalar muls locally; no IVC folding infrastructure.
+
+#### When to use Nova VRF
+
+Use the **ZKP Nova VRF** when:
+
+- **Zero-knowledge is required** — you need to prove "I know a valid VRF proof for this input" without revealing the input, the secret key, or the proof itself. Examples:
+  - Private lottery: prove your ticket is valid without revealing your number.
+  - Sealed-bid auctions: prove VRF output without revealing the bid.
+  - Compliance: prove VRF compliance with a policy without revealing the data.
+- **The computation is part of a larger IVC chain** — if VRF verification is one step in a multi-step computation (e.g., VRF + state transition + Merkle proof), folding amortizes the cost across all steps.
+- **Post-quantum trajectory** — the sumcheck-based compression is commitment-agnostic; swapping Pedersen for lattice commitments (in `lattice-prover`) gives PQ security without changing the VRF circuit.
+- **Aggregation** — multiple VRF proofs can be folded into a single compressed proof, reducing on-chain verification from O(N) to O(1).
+
+#### When NOT to use either
+
+| Scenario | Recommended approach |
+|---|---|
+| Simple randomness beacon (public VRF output) | Aiken VRF — 144 B, minimal cost |
+| Slot leader election (Ouroboros Praos) | Aiken VRF — BLS key reuse, standard |
+| Private VRF (hidden input) | Nova VRF — ZK is the differentiator |
+| VRF as one step in a larger proof | Nova VRF — IVC folding amortizes cost |
+| High-frequency VRF (gaming, lotteries) | Aiken G1 variant (48 B proof, 2–3× faster) |
+| VRF + Merkle + signature in one proof | Nova VRF — fold all steps into one proof |
+
+#### Why two implementations?
+
+The Aiken VRF is the **production baseline** — it is what goes on-chain today: RFC-compliant, auditable, minimal proof size, native Plutus execution. The Nova VRF is the **privacy-preserving extension** — it trades proof size (144 B → 5.2 KiB) and adds prover work (~1.1 s) for zero-knowledge. They are complementary, not competing:
+
+- **Aiken VRF** = "here is my VRF proof, verify it publicly"
+- **Nova VRF** = "I have a valid VRF proof, trust me, don't look at it"
+
+The Nova VRF re-implements the same ECVRF scheme in Circom (JubJub curve) because the IVC folding requires circuit-friendly arithmetic. The Aiken VRF uses Plutus builtins (BLS12-381 G2) for maximum on-chain efficiency. Both produce the same cryptographic guarantee — knowledge of a valid VRF scalar `s` and challenge `c` satisfying the Schnorr equations — but the trust model differs.
 
 ### Files
 
@@ -534,6 +607,7 @@ Verification passes. Total on-chain footprint is ~3.9 KiB — well within Cardan
 - `circom/VRF/vrf_verify.r1cs` / `vrf_verify_nova.r1cs` — compiled R1CS
 - `circom/VRF/vrf_verify_nova_js/vrf_verify_nova.wasm` — compiled WASM for witness gen
 - `circom/VRF/gen_vrf_witnesses.py` — Python witness generator (key gen, VRF proof, step witnesses)
+- `aiken/vrf/lib/vrf/core.ak` — native Aiken VRF (RFC 9381 ECVRF, BLS12-381 G2)
 
 </details>
 
