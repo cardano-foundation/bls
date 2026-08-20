@@ -4,7 +4,7 @@
 //! Without it (Implementation 9), produces a Groth16 compression proof.
 
 use clap::Parser;
-use nova_prover::{run_compress, run_compress_sumcheck};
+use nova_prover::{run_compress_opt, run_compress_sumcheck_opt, OptFlags};
 use std::error::Error;
 use std::path::PathBuf;
 
@@ -38,20 +38,43 @@ pub struct Args {
     /// produces O(log N) proof size.
     #[arg(long)]
     pub sumcheck: bool,
+
+    /// Implementation 11 optimizations (comma-separated):
+    ///   parallel  — use rayon for independent row/column operations
+    ///   lazy      — defer Pedersen MSM to final step
+    ///   all       — enable all optimizations
+    #[arg(long, value_name = "OPTS", default_value = "none")]
+    pub opt: String,
+}
+
+fn parse_opt_flags(s: &str) -> Result<OptFlags, Box<dyn Error>> {
+    let mut flags = OptFlags::NONE;
+    for part in s.split(',') {
+        match part.trim() {
+            "none" | "" => {}
+            "parallel" | "p" => flags.parallel = true,
+            "lazy" | "l" => flags.lazy_commit = true,
+            "all" | "a" => flags = OptFlags::ALL,
+            other => return Err(format!("unknown optimization: '{other}' — valid: parallel, lazy, all, none").into()),
+        }
+    }
+    Ok(flags)
 }
 
 /// Run the `compress` subcommand.
 pub fn run(args: Args) -> Result<(), Box<dyn Error>> {
+    let opts = parse_opt_flags(&args.opt)?;
     if args.sumcheck {
-        run_compress_sumcheck(&args.circuit, &args.steps, &args.out)?;
+        run_compress_sumcheck_opt(&args.circuit, &args.steps, &args.out, opts)?;
     } else {
-        run_compress(
+        run_compress_opt(
             &args.circuit,
             &args.steps,
             args.proving_key
                 .as_deref()
                 .expect("clap requires --proving-key unless --sumcheck"),
             &args.out,
+            opts,
         )?;
     }
     Ok(())
