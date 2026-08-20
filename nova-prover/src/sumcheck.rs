@@ -35,6 +35,7 @@
 use ark_bls12_381::Fr;
 use ark_ff::{BigInteger, One, PrimeField, Zero};
 use blake2::{Blake2b512, Digest};
+use rayon::prelude::*;
 
 use crate::nifs;
 
@@ -140,6 +141,22 @@ pub fn prove(
     u: Fr,
     e: &[Fr],
 ) -> (SumcheckProof, Vec<Fr>) {
+    prove_with_opts(l, r_mat, o, z, u, e, false)
+}
+
+/// Like [`prove`] but with optimization flags.
+///
+/// When `parallel` is true, the per-row product computation uses rayon for
+/// parallel iteration over constraint rows.
+pub fn prove_with_opts(
+    l: &[Vec<(u32, Fr)>],
+    r_mat: &[Vec<(u32, Fr)>],
+    o: &[Vec<(u32, Fr)>],
+    z: &[Fr],
+    u: Fr,
+    e: &[Fr],
+    parallel: bool,
+) -> (SumcheckProof, Vec<Fr>) {
     let n = l.len();
     assert_eq!(r_mat.len(), n);
     assert_eq!(o.len(), n);
@@ -162,14 +179,26 @@ pub fn prove(
     }
 
     // Compute per-row products: P(j) = (AZ)_j · (BZ)_j − u · (CZ)_j − e[j].
-    let mut current: Vec<Fr> = (0..n)
-        .map(|j| {
-            let az = eval_row_mle(&l[j], z);
-            let bz = eval_row_mle(&r_mat[j], z);
-            let cz = eval_row_mle(&o[j], z);
-            az * bz - u * cz - e[j]
-        })
-        .collect();
+    let mut current: Vec<Fr> = if parallel {
+        (0..n)
+            .into_par_iter()
+            .map(|j| {
+                let az = eval_row_mle(&l[j], z);
+                let bz = eval_row_mle(&r_mat[j], z);
+                let cz = eval_row_mle(&o[j], z);
+                az * bz - u * cz - e[j]
+            })
+            .collect()
+    } else {
+        (0..n)
+            .map(|j| {
+                let az = eval_row_mle(&l[j], z);
+                let bz = eval_row_mle(&r_mat[j], z);
+                let cz = eval_row_mle(&o[j], z);
+                az * bz - u * cz - e[j]
+            })
+            .collect()
+    };
     current.resize(n_padded, Fr::zero());
 
     let mut claims = Vec::with_capacity(num_rounds + 1);
@@ -1133,6 +1162,50 @@ mod proptests {
 
             let expected_rounds = log2ceil(next_power_of_two(n_constraints));
             prop_assert_eq!(proof.polys.len(), expected_rounds);
+        }
+
+        /// Property: parallel sumcheck prover produces identical proof to sequential.
+        #[test]
+        fn prop_parallel_sumcheck_matches_sequential(
+            a1 in 1u64..500,
+            b1 in 1u64..500,
+            a2 in 1u64..500,
+            b2 in 1u64..500,
+        ) {
+            let l = vec![
+                vec![(1u32, Fr::from(1u64))],
+                vec![(4u32, Fr::from(1u64))],
+            ];
+            let r_mat = vec![
+                vec![(2u32, Fr::from(1u64))],
+                vec![(5u32, Fr::from(1u64))],
+            ];
+            let o = vec![
+                vec![(3u32, Fr::from(1u64))],
+                vec![(6u32, Fr::from(1u64))],
+            ];
+            let z = vec![
+                Fr::from(1u64),
+                Fr::from(a1),
+                Fr::from(b1),
+                Fr::from(a1) * Fr::from(b1),
+                Fr::from(a2),
+                Fr::from(b2),
+                Fr::from(a2) * Fr::from(b2),
+            ];
+            let u = Fr::from(1u64);
+            let e = vec![Fr::zero(); 2];
+
+            let (seq_proof, seq_r) = prove_with_opts(&l, &r_mat, &o, &z, u, &e, false);
+            let (par_proof, par_r) = prove_with_opts(&l, &r_mat, &o, &z, u, &e, true);
+
+            prop_assert_eq!(proof_hash(&seq_proof), proof_hash(&par_proof));
+            prop_assert_eq!(seq_r, par_r);
+
+            let (ok_seq, _, _) = verify(&seq_proof);
+            let (ok_par, _, _) = verify(&par_proof);
+            prop_assert!(ok_seq, "sequential proof must verify");
+            prop_assert!(ok_par, "parallel proof must verify");
         }
     }
 }
