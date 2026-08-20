@@ -1,6 +1,20 @@
 use nova/types.{FinalInstance, CircuitParams, SlimProof}
 use nova/verifier
 
+/// Plutus V3 spending validator: verifies a Nova slim sumcheck proof.
+/// The datum carries the expected circuit parameters; the redeemer is the proof.
+validator nova_slim_verify {
+  spend(datum: Option<CircuitParams>, redeemer: SlimProof, _self: Data, _tx: Data) -> Bool {
+    expect Some(params) = datum
+    redeemer.circuit_params == params
+      && verifier.verify_slim(redeemer)
+  }
+
+  else(_) {
+    fail
+  }
+}
+
 test test_verify_single_round_valid() {
   let proof = SlimProof {
     circuit_params: CircuitParams {
