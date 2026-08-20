@@ -4,7 +4,7 @@
 //! Without it (Implementation 9), produces a Groth16 compression proof.
 
 use clap::Parser;
-use nova_prover::{run_compress_opt, run_compress_sumcheck_opt, OptFlags};
+use nova_prover::{run_compress_opt, run_compress_sumcheck_opt, run_compress_sumcheck_slim, OptFlags};
 use std::error::Error;
 use std::path::PathBuf;
 

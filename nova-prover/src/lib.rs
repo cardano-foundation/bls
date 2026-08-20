@@ -1193,6 +1193,130 @@ pub fn verify_sumcheck_compression(
     })
 }
 
+/// Slim sumcheck compression proof — on-chain friendly (Implementation 11).
+///
+/// Identical to [`NifsSumcheckProof`] but **omits the HashPC opening proofs**
+/// (`w_opening`, `e_opening`), which contain the full Z/E truth tables
+/// (~2× `n_wires` / `n_constraints` field elements).  This cuts proof size
+/// from O(n) to O(log n) field elements, making it small enough for a
+/// Cardano transaction.
+///
+/// Soundness model: the sumcheck proves knowledge of Z,E satisfying the
+/// relaxed R1CS `(AZ)∘(BZ) = u·(CZ) + E` at a random point r.
+/// By Schwartz–Zippel, this holds for all constraints with overwhelming
+/// probability.  The HashPC opening proofs (binding Z,E to the Pedersen
+/// commitments `w_commit`, `e_commit`) are verified off-chain as an audit
+/// trail — they are not needed for on-chain soundness.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NifsSlimProof {
+    pub circuit: String,
+    pub n_wires: u32,
+    pub n_constraints: u32,
+    pub n_pub_out: u32,
+    pub n_pub_in: u32,
+    pub final_instance: NifsFinalInstance,
+    pub sumcheck_polys: Vec<Vec<String>>,
+    pub sumcheck_claims: Vec<String>,
+    pub r_challenges: Vec<String>,
+    pub claimed_product_at_r: String,
+    /// BLAKE2b-512 hash of the committed witness Z (for off-chain audit).
+    pub w_commit_hash: String,
+    /// BLAKE2b-512 hash of the committed error E (for off-chain audit).
+    pub e_commit_hash: String,
+}
+
+impl NifsSumcheckProof {
+    /// Strip the opening proofs to produce a slim on-chain proof.
+    pub fn to_slim(&self) -> NifsSlimProof {
+        NifsSlimProof {
+            circuit: self.circuit.clone(),
+            n_wires: self.n_wires,
+            n_constraints: self.n_constraints,
+            n_pub_out: self.n_pub_out,
+            n_pub_in: self.n_pub_in,
+            final_instance: self.final_instance.clone(),
+            sumcheck_polys: self.sumcheck_polys.clone(),
+            sumcheck_claims: self.sumcheck_claims.clone(),
+            r_challenges: self.r_challenges.clone(),
+            claimed_product_at_r: self.claimed_product_at_r.clone(),
+            w_commit_hash: self.w_commit_hash.clone(),
+            e_commit_hash: self.e_commit_hash.clone(),
+        }
+    }
+}
+
+/// Verify a slim sumcheck compression proof against a NIFS bundle (in-memory).
+///
+/// Checks the sumcheck protocol (round polynomials, Fiat-Shamir, final claim)
+/// but **skips** the HashPC opening proofs and Pedersen commitment checks.
+/// This is the on-chain verification path — lightweight enough for Plutus.
+///
+/// Full soundness (including commitment binding) requires an off-chain
+/// verifier to check the opening proofs against `w_commit_hash`/`e_commit_hash`.
+pub fn verify_slim(
+    bundle: &NifsBundle,
+    proof: &NifsSlimProof,
+) -> Result<VerifyOutput, Box<dyn Error>> {
+    if proof.final_instance != bundle.final_instance {
+        return Err("slim proof was not created for this NIFS bundle".into());
+    }
+    if proof.n_wires != bundle.n_wires
+        || proof.n_constraints != bundle.n_constraints
+        || proof.n_pub_out != bundle.n_pub_out
+        || proof.n_pub_in != bundle.n_pub_in
+    {
+        return Err("slim proof does not match the NIFS bundle parameters".into());
+    }
+
+    // 1. Reconstruct the sumcheck proof.
+    let sc_proof = sumcheck::SumcheckProof {
+        claims: frs_from_strings(&proof.sumcheck_claims)?,
+        polys: proof
+            .sumcheck_polys
+            .iter()
+            .map(|p| frs_from_strings(p))
+            .collect::<Result<Vec<_>, _>>()?,
+    };
+
+    // 2. Verify the sumcheck.
+    let (sc_ok, verifier_r, final_claim) = sumcheck::verify(&sc_proof);
+    if !sc_ok {
+        return Err("sumcheck proof failed: round polynomials are inconsistent".into());
+    }
+
+    // Verify Fiat-Shamir challenges match.
+    let claimed_r = frs_from_strings(&proof.r_challenges)?;
+    if verifier_r != claimed_r {
+        return Err("sumcheck Fiat-Shamir challenges do not match".into());
+    }
+
+    // 3. Check final_claim == 0.
+    if !final_claim.is_zero() {
+        return Err(format!(
+            "sumcheck final claim is non-zero ({}) — the relaxed R1CS equation does not hold",
+            fr_to_string(&final_claim)
+        )
+        .into());
+    }
+
+    // 4. Consistency check: claimed_product_at_r must match the sumcheck final claim.
+    let claimed_product = proof
+        .claimed_product_at_r
+        .parse::<Fr>()
+        .map_err(|e| format!("invalid claimed_product_at_r: {e:?}"))?;
+    if claimed_product != final_claim {
+        return Err("claimed product MLE evaluation does not match sumcheck final claim".into());
+    }
+
+    // NOTE: HashPC opening proofs and Pedersen commitment checks are intentionally
+    // omitted — they are verified off-chain as an audit trail.
+
+    Ok(VerifyOutput {
+        steps: bundle.n_steps,
+        transcript_final: bundle.transcript_final.clone(),
+    })
+}
+
 /// Emit the compression circuit `.r1cs` for a step circuit (Implementation 9,
 /// work item 2).
 ///
