@@ -1981,4 +1981,363 @@ mod tests {
         let w_commit = nifs::commit(&params.basis_w, &fold_out.final_witness.w);
         assert_eq!(fold_out.final_instance.w_commit, w_commit);
     }
+
+    // ── Slim-proof tests (Implementation 11) ──────────────────────────
+
+    #[test]
+    fn slim_proof_is_much_smaller_than_full() {
+        let tmp = tempfile::tempdir().unwrap();
+        let r1cs_path = tmp.path().join("step.r1cs");
+        let steps_dir = tmp.path().join("steps");
+        fs::write(&r1cs_path, step_r1cs_bytes()).unwrap();
+        fs::create_dir(&steps_dir).unwrap();
+
+        let mut state = 2u64;
+        for (i, x) in [3u64, 5, 7].iter().enumerate() {
+            state = write_step_wtns(&steps_dir, i, state, *x);
+        }
+
+        let fold_out = run_fold_nifs(&r1cs_path, &steps_dir).unwrap();
+        let c = load_circuit(&r1cs_path).unwrap();
+        let mut rng = rand::thread_rng();
+        let sc = prove_sumcheck_compression(&c, &fold_out, &mut rng).unwrap();
+        let slim = sc.to_slim();
+
+        let full_json = serde_json::to_string(&sc).unwrap();
+        let slim_json = serde_json::to_string(&slim).unwrap();
+
+        // For the tiny 1-constraint test circuit the difference is modest;
+        // on real circuits (7K+ constraints) the slim proof is ~98 % smaller.
+        assert!(
+            slim_json.len() < full_json.len(),
+            "slim proof should be smaller than full: slim={} full={}",
+            slim_json.len(),
+            full_json.len()
+        );
+        assert!(!slim.w_commit_hash.is_empty());
+        assert!(!slim.e_commit_hash.is_empty());
+        // The opening tables are structurally absent from the slim JSON.
+        assert!(
+            !slim_json.contains("w_opening"),
+            "slim JSON must not contain w_opening"
+        );
+        assert!(
+            !slim_json.contains("e_opening"),
+            "slim JSON must not contain e_opening"
+        );
+        // The full JSON does contain them.
+        assert!(full_json.contains("w_opening"));
+        assert!(full_json.contains("e_opening"));
+    }
+
+    #[test]
+    fn slim_verify_accepts_valid_proof() {
+        let tmp = tempfile::tempdir().unwrap();
+        let r1cs_path = tmp.path().join("step.r1cs");
+        let steps_dir = tmp.path().join("steps");
+        fs::write(&r1cs_path, step_r1cs_bytes()).unwrap();
+        fs::create_dir(&steps_dir).unwrap();
+
+        let mut state = 2u64;
+        for (i, x) in [3u64, 5, 7].iter().enumerate() {
+            state = write_step_wtns(&steps_dir, i, state, *x);
+        }
+
+        let fold_out = run_fold_nifs(&r1cs_path, &steps_dir).unwrap();
+        let c = load_circuit(&r1cs_path).unwrap();
+        let mut rng = rand::thread_rng();
+        let sc = prove_sumcheck_compression(&c, &fold_out, &mut rng).unwrap();
+        let slim = sc.to_slim();
+
+        let v_full = verify_sumcheck_compression(&fold_out.bundle, &sc).unwrap();
+        let v_slim = verify_slim(&fold_out.bundle, &slim).unwrap();
+        assert_eq!(v_full.steps, v_slim.steps);
+        assert_eq!(v_full.transcript_final, v_slim.transcript_final);
+    }
+
+    #[test]
+    fn slim_verify_rejects_tampered_claims() {
+        let tmp = tempfile::tempdir().unwrap();
+        let r1cs_path = tmp.path().join("step.r1cs");
+        let steps_dir = tmp.path().join("steps");
+        fs::write(&r1cs_path, step_r1cs_bytes()).unwrap();
+        fs::create_dir(&steps_dir).unwrap();
+
+        let mut state = 2u64;
+        for (i, x) in [3u64, 5, 7].iter().enumerate() {
+            state = write_step_wtns(&steps_dir, i, state, *x);
+        }
+
+        let fold_out = run_fold_nifs(&r1cs_path, &steps_dir).unwrap();
+        let c = load_circuit(&r1cs_path).unwrap();
+        let mut rng = rand::thread_rng();
+        let mut slim = prove_sumcheck_compression(&c, &fold_out, &mut rng)
+            .unwrap()
+            .to_slim();
+
+        slim.sumcheck_claims[0] = fr_to_string(&(Fr::from(42u64)));
+        assert!(verify_slim(&fold_out.bundle, &slim).is_err());
+    }
+
+    #[test]
+    fn slim_verify_rejects_tampered_final_instance() {
+        let tmp = tempfile::tempdir().unwrap();
+        let r1cs_path = tmp.path().join("step.r1cs");
+        let steps_dir = tmp.path().join("steps");
+        fs::write(&r1cs_path, step_r1cs_bytes()).unwrap();
+        fs::create_dir(&steps_dir).unwrap();
+
+        let mut state = 2u64;
+        for (i, x) in [3u64, 5, 7].iter().enumerate() {
+            state = write_step_wtns(&steps_dir, i, state, *x);
+        }
+
+        let fold_out = run_fold_nifs(&r1cs_path, &steps_dir).unwrap();
+        let c = load_circuit(&r1cs_path).unwrap();
+        let mut rng = rand::thread_rng();
+        let mut slim = prove_sumcheck_compression(&c, &fold_out, &mut rng)
+            .unwrap()
+            .to_slim();
+
+        slim.final_instance.u = fr_to_string(&(Fr::from(999u64)));
+        assert!(verify_slim(&fold_out.bundle, &slim).is_err());
+    }
+
+    #[test]
+    fn slim_verify_does_not_check_commitment_hashes() {
+        // Documentation test: slim verifier intentionally skips Pedersen/HashPC
+        // checks. If someone accidentally re-adds them, this breaks.
+        let tmp = tempfile::tempdir().unwrap();
+        let r1cs_path = tmp.path().join("step.r1cs");
+        let steps_dir = tmp.path().join("steps");
+        fs::write(&r1cs_path, step_r1cs_bytes()).unwrap();
+        fs::create_dir(&steps_dir).unwrap();
+
+        let mut state = 2u64;
+        for (i, x) in [3u64, 5, 7].iter().enumerate() {
+            state = write_step_wtns(&steps_dir, i, state, *x);
+        }
+
+        let fold_out = run_fold_nifs(&r1cs_path, &steps_dir).unwrap();
+        let c = load_circuit(&r1cs_path).unwrap();
+        let mut rng = rand::thread_rng();
+        let mut slim = prove_sumcheck_compression(&c, &fold_out, &mut rng)
+            .unwrap()
+            .to_slim();
+
+        slim.w_commit_hash = "00".repeat(64);
+        slim.e_commit_hash = "00".repeat(64);
+
+        assert!(
+            verify_slim(&fold_out.bundle, &slim).is_ok(),
+            "slim verifier must not inspect commitment hashes"
+        );
+    }
+
+    #[test]
+    fn slim_verify_rejects_wrong_r_challenges() {
+        let tmp = tempfile::tempdir().unwrap();
+        let r1cs_path = tmp.path().join("step.r1cs");
+        let steps_dir = tmp.path().join("steps");
+        fs::write(&r1cs_path, step_r1cs_bytes()).unwrap();
+        fs::create_dir(&steps_dir).unwrap();
+
+        let mut state = 2u64;
+        for (i, x) in [3u64, 5, 7].iter().enumerate() {
+            state = write_step_wtns(&steps_dir, i, state, *x);
+        }
+
+        let fold_out = run_fold_nifs(&r1cs_path, &steps_dir).unwrap();
+        let c = load_circuit(&r1cs_path).unwrap();
+        let mut rng = rand::thread_rng();
+        let mut slim = prove_sumcheck_compression(&c, &fold_out, &mut rng)
+            .unwrap()
+            .to_slim();
+
+        if !slim.r_challenges.is_empty() {
+            slim.r_challenges[0] = fr_to_string(&(Fr::from(12345u64)));
+            assert!(verify_slim(&fold_out.bundle, &slim).is_err());
+        }
+    }
+
+    // ── Folding edge cases ────────────────────────────────────────────
+
+    #[test]
+    fn nifs_fold_single_step() {
+        let tmp = tempfile::tempdir().unwrap();
+        let r1cs_path = tmp.path().join("step.r1cs");
+        let steps_dir = tmp.path().join("steps");
+        fs::write(&r1cs_path, step_r1cs_bytes()).unwrap();
+        fs::create_dir(&steps_dir).unwrap();
+
+        let state = 2u64;
+        write_step_wtns(&steps_dir, 0, state, 3u64);
+
+        let fold_out = run_fold_nifs(&r1cs_path, &steps_dir).unwrap();
+        assert_eq!(fold_out.bundle.n_steps, 1);
+        assert_eq!(fold_out.final_instance.u, Fr::from(1u64));
+        assert!(fold_out.final_witness.e.iter().all(|x| x.is_zero()));
+    }
+
+    #[test]
+    fn nifs_fold_empty_steps_fails() {
+        let tmp = tempfile::tempdir().unwrap();
+        let r1cs_path = tmp.path().join("step.r1cs");
+        let steps_dir = tmp.path().join("steps");
+        fs::write(&r1cs_path, step_r1cs_bytes()).unwrap();
+        fs::create_dir(&steps_dir).unwrap();
+
+        assert!(run_fold_nifs(&r1cs_path, &steps_dir).is_err());
+    }
+
+    #[test]
+    fn nifs_fold_detects_broken_chain() {
+        let tmp = tempfile::tempdir().unwrap();
+        let r1cs_path = tmp.path().join("step.r1cs");
+        let steps_dir = tmp.path().join("steps");
+        fs::write(&r1cs_path, step_r1cs_bytes()).unwrap();
+        fs::create_dir(&steps_dir).unwrap();
+
+        let state0 = 2u64;
+        let state1 = write_step_wtns(&steps_dir, 0, state0, 3u64);
+        let _ = write_step_wtns(&steps_dir, 1, state1 + 1, 5u64); // break chain
+
+        let err = fold_nifs(&r1cs_path, &steps_dir, OptFlags::NONE).unwrap_err();
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("state_in does not chain"),
+            "expected chain-break error, got: {msg}"
+        );
+    }
+
+    // ── Parameter-mismatch adversarial tests ──────────────────────────
+
+    #[test]
+    fn verify_rejects_wrong_circuit_metadata() {
+        let tmp = tempfile::tempdir().unwrap();
+        let r1cs_path = tmp.path().join("step.r1cs");
+        let steps_dir = tmp.path().join("steps");
+        fs::write(&r1cs_path, step_r1cs_bytes()).unwrap();
+        fs::create_dir(&steps_dir).unwrap();
+
+        let mut state = 2u64;
+        for (i, x) in [3u64, 5, 7].iter().enumerate() {
+            state = write_step_wtns(&steps_dir, i, state, *x);
+        }
+
+        let fold_out = run_fold_nifs(&r1cs_path, &steps_dir).unwrap();
+        let c = load_circuit(&r1cs_path).unwrap();
+        let mut rng = rand::thread_rng();
+        let sc = prove_sumcheck_compression(&c, &fold_out, &mut rng).unwrap();
+
+        let mut bad_bundle = fold_out.bundle.clone();
+        bad_bundle.n_constraints += 1;
+        assert!(verify_sumcheck_compression(&bad_bundle, &sc).is_err());
+    }
+
+    #[test]
+    fn verify_rejects_malformed_field_strings() {
+        let tmp = tempfile::tempdir().unwrap();
+        let r1cs_path = tmp.path().join("step.r1cs");
+        let steps_dir = tmp.path().join("steps");
+        fs::write(&r1cs_path, step_r1cs_bytes()).unwrap();
+        fs::create_dir(&steps_dir).unwrap();
+
+        let mut state = 2u64;
+        for (i, x) in [3u64, 5, 7].iter().enumerate() {
+            state = write_step_wtns(&steps_dir, i, state, *x);
+        }
+
+        let fold_out = run_fold_nifs(&r1cs_path, &steps_dir).unwrap();
+        let c = load_circuit(&r1cs_path).unwrap();
+        let mut rng = rand::thread_rng();
+        let mut sc = prove_sumcheck_compression(&c, &fold_out, &mut rng).unwrap();
+
+        sc.claimed_product_at_r = "not_a_number".to_string();
+        assert!(verify_sumcheck_compression(&fold_out.bundle, &sc).is_err());
+    }
+
+    // ── Boundary step-count E2E tests for sumcheck ────────────────────
+
+    #[test]
+    fn sumcheck_exact_power_of_two_constraints() {
+        for &n in &[1usize, 2, 4, 8] {
+            let tmp = tempfile::tempdir().unwrap();
+            let r1cs_path = tmp.path().join("step.r1cs");
+            let steps_dir = tmp.path().join("steps");
+            fs::write(&r1cs_path, step_r1cs_bytes()).unwrap();
+            fs::create_dir(&steps_dir).unwrap();
+
+            let mut state = 2u64;
+            for i in 0..n {
+                state = write_step_wtns(&steps_dir, i, state, (i as u64) + 3);
+            }
+
+            let fold_out = run_fold_nifs(&r1cs_path, &steps_dir).unwrap();
+            let c = load_circuit(&r1cs_path).unwrap();
+            let mut rng = rand::thread_rng();
+            let sc = prove_sumcheck_compression(&c, &fold_out, &mut rng).unwrap();
+            assert!(
+                verify_sumcheck_compression(&fold_out.bundle, &sc).is_ok(),
+                "failed for n={n}"
+            );
+        }
+    }
+
+    #[test]
+    fn sumcheck_just_above_power_of_two() {
+        // 3 constraints in the step circuit -> padded to 4 -> 2 rounds.
+        // (step_r1cs_bytes has 1 constraint, so we reuse it with 3 steps)
+        let n = 3usize;
+        let tmp = tempfile::tempdir().unwrap();
+        let r1cs_path = tmp.path().join("step.r1cs");
+        let steps_dir = tmp.path().join("steps");
+        fs::write(&r1cs_path, step_r1cs_bytes()).unwrap();
+        fs::create_dir(&steps_dir).unwrap();
+
+        let mut state = 2u64;
+        for i in 0..n {
+            state = write_step_wtns(&steps_dir, i, state, (i as u64) + 3);
+        }
+
+        let fold_out = run_fold_nifs(&r1cs_path, &steps_dir).unwrap();
+        let c = load_circuit(&r1cs_path).unwrap();
+        let mut rng = rand::thread_rng();
+        let sc = prove_sumcheck_compression(&c, &fold_out, &mut rng).unwrap();
+        assert!(verify_sumcheck_compression(&fold_out.bundle, &sc).is_ok());
+    }
+
+    #[test]
+    fn parallel_slim_matches_sequential_slim() {
+        let tmp = tempfile::tempdir().unwrap();
+        let r1cs_path = tmp.path().join("step.r1cs");
+        let steps_dir = tmp.path().join("steps");
+        fs::write(&r1cs_path, step_r1cs_bytes()).unwrap();
+        fs::create_dir(&steps_dir).unwrap();
+
+        let mut state = 2u64;
+        for (i, x) in [3u64, 5, 7].iter().enumerate() {
+            state = write_step_wtns(&steps_dir, i, state, *x);
+        }
+
+        let c = load_circuit(&r1cs_path).unwrap();
+
+        let fold_seq = run_fold_nifs_opt(&r1cs_path, &steps_dir, OptFlags::NONE).unwrap();
+        let fold_par = run_fold_nifs_opt(&r1cs_path, &steps_dir, OptFlags::PARALLEL).unwrap();
+
+        let mut rng = rand::thread_rng();
+        let slim_seq = prove_sumcheck_compression_opt(&c, &fold_seq, &mut rng, OptFlags::NONE)
+            .unwrap()
+            .to_slim();
+        let mut rng = rand::thread_rng();
+        let slim_par = prove_sumcheck_compression_opt(&c, &fold_par, &mut rng, OptFlags::PARALLEL)
+            .unwrap()
+            .to_slim();
+
+        let v_seq = verify_slim(&fold_seq.bundle, &slim_seq).unwrap();
+        let v_par = verify_slim(&fold_par.bundle, &slim_par).unwrap();
+        assert_eq!(v_seq.steps, v_par.steps);
+        assert_eq!(v_seq.transcript_final, v_par.transcript_final);
+        assert_eq!(fold_seq.bundle, fold_par.bundle);
+    }
 }

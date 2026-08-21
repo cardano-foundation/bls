@@ -904,6 +904,80 @@ mod tests {
 
         assert!(!verify_opening(&hash, &proof, &wrong_eval, &r));
     }
+
+    // ── HashPC boundary / edge cases ────────────────────────────────
+
+    #[test]
+    fn hashpc_empty_vector() {
+        let params = PedersenParams::from_seed(b"empty", 0, 0);
+        let v: Vec<Fr> = vec![];
+        let (hash, pt) = poly_commit(&v, &params.basis_w);
+        assert_eq!(hash, poly_commit(&v, &params.basis_w).0);
+        assert_eq!(pt, ark_bls12_381::G1Affine::identity());
+    }
+
+    #[test]
+    fn hashpc_single_element() {
+        let v = vec![Fr::from(42u64)];
+        let params = PedersenParams::from_seed(b"single", 1, 1);
+        let (hash, _) = poly_commit(&v, &params.basis_w);
+        let opening = create_opening(&v);
+        let r: Vec<Fr> = vec![];
+        assert!(verify_opening(&hash, &opening, &Fr::from(42u64), &r));
+    }
+
+    #[test]
+    fn hashpc_opening_rejects_tampered_hash() {
+        let v = vec![
+            Fr::from(10u64),
+            Fr::from(20u64),
+            Fr::from(30u64),
+            Fr::from(40u64),
+        ];
+        let params = PedersenParams::from_seed(b"tamper-hash", 4, 1);
+        let (hash, _) = poly_commit(&v, &params.basis_w);
+        let mut opening = create_opening(&v);
+        opening.table[0] += Fr::from(1u64);
+        let r = vec![Fr::from(7u64), Fr::from(11u64)];
+        let claimed = eval_dense_mle(&v, &r);
+        assert!(!verify_opening(&hash, &opening, &claimed, &r));
+    }
+
+    #[test]
+    fn eval_dense_mle_rejects_mismatched_r_length() {
+        // table length 4 -> k=2, so r must have length 2.
+        let v = vec![
+            Fr::from(10u64),
+            Fr::from(20u64),
+            Fr::from(30u64),
+            Fr::from(40u64),
+        ];
+        let r_ok = vec![Fr::from(1u64), Fr::from(2u64)];
+        let _ = eval_dense_mle(&v, &r_ok);
+        // r with 3 bits should panic (assertion in eval_dense_mle).
+        let r_bad = vec![Fr::from(1u64), Fr::from(2u64), Fr::from(3u64)];
+        let result = std::panic::catch_unwind(|| eval_dense_mle(&v, &r_bad));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn sumcheck_zero_constraints_trivial_case() {
+        // 1 constraint -> 0 rounds, already golden-tested; this is an explicit
+        // boundary reminder that 1 constraint is the minimum.
+        let (l, r_mat, o) = simple_r1cs();
+        let z = vec![
+            Fr::from(1u64),
+            Fr::from(3u64),
+            Fr::from(5u64),
+            Fr::from(15u64),
+        ];
+        let (proof, r_challenges) = prove(&l, &r_mat, &o, &z, Fr::from(1u64), &[Fr::zero()]);
+        assert_eq!(proof.polys.len(), 0);
+        assert!(r_challenges.is_empty());
+        let (ok, _, final_claim) = verify(&proof);
+        assert!(ok);
+        assert_eq!(final_claim, Fr::zero());
+    }
 }
 
 // ── Property-based tests (proptest) ────────────────────────────────
