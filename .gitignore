@@ -1,7 +1,6 @@
 # Aiken build artifacts
-aiken/*/build/
-aiken/*/*/build/
-clis/*/aiken/build/
+aiken/**/build/
+clis/**/aiken/build/
 
 # Aiken blueprints
 **/plutus.json
