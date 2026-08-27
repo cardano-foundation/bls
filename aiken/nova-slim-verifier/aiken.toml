@@ -1,0 +1,18 @@
+name = "paweljakubas/nova-slim-verifier"
+version = "0.0.0"
+compiler = "v1.1.21"
+plutus = "v3"
+license = "Apache-2.0"
+description = "Aiken contracts for project 'paweljakubas/nova-slim-verifier'"
+
+[repository]
+user = "paweljakubas"
+project = "nova-slim-verifier"
+platform = "github"
+
+[[dependencies]]
+name = "aiken-lang/stdlib"
+version = "v3.1.0"
+source = "github"
+
+[config]
