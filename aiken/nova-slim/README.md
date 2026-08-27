@@ -37,8 +37,8 @@ against the commitment hashes stored in the datum.
 
 ```bash
 # Clone the verifier
-git clone https://github.com/paweljakubas/nova-slim-verifier.git
-cd nova-slim-verifier
+git clone https://github.com/paweljakubas/nova-slim.git
+cd nova-slim
 
 # Type-check and run tests
 aiken check
@@ -122,7 +122,7 @@ aiken check
 
 Expected output:
 ```
-  Compiling paweljakubas/nova-slim-verifier
+  Compiling paweljakubas/nova-slim
    Collecting all tests scenarios across all modules
 {
   "summary": {
