@@ -18,6 +18,7 @@ This directory contains Circom circuits that can be loaded by the Rust prover vi
 | [`CardanoKeyOwnership/`](CardanoKeyOwnership/README.md) | Key ownership: JubJub variant | ~4K | ✅ Working e2e |
 | [`CardanoKeyOwnership/`](CardanoKeyOwnership/README.md) | Key ownership: Ed25519 variant (real Cardano wallet key) | ~1.97M | ✅ Working e2e |
 | [`AnonymousAirdrop/`](AnonymousAirdrop/README.md) | SMT membership + score threshold — anonymous reputation-gated airdrop | 1,561 (depth 2) | ✅ Working e2e |
+| [`Predicate/`](Predicate/README.md) | Composite selective disclosure — Poseidon + EdDSA-JubJub + range + Merkle predicate over a signed credential | 10,456 (depth 2) | ✅ Working e2e |
 
 ---
 
