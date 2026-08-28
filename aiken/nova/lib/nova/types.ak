@@ -42,3 +42,18 @@ pub type SlimProof {
   /// BLAKE2b-256 hash of the committed error E (for off-chain audit).
   e_commit_hash: ByteArray,
 }
+
+/// The on-chain policy of a selective-disclosure Predicate gate.
+///
+/// These are the scheme-constant public inputs that a valid predicate proof
+/// must commit to (the public state carried in `final_instance.x[0..3]`):
+///   x[0] = issuer_pk_u, x[1] = issuer_pk_v, x[2] = current_year,
+///   x[3] = country_root, x[4] = eligible (= 1).
+/// A gate script binds these via the datum, so one reusable script serves many
+/// issuers / country sets / epochs without recompiling.
+pub type PredicatePolicy {
+  issuer_pk_u: Int,
+  issuer_pk_v: Int,
+  current_year: Int,
+  country_root: Int,
+}

@@ -322,9 +322,9 @@ Both paths use BLS12-381 and the same Circom circuit infrastructure. The key tra
 
 | Component | Status | Why It Is Needed |
 |-----------|--------|------------------|
-| **Predicate step circuit (Circom)** | 🔄 In progress | Compose Poseidon + range + Merkle + EdDSA into a single Nova step circuit |
-| **Gate Script with Nova verifier** | 🔄 In progress | Aiken validator parameterized by circuit params, calling the Nova sumcheck verifier |
-| **End-to-end selective-disclosure test** | ❌ Not started | Full Step 1–6 flow with a real predicate, issued credential, and unlock tx |
+| **Predicate step circuit (Circom)** | ✅ Done | `circom/Predicate/predicate_nova.circom`, verified N=1 fold → slim proof |
+| **Gate Script with Nova verifier** | ✅ Done | `aiken/nova/validators/predicate_gate.ak` (policy in datum, on-chain Fiat-Shamir sumcheck) |
+| **End-to-end selective-disclosure test** | 🔄 In progress | Full Step 1–6 flow with a real predicate, issued credential, and unlock tx |
 
 </details>
 
