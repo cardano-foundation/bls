@@ -143,11 +143,53 @@ Verification result: VALID
 
 ---
 
+## Nova IVC step circuit
+
+`predicate_nova.circom` wraps the whole `Predicate(depth)` into a Nova step
+circuit ("single monolithic step" design). Every step re-proves the full
+predicate and chains the 5 public state scalars unchanged:
+
+```
+Public state (chained):  pku, pkv, current_year, country_root, eligible
+   →  pk_u_out, pk_v_out, current_year_out, country_root_out, eligible_out
+Private witness:         dob_year, country, Ru, Rv, S, sibling[], direction[]
+n_pub_in == n_pub_out == 5   (validated by `nova params`)
+```
+
+**Compile:**
+
+```bash
+circom predicate_nova.circom --r1cs --wasm --sym --prime bls12381 \
+  -o pred_out -l ../EdDSAJubJub -l ../PoseidonPreimage \
+  -l ../EdDSAJubJub/node_modules/circomlib/circuits
+```
+
+**Fold (N = 1) and verify** (see [`clis/nova/README.md`](../../clis/nova/README.md)):
+
+```bash
+mkdir -p /tmp/pred_steps
+snarkjs wtns calculate pred_out/predicate_nova_js/predicate_nova.wasm \
+  input.json /tmp/pred_steps/step_0000.wtns
+
+nova params  --circuit pred_out/predicate_nova.r1cs                     # n_pub_in == n_pub_out == 5
+nova fold    --nifs   --circuit pred_out/predicate_nova.r1cs --steps /tmp/pred_steps/ --out bundle.ivc.json
+nova compress --slim  --circuit pred_out/predicate_nova.r1cs --steps /tmp/pred_steps/ --out slim.proof.json
+nova verify  --ivc bundle.ivc.json --slim-proof slim.proof.json
+# → Verified 1 steps: slim sumcheck proof OK, state chain OK
+```
+
+The N=1 fold produces a ~3 KB slim proof. The same step circuit folds N>1
+repetitions (valid, but redundant for a stateless predicate — kept so the
+predicate can later be composed with other folded step circuits in one IVC).
+
+---
+
 ## Files
 
 | File | Description |
 |------|-------------|
 | `predicate.circom` | Reusable `EdDSAVerifyThirdParty` + `Predicate(depth)` templates |
-| `predicate_depth2.circom` | Instantiation with depth = 2 |
+| `predicate_depth2.circom` | Groth16 instantiation with depth = 2 |
+| `predicate_nova.circom` | Nova IVC step circuit (monolithic, depth = 2) |
 | `gen_predicate_input.py` | Issuer + holder witness generator (reuses `EdDSAJubJub/gen_test_vectors.py`) |
 | `input.json` | Valid witness input (holder, approved, adult) |
