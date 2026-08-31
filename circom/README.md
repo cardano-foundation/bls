@@ -20,6 +20,7 @@ This directory contains Circom circuits that can be loaded by the Rust prover vi
 | [`AnonymousAirdrop/`](AnonymousAirdrop/README.md) | SMT membership + score threshold — anonymous reputation-gated airdrop | 1,561 (depth 2) | ✅ Working e2e |
 | [`Predicate/`](Predicate/README.md) | Composite selective disclosure — Poseidon + EdDSA-JubJub + range + Merkle predicate over a signed credential | 10,456 (depth 2) | ✅ Working e2e |
 | [`TwistedElGamal/`](TwistedElGamal/README.md) | Confidential transfers — Twisted ElGamal encryption, limb decomposition, and a Nova IVC step over JubJub | 32–10,206 | ✅ Compiles |
+| [`PrivacyPool/`](PrivacyPool/README.md) | Shielded privacy pool (F5a) — note commitment + Merkle + range + conservation, plus a Nova IVC Merkle step | 2,785 / 245 | ✅ Groth16 + Nova e2e |
 
 ---
 
