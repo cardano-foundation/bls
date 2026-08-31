@@ -12,7 +12,7 @@
 4. [Step 1: Predicate Proofs with Aiken](#step-1-predicate-proofs-with-aiken)
 5. [Step 2: Twisted ElGamal Extension](#step-2-twisted-elgamal-extension)
 6. [Step 3: Privacy Pools & Shielded Transactions](#step-3-privacy-pools--shielded-transactions)
-7. [Step 4: Future Directions](#step-4-future-directions)
+7. [Comparison with CIP proposal: Native Confidential Transfers](#comparison-with-cip-proposal-native-confidential-transfers)
 8. [Compliance & Auditability](#compliance--auditability)
 9. [Threat Model & Deployment](#threat-model--deployment)
 10. [References](#references)
@@ -625,43 +625,18 @@ The folded chain provably transforms the input note's commitment into the Merkle
 
 ---
 
-## Step 4: Future Directions
-
-<details>
-<summary><b>Expand</b></summary>
-
-The Groth16-based design in Steps 0–3 provides practical, production-ready privacy today, but it relies on elliptic-curve cryptography that is not quantum-resistant. Long-term research directions are to complement or replace the zk-SNARK layer with post-quantum alternatives.
-
-### FHE-Based Selective Disclosure
-
-Fully homomorphic encryption (FHE) enables predicate evaluation on encrypted credential fields by any party. It is believed to be post-quantum but is currently too heavy for on-chain verification. Short term: keep Groth16 for production. Medium term: monitor zk-FHE / FHE-SNARKs that combine homomorphic evaluation with succinct correctness proofs. Long term: migrate predicate gates to FHE-first constructions when lattice-based FHE becomes cheap enough.
-
-References: [LACTv2](https://github.com/jaymine/LACTv2) (lattice-based anonymous credentials); De Salve et al., *IET Information Security*, 2018 (FHE-based selective disclosure).
-
-### STARK / zkVM Quantum-Resistance Path
-
-Hash-based STARKs and zkVM backends (FRI-STARK, RISC Zero) are transparent, natively post-quantum, and verified on-chain by a hash-based verifier. Their cost is proof size (hundreds of KB today) and heavier on-chain verification.
-
-Live production references:
-- **CIP-1242 — ZKPoSP** (Botta et al., IACR ePrint 2026/1508): RISC Zero proofs of BIP-32-Ed25519 seed ownership for Cardano HD wallets.
-- **Zcash quantum readiness** (CoinDesk Research, June 2026): Three-step path to a fully post-quantum pool with hybrid classical+PQ signatures and hash-based proof hardening.
-
-The Step 1 predicate proof is a natural candidate for staged migration: issue credentials with Groth16 today, and move to a STARK/zkVM backend once proofs are small enough for the Plutus V3 budget. The issuer/holder/Gate Script architecture is unchanged; only the primitive inside the redeemer changes.
-
-### Comparison: CIP-???? Native Confidential Transfers
+## Comparison with CIP proposal: Native Confidential Transfers
 
 A parallel proposal aims to hide transaction amounts at the **ledger layer** using Pedersen commitments over ristretto255 and Bulletproofs range proofs. Our research demonstrates that **the same amount confidentiality is achievable within Cardano's existing BLS12-381 primitive set** — without new curves, without new proof systems, and without a hard fork.
 
-| Aspect | CIP-???? (Ledger-Native) | Our Research (Smart-Contract ZK) |
-|--------|--------------------------|----------------------------------|
+| Aspect | CIP proposal (Ledger-Native) | Our Research (Smart-Contract ZK) |
+|--------|------------------------------|----------------------------------|
 | **Amounts hidden?** | ✅ Yes | ✅ Yes |
 | **Identity hidden?** | ❌ No | ✅ Yes |
 | **Curve** | ristretto255 (NEW) | BLS12-381 G1 (already live) |
 | **Hard fork required** | ✅ Yes | ❌ No |
 | **Proof verification cost** | O(n log n) (Bulletproofs) | **O(1)** (Groth16) |
 | **Script address support** | ❌ Deferred | ✅ Core architecture |
-
-</details>
 
 ---
 
