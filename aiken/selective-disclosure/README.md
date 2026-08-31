@@ -379,6 +379,62 @@ circom twisted_elgamal_nova.circom --r1cs --wasm --sym --prime bls12381 \
 cd ../..
 ```
 
+#### Path A: Groth16 e2e (mention-only amounts)
+
+The whole transfer in one monolithic `transfer.circom` proof (32 non-linear constraints), checked on-chain by the standard pairing check. Every command below assumes you are in the `bls/` repo root and uses the Rust CLIs from [`groth16-prover`](../../groth16-prover/README.md) / [`clis/trusted-setup`](../../clis/trusted-setup/README.md).
+
+1. **Compile the transfer circuit & generate a witness** (off-chain):
+
+```bash
+cd circom/TwistedElGamal
+circom transfer.circom --r1cs --wasm --sym --prime bls12381 \
+  -l ../EdDSAJubJub/node_modules/circomlib/circuits \
+  -l ./node_modules/circomlib/circuits
+snarkjs wtns calculate transfer_js/transfer.wasm input_transfer.json witness.wtns
+cd ../..
+```
+
+`input_transfer.json` supplies the private `amount` and the public `oldBalance` / `newBalance` (satisfying `newBalance == oldBalance - amount`).
+
+2. **Run a dev ceremony** (one time per circuit — produces the proving/verifying keys):
+
+```bash
+cargo run --release --manifest-path clis/trusted-setup/Cargo.toml -- ceremony-dev \
+  --circuit circom/TwistedElGamal/transfer.r1cs \
+  --proving-key /tmp/transfer.pk \
+  --verifying-key /tmp/transfer.vk
+```
+
+3. **Prove** (off-chain, holder device):
+
+```bash
+cargo run --release --manifest-path clis/groth16/Cargo.toml -- prove \
+  --circuit circom/TwistedElGamal/transfer.r1cs \
+  --witness circom/TwistedElGamal/witness.wtns \
+  --proving-key /tmp/transfer.pk \
+  --out /tmp/transfer.proof
+```
+
+4. **Verify** off-chain:
+
+```bash
+cargo run --release --manifest-path clis/groth16/Cargo.toml -- verify \
+  --proof /tmp/transfer.proof \
+  --public /tmp/transfer.pub \
+  --verifying-key /tmp/transfer.vk
+# → Verification result: VALID
+```
+
+5. **Export the verifying key to Aiken** (on-chain integration):
+
+```bash
+cargo run --release --manifest-path clis/groth16/Cargo.toml -- export-vk \
+  --verifying-key /tmp/transfer.vk \
+  --out /tmp/transfer_vk.ak
+```
+
+Paste the generated `VerificationKey` into the Gate Script's parameter block and submit `oldBalance` + `newBalance` as the public inputs in the redeemer, with the 192-byte `proof` alongside. See [`aiken/groth16/README.md`](../../aiken/groth16/README.md).
+
 #### Path B: NovaSlim e2e (mention-only amounts)
 
 A single transfer folded with Nova instead of a big monolithic Groth16 circuit. Every command below assumes you are in the `bls/` repo root with `nova-slim` built as a sibling:
