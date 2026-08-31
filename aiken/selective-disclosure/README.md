@@ -185,11 +185,11 @@ graph LR
         P4["Phase 4: Fund Gate<br/>Lock ADA at script"]
         P6["Phase 6: Unlock tx<br/>Script verifies proof → releases"]
     end
-    P1 --> P3
-    P2 --> P5
-    P3 --> P4
-    P5 --> P6
-    P4 --> P6
+    P1 -->|"Zk trusted setup → pass vk (dev)"| P3
+    P2 -->|"Issuer signs credential, delivers off-chain (issuer → holder)"| P5
+    P3 -->|"Submit funding tx (payer)"| P4
+    P5 -->|"Submit unlock tx w/ ZK proof (holder)"| P6
+    P4 -->|"Verify proof on-chain → release ADA (gate)"| P6
 ```
 
 ---
@@ -432,11 +432,11 @@ graph LR
         E4["Phase 4: Fund Gate<br/>Lock ADA; datum stores encrypted G1 points"]
         E6["Phase 6: Unlock tx<br/>Script verifies range proofs → releases amount"]
     end
-    E1 --> E3
-    E2 --> E5
-    E3 --> E4
-    E5 --> E6
-    E4 --> E6
+    E1 -->|"Zk trusted setup → pass vk (dev)"| E3
+    E2 -->|"Split amount to limbs + ElGamal-encrypt (holder)"| E5
+    E3 -->|"Submit funding tx w/ datum ciphertexts (payer)"| E4
+    E5 -->|"Prove limbs in-range in ZK (holder)"| E6
+    E4 -->|"Submit unlock tx → verify range proofs → release (holder/gate)"| E6
 ```
 
 | Aspect | Step 1 Only | + Twisted ElGamal |
@@ -586,11 +586,11 @@ graph LR
         P4["Phase 4: Deposit tx<br/>Add note commitment, update root"]
         P6["Phase 6: Shielded spend tx<br/>Verify Merkle + nullifier + conservation → update root"]
     end
-    P1 --> P3
-    P2 --> P4
-    P3 --> P4
-    P5 --> P6
-    P4 --> P6
+    P1 -->|"Zk trusted setup → pass vk (dev)"| P3
+    P2 -->|"Build note commitments, pass Merkle root (depositor)"| P4
+    P3 -->|"Pool holds root + nullifier set (pool contract)"| P4
+    P5 -->|"Submit shielded-spend tx w/ ZK proof (holder)"| P6
+    P4 -->|"Verify Merkle + nullifier + conservation → update root (pool)"| P6
 ```
 
 | Aspect | Step 1 (Predicate Only) | Step 2 (+ ElGamal) | Step 3 (Privacy Pool) |
@@ -695,12 +695,12 @@ graph LR
         A4["Phase 4: Fund / Deposit<br/>Lock ADA"]
         A6["Phase 6: Shielded spend tx<br/>Verify Merkle + nullifier + ciphertext → update root"]
     end
-    A1 --> A3
-    A2 --> A4
-    A3 --> A4
-    A5 --> A6
-    A4 --> A6
-    A6 --> A7
+    A1 -->|"Zk trusted setup → pass vk (dev)"| A3
+    A2 -->|"Deposit, pin pk_audit, E/C public (depositor/auditor)"| A4
+    A3 -->|"Pool whitelists pk_audit (pool contract)"| A4
+    A5 -->|"Submit shielded-spend tx w/ ZK proof (holder)"| A6
+    A4 -->|"Verify Merkle + nullifier + ElGamal ciphertext → update root (pool)"| A6
+    A6 -->|"Reveal C - sk_audit*E = amount*H (auditor, viewing key)"| A7
 ```
 
 ```
