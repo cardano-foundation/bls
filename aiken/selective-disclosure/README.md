@@ -13,11 +13,12 @@
 5. [Step 2: Twisted ElGamal Extension](#step-2-twisted-elgamal-extension)
 6. [Step 3: Privacy Pools & Shielded Transactions](#step-3-privacy-pools--shielded-transactions)
 7. [Step 4: Compliant Shielded Transfer (Viewing-Key Auditor Reveal)](#step-4-compliant-shielded-transfer-viewing-key-auditor-reveal)
-8. [Runnable e2e Scripts & Timing](#runnable-e2e-scripts--timing)
-9. [Comparison with CIP proposal: Native Confidential Transfers](#comparison-with-cip-proposal-native-confidential-transfers)
-10. [Compliance & Auditability](#compliance--auditability)
-11. [Threat Model & Deployment](#threat-model--deployment)
-12. [References](#references)
+8. [Step 5: Full Auditor Reveal (Amount + Recipient Address)](#step-5-full-auditor-reveal-amount--recipient-address)
+9. [Runnable e2e Scripts & Timing](#runnable-e2e-scripts--timing)
+10. [Comparison with CIP proposal: Native Confidential Transfers](#comparison-with-cip-proposal-native-confidential-transfers)
+11. [Compliance & Auditability](#compliance--auditability)
+12. [Threat Model & Deployment](#threat-model--deployment)
+13. [References](#references)
 
 ---
 
@@ -744,19 +745,107 @@ comparison): `privacy_pool_viewable.circom` proves `VALID` with the auditor reve
 
 ---
 
+## Step 5: Full Auditor Reveal (Amount + Recipient Address)
+
+<details>
+<summary><b>Expand</b></summary>
+
+Step 4 let a designated auditor decrypt the **amount**. Step 5 extends the
+viewing-key reveal so the auditor can additionally decrypt the **recipient
+address / identity**. The shielded privacy-pool spend (Step 3, reused verbatim)
+now carries a *multi-message* Twisted ElGamal ciphertext to **one** auditor
+public key using **shared** ephemeral randomness `r`, encrypting the amount
+**and** the recipient address (split into two `u16` limbs):
+
+```
+E     = r * G                           shared ephemeral (public)
+C     = in_amount  * H + r * pk_audit   amount ciphertext   (public)
+C_a0  = addr_limb0 * H + r * pk_audit   address low  u16 limb (public)
+C_a1  = addr_limb1 * H + r * pk_audit   address high u16 limb (public)
+
+m * H = C_x - sk_audit * E              auditor reveal (off-chain decrypt)
+addr  = limb0 + 2^16 * limb1            reassemble recipient address
+```
+
+The address is bound to the spend via a public commitment
+`addr_commitment = Poseidon(recipient_addr, nullifier)`, so the auditor can
+verify the decrypted address against the chain. Only the auditor holding
+`sk_audit` sees both the amount and the recipient; everyone else sees only
+ciphertexts and the transaction graph stays hidden.
+
+```mermaid
+graph LR
+    subgraph OffChain["Off-Chain"]
+        D1["Phase 1: Trusted Setup<br/>Full-reveal pool circuit → R1CS → SRS → vk + pk"]
+        D2["Phase 2: Deposit + Auditor<br/>Pin pk_audit; commit notes; E, C, C_a public"]
+        D5["Phase 5: Proof Generation<br/>Shielded spend + ElGamal-encrypt amount + address to pk_audit"]
+        D7["Phase 7: Auditor Reveal<br/>C - sk_audit*E = amount*H; C_a - sk_audit*E = addr limbs"]
+    end
+    subgraph OnChain["On-Chain (Cardano)"]
+        D3["Phase 3: Deploy Pool<br/>Aiken validator (vk) + whitelisted pk_audit"]
+        D4["Phase 4: Fund / Deposit<br/>Lock ADA"]
+        D6["Phase 6: Shielded spend tx<br/>Verify Merkle + nullifier + ciphertexts → update root"]
+    end
+    D1 -->|"Zk trusted setup → pass vk (dev)"| D3
+    D2 -->|"Deposit, pin pk_audit, E/C/C_a public (depositor/auditor)"| D4
+    D3 -->|"Pool whitelists pk_audit (pool contract)"| D4
+    D5 -->|"Submit shielded-spend tx w/ ZK proof (holder)"| D6
+    D4 -->|"Verify Merkle + nullifier + ElGamal ciphertexts → update root (pool)"| D6
+    D6 -->|"Reveal amount + address via sk_audit (auditor, viewing key)"| D7
+```
+
+| Aspect | Step 3 (Privacy Pool) | Step 4 (+ Amount Reveal) | Step 5 (+ Address Reveal) |
+|--------|----------------------|--------------------------|---------------------------|
+| **What is hidden** | Identity + amount + graph | Same, **except amount from auditor** | Same, **except amount + address from auditor** |
+| **On-chain state** | Merkle root | + public `pk_audit`, `E`, `C` | + `addr_commitment`, `C_a0`, `C_a1` |
+| **Circuit proves** | Merkle + range + conservation + nullifier | + ElGamal of `in_amount` | + multi-message ElGamal of `in_amount` **and** `recipient_addr` (2 limbs, shared `r`) |
+| **Auditor decrypts** | — (absent) | amount | **amount + recipient address** |
+
+**Circuits** in [`circom/PrivacyPool/`](../../circom/PrivacyPool/README.md):
+
+- `privacy_pool_viewable_addr.circom` — **Groth16**: full Step 3 pool + a
+  multi-message `TwistedElGamalEncrypt` of `in_amount` and the two address limbs
+  to `pk_audit` (shared `r`). Public `E, C, C_a0, C_a1` + `addr_commitment`.
+  ~33.6K non-linear constraints (depth 4).
+- `elgamal_viewkey_addr_nova.circom` — **NovaSlim step**: folds the multi-message
+  auditor encryption as a single Nova step; the public IVC state (`wit[1]`) is a
+  Poseidon commitment to the shared `E` and the three `C` points. ~5.8K
+  non-linear constraints.
+- `privacy_pool_viewable.circom` / `privacy_pool.circom` / `privacy_pool_nova.circom`
+  / `note.circom` / `merkle.circom` / `elgamal_viewkey_nova.circom` — unmodified,
+  reused from Steps 3/4.
+- `gen_viewable_addr_input.py` — witness builder reusing `gen_privacy_input.generate()`,
+  deriving the auditor keypair, and running the **off-chain decrypt checks**
+  (recovers `in_amount`, both address limbs, reassembles `recipient_addr`, and
+  checks `Poseidon(addr, nullifier) == addr_commitment`).
+
+A policy layer (not enforced in-circuit) pins `pk_audit` to the pool's
+registered auditor; the on-chain gate can whitelist that public key.
+
+**Verified e2e** (both paths, see [`step5/README.md`](step5/README.md) for the
+measured comparison): `privacy_pool_viewable_addr.circom` proves `VALID` with the
+auditor revealing `in_amount = 100` and `recipient_addr = 0x1234`;
+`elgamal_viewkey_addr_nova.circom` folds+verifies with `state chain OK`
+(758 B slim proof) and the same reveal.
+
+</details>
+
+---
+
 ## Runnable e2e Scripts & Timing
 
 <details>
 <summary><b>Expand</b></summary>
 
-Every step has a `step{N}/` directory of runnable scripts (`aiken/selective-disclosure/step{N}/`) that reproduce the e2e from scratch, covering **both** proof paths. All eight were run to completion and verified (`VALID` / `state chain OK`).
+Every step has a `step{N}/` directory of runnable scripts (`aiken/selective-disclosure/step{N}/`) that reproduce the e2e from scratch, covering **both** proof paths. All ten were run to completion and verified (`VALID` / `state chain OK`).
 
 ```text
 aiken/selective-disclosure/
 ├── step1/  groth16_e2e.sh   novaslim_e2e.sh   README.md   (Predicate)
 ├── step2/  groth16_e2e.sh   novaslim_e2e.sh   README.md   (Twisted ElGamal)
 ├── step3/  groth16_e2e.sh   novaslim_e2e.sh   README.md   (Privacy Pool)
-└── step4/  groth16_e2e.sh   novaslim_e2e.sh   README.md   (Compliant Shielded Transfer)
+├── step4/  groth16_e2e.sh   novaslim_e2e.sh   README.md   (Compliant Shielded Transfer)
+└── step5/  groth16_e2e.sh   novaslim_e2e.sh   README.md   (Full Auditor Reveal)
 ```
 
 Run from the repo root (or anywhere; repo root is auto-detected):
@@ -780,6 +869,7 @@ in a table:
 - [`step2/README.md`](step2/README.md) — Twisted ElGamal
 - [`step3/README.md`](step3/README.md) — Privacy Pool
 - [`step4/README.md`](step4/README.md) — Compliant Shielded Transfer (viewing-key auditor reveal)
+- [`step5/README.md`](step5/README.md) — Full Auditor Reveal (amount + recipient address)
 
 See those READMEs for the measured numbers rather than repeating them here.
 
@@ -806,7 +896,7 @@ Privacy-by-default does not mean absence of oversight. Production deployments ca
 
 | Mechanism | How It Works |
 |-----------|--------------|
-| **Per-credential auditing** | Issuer encrypts a viewing key to auditor keys at issuance; no per-transaction overhead — now demonstrated end-to-end in [Step 4](#step-4-compliant-shielded-transfer-viewing-key-auditor-reveal) (private amount ElGamal-encrypted to the auditor, recoverable only by `sk_audit`) |
+| **Per-credential auditing** | Issuer encrypts a viewing key to auditor keys at issuance; no per-transaction overhead — now demonstrated end-to-end in [Step 4](#step-4-compliant-shielded-transfer-viewing-key-auditor-reveal) (private amount ElGamal-encrypted to the auditor, recoverable only by `sk_audit`) and [Step 5](#step-5-full-auditor-reveal-amount--recipient-address) (amount **and** recipient address encrypted, recoverable only by `sk_audit`) |
 | **Permissioned gates** | Gate Script checks an additional on-chain policy (KYC registry, rate limit, allowlist) alongside the ZK proof |
 | **Emergency controls** | Revocation (new Merkle root), global pause (`is_active` flag), freeze (frozen set), coercion resistance (proofs never reveal field values) |
 | **Forensic Data Escrow** | Non-sensitive metadata encrypted to a governance multi-sig; decryptable under defined circumstances without exposing credential fields |
