@@ -41,3 +41,4 @@ __pycache__/
 # Circom witness inputs
 input.json
 *_input.json
+*_meta.json
