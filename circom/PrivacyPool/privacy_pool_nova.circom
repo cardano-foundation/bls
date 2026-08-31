@@ -22,11 +22,12 @@ template PrivacyPoolStep() {
     signal input direction;      // 1 if sibling is on the left
     signal output state_out;     // hashed node
 
-    // if direction == 1, swap so sibling goes first
+    // if direction == 1, item is the right child, so the sibling is the
+    // left input: hash = Poseidon(sibling, item).
     signal a;
     signal b;
-    a <== (state_in - sibling) * direction + sibling;       // a = direction? state_in : sibling
-    b <== (sibling - state_in) * direction + state_in;      // b = direction? sibling : state_in
+    a <== (sibling - state_in) * direction + state_in;   // a = direction ? sibling : state_in
+    b <== (state_in - sibling) * direction + sibling;    // b = direction ? state_in : sibling
 
     component hasher = PoseidonBLS12_381();
     hasher.in0 <== a;
