@@ -12,11 +12,12 @@
 4. [Step 1: Predicate Proofs with Aiken](#step-1-predicate-proofs-with-aiken)
 5. [Step 2: Twisted ElGamal Extension](#step-2-twisted-elgamal-extension)
 6. [Step 3: Privacy Pools & Shielded Transactions](#step-3-privacy-pools--shielded-transactions)
-7. [Runnable e2e Scripts & Timing](#runnable-e2e-scripts--timing)
-8. [Comparison with CIP proposal: Native Confidential Transfers](#comparison-with-cip-proposal-native-confidential-transfers)
-9. [Compliance & Auditability](#compliance--auditability)
-10. [Threat Model & Deployment](#threat-model--deployment)
-11. [References](#references)
+7. [Step 4: Compliant Shielded Transfer (Viewing-Key Auditor Reveal)](#step-4-compliant-shielded-transfer-viewing-key-auditor-reveal)
+8. [Runnable e2e Scripts & Timing](#runnable-e2e-scripts--timing)
+9. [Comparison with CIP proposal: Native Confidential Transfers](#comparison-with-cip-proposal-native-confidential-transfers)
+10. [Compliance & Auditability](#compliance--auditability)
+11. [Threat Model & Deployment](#threat-model--deployment)
+12. [References](#references)
 
 ---
 
@@ -626,15 +627,64 @@ The folded chain provably transforms the input note's commitment into the Merkle
 
 ---
 
+## Step 4: Compliant Shielded Transfer (Viewing-Key Auditor Reveal)
+
+Steps 1–3 deliver privacy by default, but production systems also need **oversight**.
+Step 4 layers a designated-auditor reveal on top of Step 3's shielded pool: the same
+privacy-pool spend (reused verbatim) additionally encrypts the private input amount
+to an **auditor's public key** with Twisted ElGamal, so the pool hides identity and
+the transaction graph while the auditor — and only the auditor, holding the viewing
+key `sk_audit` — can decrypt the amount.
+
+```
+E = r * G                       ephemeral component (public)
+C = in_amount * H + r * pk_audit   commitment   (public)
+in_amount * H = C - sk_audit * E   viewing-key reveal (auditor decrypts)
+```
+
+| Aspect | Step 3 (Privacy Pool) | Step 4 (+ Viewing-Key Audit) |
+|--------|----------------------|------------------------------|
+| **What is hidden** | Identity + amount + transaction graph | Same, **except from the designated auditor** |
+| **On-chain state** | Merkle root of note commitments | + public `pk_audit`, `E`, `C` (auditor ciphertext) |
+| **Circuit proves** | Merkle + range + conservation + nullifier | Same **+** ElGamal encryption of `in_amount` to `pk_audit` |
+| **Regulatory** | Offline/absent | Auditor reveals per-tx amount on demand |
+
+**Circuits** in [`circom/PrivacyPool/`](../../circom/PrivacyPool/README.md):
+
+- `privacy_pool_lib.circom` — the Step 3 `PrivacyPool` template extracted into an
+  include-only library (kept identical; `privacy_pool.circom` now just adds its `main`).
+- `privacy_pool_viewable.circom` — **Groth16**: Step 3 pool + `TwistedElGamalEncrypt`
+  of `in_amount` to `pk_audit`; public because `E[2], C[2]` are outputs. ~13K non-linear
+  constraints (depth 4).
+- `elgamal_viewkey_nova.circom` — **NovaSlim step**: encrypt the amount to the auditor;
+  the public IVC state (`wit[1]`) is a Poseidon commitment to the ciphertext, so the
+  slim proof binds the `(E, C)` the prover reveals off-chain. ~2.1K non-linear constraints.
+- `privacy_pool.circom` / `privacy_pool_nova.circom` / `note.circom` / `merkle.circom` —
+  unmodified, reused from Step 3.
+- `gen_viewable_input.py` — witness builder that reuses `gen_privacy_input.generate()`,
+  derives the auditor keypair, and runs the **off-chain decrypt check**
+  (`C - sk_audit*E == amount*H`, recovering e.g. `in_amount = 100`).
+
+A policy layer (not enforced in-circuit) pins `pk_audit` to the pool's registered
+auditor; the on-chain gate can whitelist that public key.
+
+**Verified e2e** (both paths, see [`step4/README.md`](step4/README.md) for the measured
+comparison): `privacy_pool_viewable.circom` proves `VALID` with the auditor revealing
+`in_amount = 100`; `elgamal_viewkey_nova.circom` folds+verifies with `state chain OK`
+(684 B slim proof) and the same reveal.
+
+---
+
 ## Runnable e2e Scripts & Timing
 
-Every step has a `step{N}/` directory of runnable scripts (`aiken/selective-disclosure/step{N}/`) that reproduce the e2e from scratch, covering **both** proof paths. All six were run to completion and verified (`VALID` / `state chain OK`).
+Every step has a `step{N}/` directory of runnable scripts (`aiken/selective-disclosure/step{N}/`) that reproduce the e2e from scratch, covering **both** proof paths. All eight were run to completion and verified (`VALID` / `state chain OK`).
 
 ```text
 aiken/selective-disclosure/
 ├── step1/  groth16_e2e.sh   novaslim_e2e.sh   README.md   (Predicate)
 ├── step2/  groth16_e2e.sh   novaslim_e2e.sh   README.md   (Twisted ElGamal)
-└── step3/  groth16_e2e.sh   novaslim_e2e.sh   README.md   (Privacy Pool)
+├── step3/  groth16_e2e.sh   novaslim_e2e.sh   README.md   (Privacy Pool)
+└── step4/  groth16_e2e.sh   novaslim_e2e.sh   README.md   (Compliant Shielded Transfer)
 ```
 
 Run from the repo root (or anywhere; repo root is auto-detected):
@@ -657,6 +707,7 @@ in a table:
 - [`step1/README.md`](step1/README.md) — Predicate
 - [`step2/README.md`](step2/README.md) — Twisted ElGamal
 - [`step3/README.md`](step3/README.md) — Privacy Pool
+- [`step4/README.md`](step4/README.md) — Compliant Shielded Transfer (viewing-key auditor reveal)
 
 See those READMEs for the measured numbers rather than repeating them here.
 
@@ -683,7 +734,7 @@ Privacy-by-default does not mean absence of oversight. Production deployments ca
 
 | Mechanism | How It Works |
 |-----------|--------------|
-| **Per-credential auditing** | Issuer encrypts a viewing key to auditor keys at issuance; no per-transaction overhead |
+| **Per-credential auditing** | Issuer encrypts a viewing key to auditor keys at issuance; no per-transaction overhead — now demonstrated end-to-end in [Step 4](#step-4-compliant-shielded-transfer-viewing-key-auditor-reveal) (private amount ElGamal-encrypted to the auditor, recoverable only by `sk_audit`) |
 | **Permissioned gates** | Gate Script checks an additional on-chain policy (KYC registry, rate limit, allowlist) alongside the ZK proof |
 | **Emergency controls** | Revocation (new Merkle root), global pause (`is_active` flag), freeze (frozen set), coercion resistance (proofs never reveal field values) |
 | **Forensic Data Escrow** | Non-sensitive metadata encrypted to a governance multi-sig; decryptable under defined circumstances without exposing credential fields |
