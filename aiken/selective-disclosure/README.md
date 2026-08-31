@@ -360,6 +360,66 @@ Only use this if your use case requires hiding **amounts** (balances, transfer v
 
 If you go this route, the composition is: **predicate proof for identity + ElGamal encryption for amounts**, verified by a single Groth16 proof checked by the same Aiken Gate Script.
 
+#### Circuits
+
+Implemented (compiles clean, BLS12-381 scalar field) in [`circom/TwistedElGamal/`](../../circom/TwistedElGamal/README.md):
+
+- `twisted_elgamal.circom` — prove knowledge of `(m, r)` for `E = r·G`, `C = m·H + r·PK` (JubJub).
+- `limb_decompose.circom` — split an amount into `u16` limbs (the selective-disclosure primitive).
+- `transfer.circom` — single monolithic transfer with value conservation + range checks.
+- `twisted_elgamal_nova.circom` — **Nova IVC step**: one `u16` limb per step, `state_out = state_in + (new_limb − old_limb)`.
+
+Compile (note the `-l` Circomlib include paths):
+
+```bash
+cd circom/TwistedElGamal
+circom twisted_elgamal_nova.circom --r1cs --wasm --sym --prime bls12381 \
+  -l ../EdDSAJubJub/node_modules/circomlib/circuits \
+  -l ./node_modules/circomlib/circuits
+cd ../..
+```
+
+#### Path B: NovaSlim e2e (mention-only amounts)
+
+A single transfer folded with Nova instead of a big monolithic Groth16 circuit. Every command below assumes you are in the `bls/` repo root with `nova-slim` built as a sibling:
+
+```bash
+NOVA=../nova-slim/cli/target/release/nova-slim
+```
+
+1. **Compile & generate limb witnesses** — decompose the transfer into `nLimbs` steps, one limb per step:
+
+```bash
+python3 ../nova-slim/benchmarks/gen_step_witnesses.py \
+  --wasm circom/TwistedElGamal/twisted_elgamal_nova_js/twisted_elgamal_nova.wasm \
+  --initial .input/teg_transfer.json \
+  --steps 8 --dir teg_steps/
+```
+
+2. **Fold** the 8 limb-steps into one IVC proof:
+
+```bash
+$NOVA fold --curve bls12-381 \
+  --circuit circom/TwistedElGamal/twisted_elgamal_nova.r1cs \
+  --steps teg_steps/ --out teg.ivc.cbor
+```
+
+3. **Compress** to a slim (~KiB) proof:
+
+```bash
+$NOVA compress --slim --curve bls12-381 \
+  --ivc teg.ivc.cbor --out teg_slim.proof.cbor
+```
+
+4. **Verify** off-chain:
+
+```bash
+$NOVA verify --curve bls12-381 \
+  --ivc teg.ivc.cbor --slim-proof teg_slim.proof.cbor
+```
+
+The final folded state equals `−amount` (sum of `new_limb − old_limb` over all limbs), giving value conservation. Compute the `initial` state as `0` and validate the final `state_out` against the intended transfer amount.
+
 </details>
 
 ---
