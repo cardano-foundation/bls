@@ -1,7 +1,7 @@
 # Nova IVC On-Chain Verifier + SD Predicate Gate (Aiken)
 
 Aiken (Plutus V3) implementation that verifies **slim Nova IVC proofs** produced
-by the Rust `nova-prover` / `clis/nova` on Cardano, plus a reusable
+by the Rust [`nova-slim`](../../../nova-slim/README.md) on Cardano, plus a reusable
 **Selective-Disclosure (SD) Predicate Gate** built on top of it.
 
 Toolchain: **aiken v1.1.19** (see `aiken.toml`).

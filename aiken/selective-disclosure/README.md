@@ -7,16 +7,15 @@
 ## Table of Contents
 
 1. [Overview](#overview)
-2. [Research & Context](#research--context)
-3. [Design](#design)
-4. [Step 0: Proof System Implementation (Prerequisite)](#step-0-proof-system-implementation-prerequisite)
-5. [Step 1: Predicate Proofs with Aiken](#step-1-predicate-proofs-with-aiken)
-6. [Step 2: Twisted ElGamal Extension](#step-2-twisted-elgamal-extension)
-7. [Step 3: Privacy Pools & Shielded Transactions](#step-3-privacy-pools--shielded-transactions)
-8. [Step 4: Future Directions](#step-4-future-directions)
-9. [Compliance & Auditability](#compliance--auditability)
-10. [Threat Model & Deployment](#threat-model--deployment)
-11. [References](#references)
+2. [Design](#design)
+3. [Step 0: Proof System Implementation (Prerequisite)](#step-0-proof-system-implementation-prerequisite)
+4. [Step 1: Predicate Proofs with Aiken](#step-1-predicate-proofs-with-aiken)
+5. [Step 2: Twisted ElGamal Extension](#step-2-twisted-elgamal-extension)
+6. [Step 3: Privacy Pools & Shielded Transactions](#step-3-privacy-pools--shielded-transactions)
+7. [Step 4: Future Directions](#step-4-future-directions)
+8. [Compliance & Auditability](#compliance--auditability)
+9. [Threat Model & Deployment](#threat-model--deployment)
+10. [References](#references)
 
 ---
 
@@ -34,38 +33,7 @@ The authorization to spend or access a resource comes from a **zero-knowledge pr
 
 ---
 
-## Research & Context
-
-**Executive summary:** Traditional selective disclosure (SD-JWT, BBS+, Merkle trees) reveals selected claims in plaintext, which still leaks identity through the disclosed fields. This design moves to **predicate-level zero-knowledge disclosure**, where the holder proves a constraint is satisfied without revealing *any* field values. We draw on SSI literature (IEEE Access survey), Mysten Labs' confidential transfers (per-credential auditing), and Panther Protocol (UTxO anonymity sets, local proof generation) to build a privacy-native authorization layer on Cardano.
-
-<details>
-<summary><b>Click to expand: Claim-Level vs Predicate-Level Disclosure</b></summary>
-
-Traditional selective disclosure approaches (as surveyed in SSI literature) fall into five categories:
-
-| Approach | What the holder reveals | Address hiding possible? |
-|----------|------------------------|------------------------|
-| **Atomic credentials** | One claim per credential; holder picks which credentials to present | No — holder identity is still bound to the presentation |
-| **Hash-based** (e.g., SD-JWT) | Selected claims in plaintext + hash verification | No — disclosed claims may contain identifying data |
-| **Encryption-based** | Selected claims in plaintext + decryption keys | No — same problem as hash-based |
-| **Hash tree-based** (Merkle) | Selected claims in plaintext + Merkle membership proof | No — claims are still revealed |
-| **Signature-based** (BBS+) | Selected claims in plaintext + ZK proof of signature | No — while ZK hides undisclosed claims, the disclosed ones may identify the holder |
-| **Predicate-level ZK** (this design) | **Only the predicate result** (e.g., `eligible = 1`) | **Yes** — no claims are ever revealed |
-
-The key advancement here is moving from **claim-level selective disclosure** (revealing some fields, hiding others) to **predicate-level zero-knowledge disclosure** (proving a constraint is satisfied without revealing any field values). Because *no claims are disclosed*, the transaction cannot be linked to the holder's identity via the credential contents, and the holder's blockchain address can remain completely hidden.
-
-> **Note on encrypted-balance systems.** A complementary privacy paradigm (e.g., Mysten Labs' [Confidential Transfers on Sui](https://github.com/MystenLabs/confidential-transfers)) uses homomorphic encryption (Twisted ElGamal) to hide *amounts* while sender/receiver addresses remain visible. Predicate-level ZK, by contrast, hides *identity* (no address is checked) while operating on credential fields rather than balances. The two techniques solve different problems and can be composed: a system could require a predicate proof before minting a confidential UTxO, then use encrypted balances for subsequent transfers.
-
-</details>
-
----
-
 ## Design
-
-**Executive summary:** The system has four actors: an Issuer who signs rich credentials and publishes Merkle roots; a Holder who stores the credential locally and generates proofs; a Verifier/Gate which is a Plutus V3 script parameterized by a Groth16 verifying key (written in Aiken or generated via Julc); and an optional Relayer who submits transactions without learning the credential. The holder's proof is generated locally on their device, provided in the transaction redeemer, and verified on-chain. The script never checks an address, staking key, or known signature — only the mathematical validity of the proof.
-
-<details>
-<summary><b>Click to expand: Architecture & Actors</b></summary>
 
 ### Actors
 
@@ -76,319 +44,119 @@ The key advancement here is moving from **claim-level selective disclosure** (re
 | **Verifier / Gate** | A Cardano script that releases funds or grants access when presented with a valid proof |
 | **Relayer (optional)** | Submits transactions on behalf of the holder; cannot forge proofs |
 
-### Architecture Diagram
+### Architecture
 
 ```
-┌─────────────┐      signed credential      ┌─────────────┐
-│   Issuer    │ ──────────────────────────▶ │   Holder    │
-│  (private   │                             │ (stores full│
-│   key)      │      published roots        │  credential│
-│             │ ──────────────────────────▶ │   + proof  │
-└─────────────┘                             │   keys)    │
-                                            └──────┬──────┘
-                                                   │
-                          ┌────────────────────────┼────────────────────────┐
-                          │                        │                        │
-                          ▼                        ▼                        ▼
-              ┌─────────────────────┐  ┌─────────────────────┐  ┌─────────────────────┐
-              │  Predicate Proof 1  │  │  Predicate Proof 2  │  │  Predicate Proof N  │
-              │  (age ≥ 21 +        │  │  (role == Doctor +  │  │  (any constraint    │
-              │   country ∈ set)    │  │   age ≥ 30)         │  │   over credential)  │
-              └──────────┬──────────┘  └──────────┬──────────┘  └──────────┬──────────┘
-                         │                        │                        │
-                         ▼                        ▼                        ▼
-              ┌─────────────────────┐  ┌─────────────────────┐  ┌─────────────────────┐
-              │   Gate Script 1     │  │   Gate Script 2     │  │   Gate Script N     │
-              │   (parameterized    │  │   (parameterized    │  │   (parameterized    │
-              │    by proof vk)     │  │    by proof vk)     │  │    by proof vk)     │
-              └─────────────────────┘  └─────────────────────┘  └─────────────────────┘
+Issuer ──signed credential──▶ Holder
+        ──published roots───▶ (Merkle roots, revocation lists)
+
+Holder ──predicate proof───▶ Gate Script (parameterized by vk)
+                              └── verifies proof on-chain ──▶ release resource
 ```
 
-</details>
+The holder's proof is generated **locally** on their device. The script never checks an address, staking key, or known signature — only the mathematical validity of the proof.
 
-<details>
-<summary><b>Click to expand: Off-Chain Components</b></summary>
+### Off-Chain Flow
 
-### 1. Credential Issuance
+1. **Credential Issuance:** The issuer creates a credential, computes `claimsCommitment = Hash(field_1, ..., field_n)`, signs it, and delivers the bundle privately to the holder. Published roots (approved sets, revocation lists) are made public.
+2. **Predicate Proof Generation:** The holder generates a ZK proof locally. Public inputs (visible on-chain) include issuer public key, timestamp, Merkle roots, and an `eligible` flag. Private inputs (never revealed) include all credential fields, issuer signature, Merkle witnesses, and reduction witnesses.
+3. **Transaction Construction:** The holder (or relayer) builds a transaction spending a UTxO locked at the Gate Script, providing the proof in the **redeemer**. The holder's blockchain address is **not** included in the datum or redeemer.
 
-The issuer creates a credential containing multiple fields:
-
-```
-Credential = (field_1, field_2, ..., field_n)
-```
-
-The issuer computes a commitment:
-
-```
-claimsCommitment = Hash(field_1, field_2, ..., field_n)
-```
-
-And signs this commitment with their private key. The full credential and signature are delivered privately to the holder.
-
-The issuer also maintains and publishes:
-- **Merkle roots** for approved sets (countries, roles, institutions)
-- **Revocation roots** for invalidated credentials
-
-Because the credential is a single signed object (not one signature per claim as in atomic approaches), revocation is simple: the issuer publishes one revocation root that covers the entire credential.
-
-### 2. Predicate Proof Generation
-
-When the holder wants to access a service, they generate a zero-knowledge proof for that service's specific predicate. The proof is generated **locally in the holder's wallet or device** — the credential fields and signing key never leave the holder's control. The specific proving software (Rust/Circom for Groth16, or Nova IVC folding) is chosen at the project level; see [Step 0](#step-0-proof-system-implementation-prerequisite).
-
-**Public inputs** (visible on-chain):
-- Issuer public key (or commitment to it)
-- Current timestamp / epoch
-- Published Merkle roots
-- Eligibility flag (1 or 0)
-
-**Private inputs** (never revealed):
-- All credential fields
-- Issuer signature
-- Merkle membership witnesses
-- Reduction witnesses for signature verification
-
-The proof demonstrates:
-1. The credential fields hash to the signed commitment
-2. The issuer's signature is valid
-3. The predicate constraints are satisfied (e.g., `age ≥ 21`, `country ∈ approvedSet`)
-4. The `eligible` output equals `1`
-
-**Crucially**, the holder's blockchain address is **not** an input to the proof or the transaction.
-
-### 3. Transaction Construction
-
-The holder (or a relayer) builds a transaction that:
-- Identifies a UTxO locked at the Gate Script
-- Provides the proof in the **redeemer**
-- Provides the public inputs matching the proof
-- **Does not** include the holder's identity, address, or staking key anywhere in the transaction body, datum, or redeemer
-
-The transaction is signed only to satisfy blockchain transaction validity (paying fees), but this signing address is decoupled from identity. It can be:
-- A fresh one-time address
-- A relayer's address
-- A coin-mixed address
-
-</details>
-
-<details>
-<summary><b>Click to expand: On-Chain Components</b></summary>
-
-### Gate Script
-
-Each service deploys a Gate Script — a validator parameterized by:
-- The **verifying key** of the predicate circuit it accepts
-
-The script logic:
-
-```
-validate(datum, redeemer, context):
-    1. Extract proof (π_A, π_B, π_C) from redeemer
-    2. Extract public inputs from redeemer
-    3. Verify: eligible == 1
-    4. Verify: ZKVerify(publicInputs, proof, vk) == true
-    5. Return true
-```
-
-The script **never** checks:
-- A specific payment address
-- A staking credential
-- A signature from a known key
-- Any datum containing identity
-
-The only authorization is the mathematical validity of the proof.
-
-### UTxO Lifecycle
+### On-Chain Flow
 
 ```
 Phase 1: Funding
-┌─────────────────────────────────────┐
-│  Someone locks funds at Gate Script │
-│  Datum: unit (no identity data)     │
-└─────────────────────────────────────┘
+  Someone locks funds at Gate Script
+  Datum: unit (no identity data)
 
 Phase 2: Unlocking
-┌─────────────────────────────────────┐
-│  Holder submits unlock tx           │
-│  Redeemer: proof + public inputs    │
-│  No holder address in datum/redeemer│
-│  Script verifies proof → releases   │
-└─────────────────────────────────────┘
+  Holder submits unlock tx
+  Redeemer: proof + public inputs
+  Script verifies proof → releases funds
 ```
 
-</details>
-
-<details>
-<summary><b>Click to expand: Privacy Properties</b></summary>
+### Privacy Properties
 
 | Property | How It Is Achieved |
 |----------|-------------------|
-| **Credential fields hidden** | All fields are private inputs to the ZK circuit; only the predicate result is public |
-| **Transaction address hidden** | The script does not require or verify any holder address; authorization is purely proof-based |
-| **Anonymity set** | When multiple UTxOs are locked at the same Gate Script, any valid proof can unlock any of them; observers cannot link a specific spend to a specific credential holder |
-| **Unlinkable proofs** | Two proofs against different circuits (or even the same circuit with different public inputs) are cryptographically independent; a verifier cannot tell if they came from the same credential |
-| **No linkability across sessions** | The holder can use fresh fee-payer addresses or relayers for each transaction |
-| **Approved sets are upgradeable** | The issuer publishes new Merkle roots; existing credentials remain valid |
-| **No external services** | Verification is self-contained in the script; no oracles, DHTs, or registries are needed at proof time |
+| **Credential fields hidden** | All fields are private inputs; only the predicate result is public |
+| **Transaction address hidden** | The script does not require or verify any holder address |
+| **Anonymity set** | Any valid proof can unlock any UTxO at the same Gate Script |
+| **Unlinkable proofs** | Proofs against different circuits are cryptographically independent |
+| **No external services** | Verification is self-contained; no oracles or registries needed |
 
-</details>
+### Example Workflows
 
-<details>
-<summary><b>Click to expand: Example Workflows</b></summary>
+**Anonymous Access:** Alice holds a credential `(dob: 1990, country: DEU, role: Doctor)`. She generates a proof that `role == Doctor AND age ≥ 30`, submits it to the Healthcare Portal's Gate Script, and gains access without revealing her identity, birth year, or address.
 
-### Workflow A: Anonymous Access to a Service
-
-1. **Issuer** signs a credential for Alice: `(dob: 1990, country: DEU, role: Doctor)`
-2. **Issuer** publishes `approvedCountriesRoot` on-chain or off-chain
-3. **Alice** wants to access the "Healthcare Portal"
-4. **Alice** generates a proof that her `role == Doctor AND age ≥ 30`
-5. **Alice** (or a relayer) submits a transaction spending the Portal's Gate UTxO
-6. **On-chain validator** verifies the proof and releases the resource
-7. **No one** can determine Alice's address, her birth year, or that she is the same person who accessed the Library last week
-
-### Workflow B: Cross-Border Credential Reuse
-
-1. **National Authority** issues a digital residency credential to Bob
-2. **Banking DApp** in jurisdiction A requires `age ≥ 21 AND country ∈ {DEU, FRA, GBR}`
-3. **Insurance DApp** in jurisdiction B requires `age ≥ 25 AND country ∈ {DEU, NLD}`
-4. **Bob** uses the **same credential** to generate two **different** proofs
-5. Each DApp's script validates only its own predicate; neither learns Bob's exact age or country
-6. Neither DApp can link the two transactions to the same person
-
-</details>
+**Cross-Border Reuse:** Bob uses the same residency credential to generate two different proofs for a Banking DApp (`age ≥ 21 AND country ∈ {DEU, FRA, GBR}`) and an Insurance DApp (`age ≥ 25 AND country ∈ {DEU, NLD}`). Neither learns his exact age or country, and neither can link the two transactions.
 
 ---
 
 ## Step 0: Proof System Implementation (Prerequisite)
 
-**Executive summary:** Before any selective-disclosure flow can run end-to-end, we need a working proof system over BLS12-381 split into an off-chain prover and an on-chain verifier. There are **two viable paths** with different trade-offs:
+Before any selective-disclosure flow can run end-to-end, we need a working proof system over BLS12-381 split into an off-chain prover and an on-chain verifier.
 
 | Path | Off-chain prover | On-chain verifier | Trusted setup | Proof size | Status |
 |------|-----------------|-------------------|---------------|------------|--------|
 | **A — Groth16** | `circom` + [`groth16-prover`](../../groth16-prover/README.md) (Rust/arkworks) | [`aiken/groth16`](../../aiken/groth16/README.md) (pairing check) | Per-circuit Phase-2 | 192 bytes | ✅ Working e2e |
-| **B — Nova IVC** | [`nova-prover`](../../nova-prover/README.md) (Rust, folding) + Circom step circuits | [`aiken/nova`](../../aiken/nova/README.md) (sumcheck verification) | Step circuit only (universal) | ~4 KB slim | ✅ Working e2e |
+| **B — Nova IVC** | [`nova-slim`](../../../nova-slim/README.md) (Rust, folding) + Circom step circuits | [`nova-slim/cardano/nova-slim-verifier/`](../../../nova-slim/cardano/) (sumcheck verification) | None (transparent) | ~0.4–2.5 KiB slim | ✅ Working e2e |
 
-**Path A** is the reference implementation: Circom circuits → R1CS → Rust Groth16 prover → Aiken on-chain pairing check. Verified end-to-end for several circuits (3-gate multiplier, 1107-constraint MiMC Merkle, Poseidon preimage, Poseidon Merkle).
+**Path A** is the reference implementation: Circom circuits → R1CS → Rust Groth16 prover → Aiken on-chain pairing check.
 
-**Path B** uses Nova IVC folding: the predicate is decomposed into identical step circuits, the holder folds N steps off-chain into a single compressed proof, and the on-chain verifier checks a sumcheck argument (~4 KB). No per-circuit trusted setup beyond the step circuit's Groth16 ceremony. Step circuits for Cardano key ownership (CKO) and sparse Merkle trees (SMT) are working end-to-end (255 steps folded and verified).
+**Path B** uses [`nova-slim`](../../../nova-slim/README.md): the predicate is decomposed into identical step circuits, the holder folds N steps off-chain into a single compressed proof, and the on-chain verifier checks a sumcheck argument. No trusted setup; proof size is ~0.4–2.5 KiB depending on step-circuit size.
 
-Both paths use BLS12-381 and the same Circom circuit infrastructure. The key trade-off is **proof size vs. flexibility**: Groth16 gives 192-byte proofs but requires a separate circuit per predicate; Nova gives ~4 KB proofs but allows predicate composition by folding different step circuits.
+Both paths use BLS12-381 and the same Circom circuit infrastructure. The key trade-off is **proof size vs. flexibility**: Groth16 gives 192-byte proofs but requires a separate circuit per predicate; Nova gives ~0.4–2.5 KiB proofs but allows predicate composition by folding different step circuits.
 
-<details>
-<summary><b>Click to expand: Groth16 vs Nova — When to Use Which</b></summary>
+### When to Use Which
 
 | Consideration | Groth16 (Path A) | Nova IVC (Path B) |
 |---------------|-----------------|-------------------|
-| **Proof size** | 192 bytes (smallest possible) | ~4 KB (sumcheck slim) |
+| **Proof size** | 192 bytes | ~0.4–2.5 KiB |
 | **On-chain cost** | ~20% of script CPU (pairing check) | ~25% of script CPU (sumcheck verify) |
-| **Trusted setup** | Per-circuit Phase-2 ceremony | Step circuit only; reused across predicates |
+| **Trusted setup** | Per-circuit Phase-2 ceremony | None |
 | **Predicate composition** | One circuit per predicate combination | Fold different step circuits freely |
 | **Proof generation** | Single-shot (prover → proof) | Sequential folding (N steps → compress) |
 | **Best for** | Fixed predicates, minimal on-chain cost | Dynamic predicates, credential composition |
 
-**Recommendation:** Use Groth16 for simple, fixed-privacy predicates (e.g., "age ≥ 21"). Use Nova when the predicate set is dynamic or when credentials from different issuers must be composed (e.g., "age ≥ 21 AND country in set AND membership verified").
+### Ingredient Inventory (Path A)
 
-</details>
-
-<details>
-<summary><b>Click to expand: What Already Exists vs What Remains</b></summary>
-
-### Path A — Groth16 (Rust / Circom)
-
-| Component | Status | Location |
-|-----------|--------|----------|
-| **Circom compiler adapter** (`.r1cs` + `.wtns` parser) | ✅ Done | `clis/trusted-setup/src/circom_adapter.rs` |
-| **QAP engine** (dense + FFT paths) | ✅ Done | `clis/trusted-setup/src/engine.rs` |
-| **Groth16 prover** (BLS12-381, naive + Pippenger MSM) | ✅ Done | `clis/trusted-setup/src/prover.rs` |
-| **Trusted setup** (dev ceremony + Phase-2 MPC) | ✅ Done | `clis/trusted-setup/src/phase2.rs`, `clis/trusted-setup/src/ptau.rs` |
-| **Proof serialization** (arkworks → compressed bytes) | ✅ Done | `clis/groth16` |
-| **VK export** (binary `.vk` → Aiken `VerificationKey`) | ✅ Done | `clis/groth16` (`export-vk`) |
-| **Aiken Groth16 verifier library** (parameterized) | ✅ Done | `aiken/groth16/lib/groth16/verifier.ak` |
-| **Example circuits** (multiplier, Merkle spend, Poseidon pre-image, Poseidon Merkle) | ✅ Done | `circom/` |
-
-### Path B — Nova IVC (Rust / Circom)
-
-| Component | Status | Location |
-|-----------|--------|----------|
-| **Step circuit compiler** (Circom → R1CS sparse matrices) | ✅ Done | `clis/trusted-setup/src/circom_adapter.rs` |
-| **Nova IVC folding** (NIFS, Pedersen commitments) | ✅ Done | `nova-prover/src/nifs.rs` |
-| **Groth16 compression** (folded instance → single Groth16 proof) | ✅ Done | `nova-prover/src/compression.rs` |
-| **Sumcheck compression** (folded instance → ~4 KB slim proof) | ✅ Done | `nova-prover/src/sumcheck.rs` |
-| **CKO step circuit** (Ed25519 key ownership, 7724 constraints) | ✅ Done | `circom/CardanoKeyOwnership/cardano_ed25519_ownership_nova.circom` |
-| **SMT step circuit** (sparse Merkle membership, 7724 constraints) | ✅ Done | `circom/CardanoKeyOwnershipSMT/` |
-| **Nova CLI** (fold, compress, verify, slim) | ✅ Done | `clis/nova/` |
-| **Aiken Nova verifier library** (sumcheck verify) | ✅ Done | `aiken/nova/lib/nova/verifier.ak` |
-
-### What Remains for a Production Selective-Disclosure Gate
-
-| Component | Status | Why It Is Needed |
-|-----------|--------|------------------|
-| **Predicate step circuit (Circom)** | ✅ Done | `circom/Predicate/predicate_nova.circom`, verified N=1 fold → slim proof |
-| **Gate Script with Nova verifier** | ✅ Done | `aiken/nova/validators/predicate_gate.ak` (policy in datum, on-chain Fiat-Shamir sumcheck) |
-| **End-to-end selective-disclosure test** | 🔄 In progress | Full Step 1–6 flow with a real predicate, issued credential, and unlock tx |
-
-</details>
-
-#### Circom ingredient inventory (Path A)
-
-The Step 1 predicate circuit requires five cryptographic primitives. Here is the exact status of each in `circom/`:
+The Step 1 predicate circuit requires five cryptographic primitives:
 
 | Primitive | Needed for | Status | Source |
 |-----------|-----------|--------|--------|
-| **Poseidon hash (BLS12-381)** | `claims_msg = Poseidon(dob_year, country)`, Merkle tree nodes | ✅ Working e2e | `circom/PoseidonPreimage/poseidon_bls12_381.circom` (~250 constraints) |
-| **Range proof** | `assert dob_year <= current_year - 21` (age ≥ 21) | ✅ Working e2e | `circom/RangeProof/range_proof_simple.circom` (~32 constraints for 32-bit) |
-| **Merkle verify (Poseidon-based)** | `Merkle_Verify(country, country_root, merkle_proof)` | ✅ Working e2e | `circom/PoseidonMerkle/poseidon_merkle.circom` (737 constraints for depth 2) |
-| **EdDSA verify (JubJub)** | `EdDSA_Verify(issuer_pk, claims_msg, signature)` | ✅ Working e2e | `circom/EdDSAJubJub/eddsa_jubjub.circom` (12 601 constraints) |
+| **Poseidon hash (BLS12-381)** | `claims_msg = Poseidon(dob_year, country)`, Merkle tree nodes | ✅ Working e2e | `circom/PoseidonPreimage/poseidon_bls12_381.circom` |
+| **Range proof** | `assert dob_year <= current_year - 21` | ✅ Working e2e | `circom/RangeProof/range_proof_simple.circom` |
+| **Merkle verify (Poseidon-based)** | `Merkle_Verify(country, country_root, merkle_proof)` | ✅ Working e2e | `circom/PoseidonMerkle/poseidon_merkle.circom` |
+| **EdDSA verify (JubJub)** | `EdDSA_Verify(issuer_pk, claims_msg, signature)` | ✅ Working e2e | `circom/EdDSAJubJub/eddsa_jubjub.circom` |
 | **Groth16 prover + Aiken verifier** | All steps | ✅ Working e2e | `groth16-prover/` + `aiken/groth16/` |
 
-**EdDSA-JubJub and Poseidon Merkle membership are complete.** The EdDSA-JubJub
-circuit was ported from circomlib's BabyJubJub to JubJub (`a=-1, d=0x2a93...eb1`,
-embedded in BLS12-381 scalar field), optimised from 18 112 wires to 12 601 (–31%),
-and validated end-to-end. The Poseidon Merkle gadget (`PoseidonMerkle(depth)`)
-was composed from the existing `PoseidonBLS12_381` hash and validated end-to-end
-at depth 2 (737 constraints). All five Step 1 predicate primitives are now
-available in `circom/`.
+### Quick-Start: Groth16 (Path A)
 
-</details>
-
-<details>
-<summary><b>Click to expand: Path A — Groth16 Quick-Start</b></summary>
-
-The fastest way to get a Groth16 proof verified on-chain:
-
-1. **Compile a Circom circuit** → `.r1cs` + `.wasm`
-2. **Generate a witness** with `snarkjs` → `.wtns`
-3. **Run a dev ceremony** with the Rust CLI → `.pk` + `.vk`
-4. **Generate a proof** with the Rust CLI → `proof.bin`
-5. **Export the VK** to Aiken → `.ak` source file
-6. **Verify in Aiken** — paste the proof bytes into an Aiken test or validator
+1. Compile a Circom circuit → `.r1cs` + `.wasm`
+2. Generate a witness with `snarkjs` → `.wtns`
+3. Run a dev ceremony with the Rust CLI → `.pk` + `.vk`
+4. Generate a proof with the Rust CLI → `proof.bin`
+5. Export the VK to Aiken → `.ak` source file
+6. Verify in Aiken — paste the proof bytes into an Aiken test or validator
 
 See [`aiken/groth16/README.md`](../../aiken/groth16/README.md) and [`circom/README.md`](../../circom/README.md) for step-by-step commands.
 
-</details>
+### Quick-Start: Nova IVC (Path B)
 
-<details>
-<summary><b>Click to expand: Path B — Nova IVC Quick-Start</b></summary>
+1. **Prepare step witnesses** — one JSON per step
+2. **Fold** — `nova-slim fold --circuit <step.r1cs> --steps <witness-dir> --out <fold.json>`
+3. **Compress** — `nova-slim compress --slim --ivc <fold.json> --out <proof.cbor>`
+4. **Verify** — `nova-slim verify --ivc <fold.json> --slim-proof <proof.cbor>`
+5. **On-chain** — the slim proof is submitted as a redeemer; the Aiken sumcheck verifier checks it
 
-The Nova path folds N step-circuit proofs into a single compressed proof:
-
-1. **Prepare step witnesses** — one JSON per step (e.g., from `gen_cardano_address_input.py`)
-2. **Fold** — `nova fold --circuit <step.r1cs> --witness-dir <witnesses/> --out <fold.json>`
-3. **Compress** — `nova compress --ivc <fold.json> --compression-key <ck.json> --out <proof.json> --slim`
-4. **Verify** — `nova verify --ivc <fold.json> --slim-proof <proof.json>`
-5. **On-chain** — the slim proof (~4 KB) is submitted as a redeemer; the Aiken sumcheck verifier checks it
-
-See [`aiken/nova/README.md`](../../aiken/nova/README.md) and [`nova-prover/README.md`](../../nova-prover/README.md) for details.
-
-</details>
+See [`nova-slim/README.md`](../../../nova-slim/README.md) and [`nova-slim/cardano/`](../../../nova-slim/cardano/) for details.
 
 ---
 
 ## Step 1: Predicate Proofs with Aiken
 
-**Executive summary:** This is the simplest valid end-to-end flow: one issuer signs a two-field credential (`dobYear`, `country`), the holder generates a Groth16 proof that `age >= 21 AND country in approved set`, and an Aiken Gate Script verifies the proof on-chain before releasing locked ADA. The flow has six steps: trusted setup, issuance, deploy gate, fund gate, proof generation, and unlock. Plutus V3 already has all BLS12-381 primitives needed; no new built-ins are required.
-
-<details>
-<summary><b>Click to expand: High-Level Flow Diagram</b></summary>
+The simplest valid end-to-end flow: one issuer signs a two-field credential (`dobYear`, `country`), the holder generates a proof that `age >= 21 AND country in approved set`, and an Aiken Gate Script verifies the proof on-chain before releasing locked ADA.
 
 ```mermaid
 graph LR
@@ -409,29 +177,13 @@ graph LR
     S4 --> S6
 ```
 
-</details>
+### Step 1 — Trusted Setup & Circuit Compilation (Off-Chain)
 
-<details>
-<summary><b>Click to expand: Step 1 — Trusted Setup & Circuit Compilation (Off-Chain)</b></summary>
+The predicate circuit is compiled and a trusted setup ceremony is run to produce the proving key (`pk`) and verifying key (`vk`).
 
-**What happens:** The predicate circuit is compiled and a trusted setup ceremony is run to produce the proving key (`pk`) and verifying key (`vk`).
+**Data created:** `proving_key` (holder use, off-chain), `verifying_key` (embedded in Gate Script), `circuit_hash` (cache validation).
 
-**Functionality needed**
-
-| Component | Purpose |
-|-----------|---------|
-| Circuit DSL / R1CS compiler | Convert the predicate logic (`age >= 21`, Merkle membership) into Rank-1 Constraint System |
-| Powers of Tau (universal SRS) | Generate a structured reference string independent of the circuit |
-| Phase-2 setup | Derive circuit-specific `pk` and `vk` from the SRS |
-
-**Data created**
-```
-proving_key      → used by the holder to generate proofs (kept off-chain)
-verifying_key    → embedded into the Aiken Gate Script (on-chain parameter)
-circuit_hash     → fingerprint of the circuit for cache validation
-```
-
-**Example circuit (pseudocode)**
+**Example circuit (pseudocode):**
 ```
 Public:  issuer_pk, current_year, country_root, eligible
 Secret:  dob_year, country, signature, merkle_proof
@@ -443,84 +195,17 @@ Secret:  dob_year, country, signature, merkle_proof
 5. assert eligible == 1
 ```
 
-</details>
+### Step 2 — Credential Issuance (Off-Chain)
 
-<details>
-<summary><b>Click to expand: Step 2 — Credential Issuance (Off-Chain)</b></summary>
+The issuer creates a credential, hashes its fields, signs the hash, and delivers the bundle privately to the holder. The issuer also publishes the approved-country Merkle root.
 
-**What happens:** The issuer creates a credential, hashes its fields, signs the hash, and delivers the bundle privately to the holder. The issuer also publishes the approved-country Merkle root.
+**Important:** The credential bundle lives entirely off-chain in the holder's wallet. Only the `country_root` needs to be publicly available.
 
-**Functionality needed**
+### Step 3 — Deploy Gate Script (On-Chain)
 
-| Component | Purpose |
-|-----------|---------|
-| Poseidon hash | Compute `claims_msg = Hash(dob_year, country)` |
-| EdDSA (Jubjub) | Sign `claims_msg` with issuer secret key |
-| Merkle tree builder | Construct approved-country set and compute `country_root` |
+An Aiken validator parameterized with the verifying key (`vk`) from Step 1 is compiled and deployed to Cardano as a Plutus V3 script.
 
-**Data created & flow**
-
-```mermaid
-sequenceDiagram
-    participant Issuer as Issuer (Off-Chain)
-    participant Holder as Holder Wallet (Off-Chain)
-    participant Public as Public Registry / On-Chain
-
-    Issuer->>Issuer: Generate credential fields<br/>(dobYear=1990, country=276)
-    Issuer->>Issuer: Compute claims_msg = Poseidon(fields)
-    Issuer->>Issuer: Sign claims_msg with issuer_sk
-    Issuer->>Holder: Deliver credential bundle (private channel)
-    Note over Holder: Holder stores:<br/>- dobYear, country<br/>- claims_msg<br/>- issuer_signature
-    Issuer->>Issuer: Build Merkle tree of approved countries
-    Issuer->>Public: Publish country_root
-    Note over Public: Anyone can read country_root<br/>for proof verification
-```
-
-```
-Issuer (off-chain)
-  │
-  ├─> Credential bundle ────────> Holder (off-chain, private channel)
-  │     ├─ dob_year: 1990
-  │     ├─ country: 276        (DEU)
-  │     ├─ claims_msg: Hash(...)
-  │     └─ issuer_signature
-  │
-  └─> country_root ────────────> Published (on-chain datum or IPFS)
-```
-
-**Important**: The credential bundle lives entirely off-chain in the holder's wallet. Only the `country_root` needs to be publicly available.
-
-</details>
-
-<details>
-<summary><b>Click to expand: Step 3 — Deploy Gate Script (On-Chain)</b></summary>
-
-**What happens:** An Aiken validator parameterized with the verifying key (`vk`) from Step 1 is compiled and deployed to Cardano as a Plutus V3 script.
-
-**Functionality needed**
-
-| Component | Purpose |
-|-----------|---------|
-| Aiken compiler | Compile validator to Plutus V3 UPLC |
-| Groth16 verifier library (Aiken) | BLS12-381 pairing check callable from Aiken (either as a library or via Plutus built-ins) |
-| Cardano CLI / client | Submit the script reference or use it directly in transactions |
-
-**Aiken validator skeleton**
 ```aiken
-use aiken/builtin
-
-// Groth16 proof elements passed in the redeemer
-type ProofRedeemer {
-  pi_a: ByteArray,      // G1 point
-  pi_b: ByteArray,      // G2 point
-  pi_c: ByteArray,      // G1 point
-  pk_u: ByteArray,      // issuer pubkey coordinate
-  pk_v: ByteArray,      // issuer pubkey coordinate
-  current_year: ByteArray,
-  country_root: ByteArray,
-  eligible: ByteArray,  // must be 1
-}
-
 validator gate(
   vk_alpha: ByteArray,
   vk_beta: ByteArray,
@@ -529,667 +214,148 @@ validator gate(
   vk_ic: List<ByteArray>,
 ) {
   fn spend(_datum: Void, redeemer: ProofRedeemer, _ctx: ScriptContext) -> Bool {
-    // 1. Hard predicate: eligible must be exactly 1
     expect redeemer.eligible == #[1]
-
-    // 2. Reconstruct public inputs as field elements
     let public_inputs = [
-      redeemer.pk_u,
-      redeemer.pk_v,
-      redeemer.current_year,
-      redeemer.country_root,
-      redeemer.eligible,
+      redeemer.pk_u, redeemer.pk_v,
+      redeemer.current_year, redeemer.country_root, redeemer.eligible,
     ]
-
-    // 3. Verify the Groth16 proof against the embedded vk
-    groth16_verify_bls12_381(
-      public_inputs,
-      redeemer.pi_a,
-      redeemer.pi_b,
-      redeemer.pi_c,
-      vk_alpha,
-      vk_beta,
-      vk_gamma,
-      vk_delta,
-      vk_ic,
-    )
+    groth16_verify_bls12_381(public_inputs, redeemer.pi_a, redeemer.pi_b, redeemer.pi_c,
+      vk_alpha, vk_beta, vk_gamma, vk_delta, vk_ic)
   }
 }
 ```
 
-> **Note**: `groth16_verify_bls12_381` performs three pairings on the BLS12-381 curve. In a production Aiken deployment this is either imported from a verified Aiken library or implemented via Plutus V3 built-in cryptographic primitives.
+**Data created:** `script_hash` (Gate address derivation), `gate_address` (where funds are locked).
 
-**Data created**
-```
-script_hash  → hash of the compiled Plutus script (used to derive the Gate address)
-gate_address → Cardano address derived from script_hash (where funds will be locked)
-```
+### Step 4 — Fund the Gate (On-Chain)
 
-</details>
+Anyone locks ADA at the Gate script address. The datum is a unit (`()`), carrying no identity information. The funder's address is visible but irrelevant to the eventual holder.
 
-<details>
-<summary><b>Click to expand: Step 4 — Fund the Gate (On-Chain)</b></summary>
+### Step 5 — Proof Generation (Off-Chain)
 
-**What happens:** Anyone locks ADA at the Gate script address. The datum is a unit (`()`), carrying no identity information.
+The holder uses their credential, issuer signature, published `country_root`, and `proving_key` to generate a zero-knowledge proof entirely on their device.
 
-**Functionality needed**
+**Public inputs (on-chain redeemer):** `issuer_pk.u`, `issuer_pk.v`, `current_year`, `country_root`, `eligible = 1`
 
-| Component | Purpose |
-|-----------|---------|
-| Cardano transaction builder | Construct a `pay-to-script` output |
-| Wallet | Sign and submit the funding transaction |
+**Private inputs (never leave holder's device):** `dob_year`, `country`, `signature.r`, `signature.s`, `k_mod_l`, `k_quotient`, `merkle_siblings`, `merkle_path_bits`
 
-**Data flow**
+**Data created:** `pi_a` (G1, 48 B), `pi_b` (G2, 96 B), `pi_c` (G1, 48 B), public inputs.
 
-```mermaid
-sequenceDiagram
-    participant Funder as Funder Wallet
-    participant Ledger as Cardano Ledger
+### Step 6 — Unlock Transaction (On-Chain)
 
-    Funder->>Funder: Build tx: pay 100 ADA to gate_address<br/>datum = ()
-    Funder->>Ledger: Submit funding transaction
-    Ledger->>Ledger: Create UTxO
-    Note over Ledger: UTxO at gate_address:<br/>value = 100 ADA<br/>datum = ()
-```
+The holder (or relayer) constructs a transaction spending the locked UTxO. The proof and public inputs are in the **redeemer**. The Gate script validates and releases funds.
 
-```
-Funder wallet
-     │
-     │ Tx: pay 100 ADA to gate_address
-     │     datum = ()
-     │
-     v
-Cardano ledger
-     │
-     └─> New UTxO created:
-         address = gate_address
-         value   = 100 ADA
-         datum   = ()
-```
-
-**Privacy note**: The funder's address is visible, but this is irrelevant to the eventual holder who will unlock. The funder and the holder can be different parties, or the funder can be a relayer.
-
-</details>
-
-<details>
-<summary><b>Click to expand: Step 5 — Proof Generation (Off-Chain)</b></summary>
-
-**What happens:** The holder uses their credential, the issuer signature, the published `country_root`, and the `proving_key` to generate a zero-knowledge proof.
-
-**Functionality needed**
-
-| Component | Purpose |
-|-----------|---------|
-| Witness calculator | Assign values to all circuit wires (public + private) |
-| Groth16 prover (BLS12-381) | Generate `pi_a`, `pi_b`, `pi_c` given the witness and `pk` |
-| Merkle proof provider | Look up `country = 276` in the approved set and produce siblings + path bits |
-
-**Inputs to the prover**
-```
-Public inputs (will appear on-chain in the redeemer):
-  issuer_pk.u, issuer_pk.v
-  current_year = 2026
-  country_root = 0xabc123...
-  eligible     = 1
-
-Private inputs (never leave the holder's device):
-  dob_year     = 1990
-  country      = 276
-  signature.r, signature.s
-  k_mod_l, k_quotient       // EdDSA reduction witnesses
-  merkle_siblings[0..3]
-  merkle_path_bits[0..3]
-```
-
-**Data created**
-```
-proof_bundle:
-  pi_a: G1 point (48 bytes compressed)
-  pi_b: G2 point (96 bytes compressed)
-  pi_c: G1 point (48 bytes compressed)
-  public_inputs: [ByteArray; 5]
-```
-
-**Privacy note**: The proof is generated entirely on the holder's device. No credential fields, signatures, or Merkle witnesses are transmitted to any server.
-
-</details>
-
-<details>
-<summary><b>Click to expand: Step 6 — Unlock Transaction (On-Chain)</b></summary>
-
-**What happens:** The holder (or a relayer) constructs a transaction that spends the locked UTxO from Step 4. The proof and public inputs are provided in the **redeemer**. The Gate script validates the proof and releases the funds.
-
-**Functionality needed**
-
-| Component | Purpose |
-|-----------|---------|
-| Cardano transaction builder | Assemble inputs, outputs, redeemer, and collateral |
-| Script evaluator (Aiken/Plutus) | Execute the Gate validator during transaction validation |
-| Wallet / relayer | Provide transaction fee and signing |
-
-**Data flow**
-
-```mermaid
-sequenceDiagram
-    participant Holder as Holder Wallet / Relayer
-    participant Ledger as Cardano Ledger
-    participant Script as Gate Script (Aiken)
-    participant Recipient as Recipient Address
-
-    Holder->>Holder: Build tx:<br/>Input = UTxO at gate_address<br/>Redeemer = ProofRedeemer {pi_a, pi_b, pi_c, ...}<br/>Output = 95 ADA to recipient_address
-    Holder->>Ledger: Submit unlock transaction
-    Ledger->>Script: Evaluate Gate validator
-    Script->>Script: Check eligible == 1
-    Script->>Script: Groth16Verify(public_inputs, proof, vk)
-    Script-->>Ledger: Return True
-    Ledger->>Ledger: Consume UTxO
-    Ledger->>Recipient: Transfer 95 ADA
-    Note over Recipient: recipient_address can be<br/>a fresh one-time address
-```
-
-```
-Holder wallet (or Relayer)
-     │
-     │ Tx:
-     │   Input[0]: UTxO at gate_address (from Step 4)
-     │              redeemer = ProofRedeemer { pi_a, pi_b, pi_c, ... }
-     │
-     │   Output[0]: 95 ADA to recipient_address
-     │              (can be a fresh one-time address)
-     │
-     │   Collateral: provided by fee payer
-     │
-     v
-Cardano ledger / Script evaluator
-     │
-     ├─> Gate script runs:
-     │     1. eligible == 1              ✓
-     │     2. Groth16Verify(...)         ✓
-     │     → script returns True
-     │
-     └─> Tx accepted. UTxO consumed.
-         Funds transferred to recipient_address.
-```
-
-**Data created**
-```
-tx_hash      → on-chain evidence that the proof was accepted
-redeemer_log → proof + public inputs (visible on-chain, but reveals no credential fields)
-```
-
-**Privacy outcome**: An observer sees that *someone* produced a valid proof for the "adult resident" gate and claimed the funds. They cannot determine:
-- Who the holder is (no address in datum/redeemer binds identity)
+**Privacy outcome:** An observer sees that *someone* produced a valid proof. They cannot determine:
+- Who the holder is
 - The holder's birth year or country
 - Whether this is the same person who used another gate yesterday
 
-</details>
-
-<details>
-<summary><b>Click to expand: Summary, Tooling Stack & Feasibility</b></summary>
-
-### Summary: Data & Functionality per Step
-
-| Step | Location | Functionality | Data In | Data Out |
-|------|----------|---------------|---------|----------|
-| 1. Setup | Off-chain | R1CS compiler, PoT, Phase-2 | Circuit definition | `pk`, `vk`, `circuit_hash` |
-| 2. Issuance | Off-chain | Poseidon, EdDSA sign, Merkle tree | Credential fields, issuer sk | Signed credential, `country_root` |
-| 3. Deploy | On-chain | Aiken compiler, Groth16 lib | `vk` bytes | `script_hash`, `gate_address` |
-| 4. Fund | On-chain | Tx builder, wallet | ADA, `gate_address` | Locked UTxO |
-| 5. Prove | Off-chain | Witness calculator, Groth16 prover | Credential, `pk`, `country_root` | `pi_a`, `pi_b`, `pi_c`, public inputs |
-| 6. Unlock | On-chain | Tx builder, script evaluator | Proof, UTxO, fee | Spent UTxO, released funds |
-
-### Minimal Viable Tooling Stack
-
-To replicate this flow end-to-end, the following primitives must be available:
-
-**Off-chain**
-- Poseidon hash over BLS12-381 scalar field
-- EdDSA signature over Jubjub curve
-- Groth16 prover over BLS12-381
-- Merkle tree builder and proof generator
-
-**On-chain (Aiken / Plutus V3)**
-- BLS12-381 curve operations (already available as Plutus V3 built-ins)
-- Groth16 verifier (pairing check + public input linear combination)
-- ByteArray <-> integer conversions for parsing redeemers
-
-**Cross-layer**
-- Proof compression (Jacobian to compressed bytes) to fit redeemers within transaction size limits
-- Aiken / Plutus datum/redeemer serialization matching the off-chain prover's output format
-
 ### Is Groth16 on Cardano Actually Feasible?
 
-**Yes. Cardano's Plutus V3 has native BLS12-381 support, which is exactly what Groth16 over BLS12-381 requires.**
+**Yes.** Cardano's Plutus V3 has native BLS12-381 support: `bls12_381_G1_element`, `bls12_381_G2_element`, `bls12_381_millerLoop`, `bls12_381_finalVerify`, and scalar field operations.
 
 | Concern | Reality |
 |---------|---------|
-| **Curve support** | Plutus V3 ships with built-in BLS12-381 primitives: `bls12_381_G1_element`, `bls12_381_G2_element`, `bls12_381_millerLoop`, `bls12_381_finalVerify`, and scalar field operations. These were added specifically to enable ZK proof verification. |
-| **Groth16 verifier complexity** | A Groth16 verify is ~3 Miller loops + 1 final pairing check + some G1 multi-scalar multiplications for public inputs. This maps directly to the Plutus V3 built-ins. The Aiken validator sketched in Step 3 is not pseudocode wishful thinking — it compiles to real UPLC. |
-| **Execution budget** | Each BLS12-381 pairing costs ~10–20M CPU units in Plutus V3. A full Groth16 verification with 5 public inputs fits comfortably within Cardano's current per-transaction limits (mainnet block budget is ~10B CPU units; a single script can consume ~100M+ depending on protocol parameters). Early testnet benchmarks by IOG and community projects confirm Groth16 verify scripts execute successfully. |
-| **Trusted setup** | The off-chain Powers of Tau + Phase-2 ceremony is standard zkSNARK infrastructure and not constrained by Cardano at all. The resulting `vk` is just a few kilobytes embedded as validator parameters. |
-| **Proving** | Happens entirely off-chain in the holder's wallet. No Cardano limits apply. |
-
-**Bottom line**: The cryptographic primitives are live on Cardano mainnet today. The remaining work is engineering — writing the Aiken Groth16 verifier library, optimizing public-input MSM, and ensuring the proof compression format matches between off-chain prover and on-chain parser. This is well within the scope of current cardano-client-lib / Aiken tooling.
-
-</details>
+| **Curve support** | Built-ins added specifically for ZK proof verification |
+| **Verifier complexity** | ~3 Miller loops + 1 final pairing check + G1 MSMs; maps directly to Plutus V3 built-ins |
+| **Execution budget** | A full Groth16 verification with 5 public inputs fits comfortably within current per-transaction limits |
+| **Trusted setup** | Standard zkSNARK infrastructure; `vk` is a few kilobytes embedded as validator parameters |
+| **Proving** | Entirely off-chain in the holder's wallet |
 
 ---
 
 ## Step 2: Twisted ElGamal Extension
 
-**Executive summary:** Only use this if your use case requires hiding **amounts** (balances, transfer values) in addition to hiding identity. Twisted ElGamal is realizable on Cardano by substituting Ristretto255 with BLS12-381 G1 — all required operations (point addition, scalar multiplication, negation, equality) are already in Plutus V3. The catch is that messages live in the exponent, so amounts must be split into `u16` limbs and range proofs added to the Groth16 circuit. Skip this if your use case is identity-only.
+Only use this if your use case requires hiding **amounts** (balances, transfer values) in addition to hiding identity. Twisted ElGamal is realizable on Cardano by substituting Ristretto255 with **BLS12-381 G1** — all required operations (point addition, scalar multiplication, negation, equality) are already in Plutus V3. The catch is that messages live in the exponent, so amounts must be split into `u16` limbs and range proofs added to the Groth16 circuit.
 
-<details>
-<summary><b>Click to expand: Can We Use Twisted ElGamal on Cardano?</b></summary>
-
-**Yes.** Twisted ElGamal is conceptually realizable on Cardano with a curve substitution: instead of Ristretto255 (used by Mysten on Sui), you use **BLS12-381 G1** as the underlying group, because that's what Plutus V3 has native built-ins for.
-
-### What Plutus V3 Already Gives Us
-
-| Operation | Needed for Twisted ElGamal | Available in Plutus V3? |
-|-----------|---------------------------|------------------------|
-| Group element type | `G1Element` for ciphertext points | ✅ `bls12_381_G1_element` |
-| Point addition | Homomorphic addition of ciphertexts | ✅ `bls12_381_G1_add` |
-| Scalar multiplication | `r*g`, `m*h`, `r*pk` | ✅ `bls12_381_G1_scalarMul` |
-| Point negation | Subtraction (`c - d/x`) | ✅ `bls12_381_G1_neg` |
-| Point equality | Verify ciphertext integrity | ✅ `bls12_381_G1_equal` |
-| Hash to curve | Derive second generator `h` | ⚠️ Likely available as `bls12_381_G1_hashToGroup`; verify in target node version |
-| Pairings | **Not needed** for ElGamal itself | ✅ Available anyway (for Groth16) |
-
-**No new Plutus built-ins are needed** for the core ElGamal operations. The existing BLS12-381 G1 primitives are sufficient.
-
-</details>
-
-<details>
-<summary><b>Click to expand: What Changes Architecturally</b></summary>
-
-#### Current Design (Step 1 — Predicate Proofs Only)
-```
-Credential fields → private inputs to Groth16 circuit
-     ↓
-Proof says: "I satisfy predicate P" (no fields revealed)
-     ↓
-Script verifies Groth16 proof → releases funds
-```
-
-#### Extended Design (+ Twisted ElGamal)
-```
-Credential fields → encrypted as G1 points, stored in datum
-     ↓
-Holder proves: "decrypt(my_balance) ≥ transfer_amount
-               AND transfer_amount ≥ 0"
-     ↓
-Proof is Groth16 over constraints that include:
-  - ElGamal homomorphism equations
-  - Range bounds on encrypted limbs
-     ↓
-Script verifies Groth16 proof + adds ciphertexts homomorphically
-```
-
-#### Key Changes
+**Skip this if your use case is identity-only.** For identity-only selective disclosure (age verification, role checks, residency), encrypted balances are pure overhead.
 
 | Aspect | Step 1 Only | + Twisted ElGamal |
 |--------|-------------|-------------------|
-| **On-chain state** | Unit datum (no balance data) | Datum stores encrypted G1 points (active balance, pending balance) |
-| **Transfer logic** | One-shot unlock | Homomorphic point addition updates encrypted balances |
-| **Circuit complexity** | Signature verify + Merkle + comparison | Same + ElGamal equations + range decomposition |
-| **Redeemer size** | ~200 bytes (proof + 5 public inputs) | ~400–600 bytes (proof + multiple ciphertexts) |
+| **On-chain state** | Unit datum | Datum stores encrypted G1 points |
+| **Circuit complexity** | Signature + Merkle + comparison | Same + ElGamal equations + range decomposition |
 | **What is hidden** | Identity + credential fields | Identity + credential fields + amounts |
-| **What script does** | Verify proof, release funds | Verify proof, add ciphertexts, release funds |
-
-</details>
-
-<details>
-<summary><b>Click to expand: The Range-Proof Catch & Practical Architecture</b></summary>
-
-Twisted ElGamal is additively homomorphic, but the **message lives in the exponent**:
-
-```
-decrypt: c - d/x = m*h  →  m = log_h(m*h)
-```
-
-This is only practical for small `m` (because discrete log brute-force is needed). Mysten solves this by splitting amounts into `u16` limbs and encrypting each limb separately. But then the on-chain verifier must ensure:
-1. Each limb is within `[0, 2^16]`
-2. The sum of limbs doesn't overflow
-3. Sender has sufficient balance
-
-These are **range proofs**. In a UTxO model without account state, you need a ZK proof that the homomorphic subtraction is valid and non-negative. You would express these constraints as additional R1CS constraints inside your existing Groth16 circuit, then verify the same Groth16 proof on-chain.
-
-**So the practical architecture becomes:**
-
-```
-Off-chain:
-  1. Split amount into limbs (u16)
-  2. Encrypt each limb with Twisted ElGamal over BLS12-381 G1
-  3. Build Groth16 witness including ElGamal equations + range constraints
-  4. Generate proof
-
-On-chain (Aiken):
-  1. Receive proof + encrypted ciphertexts in redeemer
-  2. Groth16Verify(proof, vk) — checks signature, Merkle, AND ElGamal ranges
-  3. If valid, homomorphically add ciphertexts to update balances
-```
-
-</details>
-
-<details>
-<summary><b>Click to expand: Use-Case Guidance & Summary</b></summary>
-
-**Add Twisted ElGamal if your use case requires hiding amounts.** Examples:
-- Private payroll distribution (prove "is employee" without revealing salary amount)
-- Confidential voting weights (prove "holds governance token" without revealing balance)
-- Anonymous donations (prove "meets eligibility" without revealing donation size)
-
-**Skip it if your use case is identity-only.** Examples:
-- Age verification for venue entry
-- Role verification for healthcare access
-- Country residency for banking KYC
-
-In those cases, adding encrypted balances is pure overhead. The predicate proof already hides identity completely; encrypting a boolean `eligible` flag adds nothing.
-
-| Question | Answer |
-|----------|--------|
-| Can we use Twisted ElGamal on Cardano? | **Yes**, using BLS12-381 G1 as the group |
-| Do we need new Plutus built-ins? | **No**, existing G1 ops are sufficient |
-| What changes? | Datum stores G1 ciphertexts; circuit includes ElGamal + range constraints; script does homomorphic addition |
-| Is it harder? | **Moderately**. The cryptography is there, but the circuit grows (more constraints = slower proving), and the datum/redeemer structures become more complex |
-| Should we do it? | Only if amount privacy is a **requirement**. For identity-only selective disclosure, it's unnecessary complexity |
 
 If you go this route, the composition is: **predicate proof for identity + ElGamal encryption for amounts**, verified by a single Groth16 proof checked by the same Aiken Gate Script.
-
-</details>
 
 ---
 
 ## Step 3: Privacy Pools & Shielded Transactions
 
-**Executive summary:** Steps 1 and 2 solve two independent problems: (1) hiding identity via predicate proofs, and (2) hiding amounts via Twisted ElGamal. **Step 3 composes both into a single, usable system: a privacy pool where users can deposit, privately transfer, and withdraw funds without ever revealing their address, identity, or transaction value.** The circuit design for this step is described in detail in [`groth16-prover/docs/F5_RESEARCH_DIRECTION.md`](../../groth16-prover/docs/F5_RESEARCH_DIRECTION.md) under the **F5a — Shielded Amounts** section. This section explains how that circuit fits into the selective-disclosure architecture.
-
-> **Relationship to F5 research.** The `F5` document originally described an Ethereum-centric cross-chain privacy pool. The **F5a** circuit extension is the portable, chain-agnostic core: a Groth16 circuit that proves note ownership, amount range bounds, and value conservation — all using primitives we already have in `circom/`. On Cardano, this becomes a natural Step 3 because it does not require bridges: a single-chain privacy pool (deposit → shielded transfer → withdraw) is already valuable, and cross-chain extensions can be added later.
-
-### What changes from Steps 1–2
+Steps 1 and 2 solve two independent problems: (1) hiding identity via predicate proofs, and (2) hiding amounts via Twisted ElGamal. **Step 3 composes both into a single system: a privacy pool where users can deposit, privately transfer, and withdraw funds without revealing their address, identity, or transaction value.**
 
 | Aspect | Step 1 (Predicate Only) | Step 2 (+ ElGamal) | Step 3 (Privacy Pool) |
 |--------|------------------------|-------------------|----------------------|
-| **What is hidden** | Identity + credential fields | + Amounts | + Transaction graph (who paid whom) |
-| **On-chain state** | Unit datum | G1 ciphertexts in datum | **Merkle root of note commitments** in datum |
-| **Circuit proves** | Signature + Merkle + comparison | + ElGamal + range constraints | **Merkle membership of spent note + range proofs + value conservation + nullifier uniqueness** |
-| **Script logic** | Verify proof → release funds | Verify proof → add ciphertexts | Verify proof → insert new commitments + mark nullifier spent |
-| **Redeemer** | Proof + public inputs | Proof + ciphertexts | Proof + nullifier + output commitments |
-| **Anonymity set** | All users of the same Gate | Same | **All users who ever deposited into the pool** |
+| **What is hidden** | Identity + credential fields | + Amounts | + Transaction graph |
+| **On-chain state** | Unit datum | G1 ciphertexts | **Merkle root of note commitments** |
+| **Circuit proves** | Signature + Merkle + comparison | + ElGamal + range constraints | **Merkle membership + range proofs + value conservation + nullifier uniqueness** |
+| **Anonymity set** | All users of the same Gate | Same | **All users who ever deposited** |
 
-### Architecture: From Gate Script to Pool Script
-
-In Steps 1–2, each service deploys its own **Gate Script** parameterized by a verifying key. In Step 3, a single **Pool Script** manages the entire state of the privacy pool:
-
-```
-Pool Script (parameterized by vk)
-  └── datum: (merkle_root, nullifier_set_hash)
-
-Transactions against the pool script:
-  1. DEPOSIT   — anyone locks ADA; script inserts commitment into Merkle tree
-  2. TRANSFER  — holder spends old notes + creates new notes; script verifies proof + updates root
-  3. WITHDRAW  — holder burns notes; script verifies proof + releases ADA to fresh address
-```
-
-The critical difference: **the Pool Script is stateful.** It maintains a Merkle root that evolves as notes are spent and created. This is the same Merkle-tree pattern already validated in `circom/PoseidonMerkle/` and `circom/Privacy/`, but applied to a financial UTxO model.
-
-### Circuit composition (using existing primitives)
-
-The Step 3 circuit is a direct composition of five gadgets already working end-to-end in `circom/`:
-
-```
-Public:  merkle_root, nullifier_hash, output_commitments[k], fee
-Secret:  input_amounts[m], blinding_factors[m+k], merkle_paths[m],
-          stealth_scalar, input_notes[m]
-
-1. For each input note i:
-   a. commitment_i = Poseidon(amount_i, blinding_i, nullifier_i, viewing_key_i)
-   b. MerkleVerify(commitment_i, merkle_root, merkle_path_i)
-   c. RangeProof(amount_i, n=64)
-
-2. For each output note j:
-   a. RangeProof(amount_j, n=64)
-
-3. Conservation: sum(input_amounts) == sum(output_amounts) + fee
-
-4. Nullifier uniqueness: nullifier_hash = Poseidon(nullifier_0, nullifier_1, ...)
-   (The script checks nullifier_hash against its spent set)
-
-5. Stealth derivation (optional): derive output viewing keys from stealth_scalar
-```
-
-See [`groth16-prover/docs/F5_RESEARCH_DIRECTION.md`](../../groth16-prover/docs/F5_RESEARCH_DIRECTION.md) for the full constraint budget (~65K for 2-in/2-out/depth-20) and Cardano-specific range considerations (lovelace vs ADA).
-
-### Why this is the natural next step
-
-- **It reuses everything.** No new primitives are needed beyond what already exists in Steps 0–3. The sparse prover handles the circuit size. The Aiken verifier checks the proof. The Poseidon, RangeProof, and Merkle gadgets are already validated.
-- **It solves a real problem.** A predicate proof (Step 1) lets Alice prove she is an adult. Twisted ElGamal (Step 2) lets her hide a salary amount. But neither lets her **send money privately**. Step 3 closes the loop: a complete confidential payment system on Cardano.
-- **It scales the anonymity set.** In Step 1, the anonymity set is "all users of the Healthcare Gate." In Step 3, it is "everyone who ever deposited into the Cardano privacy pool" — potentially thousands or millions of users.
-- **It is deployable today.** The Pool Script uses only existing Plutus V3 builtins. No hard fork. No new curves. The proof is 192 bytes. Verification is constant-time.
-
-### From single-chain to cross-chain (future)
-
-The F5 research direction extends this single-chain pool to **cross-chain** delivery via canonical bridges. That is out of scope for Step 3 — it requires ecosystem maturity (L2 bridges on Cardano) — but the circuit and proof format are identical. A single-chain privacy pool is the right immediate target; cross-chain is the long-term horizon.
+The Pool Script maintains a Merkle root that evolves as notes are spent and created. The circuit is a direct composition of five gadgets already working end-to-end in `circom/`: Poseidon commitments, Merkle verification, range proofs, value conservation, and nullifier hashing. See [`groth16-prover/docs/F5_RESEARCH_DIRECTION.md`](../../groth16-prover/docs/F5_RESEARCH_DIRECTION.md) for the full constraint budget (~65K for 2-in/2-out/depth-20).
 
 ---
 
 ## Step 4: Future Directions
 
-**Executive summary:** The Groth16-based design in Steps 0–3 provides practical, production-ready privacy today, but it relies on elliptic-curve cryptography that is not quantum-resistant. Long-term research directions are to complement or replace the zk-SNARK layer with **fully homomorphic encryption (FHE)** schemes or with **hash-based STARK / zkVM proof systems** — both remain secure against quantum adversaries (details below).
+The Groth16-based design in Steps 0–3 provides practical, production-ready privacy today, but it relies on elliptic-curve cryptography that is not quantum-resistant. Long-term research directions are to complement or replace the zk-SNARK layer with post-quantum alternatives.
 
-<details>
-<summary><b>Click to expand: FHE-Based, Quantum-Resistant Selective Disclosure</b></summary>
+### FHE-Based Selective Disclosure
 
-### Why look beyond zk-SNARKs?
+Fully homomorphic encryption (FHE) enables predicate evaluation on encrypted credential fields by any party. It is believed to be post-quantum but is currently too heavy for on-chain verification. Short term: keep Groth16 for production. Medium term: monitor zk-FHE / FHE-SNARKs that combine homomorphic evaluation with succinct correctness proofs. Long term: migrate predicate gates to FHE-first constructions when lattice-based FHE becomes cheap enough.
 
-| Concern | Groth16 / BLS12-381 | FHE-based alternative |
-|---------|---------------------|-----------------------|
-| **Quantum resistance** | ❌ Broken by Shor's algorithm on ECDLP | ✅ Lattice-based FHE is believed to be post-quantum |
-| **Predicate evaluation** | Prover computes predicate locally, verifier checks ZK proof | Predicate can be evaluated on encrypted credential fields by any party |
-| **Disclosure granularity** | Predicate result only | Predicate result only (or encrypted result) |
-| **Computational cost** | Fast proofs, cheap on-chain verification | Heavy ciphertext operations; practical only for simple predicates today |
-| **Maturity** | Production-ready | Rapidly maturing, but not yet ready for resource-constrained on-chain verification |
+References: [LACTv2](https://github.com/jaymine/LACTv2) (lattice-based anonymous credentials); De Salve et al., *IET Information Security*, 2018 (FHE-based selective disclosure).
 
-### Relevant research
+### STARK / zkVM Quantum-Resistance Path
 
-1. **LACTv2** — a lattice-based anonymous credential protocol with attribute-hiding selective disclosure.
+Hash-based STARKs and zkVM backends (FRI-STARK, RISC Zero) are transparent, natively post-quantum, and verified on-chain by a hash-based verifier. Their cost is proof size (hundreds of KB today) and heavier on-chain verification.
 
-   > https://github.com/jaymine/LACTv2
+Live production references:
+- **CIP-1242 — ZKPoSP** (Botta et al., IACR ePrint 2026/1508): RISC Zero proofs of BIP-32-Ed25519 seed ownership for Cardano HD wallets.
+- **Zcash quantum readiness** (CoinDesk Research, June 2026): Three-step path to a fully post-quantum pool with hybrid classical+PQ signatures and hash-based proof hardening.
 
-   LACTv2 demonstrates how to issue credentials, selectively disclose attributes, and prove predicates using lattice primitives rather than elliptic-curve pairings. It is a concrete open-source reference for building selective disclosure without relying on ECDLP hardness, making it a candidate building block for a quantum-resistant version of this design.
+The Step 1 predicate proof is a natural candidate for staged migration: issue credentials with Groth16 today, and move to a STARK/zkVM backend once proofs are small enough for the Plutus V3 budget. The issuer/holder/Gate Script architecture is unchanged; only the primitive inside the redeemer changes.
 
-2. **A. De Salve, P. Mori, and L. Ricci, "A fully homomorphic encryption based scheme for verifiable credential selective disclosure," *IET Information Security*, 2018. DOI: [10.1049/iet-ifs.2018.5491](https://dl.acm.org/doi/10.1049/iet-ifs.2018.5491)**
+### Comparison: CIP-???? Native Confidential Transfers
 
-   > https://dl.acm.org/doi/10.1049/iet-ifs.2018.5491
+A parallel proposal aims to hide transaction amounts at the **ledger layer** using Pedersen commitments over ristretto255 and Bulletproofs range proofs. Our research demonstrates that **the same amount confidentiality is achievable within Cardano's existing BLS12-381 primitive set** — without new curves, without new proof systems, and without a hard fork.
 
-   This paper proposes a selective-disclosure scheme where credential attributes are encrypted with fully homomorphic encryption, and a verifier can check encrypted predicates without learning the underlying attributes. The construction is specifically aimed at post-quantum security and provides an academic foundation for replacing the Groth16 predicate proof with an FHE-based predicate check.
+| Aspect | CIP-???? (Ledger-Native) | Our Research (Smart-Contract ZK) |
+|--------|--------------------------|----------------------------------|
+| **Amounts hidden?** | ✅ Yes | ✅ Yes |
+| **Identity hidden?** | ❌ No | ✅ Yes |
+| **Curve** | ristretto255 (NEW) | BLS12-381 G1 (already live) |
+| **Hard fork required** | ✅ Yes | ❌ No |
+| **Proof verification cost** | O(n log n) (Bulletproofs) | **O(1)** (Groth16) |
+| **Script address support** | ❌ Deferred | ✅ Core architecture |
 
-### How it could fit into this design
 
-A future FHE layer could replace or augment the Step 1 predicate proof:
-
-```
-Current design (Step 1):
-  Credential fields → private inputs → Groth16 proof → on-chain pairing check
-
-FHE-augmented design:
-  Credential fields → encrypted with FHE public key
-                    → encrypted predicate evaluated by untrusted prover/verifier
-                    → encrypted result submitted to on-chain verifier
-                    → verifier decrypts only the predicate result (or checks a ZK proof of correct FHE evaluation)
-```
-
-**Practical path forward:**
-
-1. **Short term:** Keep the Groth16 / Aiken path for production deployments — it is fast, cheap to verify on-chain, and well-understood.
-2. **Medium term:** Monitor FHE proof systems (e.g., zk-FHE, FHE-SNARKs) that combine homomorphic evaluation with a succinct correctness proof. The on-chain verifier would check the succinct proof rather than evaluating FHE directly.
-3. **Long term:** If and when lattice-based FHE becomes cheap enough for on-chain verification, migrate predicate gates to an FHE-first construction. The high-level architecture (issuer, holder, Gate Script, redeemer) remains the same; only the cryptographic primitive inside the script changes.
-
-### Summary
-
-FHE-based selective disclosure is not yet a drop-in replacement for Groth16 on Cardano, but it is a **strategic future direction** for quantum resistance and for scenarios where the predicate itself should be evaluated on encrypted data by an untrusted party. The two references above provide both a concrete implementation starting point (LACTv2) and the theoretical basis (De Salve et al., 2018) for this research direction.
-
-</details>
-
-<details>
-<summary><b>Click to expand: STARK / zkVM Quantum-Resistance Path (CIP-1242 ZKPoSP, Zcash)</b></summary>
-
-Alongside lattice-based FHE, **hash-based proof systems** are the other live post-quantum track for predicate proofs. Hash-based STARKs and zkVM backends (FRI-STARK, RISC Zero) are transparent (no trusted setup), natively post-quantum, and — unlike Groth16's single pairing check — are verified on-chain by a **hash-based verifier**. Their cost is proof size (hundreds of KB today) and a heavier on-chain verification circuit.
-
-Two production-grade references are already on this path:
-
-- **CIP-1242 — ZKPoSP, post-quantum ZK signatures for Cardano HD wallets** (Botta, Pospieszalski, Ragnoli, Ranvier, IACR ePrint [2026/1508](https://eprint.iacr.org/2026/1508); CIP draft in [cardano-foundation/CIPs PR 1242](https://github.com/cardano-foundation/CIPs/pull/1242)). Proves Cardano BIP-32-Ed25519 key ownership with a **RISC Zero STARK** instead of the classical pairing-based witness. Two phases: Phase 1 verifies proofs off-chain (no ledger change), Phase 2 adds a native STARK verifier gated on shrinking the ~219 KB proof to a few KB. Its authors cite the approach in this repo as the classical baseline — "useful as a performance bound and for a possible **hybrid**."
-- **Zcash quantum readiness** ([CoinDesk Research, June 2026](https://www.coindesk.com/research/building-the-zcash-machine-tachyon-and-quantum-readiness)). Three steps: quantum recoverability (ZIP 2005) → ML-KEM + Tachyon against harvest-and-decrypt → a fully post-quantum pool with hybrid classical+PQ signatures and "hash-based or STARK-style proof hardening" of Halo2. The SNARK swap is deferred on purpose: PQ proofs are "much larger" and primitives are still moving fast.
-
-**How it could fit into this design:** the Step 1 predicate proof is a natural candidate for the same staged migration — issue credentials with the current Groth16 proof today, and move the predicate proof to a STARK/zkVM backend once proofs are small enough for the Plutus V3 budget. The issuer/holder/Gate Script architecture is unchanged; only the primitive inside the redeemer changes. The lattice path in `groth16-prover` and `nova-prover` (Implementation 10) and this STARK path are complementary candidates for the same future PQ chain.
-
-### Partial post-quantum — what the STARK swap covers and what it does not
-
-A FRI-STARK (ZKPoSP-style, RISC Zero) makes the **proof layer** post-quantum: transparent, no trusted setup, only hash assumptions (FRI over a hash-based polynomial commitment). But the solution is only as PQ as its **weakest link**, so three things decide whether the *whole* pipeline is quantum-resistant:
-
-1. **Witness relations.** A STARK faithfully proves whatever relation the circuit encodes. If the predicate circuit verifies a classical Ed25519 / BLS / BBS+ signature, the statement is classical — a quantum attacker forges the signature and the (now-PQ) proof verifies it. PQ requires the relation to be **hash-based**: e.g., *"the public key is derived from a seed along the Cardano path"* — BIP-32-Ed25519 key *derivation* is a hash chain with no ECDLP anywhere, which is precisely why ZKPoSP proves seed ownership rather than signature validity. For the ownership use case (prove control of a key from a mnemonic) a FRI-STARK therefore gives a **fully** post-quantum solution end to end.
-2. **Credentials.** In the VC model the issuer signs the attributes, and that signature is the weak link unless it too goes PQ (lattice-based, e.g. LACTv2, or hash-based such as SPHINCS+ / Merkle-based). The ZKPoSP-style swap alone leaves a classical credential signature outside the proof, still forgeable by Shor's algorithm. For **selective disclosure** (as opposed to plain ownership) the FRI-STARK is therefore necessary but **not sufficient** — the credential signature layer must be PQ as well, or the predicate proof must be reduced to hash-based relations (committed attributes + seed/preimage knowledge) with no in-circuit classical signature check.
-3. **On-chain verification.** The hash-based verifier is PQ by construction, but Plutus V3 budget and ~219 KB proof sizes keep on-chain verification Phase-2-gated (the same staging ZKPoSP commits to).
-
-**Additional caveat specific to a privacy design:** FRI-STARKs are not zero-knowledge by default — full hiding requires a masking / hiding-FRI variant (RISC Zero provides this via hidden witness), so ZK must be an explicit requirement of the STARK backend, not an assumption.
-
-### Summary
-
-Hash-based / STARK-style proofs are a **strategic future direction** for quantum resistance, with ZKPoSP (CIP-1242) and Zcash as live production references. They make the **proof layer** post-quantum (transparent, hash-based, no trusted setup) and give a **fully** PQ solution for the ownership case; a **fully** PQ selective-disclosure pipeline additionally requires PQ credential signatures (lattice or hash-based) or hash-based witness relations, plus proof sizes small enough for the Plutus V3 budget.
-
-</details>
-
-<details>
-<summary><b>Click to expand: CIP-???? Native Confidential Transfers — Comparison & Critique</b></summary>
-
-A parallel proposal, [CIP-???? | Native Confidential Transfers](https://github.com/cardano-foundation/CIPs/pull/1233), aims to hide transaction amounts at the **ledger layer** using Pedersen commitments over **ristretto255** and **Bulletproofs** range proofs. This section compares that design with our Step 0–2 research, which demonstrates that **the same amount confidentiality is achievable within Cardano's existing BLS12-381 primitive set** — without new curves, without new proof systems, and without a hard fork.
-
-### The Core Disagreement: New Primitives vs. Existing Infrastructure
-
-| Aspect | CIP-???? (Ledger-Native) | Our Research (Steps 0–3, Smart-Contract ZK) |
-|--------|--------------------------|---------------------------------------------|
-| **Amounts hidden?** | ✅ Yes (Pedersen commitments over ristretto255) | ✅ **Yes** (Twisted ElGamal / Pedersen over BLS12-381 G1) |
-| **Identity hidden?** | ❌ No — addresses public | ✅ Yes — predicate proofs in Gate Scripts |
-| **Curve / group used** | **ristretto255** (NEW to Cardano) | **BLS12-381 G1** (already live since Chang hard fork) |
-| **Range proof system** | **Bulletproofs** (NEW verifier logic needed) | **Groth16** (already implemented end-to-end; PLONK possible) |
-| **Requires hard fork** | ✅ Yes — add ristretto255 + Bulletproofs verifier logic to ledger rules | ❌ **No** — Groth16 range proofs deploy today as Aiken Gate Scripts using existing Plutus V3 builtins |
-| **Plutus builtins needed** | ❌ None exist for ristretto255 | ✅ All already exist: `G1_add`, `G1_scalarMul`, `G1_neg`, `G1_equal`, `G1_hashToGroup`, `millerLoop`, `finalVerify` |
-| **Proof verification cost** | O(n log n) per tx (Bulletproofs, grows with #commitments) | **O(1)** per tx (Groth16 — constant ~20% of script CPU budget regardless of circuit size) |
-| **ZK composability** | ❌ ristretto255 field incompatible with BLS12-381 R1CS | ✅ **Same scalar field** — circuits natively reason about commitments |
-| **Script address support** | ❌ Restricted to key-locked addresses; explicitly deferred to future companion CIPs (validation rule 10) | ✅ **Core architecture** — Gate Script IS the verifier |
-| **Programmable tokens (CIP-113)** | ❌ Mutually exclusive by construction in v1; future companion requires script-context extension + ZK predicates | ✅ **Naturally compatible** — proof is the programmable authorization |
-| **Staking compatibility** | ❌ Confidential ADA excluded from stake, rewards, and governance voting power — including DRep vote-delegation weight and SPO votes | ✅ **Preserved** — transparent ADA stakes normally; confidentiality is orthogonal |
-| **Audit granularity** | One viewing key per account (all payment addresses of a stake credential); HD-derived from wallet seed; on-chain registration certificate | Per-credential auditor keys (different auditors for different credentials) |
-| **Transaction size (range proof)** | ~1–2 KB (Bulletproofs, aggregated) | **192 bytes** (Groth16, constant regardless of constraints) |
-| **Trusted setup** | None for Bulletproofs; CIP also explicitly states staking variants and post-quantum paths are setup-free | Per-circuit (reusable universal SRS + Phase-2 MPC — **already implemented**); 1-of-N secure |
-| **Estimated node CPU cost** | ~2–3 ms per confidential tx unbatched (~1 ms batched) vs ~0.1–0.2 ms transparent — **~10–20× CPU multiplier** (CIP's own appendix) | ~20% of Plutus script CPU budget, constant regardless of circuit size |
-
-### Key Critique Points
-
-1. **BLS12-381 G1 is already a prime-order group.** The CIP correctly identifies that raw Curve25519 has cofactor 8 and chooses ristretto255 to remove it. However, BLS12-381 G1 — the subgroup used by all Plutus builtins — is already prime-order, canonical, and consensus-critical. Adding ristretto255 to the ledger duplicates a property that exists today on a curve the network already trusts. We understand the rationale (reuse of the Ed25519 field), but the duplication cost should be weighed against the alternative of leveraging an existing prime-order group.
-
-2. **Twisted ElGamal works identically over BLS12-381 G1.** Our Step 2 research explicitly confirmed this. The CIP's amount transport — `C = v·H + r·G`, ephemeral key `E = e·G`, shared secret `s = e·P_view` — uses only point addition, scalar multiplication, and equality checks, all of which are existing Plutus builtins. The mathematics are identical; only the curve label differs. We note the CIP's explicit rejection of per-recipient Twisted-ElGamal handles (§Alternatives Considered) — their reasoning is sound for the single-viewing-key model: handles add +32 bytes per reader per output, force a bounded amount space with discrete-log lookup tables, and the Diffie-Hellman transport already delivers amounts under a single key. Our claim is about mathematical equivalence of the commitment scheme, not a recommendation to adopt handles.
-
-3. **Bulletproofs verification cost is linear and a scalability concern — confirmed by the CIP's own appendix and independent benchmarks.** For a ledger layer where every node verifies every confidential transaction, the CIP now self-documents a ~10–20× CPU multiplier (~2–3 ms per tx unbatched vs ~0.1–0.2 ms transparent), with verification growing linearly in the number of committed values. Independent benchmarks (El-Hajj & Oude Roelink, *Information* 2024, 15(8), 463) empirically confirm that Bulletproofs is the slowest of the three major ZK proof systems (zk-SNARK, zk-STARK, Bulletproofs) in proving, verification, and proof size. Groth16 verification is genuinely constant-time — the same cost for 3 constraints or 79,000 constraints — and we have measured it at ~20% of a Plutus script CPU budget. The CIP mitigates with batch verification (~halving the cost) and protocol parameters (`maxConfidentialCommitmentsPerTx`), but the fundamental O(n) vs O(1) gap remains. We note that **Bulletproofs++** (Eagen et al., ePrint 2022/510) is a transparent, drop-in improvement over Bulletproofs — same security model, same features, ~3–5× faster verification, ~38% smaller proofs — and would significantly reduce the CIP's CPU multiplier while preserving the no-trusted-setup property.
-
-4. **The "no trusted setup" framing is now internally consistent, but the cost comparison should include social trust.** The CIP correctly states that Bulletproofs require no cryptographic trusted setup, and now extends this to staking variants and post-quantum paths. Our earlier concern about "misleading framing" is softened — the CIP is internally consistent. However, the comparison is incomplete without acknowledging that the CIP requires a **protocol hard fork** (social trust: every node operator must trust the implementation), while our Groth16 approach uses a **cryptographic trusted setup** (Powers of Tau + Phase-2 MPC) that is 1-of-N secure, reusable across circuits, and already fully implemented. Both involve trust; the nature of the trust differs.
-
-5. **The CIP precludes ZK composability across curve boundaries.** Because ristretto255 operates over a different field than BLS12-381, a future Groth16 circuit cannot efficiently reason about a ristretto255 commitment (e.g., "prove my hidden balance exceeds X"). Our BLS12-381-native commitments enable a single circuit to prove both predicate satisfaction (identity) and range constraints (amount) in one 192-byte proof. The CIP's future extensions section mentions ZK predicates over commitments for governance and programmable tokens, but assumes ristretto255-native tooling — the cross-curve composability gap is not addressed.
-
-6. **Script-address confidentiality is now explicitly deferred, not just "open."** The CIP's validation rule 10 formally prohibits Plutus script execution alongside confidential components, and script-address confidentiality is explicitly deferred to future companion CIPs. Our Gate Script architecture — a working, tested script-locked ZK verifier validated for multiple circuits — demonstrates that this is an engineering choice, not a fundamental limitation. The CIP's self-imposed restriction to key-locked addresses is a consequence of its ledger-native architecture, where script contexts cannot represent hidden quantities. Our application-layer approach sidesteps this entirely: the Gate Script *is* the verifier, so script addresses are not a special case.
-
-7. **The CIP creates a dual-system complexity burden on the entire ecosystem.** The CIP does not replace transparent transfers — it adds 12 new validation rules, new certificate types (viewing-key registration), new cryptographic operations (DH transport, Bulletproofs verification), and new wallet logic (key derivation, amount recovery, shield/unshield flows) that must coexist with the existing transparent system. Every component — ledger, wallets, block explorers, audit tools, developer tooling — must now handle two parallel transfer modes. Every future Cardano upgrade must consider its interaction with both. Our application-layer approach adds zero complexity to the ledger; the Gate Script is self-contained, and if it has a bug, it affects one application, not every confidential transaction on the network.
-
-### Bottom Line
-
-Both approaches achieve amount confidentiality. The CIP has matured significantly since our initial analysis — it now includes versioning, HD key derivation, node resource estimates, structured future extensions, and trimmed open questions. None of these changes alter the fundamental trade-off:
-
-- **CIP path:** Universal amount hiding for all **simple transfers** via ristretto255 + Bulletproofs. Requires hard fork, introduces new primitives (ristretto255, Bulletproofs verifier logic), ~10–20× CPU multiplier (CIP's own appendix), linear verification cost with number of commitments, excludes script-address and Plutus smart-contract interaction while amounts are hidden (validation rule 10), and sacrifices cross-curve ZK composability. Audibility is account-level: one viewing key per stake credential exposes all payment addresses and all transaction history. The CIP is honest about these trade-offs and frames them as deliberate design choices.
-- **Our path:** Application-layer amount hiding via Twisted ElGamal + Groth16 range proofs over BLS12-381 G1. Deployable today without governance consensus, constant O(1) verification cost (~20% of script CPU budget), fully composable with BLS12-381 ZK circuits (predicate + amount in one proof), native script-address support (Gate Script IS the verifier), and preserves staking/programmability. Audibility is credential-level: per-credential auditor keys enable flexible, composable disclosure without per-transaction overhead. The cost is a per-circuit cryptographic trusted setup (1-of-N secure, already implemented).
-
-For a strategic comparison of primitive choices, see our full analysis: [`cip-primitive-confrontation.md`](../../tmp/opencode/cip-primitive-confrontation.md).
-
-</details>
 
 ---
 
 ## Compliance & Auditability
 
-**Executive summary:** Privacy-by-default does not mean absence of oversight. Production deployments can layer compliance on top of the core proof-based authorization without weakening privacy. Three mechanisms are available: per-credential auditing (encrypt a viewing key to auditor keys at issuance, no per-transaction overhead), permissioned gates (KYC checks layered alongside the ZK proof), and emergency controls (revocation, pause, freeze, coercion resistance). An advanced Forensic Data Escrow allows governed conditional disclosure of encrypted metadata without exposing credential fields.
+Privacy-by-default does not mean absence of oversight. Production deployments can layer compliance on top without weakening privacy.
 
-<details>
-<summary><b>Click to expand: Auditor Visibility Without Per-Transaction Overhead</b></summary>
-
-Instead of attaching audit data to every proof submission (which increases transaction size and cost), the issuer can bundle an **auditor-encrypted decryption key** with the credential at issuance time.
-
-- When the credential is issued, the holder's wallet encrypts a credential decryption key to the issuer's designated auditor public keys and includes the ciphertext in the credential bundle.
-- Auditors decrypt this key once off-chain and can then read the full credential contents, verify historical proofs, or inspect Merkle root updates.
-- The holder's individual proof transactions remain unchanged — no extra ciphertext or proof is needed per transaction.
-
-This **per-credential auditing** model (inspired by Mysten Labs' confidential-transfer design, adapted to a UTxO context) is cheaper for holders and simpler for auditors than per-transaction audit trails. In Cardano's UTxO model there is no on-chain account object; the credential and its audit key are simply off-chain data held by the holder.
-
-</details>
-
-<details>
-<summary><b>Click to expand: Permissioned Gates</b></summary>
-
-A verifier can require a valid ZK proof **plus** an additional on-chain policy check. For example:
-
-- **KYC gating**: The Gate Script checks that the transaction signer (or a referenced policy object) is present in an on-chain KYC registry before accepting the proof.
-- **Rate limiting**: A gate tracks how many times a given proof public-input set has been used in an epoch and rejects further unlocks beyond a threshold.
-- **Allowlists**: Only credentials issued by a specific issuer sub-key are accepted.
-
-The policy layer is separate from the predicate circuit, so the ZK proof itself stays small and the privacy properties remain intact.
-
-</details>
-
-<details>
-<summary><b>Click to expand: Emergency Controls & Forensic Data Escrow</b></summary>
-
-### Emergency Controls
-
-| Control | Mechanism |
-|---------|-----------|
-| **Revocation** | Issuer publishes a new revocation Merkle root; the next proof generation automatically includes a non-membership witness showing the credential is not revoked |
-| **Global pause** | Gate operator flips an `is_active` flag in the script; all proof verifications reject until lifted |
-| **Freeze** | Issuer or designated admin adds a credential ID to a frozen set; the circuit can include a non-freeze membership check |
-| **Holder coercion resistance** | Because the proof does not reveal field values, a coerced holder cannot be forced to disclose their exact age, country, etc. — they can only be forced to produce (or not produce) a proof for a given predicate |
-
-### Forensic Data Escrow (Advanced)
-
-For regulated environments, the issuer can escrow encrypted credential metadata with a governance-controlled disclosure mechanism.
-
-- At issuance, the holder includes an additional ciphertext encrypting non-sensitive metadata (e.g., credential type, issuance epoch, jurisdiction code) to a **governance multi-sig public key**.
-- This ciphertext is stored off-chain with the credential bundle — it never appears in proof transactions.
-- Under defined circumstances (court order, fraud investigation, lost-key recovery), the governance body can decrypt the escrowed metadata without learning the actual credential field values.
-- The predicate proof system remains unchanged; the escrow is a compliance layer outside the ZK circuit.
-
-This provides a middle ground between absolute privacy and regulatory accountability: the holder's fields stay hidden, but issuers retain a governed path for conditional metadata disclosure.
-
-</details>
+| Mechanism | How It Works |
+|-----------|--------------|
+| **Per-credential auditing** | Issuer encrypts a viewing key to auditor keys at issuance; no per-transaction overhead |
+| **Permissioned gates** | Gate Script checks an additional on-chain policy (KYC registry, rate limit, allowlist) alongside the ZK proof |
+| **Emergency controls** | Revocation (new Merkle root), global pause (`is_active` flag), freeze (frozen set), coercion resistance (proofs never reveal field values) |
+| **Forensic Data Escrow** | Non-sensitive metadata encrypted to a governance multi-sig; decryptable under defined circumstances without exposing credential fields |
 
 ---
 
 ## Threat Model & Deployment
 
-**Executive summary:** The main threats are credential theft (mitigated by holder binding), proof replay (mitigated by nonces/epochs), colluding verifiers (mitigated by unlinkable proofs), and holder coercion (mitigated by the fact that proofs never reveal field values). Deployment requires defining credential schemas and predicate circuits, running trusted setup, deploying parameterized Gate Scripts, publishing issuer public keys, and implementing holder-side local proof generation. Optional relayer infrastructure can hide the fee payer.
-
-<details>
-<summary><b>Click to expand: Threat Model & Mitigations</b></summary>
-
 | Threat | Mitigation |
 |--------|-----------|
-| Credential theft | **Holder binding:** Bind the credential to a holder secret (e.g., include a holder commitment in the signed message; the proof requires knowledge of the secret) |
-| Proof replay | Add a nonce, epoch number, or transaction hash as a public input to the circuit |
-| Sybil attacks | Issuer ensures one credential per real-world identity (out of scope of the cryptography) |
-| Colluding verifiers | By design, proofs are unlinkable; collusion cannot cryptographically link sessions |
-| Holder coercion | The holder can generate a proof for *any* predicate they satisfy; they cannot be forced to reveal specific field values because the proof does not expose them |
+| Credential theft | Bind credential to a holder secret (commitment in signed message) |
+| Proof replay | Add nonce, epoch, or transaction hash as a public input |
+| Sybil attacks | Issuer ensures one credential per real-world identity (out of cryptographic scope) |
+| Colluding verifiers | Proofs are unlinkable by design |
+| Holder coercion | Holder can only be forced to produce (or not produce) a proof; field values remain hidden |
 
-</details>
-
-<details>
-<summary><b>Click to expand: Deployment Checklist</b></summary>
+### Deployment Checklist
 
 - [ ] Define credential schema (fields, encoding)
 - [ ] Define predicate circuits per use case
@@ -1199,56 +365,20 @@ This provides a middle ground between absolute privacy and regulatory accountabi
 - [ ] Implement holder-side proof generation
 - [ ] Optional: deploy relayer infrastructure for address-less submission
 
-</details>
+### Hiding the Fee Payer
 
-<details>
-<summary><b>Click to expand: Hiding the Fee Payer</b></summary>
-
-For full anonymity, even the transaction fee payer can be hidden:
-
-1. **Relayer network**: The holder sends the proof to a relayer who pays fees and submits the tx. The relayer cannot forge the proof.
-2. **Stealth addresses**: The holder derives a one-time address for each transaction.
-3. **Coin mixing**: Fees are paid from mixed UTxOs, breaking the chain of custody.
-
-In all cases, the **Gate Script remains unchanged** — it validates only the proof, not the transaction's origin.
-
-</details>
+For full anonymity, even the transaction fee payer can be hidden via a **relayer network** (relayer pays fees, cannot forge proofs), **stealth addresses** (one-time addresses), or **coin mixing**.
 
 ---
 
 ## References
 
-1. A. De Salve, A. Lisi, M. Cascino, P. Mori, and L. Ricci, "Selective disclosure approaches in Self-Sovereign Identity: an experimental comparison," *IEEE Access*, 2025. DOI: [10.1109/ACCESS.2025.3649167](https://doi.org/10.1109/ACCESS.2025.3649167)
-
-   This paper surveys and experimentally compares five selective disclosure strategies (atomic credentials, hashing, encryption, hash trees, and signature-based / BBS+) from the SSI literature. The design documented here advances beyond claim-level disclosure to **predicate-level zero-knowledge disclosure**, which the surveyed approaches do not address.
-
-2. W3C, *Verifiable Credentials Data Model 2.0*, W3C Proposed Recommendation, 2025. https://www.w3.org/TR/vc-data-model-2.0/
-
-3. W3C, *Decentralized Identifiers (DIDs) v1.0*, W3C Recommendation, 2022. https://www.w3.org/TR/did-core/
-
-4. Mysten Labs, *Confidential Transfers on Sui*, GitHub repository, 2025. https://github.com/MystenLabs/confidential-transfers
-
-   Demonstrates a complementary privacy paradigm using Twisted ElGamal homomorphic encryption and zero-knowledge range proofs to hide transfer *amounts* on-chain. Key insights absorbed into this design include **per-credential auditing** (encrypting a decryption key once to auditor keys rather than attaching audit data per transaction) and **permissioned gate flows** (layering KYC/policy checks on top of cryptographic verification). Adapted here from Sui's account model to Cardano's UTxO model.
-
-5. Panther Protocol, "Programmable Privacy Is Live: Panther Protocol Deploys on Polygon," *Panther Protocol Blog*, May 2026. https://blog.pantherprotocol.io/programmable-privacy-is-live-panther-protocol-deploys-on-polygon/
-
-   Introduces **programmable privacy** — confidential on-chain interactions with zero-knowledge credential verification. Insights absorbed into this design include the **UTxO-based anonymity set** (multiple locked UTxOs at the same script create a privacy pool where any valid proof can spend any UTxO), **local proof generation** (proofs generated in the holder's wallet, never on a server), and the principle that *"the protocol verifies only what's required — nothing more."* Also informs the **Forensic Data Escrow** concept for governed conditional disclosure.
-
-6. **LACTv2** — lattice-based anonymous credentials with selective attribute disclosure.
-   https://github.com/jaymine/LACTv2
-
-   A concrete open-source implementation of anonymous credentials built on lattice primitives rather than elliptic-curve pairings. It serves as a reference for a quantum-resistant alternative to the Groth16 credential layer used in Step 1.
-
+1. A. De Salve et al., "Selective disclosure approaches in Self-Sovereign Identity: an experimental comparison," *IEEE Access*, 2025. DOI: [10.1109/ACCESS.2025.3649167](https://doi.org/10.1109/ACCESS.2025.3649167)
+2. W3C, *Verifiable Credentials Data Model 2.0*, 2025. https://www.w3.org/TR/vc-data-model-2.0/
+3. W3C, *Decentralized Identifiers (DIDs) v1.0*, 2022. https://www.w3.org/TR/did-core/
+4. Mysten Labs, *Confidential Transfers on Sui*, 2025. https://github.com/MystenLabs/confidential-transfers
+5. Panther Protocol, "Programmable Privacy Is Live," May 2026. https://blog.pantherprotocol.io/programmable-privacy-is-live-panther-protocol-deploys-on-polygon/
+6. **LACTv2** — lattice-based anonymous credentials. https://github.com/jaymine/LACTv2
 7. A. De Salve, P. Mori, and L. Ricci, "A fully homomorphic encryption based scheme for verifiable credential selective disclosure," *IET Information Security*, 2018. DOI: [10.1049/iet-ifs.2018.5491](https://dl.acm.org/doi/10.1049/iet-ifs.2018.5491)
-
-   https://dl.acm.org/doi/10.1049/iet-ifs.2018.5491
-
-   Proposes a selective-disclosure scheme where credential attributes are encrypted with fully homomorphic encryption and predicates are evaluated on encrypted data. The construction targets post-quantum security and provides the theoretical foundation for an FHE-based future direction (Step 3).
-
-8. **ZKPoSP** — Vincenzo Botta, Michał Pospieszalski, Emanuele Ragnoli, John Ranvier, "ZKPoSP: Post-Quantum Zero-Knowledge Proofs for Hierarchical Deterministic Wallets," IACR ePrint [2026/1508](https://eprint.iacr.org/2026/1508); CIP draft in [cardano-foundation/CIPs PR 1242](https://github.com/cardano-foundation/CIPs/pull/1242).
-
-   A production-grade reference for the STARK/zkVM post-quantum track: RISC Zero proofs of BIP-32-Ed25519 seed ownership for Cardano HD wallets, deployed in two phases (off-chain verification now, native STARK verifier later once proofs shrink from ~219 KB). Its authors cite this repository as the classical baseline ("useful as a performance bound and for a possible hybrid").
-
-9. **Zcash quantum readiness** — CoinDesk Research, "Building the Zcash Machine: Tachyon and Quantum Readiness," June 2026. https://www.coindesk.com/research/building-the-zcash-machine-tachyon-and-quantum-readiness
-
-   Zcash's committed three-step path: quantum recoverability (ZIP 2005, Ironwood pool) → ML-KEM (FIPS 203) + Tachyon to close the harvest-and-decrypt window → a fully post-quantum pool with hybrid classical+PQ signatures and "hash-based or STARK-style proof hardening" of Halo2. Explicitly defers the SNARK swap because PQ proofs are much larger and the primitives are still maturing — the same Phase-1-then-Phase-2 discipline as ZKPoSP.
+8. **ZKPoSP** — V. Botta et al., "ZKPoSP: Post-Quantum Zero-Knowledge Proofs for Hierarchical Deterministic Wallets," IACR ePrint [2026/1508](https://eprint.iacr.org/2026/1508); CIP draft in [cardano-foundation/CIPs PR 1242](https://github.com/cardano-foundation/CIPs/pull/1242)
+9. CoinDesk Research, "Building the Zcash Machine: Tachyon and Quantum Readiness," June 2026. https://www.coindesk.com/research/building-the-zcash-machine-tachyon-and-quantum-readiness
