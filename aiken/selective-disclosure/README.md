@@ -569,6 +569,9 @@ The final folded state equals `−amount` (sum of `new_limb − old_limb` over a
 
 ## Step 3: Privacy Pools & Shielded Transactions
 
+<details>
+<summary><b>Expand</b></summary>
+
 Steps 1 and 2 solve two independent problems: (1) hiding identity via predicate proofs, and (2) hiding amounts via Twisted ElGamal. **Step 3 composes both into a single system: a privacy pool where users can deposit, privately transfer, and withdraw funds without revealing their address, identity, or transaction value.**
 
 ```mermaid
@@ -663,9 +666,14 @@ $NOVA verify --curve bls12-381 --ivc pp.ivc.cbor --slim-proof pp_slim.proof.cbor
 
 The folded chain provably transforms the input note's commitment into the Merkle root; in a production pool a terminal constraint additionally asserts the range-conservation and non-nullifier checks of the spend before the pool updates its new root.
 
+</details>
+
 ---
 
 ## Step 4: Compliant Shielded Transfer (Viewing-Key Auditor Reveal)
+
+<details>
+<summary><b>Expand</b></summary>
 
 Steps 1–3 deliver privacy by default, but production systems also need **oversight**.
 Step 4 layers a designated-auditor reveal on top of Step 3's shielded pool: the same
@@ -732,9 +740,14 @@ comparison): `privacy_pool_viewable.circom` proves `VALID` with the auditor reve
 `in_amount = 100`; `elgamal_viewkey_nova.circom` folds+verifies with `state chain OK`
 (684 B slim proof) and the same reveal.
 
+</details>
+
 ---
 
 ## Runnable e2e Scripts & Timing
+
+<details>
+<summary><b>Expand</b></summary>
 
 Every step has a `step{N}/` directory of runnable scripts (`aiken/selective-disclosure/step{N}/`) that reproduce the e2e from scratch, covering **both** proof paths. All eight were run to completion and verified (`VALID` / `state chain OK`).
 
@@ -770,7 +783,7 @@ in a table:
 
 See those READMEs for the measured numbers rather than repeating them here.
 
-
+</details>
 
 ## Comparison with CIP proposal: Native Confidential Transfers
 
