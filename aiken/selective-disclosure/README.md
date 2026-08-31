@@ -267,6 +267,72 @@ The holder (or relayer) constructs a transaction spending the locked UTxO. The p
 - The holder's birth year or country
 - Whether this is the same person who used another gate yesterday
 
+#### Copy-paste: Groth16 end-to-end (reproducible)
+
+The phases above are the architecture; this is the exact command sequence to
+reproduce a valid proof **from scratch**. Everything runs off-chain in the
+`bls/` repo; inputs are deterministic (same seed ⇒ same proof inputs). It uses
+`circom/Predicate` (the composite Step 1 circuit) and the `--sparse` path for
+the ~10.4K-constraint circuit.
+
+```bash
+# 0. (one-time) build the two Rust CLIs, then alias them
+cargo build --release --manifest-path clis/trusted-setup/Cargo.toml
+cargo build --release --manifest-path clis/groth16/Cargo.toml
+TS=clis/trusted-setup/target/release/trusted-setup
+G16=clis/groth16/target/release/groth16
+
+# 1. Off-chain scenario: issuer keypair + approved-countries Merkle root +
+#    signed credential (dob_year=1990, country=DEU). Deterministic via --seed.
+mkdir -p /tmp/pred
+python3 circom/Predicate/gen_predicate_input.py --depth 2 \
+  --output /tmp/pred/input.json --seed 1
+#    → input.json  (issuer pk, current_year, country_root, eligible,
+#                   dob_year, country, signature, merkle witness)
+
+# 2. Compile the circuit
+cd circom/Predicate
+circom predicate_depth2.circom --r1cs --wasm --sym --prime bls12381 \
+  -o /tmp/pred \
+  -l ../EdDSAJubJub -l ../PoseidonPreimage -l ../EdDSAJubJub/node_modules/circomlib/circuits
+cd ../..
+
+# 3. Generate the witness (holder device)
+snarkjs wtns calculate /tmp/pred/predicate_depth2_js/predicate_depth2.wasm \
+  /tmp/pred/input.json /tmp/pred/predicate.wtns
+
+# 4. Dev trusted-setup ceremony (use --sparse for this circuit's size)
+$TS ceremony-dev --sparse \
+  --circuit /tmp/pred/predicate_depth2.r1cs \
+  --proving-key /tmp/pred/predicate.pk --verifying-key /tmp/pred/predicate.vk
+
+# 5. Prove (holder device)
+$G16 prove --sparse \
+  --circuit /tmp/pred/predicate_depth2.r1cs \
+  --witness /tmp/pred/predicate.wtns \
+  --proving-key /tmp/pred/predicate.pk --out /tmp/pred/predicate.proof
+
+# 6. Verify off-chain
+$G16 verify \
+  --proof /tmp/pred/predicate.proof --public /tmp/pred/predicate.pub \
+  --verifying-key /tmp/pred/predicate.vk
+# → Verification result: VALID
+
+# 7. Aiken integration (on-chain Gate verifies the same proof)
+$G16 export-vk --verifying-key /tmp/pred/predicate.vk --out /tmp/pred/predicate_vk.ak
+```
+
+**Verified end-to-end:** the sequence above produces `VALID`. The public
+inputs are `pku, pkv, current_year, country_root, eligible=1`; the private
+inputs `dob_year, country, Ru, Rv, S, sibling, direction` never leave the
+holder's device. The resulting 192-byte proof + 5-field public list are exactly
+what the Aiken `gate` validator (Phase 3) consumes.
+
+> **Tip:** the same reproducible pattern is used for Steps 2 and 3 — only the
+> circuit directory and its input generator change. See
+> [`circom/Predicate/README.md`](../../circom/Predicate/README.md) for the
+> rejected-tamper cases.
+
 #### Is Groth16 on Cardano Actually Feasible?
 
 **Yes.** Cardano's Plutus V3 has native BLS12-381 support: `bls12_381_G1_element`, `bls12_381_G2_element`, `bls12_381_millerLoop`, `bls12_381_finalVerify`, and scalar field operations.
