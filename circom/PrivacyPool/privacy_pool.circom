@@ -29,8 +29,10 @@ template PrivacyPool(depth, nBits) {
     signal input nullifier;
     signal input in_amount;
     signal input in_blinding;
+    signal input out_nullifier_1;
     signal input out_amount_1;
     signal input out_blinding_1;
+    signal input out_nullifier_2;
     signal input out_amount_2;
     signal input out_blinding_2;
     signal input sibling[depth];
@@ -55,15 +57,15 @@ template PrivacyPool(depth, nBits) {
     nHash.nullifier <== nullifier;
     nHash.nullifier_hash === nullifier_hash;
 
-    // Output note commitments must match
+    // Each output note commits to its own fresh nullifier, amount & blinding.
     component outNote1 = NoteCommitment();
-    outNote1.nullifier <== nullifier;
+    outNote1.nullifier <== out_nullifier_1;
     outNote1.amount <== out_amount_1;
     outNote1.blinding <== out_blinding_1;
     outNote1.commitment === out_commitment_1;
 
     component outNote2 = NoteCommitment();
-    outNote2.nullifier <== nullifier;
+    outNote2.nullifier <== out_nullifier_2;
     outNote2.amount <== out_amount_2;
     outNote2.blinding <== out_blinding_2;
     outNote2.commitment === out_commitment_2;
