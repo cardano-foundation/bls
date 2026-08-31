@@ -420,6 +420,25 @@ Only use this if your use case requires hiding **amounts** (balances, transfer v
 
 **Skip this if your use case is identity-only.** For identity-only selective disclosure (age verification, role checks, residency), encrypted balances are pure overhead.
 
+```mermaid
+graph LR
+    subgraph OffChain["Off-Chain"]
+        E1["Phase 1: Trusted Setup<br/>Amount-verification circuit → R1CS → SRS → vk + pk"]
+        E2["Phase 2: Encrypt<br/>Split amount into u16 limbs, ElGamal-encrypt each"]
+        E5["Phase 5: Proof Generation<br/>Prove each limb in-range in ZK"]
+    end
+    subgraph OnChain["On-Chain (Cardano)"]
+        E3["Phase 3: Deploy Gate<br/>Aiken validator (vk)"]
+        E4["Phase 4: Fund Gate<br/>Lock ADA; datum stores encrypted G1 points"]
+        E6["Phase 6: Unlock tx<br/>Script verifies range proofs → releases amount"]
+    end
+    E1 --> E3
+    E2 --> E5
+    E3 --> E4
+    E5 --> E6
+    E4 --> E6
+```
+
 | Aspect | Step 1 Only | + Twisted ElGamal |
 |--------|-------------|-------------------|
 | **On-chain state** | Unit datum | Datum stores encrypted G1 points |
@@ -552,6 +571,25 @@ The final folded state equals `−amount` (sum of `new_limb − old_limb` over a
 
 Steps 1 and 2 solve two independent problems: (1) hiding identity via predicate proofs, and (2) hiding amounts via Twisted ElGamal. **Step 3 composes both into a single system: a privacy pool where users can deposit, privately transfer, and withdraw funds without revealing their address, identity, or transaction value.**
 
+```mermaid
+graph LR
+    subgraph OffChain["Off-Chain"]
+        P1["Phase 1: Trusted Setup<br/>Pool circuit → R1CS → SRS → vk + pk"]
+        P2["Phase 2: Deposits<br/>Commit notes into Merkle tree (root)"]
+        P5["Phase 5: Proof Generation<br/>Holder proves note membership + fresh nullifier"]
+    end
+    subgraph OnChain["On-Chain (Cardano)"]
+        P3["Phase 3: Deploy Pool<br/>Aiken validator (vk) + root state"]
+        P4["Phase 4: Deposit tx<br/>Add note commitment, update root"]
+        P6["Phase 6: Shielded spend tx<br/>Verify Merkle + nullifier + conservation → update root"]
+    end
+    P1 --> P3
+    P2 --> P4
+    P3 --> P4
+    P5 --> P6
+    P4 --> P6
+```
+
 | Aspect | Step 1 (Predicate Only) | Step 2 (+ ElGamal) | Step 3 (Privacy Pool) |
 |--------|------------------------|-------------------|----------------------|
 | **What is hidden** | Identity + credential fields | + Amounts | + Transaction graph |
@@ -635,6 +673,27 @@ privacy-pool spend (reused verbatim) additionally encrypts the private input amo
 to an **auditor's public key** with Twisted ElGamal, so the pool hides identity and
 the transaction graph while the auditor — and only the auditor, holding the viewing
 key `sk_audit` — can decrypt the amount.
+
+```mermaid
+graph LR
+    subgraph OffChain["Off-Chain"]
+        A1["Phase 1: Trusted Setup<br/>Viewable pool circuit → R1CS → SRS → vk + pk"]
+        A2["Phase 2: Deposit + Auditor<br/>Pin pk_audit; commit notes; E, C made public"]
+        A5["Phase 5: Proof Generation<br/>Shielded spend + ElGamal-encrypt amount to pk_audit"]
+        A7["Phase 7: Auditor Reveal<br/>C - sk_audit*E = amount*H (viewing key)"]
+    end
+    subgraph OnChain["On-Chain (Cardano)"]
+        A3["Phase 3: Deploy Pool<br/>Aiken validator (vk) + whitelisted pk_audit"]
+        A4["Phase 4: Fund / Deposit<br/>Lock ADA"]
+        A6["Phase 6: Shielded spend tx<br/>Verify Merkle + nullifier + ciphertext → update root"]
+    end
+    A1 --> A3
+    A2 --> A4
+    A3 --> A4
+    A5 --> A6
+    A4 --> A6
+    A6 --> A7
+```
 
 ```
 E = r * G                       ephemeral component (public)
