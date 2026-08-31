@@ -493,6 +493,70 @@ Steps 1 and 2 solve two independent problems: (1) hiding identity via predicate 
 
 The Pool Script maintains a Merkle root that evolves as notes are spent and created. The circuit is a direct composition of five gadgets already working end-to-end in `circom/`: Poseidon commitments, Merkle verification, range proofs, value conservation, and nullifier hashing. See [`groth16-prover/docs/F5_RESEARCH_DIRECTION.md`](../../groth16-prover/docs/F5_RESEARCH_DIRECTION.md) for the full constraint budget (~65K for 2-in/2-out/depth-20).
 
+#### Circuits
+
+Implemented (compiles clean, BLS12-381 scalar field) in [`circom/PrivacyPool/`](../../circom/PrivacyPool/README.md):
+
+- `note.circom` — note commitment `Poseidon(Poseidon(nullifier, amount), blinding)` + `nullifier_hash`.
+- `merkle.circom` — reusable Poseidon Merkle membership over a supplied leaf.
+- `privacy_pool.circom` — **1-in / 2-out spend**: Merkle membership + nullifier-uniqueness + range checks + conservation (`in == out1 + out2 + fee`). ~7.1K constraints at depth 4.
+- `privacy_pool_nova.circom` — **Nova IVC step**, one Merkle level per step (`state_out = Poseidon(switch(state_in, sibling, direction))`).
+- `gen_privacy_input.py` / `gen_nova_privpool_steps.py` — off-chain witness builders.
+
+Compile:
+
+```bash
+cd circom/PrivacyPool
+circom privacy_pool.circom --r1cs --wasm --sym --prime bls12381 \
+  -l ../RangeProof/node_modules/circomlib/circuits -l ./node_modules/circomlib/circuits
+cd ../..
+```
+
+#### Path A: Groth16 e2e
+
+```bash
+# 1. Off-chain values
+python3 circom/PrivacyPool/gen_privacy_input.py 4          # → circom/PrivacyPool/input.json
+cd circom/PrivacyPool
+snarkjs wtns calculate privacy_pool_js/privacy_pool.wasm input.json witness.wtns
+
+# 2. Dev ceremony (--sparse for this circuit's size)
+cargo run --release --manifest-path ../../clis/trusted-setup/Cargo.toml -- ceremony-dev --sparse \
+  --circuit privacy_pool.r1cs --proving-key /tmp/pp.pk --verifying-key /tmp/pp.vk
+
+# 3. Prove & verify
+cargo run --release --manifest-path ../../clis/groth16/Cargo.toml -- prove --sparse \
+  --circuit privacy_pool.r1cs --witness witness.wtns --proving-key /tmp/pp.pk --out /tmp/pp.proof
+cargo run --release --manifest-path ../../clis/groth16/Cargo.toml -- verify \
+  --proof /tmp/pp.proof --public /tmp/pp.pub --verifying-key /tmp/pp.vk
+# → Verification result: VALID
+```
+
+**Verified e2e run** (depth 4): a 100-ADA input note → two outputs of 40 + 55 plus a 5-ADA fee, with a fresh nullifier/blinding per output. Public inputs (`merkle_root`, `nullifier_hash`, `out_commitment_1`, `out_commitment_2`, `fee`) are committed in the tree; the proof verifies as `VALID`.
+
+#### Path B: NovaSlim e2e
+
+Fold the 4 Merkle levels of the input note's path into a single proof (610-byte slim proof for 635-constraint steps):
+
+```bash
+NOVA=../nova-slim/cli/target/release/nova-slim
+
+# 1. Chained step witnesses (leaf → root over `depth` levels)
+python3 circom/PrivacyPool/gen_nova_privpool_steps.py \
+  --wasm circom/PrivacyPool/privacy_pool_nova_js/privacy_pool_nova.wasm \
+  --depth 4 --dir pp_steps/
+
+# 2. Fold / compress / verify
+$NOVA fold   --curve bls12-381 --circuit circom/PrivacyPool/privacy_pool_nova.r1cs \
+  --steps pp_steps/ --out pp.ivc.cbor
+$NOVA compress --slim --curve bls12-381 --circuit circom/PrivacyPool/privacy_pool_nova.r1cs \
+  --steps pp_steps/ --out pp_slim.proof.cbor
+$NOVA verify --curve bls12-381 --ivc pp.ivc.cbor --slim-proof pp_slim.proof.cbor
+# → Verified 4 steps: slim sumcheck proof OK, state chain OK
+```
+
+The folded chain provably transforms the input note's commitment into the Merkle root; in a production pool a terminal constraint additionally asserts the range-conservation and non-nullifier checks of the spend before the pool updates its new root.
+
 ---
 
 ## Step 4: Future Directions
