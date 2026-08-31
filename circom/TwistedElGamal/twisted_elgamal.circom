@@ -16,7 +16,8 @@ pragma circom 2.0.0;
 //
 // Coordinate field: BLS12-381 scalar field (same as the R1CS field).
 
-include "../node_modules/circomlib/circuits/bitify.circom";
+// Include paths are resolved via the `-l` compiler flag; see README.
+include "bitify.circom";
 include "../EdDSAJubJub/jubjub_primitives.circom";
 include "../EdDSAJubJub/escalarmulfix_jubjub.circom";
 include "../EdDSAJubJub/scalarmul_jubjub.circom";
