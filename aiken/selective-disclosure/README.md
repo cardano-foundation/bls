@@ -51,7 +51,7 @@ Issuer ──signed credential──▶ Holder
         ──published roots───▶ (Merkle roots, revocation lists)
 
 Holder ──predicate proof───▶ Gate Script (parameterized by vk)
-                              └── verifies proof on-chain ──▶ release resource
+                               └── verifies proof on-chain ──▶ release resource
 ```
 
 The holder's proof is generated **locally** on their device. The script never checks an address, staking key, or known signature — only the mathematical validity of the proof.
@@ -94,6 +94,9 @@ Phase 2: Unlocking
 ---
 
 ## Step 0: Proof System Implementation (Prerequisite)
+
+<details>
+<summary><b>Expand</b></summary>
 
 Before any selective-disclosure flow can run end-to-end, we need a working proof system over BLS12-381 split into an off-chain prover and an on-chain verifier.
 
@@ -152,32 +155,41 @@ See [`aiken/groth16/README.md`](../../aiken/groth16/README.md) and [`circom/READ
 
 See [`nova-slim/README.md`](../../../nova-slim/README.md) and [`nova-slim/cardano/`](../../../nova-slim/cardano/) for details.
 
+</details>
+
 ---
 
 ## Step 1: Predicate Proofs with Aiken
+
+<details>
+<summary><b>Expand</b></summary>
 
 The simplest valid end-to-end flow: one issuer signs a two-field credential (`dobYear`, `country`), the holder generates a proof that `age >= 21 AND country in approved set`, and an Aiken Gate Script verifies the proof on-chain before releasing locked ADA.
 
 ```mermaid
 graph LR
     subgraph OffChain["Off-Chain"]
-        S1["Step 1: Trusted Setup<br/>Circuit → R1CS → SRS → vk + pk"]
-        S2["Step 2: Issuance<br/>Issuer signs credential"]
-        S5["Step 5: Proof Generation<br/>Holder generates ZK proof"]
+        P1["Phase 1: Trusted Setup<br/>Circuit → R1CS → SRS → vk + pk"]
+        P2["Phase 2: Issuance<br/>Issuer signs credential"]
+        P5["Phase 5: Proof Generation<br/>Holder generates ZK proof"]
     end
     subgraph OnChain["On-Chain (Cardano)"]
-        S3["Step 3: Deploy Gate<br/>Aiken validator (vk)"]
-        S4["Step 4: Fund Gate<br/>Lock ADA at script"]
-        S6["Step 6: Unlock tx<br/>Script verifies proof → releases"]
+        P3["Phase 3: Deploy Gate<br/>Aiken validator (vk)"]
+        P4["Phase 4: Fund Gate<br/>Lock ADA at script"]
+        P6["Phase 6: Unlock tx<br/>Script verifies proof → releases"]
     end
-    S1 --> S3
-    S2 --> S5
-    S3 --> S4
-    S5 --> S6
-    S4 --> S6
+    P1 --> P3
+    P2 --> P5
+    P3 --> P4
+    P5 --> P6
+    P4 --> P6
 ```
 
-### Step 1 — Trusted Setup & Circuit Compilation (Off-Chain)
+---
+
+### Path A: Groth16
+
+#### Phase 1 — Trusted Setup & Circuit Compilation (Off-Chain)
 
 The predicate circuit is compiled and a trusted setup ceremony is run to produce the proving key (`pk`) and verifying key (`vk`).
 
@@ -195,15 +207,15 @@ Secret:  dob_year, country, signature, merkle_proof
 5. assert eligible == 1
 ```
 
-### Step 2 — Credential Issuance (Off-Chain)
+#### Phase 2 — Credential Issuance (Off-Chain)
 
 The issuer creates a credential, hashes its fields, signs the hash, and delivers the bundle privately to the holder. The issuer also publishes the approved-country Merkle root.
 
 **Important:** The credential bundle lives entirely off-chain in the holder's wallet. Only the `country_root` needs to be publicly available.
 
-### Step 3 — Deploy Gate Script (On-Chain)
+#### Phase 3 — Deploy Gate Script (On-Chain)
 
-An Aiken validator parameterized with the verifying key (`vk`) from Step 1 is compiled and deployed to Cardano as a Plutus V3 script.
+An Aiken validator parameterized with the verifying key (`vk`) from Phase 1 is compiled and deployed to Cardano as a Plutus V3 script.
 
 ```aiken
 validator gate(
@@ -227,11 +239,11 @@ validator gate(
 
 **Data created:** `script_hash` (Gate address derivation), `gate_address` (where funds are locked).
 
-### Step 4 — Fund the Gate (On-Chain)
+#### Phase 4 — Fund the Gate (On-Chain)
 
 Anyone locks ADA at the Gate script address. The datum is a unit (`()`), carrying no identity information. The funder's address is visible but irrelevant to the eventual holder.
 
-### Step 5 — Proof Generation (Off-Chain)
+#### Phase 5 — Proof Generation (Off-Chain)
 
 The holder uses their credential, issuer signature, published `country_root`, and `proving_key` to generate a zero-knowledge proof entirely on their device.
 
@@ -241,7 +253,7 @@ The holder uses their credential, issuer signature, published `country_root`, an
 
 **Data created:** `pi_a` (G1, 48 B), `pi_b` (G2, 96 B), `pi_c` (G1, 48 B), public inputs.
 
-### Step 6 — Unlock Transaction (On-Chain)
+#### Phase 6 — Unlock Transaction (On-Chain)
 
 The holder (or relayer) constructs a transaction spending the locked UTxO. The proof and public inputs are in the **redeemer**. The Gate script validates and releases funds.
 
@@ -250,7 +262,7 @@ The holder (or relayer) constructs a transaction spending the locked UTxO. The p
 - The holder's birth year or country
 - Whether this is the same person who used another gate yesterday
 
-### Is Groth16 on Cardano Actually Feasible?
+#### Is Groth16 on Cardano Actually Feasible?
 
 **Yes.** Cardano's Plutus V3 has native BLS12-381 support: `bls12_381_G1_element`, `bls12_381_G2_element`, `bls12_381_millerLoop`, `bls12_381_finalVerify`, and scalar field operations.
 
@@ -264,7 +276,72 @@ The holder (or relayer) constructs a transaction spending the locked UTxO. The p
 
 ---
 
+### Path B: NovaSlim e2e
+
+Below is a complete end-to-end run of the same predicate flow using [`nova-slim`](../../../nova-slim/README.md). All commands assume you are in the `bls/` repo root and `nova-slim` is built as a sibling directory.
+
+```bash
+# Build the nova-slim CLI (one time)
+cargo build --release --manifest-path ../nova-slim/cli/Cargo.toml
+NOVA=../nova-slim/cli/target/release/nova-slim
+```
+
+#### Phase 1 — Compile the step circuit & prepare witnesses (off-chain)
+
+```bash
+cd circom/Predicate
+circom --prime bls12381 -l ../../node_modules/circomlib/circuits \
+  predicate_nova.circom --r1cs --wasm --sym
+cd ../..
+```
+
+Generate one JSON witness per step. For a composite predicate this is typically 255 steps:
+
+```bash
+python3 ../nova-slim/benchmarks/gen_step_witnesses.py \
+  --wasm circom/Predicate/predicate_nova_js/predicate_nova.wasm \
+  --initial credential_input.json \
+  --steps 255 --dir steps/
+```
+
+#### Phase 2 — Fold (off-chain)
+
+```bash
+$NOVA fold --curve bls12-381 \
+  --circuit circom/Predicate/predicate_nova.r1cs \
+  --steps steps/ --out predicate.ivc.cbor
+```
+
+#### Phase 3 — Compress (off-chain)
+
+```bash
+$NOVA compress --slim --curve bls12-381 \
+  --ivc predicate.ivc.cbor --out predicate_slim.proof.cbor
+```
+
+#### Phase 4 — Verify off-chain (optional)
+
+```bash
+$NOVA verify --curve bls12-381 \
+  --ivc predicate.ivc.cbor --slim-proof predicate_slim.proof.cbor
+```
+
+#### Phase 5 — Deploy Gate Script (on-chain)
+
+Deploy the Aiken validator parameterized with the expected `CircuitParams` and `PredicatePolicy`. The script uses the NovaSlim sumcheck verifier instead of a Groth16 pairing check. See [`aiken/nova`](../../aiken/nova/README.md).
+
+#### Phase 6 — Submit unlock tx (on-chain)
+
+The redeemer contains the slim proof (~1.0 KiB for a 7.7K-constraint step circuit) and public inputs. The Gate Script re-derives Fiat-Shamir challenges on-chain, runs the sumcheck verifier, and releases funds.
+
+</details>
+
+---
+
 ## Step 2: Twisted ElGamal Extension
+
+<details>
+<summary><b>Expand</b></summary>
 
 Only use this if your use case requires hiding **amounts** (balances, transfer values) in addition to hiding identity. Twisted ElGamal is realizable on Cardano by substituting Ristretto255 with **BLS12-381 G1** — all required operations (point addition, scalar multiplication, negation, equality) are already in Plutus V3. The catch is that messages live in the exponent, so amounts must be split into `u16` limbs and range proofs added to the Groth16 circuit.
 
@@ -277,6 +354,8 @@ Only use this if your use case requires hiding **amounts** (balances, transfer v
 | **What is hidden** | Identity + credential fields | Identity + credential fields + amounts |
 
 If you go this route, the composition is: **predicate proof for identity + ElGamal encryption for amounts**, verified by a single Groth16 proof checked by the same Aiken Gate Script.
+
+</details>
 
 ---
 
@@ -296,6 +375,9 @@ The Pool Script maintains a Merkle root that evolves as notes are spent and crea
 ---
 
 ## Step 4: Future Directions
+
+<details>
+<summary><b>Expand</b></summary>
 
 The Groth16-based design in Steps 0–3 provides practical, production-ready privacy today, but it relies on elliptic-curve cryptography that is not quantum-resistant. Long-term research directions are to complement or replace the zk-SNARK layer with post-quantum alternatives.
 
@@ -328,7 +410,7 @@ A parallel proposal aims to hide transaction amounts at the **ledger layer** usi
 | **Proof verification cost** | O(n log n) (Bulletproofs) | **O(1)** (Groth16) |
 | **Script address support** | ❌ Deferred | ✅ Core architecture |
 
-
+</details>
 
 ---
 
