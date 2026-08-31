@@ -12,10 +12,11 @@
 4. [Step 1: Predicate Proofs with Aiken](#step-1-predicate-proofs-with-aiken)
 5. [Step 2: Twisted ElGamal Extension](#step-2-twisted-elgamal-extension)
 6. [Step 3: Privacy Pools & Shielded Transactions](#step-3-privacy-pools--shielded-transactions)
-7. [Comparison with CIP proposal: Native Confidential Transfers](#comparison-with-cip-proposal-native-confidential-transfers)
-8. [Compliance & Auditability](#compliance--auditability)
-9. [Threat Model & Deployment](#threat-model--deployment)
-10. [References](#references)
+7. [Runnable e2e Scripts & Timing](#runnable-e2e-scripts--timing)
+8. [Comparison with CIP proposal: Native Confidential Transfers](#comparison-with-cip-proposal-native-confidential-transfers)
+9. [Compliance & Auditability](#compliance--auditability)
+10. [Threat Model & Deployment](#threat-model--deployment)
+11. [References](#references)
 
 ---
 
@@ -624,6 +625,63 @@ $NOVA verify --curve bls12-381 --ivc pp.ivc.cbor --slim-proof pp_slim.proof.cbor
 The folded chain provably transforms the input note's commitment into the Merkle root; in a production pool a terminal constraint additionally asserts the range-conservation and non-nullifier checks of the spend before the pool updates its new root.
 
 ---
+
+## Runnable e2e Scripts & Timing
+
+Every step has a `step{N}/` directory of runnable scripts (`aiken/selective-disclosure/step{N}/`) that reproduce the e2e from scratch, covering **both** proof paths. All six were run to completion and verified (`VALID` / `state chain OK`).
+
+```text
+aiken/selective-disclosure/
+├── step1/  groth16_e2e.sh   novaslim_e2e.sh   README.md   (Predicate)
+├── step2/  groth16_e2e.sh   novaslim_e2e.sh   README.md   (Twisted ElGamal)
+└── step3/  groth16_e2e.sh   novaslim_e2e.sh   README.md   (Privacy Pool)
+```
+
+Run from the repo root (or anywhere; repo root is auto-detected):
+
+```bash
+./aiken/selective-disclosure/step1/groth16_e2e.sh    # Groth16 — full pipeline
+./aiken/selective-disclosure/step1/novaslim_e2e.sh   # NovaSlim — needs nova-slim CLI
+```
+
+The Groth16 scripts emit the Aiken `*_vk.ak` source for the `aiken/groth16`
+gate validator; the NovaSlim scripts emit the `.ivc.cbor` + `.slim.proof.cbor`
+consumed by the `nova-slim/cardano/nova-slim-verifier` on-chain validator.
+
+### Measured timing (dev machine, this repo)
+
+Numbers are representative single runs; they let you compare the two proof
+paths. **Groth16's ceremony is one-time per circuit** (amortized over every
+future proof); NovaSlim needs no trusted setup (transparent), but *its* proof
+size is larger and its fold/compress cost grows with the **step** circuit.
+
+| | Step 1 (Predicate, ~10.4K) | Step 2 (ElGamal transfer) | Step 3 (Privacy Pool, ~7.1K) |
+|---|---|---|---|
+| **Path** | Groth16 | NovaSlim | Groth16 | NovaSlim | Groth16 | NovaSlim |
+| prepare / input | 0.7 s | 0.7 s | <0.1 s | <0.1 s | 0.3 s | 0.3 s |
+| compile | 4.5 s | 4.5 s | 0.2 s | 0.2 s | 1.0 s | 0.4 s |
+| witness | 1.5 s | 4.3 s | 0.9 s | 15.1 s | 0.8 s | 8.4 s |
+| trusted setup* | 10.9 s | — | 0.2 s | — | 5.8 s | — |
+| prove / fold+compress | 5.0 s | 34.8+71.1 s | 0.06 s | 0.3+0.4 s | 2.5 s | 2.7+4.5 s |
+| verify | 0.07 s | 0.01 s | 0.05 s | 0.01 s | 0.05 s | 0.01 s |
+| **proof size** | **192 B** | **758 B** | **192 B** | **462 B** | **192 B** | **610 B** |
+
+\* Trusted setup is **one-time** per circuit (producing keys; not per proof).
+
+**Reading the numbers.**
+
+- **Groth16** gives the smallest proof (192 B) and instantaneous verification,
+  but needs a (one-time) trusted setup and can't shrink further per-step.
+- **NovaSlim** is transparent (no setup) and verifies in ~0.01 s on-chain, but
+  the proof is a few hundred bytes and its fold/compress is sensitive to the
+  **step** circuit: tiny incremental steps (Steps 2 & 3) fold/compress in
+  <5 s, whereas Step 1's **monolithic** step re-proves the whole predicate
+  every step and takes ~106 s to fold/compress.
+- For a production shielded-pool, **Step 3-style small step circuits + NovaSlim**
+  is the natural fit (transparent + fast fold), while classic **Groth16** wins
+  when proof size and no-trust posture matter less than size.
+
+
 
 ## Comparison with CIP proposal: Native Confidential Transfers
 
