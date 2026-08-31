@@ -35,6 +35,9 @@ The authorization to spend or access a resource comes from a **zero-knowledge pr
 
 ## Design
 
+<details>
+<summary><b>Expand</b></summary>
+
 ### Actors
 
 | Actor | Role |
@@ -90,6 +93,8 @@ Phase 2: Unlocking
 **Anonymous Access:** Alice holds a credential `(dob: 1990, country: DEU, role: Doctor)`. She generates a proof that `role == Doctor AND age ≥ 30`, submits it to the Healthcare Portal's Gate Script, and gains access without revealing her identity, birth year, or address.
 
 **Cross-Border Reuse:** Bob uses the same residency credential to generate two different proofs for a Banking DApp (`age ≥ 21 AND country ∈ {DEU, FRA, GBR}`) and an Insurance DApp (`age ≥ 25 AND country ∈ {DEU, NLD}`). Neither learns his exact age or country, and neither can link the two transactions.
+
+</details>
 
 ---
 
