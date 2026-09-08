@@ -359,6 +359,48 @@ The NIFS fold phase is **identical** to Implementation 9 (~230 ms/step on 7,724-
 ---
 
 <details>
+<summary><b>Pipeline comparison vs Anastasia-Labs proof-tool — click to expand</b></summary>
+
+Structured comparison of the two approaches for proving **ownership of a Cardano key**, decomposed by pipeline stage and the resources each stage needs. Our side is the two representative proof engines: **(A) our latest Groth16** (monolithic Ed25519, Implementation 7 sparse + h-scalar) and **(B) Nova before slim but transparent** (Implementation 10 sumcheck — full-size ~473 KiB proof, but **no ceremony / no trusted setup / no proving key**). Both prove the *same* Ed25519 ownership statement (`[sk]·G = pk`, `PointCompress(pk) = A`).
+
+### Stage-by-stage pipeline decomposition
+
+| # | Pipeline stage | Our latest Groth16 (Impl 7, sparse + h-scalar) | Nova Impl 10 (sumcheck, transparent) | Anastasia-Labs proof-tool |
+|---|---|---|---|---|
+| 1 | **Key derivation** (CIP-1852 path) | Off-circuit: `cardano-address` CLI → `pay.xsk`/`pay.vk`, then `gen_cardano_address_input.py` | Same off-circuit derivation (shared input) | **In-circuit**: 96-byte master XPrv → path → credential (CKD + Ed25519 + SHA-512/HMAC) |
+| 2 | **Circuit** | Monolithic `cardano_ed25519_ownership.circom` — 1,967,405 constraints | Step `cardano_ed25519_ownership_nova.circom` — 255 × 7,724 constraints | gnark `root-ownership-destination-v2` — 1,789,750 constraints, K=21 |
+| 3 | **Witness generation** | 9.8 s, single witness | 255 steps, 133.0 s (sequential, one per bit) | ~a few s (gnark native/JS witness solve; small fraction of total) |
+| 4 | **Trusted setup / ceremony** | **Required once (reusable)**: 496.4 s (~8 min); 1.2 GB pk, 178 MB vk; ~4.5 GiB peak RAM | **None — transparent** (sumcheck + Pedersen, no setup) | **Required**: signed single-actor setup **or** 2-phase MPC (⚠️ MPC currently **NO-GO** for mainnet) |
+| 5 | **Prove / fold** | 73.9 s (sparse prover, one large MSM) | 47.3 s fold (255 × NIFS, **no proving key**); + 7.75 s compress | ~41–48 s browser (16 WASM workers), 0.83 GiB; PK fetched in signed chunks |
+| 6 | **Prover key footprint** | 1.2 GB pk (on disk) | **None** | Large signed pk, range/chunk-fetched for browser |
+| 7 | **Verify (off-chain)** | 1.5 s, single pairing | 7.87 s (sumcheck + HashPC, O(1), ZK) | ~single pairing (gnark) |
+| 8 | **Proof / bundle size** | 192 B Groth16 proof (+ pub input) | ~472.8 KiB full sumcheck (O(1), ZK) | 336 B proof + 672 B vk (BSB22), Plutus-compatible |
+| 9 | **Statement strength** | You know the scalar for the pubkey | You know the scalar for the pubkey | You hold the **master XPrv** that derives the pubkey at a path |
+
+### Resource summary (what dominates at each stage)
+
+| Resource | Groth16 (ours) | Nova Impl 10 (ours) | Anastasia-Labs |
+|---|---|---|---|
+| CPU — setup phase | **High** (~8 min one-time ceremony) | **None** | **High** (MPC/signed ceremony; mainnet not ready) |
+| CPU — proving (steady/per key) | ~74 s | ~55 s (fold + compress) | ~41–48 s (browser) |
+| RAM — peak | ~4.5 GiB (ceremony) | per-step (~small) | ~0.83 GiB (browser) |
+| Disk — keys | 1.2 GB pk + 178 MB vk | **0** | Large signed pk bundle (chunked) |
+| Trust assumption | 1-of-N ceremony / single dev | **None (transparent)** | single operator, unless MPC completes |
+| Proof on-chain | 192 B (Groth16, Plutus V3 Aiken verifier exists) | ~473 KiB (too big for 16 KiB limit — needs slim) | 336 B + 672 B vk (Plutus V3, deployed Preprod) |
+
+### Key takeaways
+
+- **Ours — Groth16 (Impl 7):** smallest, cheapest proof (192 B) and fastest steady-state, but the **ceremony is the bottleneck and a trust assumption** (1.2 GB pk, ~8 min, ~4.5 GiB RAM). Heavier per-key resources once you exceed memory.
+- **Ours — Nova Impl 10 (sumcheck):** **zero trust (no ceremony, no keys)** and gentle per-step memory, at the cost of a **473 KiB proof** (too large for the 16 KiB on-chain limit — the slim Impl 11 strips it to ~1.5–4 KiB) and a sequential 255-step witness + fold. Best when holders must not trust anyone and memory is constrained.
+- **Theirs:** **strongest statement** (proves master-XPrv → credential derivation in-circuit) and already shipped a Plutus V3 on-chain verifier with a real Preprod deposit/reclaim deployment. But it carries the **largest trust burden** today — their mainnet MPC is **NO-GO**, so production relies on trusting one signed setup operator — and its ~1.79M-constraint in-circuit derivation forces heavy browser proving (chunked 1.2 GB-class key, ~0.83 GiB).
+
+The fundamental trade-off is **statement strength vs trust**: only they prove root-key ownership; only our Nova path proves trustlessly.
+
+</details>
+
+---
+
+<details>
 <summary><b>Implementation 11 — Slim on-chain proof (Cardano ≤16 KiB) — click to expand</b></summary>
 
 Implementation 11 strips the HashPC opening proofs (`w_opening`, `e_opening`) from the sumcheck bundle. These opening proofs (the BLAKE2b truth tables for Z and E) are only needed for off-chain auditability — the sumcheck proof itself already proves knowledge of a witness consistent with the committed instance. Removing them reduces the on-chain proof from **~473 KiB** to **~4 KiB** — well under Cardano's **16 KiB** transaction size limit.
@@ -485,6 +527,8 @@ Uses `ScalarMul`, `PointEqual`, and `PointCompress` from `Ed25519Verify/` (Elect
 - [Electron-Labs/ed25519-circom](https://github.com/Electron-Labs/ed25519-circom) — upstream Ed25519 Circom circuits
 - [IntersectMBO/cardano-addresses](https://github.com/IntersectMBO/cardano-addresses) — Cardano key derivation (CIP-1852)
 - [IntersectMBO/cardano-crypto](https://github.com/IntersectMBO/cardano-crypto) — Cardano key derivation logic
+- [Anastasia-Labs/proof-tool](https://github.com/Anastasia-Labs/proof-tool) — competing approach analyzed in the pipeline/security comparison above
+- [CharlesHoskinson/proof-zk-recovery](https://github.com/CharlesHoskinson/proof-zk-recovery) — upstream the proof-tool builds on
 
 ## License
 
