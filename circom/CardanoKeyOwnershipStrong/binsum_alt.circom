@@ -1,16 +1,22 @@
 /*
- * Precision-safe replacement for circomlib's BinSumAlt and Num2Bits.
+ * Precision-safe replacement for circomlib's BinSum and Num2Bits.
  *
- * circomlib's BinSumAlt accumulates all operand bits into a single var
- * (`lin`) and then extracts bits with `<-- (lin >> k) & 1`. The witness
- * calculators evaluate that expression with 64-bit (i64) arithmetic, so any
- * sum that reaches >= 2^64 wraps and the `lin === lout` assertion fails.
- * Real SHA-512 messages with high-bit 64-bit words routinely exceed 2^64.
+ * circomlib/electron-labs BinSum accumulates all operand bits into a single
+ * value (`lin <== 2^k * in[j][k]`) and extracts bits through a linear
+ * decomposition. Every witness calculator evaluates that linear value while
+ * solving the circuit (JS numbers for the webasm path, native ints for the
+ * generated C++), so a sum >= 2^64 wraps and yields corrupt-but-consistent
+ * witnesses (or an assert), even though the R1CS is valid.
  *
- * This implementation computes the same sum with a chain of ripple-carry
- * full adders (one bit at a time, never overflowing) and constrains every
- * output bit, so it is exact under any witness calculator and imposes the
- * same `sum == out` relation as the original.
+ * This implementation performs the same signed-free binary addition entirely
+ * with 0/1 signals and only quadratic constraints:
+ *   - (ops > 2) is folded down to two numbers with a carry-save full adder
+ *     whose parity is a XOR chain and whose carry obeys
+ *         2*carry + parity === a + b + c,   carry*(carry-1) === 0
+ *   - the final two-term addition is a ripple-carry adder written the same
+ *     way (Xor2 for the sum bit, the same sum/carry relation for cleans),
+ * so no intermediate value exceeds a single bit during witness solving and no
+ * subcomponent is instantiated.
  *
  * License: MIT.
  */
@@ -26,7 +32,7 @@ function nbitsAlt(a) {
     return r;
 }
 
-// 3-bit binary decomposition (input is 0..3 for full-adder use).
+// 3-bit binary decomposition (input is 0..3).
 template N2B3() {
     signal input in;
     signal output out[3];
@@ -53,53 +59,68 @@ template FullAdder() {
     cout <== db.out[1];
 }
 
-// W-bit ripple adder: s = (a + b) plus final carry, all bits exact.
-template RippleAdd(W) {
+// W-bit ripple carry adder: s = a + b (mod 2^W). Quadratic-only.
+template RippleAddSig(W) {
     signal input a[W];
     signal input b[W];
     signal output s[W + 1];
-    component fa[W];
+    signal carry[W + 1];
+    signal x[W];
+    signal t[W];
+    carry[0] <== 0;
     for (var i = 0; i < W; i++) {
-        fa[i] = FullAdder();
-        fa[i].a <== a[i];
-        fa[i].b <== b[i];
-        if (i == 0) { fa[i].cin <== 0; }
-        else { fa[i].cin <== fa[i - 1].cout; }
-        s[i] <== fa[i].s;
+        x[i] <== a[i] + b[i] - 2 * a[i] * b[i];
+        s[i] <== x[i] + carry[i] - 2 * x[i] * carry[i];
+        t[i] <== a[i] + b[i] + carry[i];
+        carry[i + 1] <-- (t[i] - s[i]) / 2;
+        2 * carry[i + 1] + s[i] === t[i];
     }
-    s[W] <== fa[W - 1].cout;
+    s[W] <== carry[W];
 }
 
-// Sum of `ops` n-bit operands (exact, ripple) with the same interface as
-// circomlib's BinSumAlt(n, ops). Every intermediate sum fits because the width
-// grows by one per operand; NO value ever exceeds 64 bits during witness
-// evaluation.
+// Sum of `ops` n-bit operands (exact, component-free, quadratic-only) with the
+// same interface as circomlib's BinSumAlt(n, ops).
 template BinSumAlt(n, ops) {
     var nout = nbitsAlt((2 ** n - 1) * ops);
     signal input in[ops][n];
     signal output out[nout];
 
-    component adds[ops - 1];
-    var k;
     var j;
+    var k;
 
-    adds[0] = RippleAdd(n);
-    for (k = 0; k < n; k++) {
-        adds[0].a[k] <== in[0][k];
-        adds[0].b[k] <== in[1][k];
+    // carry-save fold: stage pairs (s, c) with c shifted one column (majority).
+    // stage 0 holds the first two operands; each new stage folds the next one.
+    signal sst[ops][nout];
+    signal cst[ops][nout];
+    signal tst[ops][nout];
+    signal xst[ops][nout];
+
+    for (k = 0; k < nout; k++) {
+        if (k < n) { sst[0][k] <== in[0][k]; cst[0][k] <== in[1][k]; }
+        else { sst[0][k] <== 0; cst[0][k] <== 0; }
     }
 
     for (j = 1; j < ops - 1; j++) {
-        var W = n + j;
-        adds[j] = RippleAdd(W);
-        for (k = 0; k < W; k++) {
-            adds[j].a[k] <== adds[j - 1].s[k];
-            if (k < n) { adds[j].b[k] <== in[j + 1][k]; }
-            else { adds[j].b[k] <== 0; }
+        cst[j][0] <== 0;
+        for (k = 0; k < nout; k++) {
+            var c = 0;
+            if (k < n) { c = in[j + 1][k]; }
+            xst[j][k] <== sst[j - 1][k] + cst[j - 1][k] - 2 * sst[j - 1][k] * cst[j - 1][k];
+            sst[j][k] <== xst[j][k] + c - 2 * xst[j][k] * c;
+            tst[j][k] <== sst[j - 1][k] + cst[j - 1][k] + c;
+        }
+        for (k = 1; k < nout; k++) {
+            cst[j][k] <-- (tst[j][k - 1] - sst[j][k - 1]) / 2;
+            2 * cst[j][k] + sst[j][k - 1] === tst[j][k - 1];
         }
     }
 
+    component add = RippleAddSig(nout);
     for (k = 0; k < nout; k++) {
-        out[k] <== adds[ops - 2].s[k];
+        add.a[k] <== sst[ops - 2][k];
+        add.b[k] <== cst[ops - 2][k];
+    }
+    for (k = 0; k < nout; k++) {
+        out[k] <== add.s[k];
     }
 }
