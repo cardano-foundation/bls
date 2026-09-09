@@ -25,7 +25,7 @@
  */
 pragma circom 2.0.0;
 
-include "sha512/sha512.circom";
+include "sha512F.circom";
 include "binsum_alt.circom";
 
 // ---------------------------------------------------------------------------
@@ -60,7 +60,7 @@ template HmacSha512(nMsgBits) {
         inner[1024 + i] <== msg[i];
     }
 
-    component s1 = Sha512(1024 + nMsgBits);
+    component s1 = Sha512F(1024 + nMsgBits);
     for (i = 0; i < 1024 + nMsgBits; i++) {
         s1.in[i] <== inner[i];
     }
@@ -81,7 +81,7 @@ template HmacSha512(nMsgBits) {
         outer[1024 + i] <== s1.out[i];
     }
 
-    component s2 = Sha512(1536);
+    component s2 = Sha512F(1536);
     for (i = 0; i < 1536; i++) {
         s2.in[i] <== outer[i];
     }

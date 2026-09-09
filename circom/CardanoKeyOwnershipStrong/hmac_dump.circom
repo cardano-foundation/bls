@@ -42,7 +42,7 @@ template HmacDump() {
     }
     for (i = 0; i < 552; i++) { inner[1024 + i] <== mz[i]; }
 
-    component s1 = Sha512(1576);
+    component s1 = Sha512F(1576);
     for (i = 0; i < 1576; i++) { s1.in[i] <== inner[i]; }
     for (i = 0; i < 512; i++)  { dzin[i] <== s1.out[i]; }
 
@@ -59,7 +59,7 @@ template HmacDump() {
     }
     for (i = 0; i < 512; i++) { outer[1024 + i] <== s1.out[i]; }
 
-    component s2 = Sha512(1536);
+    component s2 = Sha512F(1536);
     for (i = 0; i < 1536; i++) { s2.in[i] <== outer[i]; }
     for (i = 0; i < 512; i++)  { dz[i] <== s2.out[i]; }
 
