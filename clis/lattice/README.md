@@ -221,7 +221,7 @@ Key observations:
 - **Performance scales with witness dimension** — the 4-limb BLS12-381 expansion multiplies the effective dimension by 4×.
 - **Large circuits need optimization** — module-SIS commitments or RNS decomposition could reduce the expansion overhead.
 
-## Comparison with Nova (same machine)
+## Comparison with Nova (same host: `pure`, Intel Core i7-7500U @ 2.70 GHz, 2C/4T, 32 GiB RAM, Debian 12)
 
 | Metric | Nova NIFS (Impl 9/10) | Lova (EdDSA, 4-limb) | Lova (Ed25519, 4-limb) |
 |--------|----------------------|----------------------|------------------------|

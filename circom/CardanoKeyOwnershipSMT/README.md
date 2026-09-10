@@ -435,7 +435,7 @@ with a clear error — there is no Python crypto fallback.
 
 ### Benchmarks — pre-Nova vs Nova
 
-Measured on the same machine (4 × 31 GB) with the `groth16` release
+Measured on **host `pure` (Intel Core i7-7500U @ 2.70 GHz, 2C/4T, 32 GiB RAM, Debian 12)** with the `groth16` release
 binary, `snarkjs` for witness generation, one shared key, single runs.
 
 | Phase | Pre-Nova (monolithic) | Nova (step-chain) |
@@ -470,7 +470,7 @@ Reproduce: `python3 ../benchmarks_compare.py --family smt --workdir <dir>`
 
 ### End-to-end comparison — Implementation 8 (step-chain) vs Implementation 9 (NIFS) vs Implementation 10 (sumcheck)
 
-Measured on the **same machine / same 255 step witnesses** (full-size state
+Measured on **host `pure` (Intel Core i7-7500U @ 2.70 GHz, 2C/4T, 32 GiB RAM, Debian 12) / same 255 step witnesses** (full-size state
 values): Impl 8 from `benchmark_nova`, Impl 9 via the real CLI e2e (`nova
 fold --nifs` → `trusted-setup ceremony-dev` → `nova compress` → `nova
 verify`), Impl 10 via `benchmark_nova --sumcheck`. The SMT step circuit is
