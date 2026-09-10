@@ -17,6 +17,7 @@ This directory contains Circom circuits that can be loaded by the Rust prover vi
 | [`Ed25519Verify/`](Ed25519Verify/README.md) | Ed25519 signature verification in-circuit | ~4M | ✅ Working e2e |
 | [`CardanoKeyOwnership/`](CardanoKeyOwnership/README.md) | Key ownership: JubJub variant | ~4K | ✅ Working e2e |
 | [`CardanoKeyOwnership/`](CardanoKeyOwnership/README.md) | Key ownership: Ed25519 variant (real Cardano wallet key) | ~1.97M | ✅ Working e2e |
+| [`CardanoKeyOwnershipStrong/`](CardanoKeyOwnershipStrong/cardano_ed25519_ownership_strong.circom) | CIP-1852 CKD chain `m/1852H/1815H/0H/0/0` (HMAC-SHA512 hard/soft) — monolith vs 6-step Nova chain | 15.8M mono / 5.93M step | ✅ Witness chain e2e (golden `A`); Groth16 mono ceremony OOMs on 31 GiB; Nova fold ≈5.2 h |
 | [`AnonymousAirdrop/`](AnonymousAirdrop/README.md) | SMT membership + score threshold — anonymous reputation-gated airdrop | 1,561 (depth 2) | ✅ Working e2e |
 | [`Predicate/`](Predicate/README.md) | Composite selective disclosure — Poseidon + EdDSA-JubJub + range + Merkle predicate over a signed credential | 10,456 (depth 2) | ✅ Working e2e |
 | [`TwistedElGamal/`](TwistedElGamal/README.md) | Confidential transfers — Twisted ElGamal encryption, limb decomposition, and a Nova IVC step over JubJub | 32–10,206 | ✅ Compiles |
