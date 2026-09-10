@@ -183,7 +183,7 @@ Key observations:
 - Proof size at default parameters (70 KiB) is comparable to Nova Impl 10's 472.8 KiB — and truly O(1).
 - **RNS mode (`--rns`)** halves `decompose_digits` (32 vs 64) but doubles the witness dimension (2×n). Currently slower for all circuit sizes because O(n²) matrix operations dominate — see RNS analysis in [`clis/lattice/README.md`](../clis/lattice/README.md).
 
-### Comparison with Nova (same machine)
+### Comparison with Nova (same host: `pure`, Intel Core i7-7500U @ 2.70 GHz, 2C/4T, 32 GiB RAM, Debian 12)
 
 | Metric | Nova NIFS (Impl 9/10) | Lova (EdDSA, 4-limb) | Lova (Ed25519, 4-limb) |
 |--------|----------------------|----------------------|------------------------|

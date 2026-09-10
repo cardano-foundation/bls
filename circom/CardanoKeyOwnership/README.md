@@ -258,7 +258,7 @@ The `sel` bits come from the same clamped scalar `sk` as in the Implementation 7
 
 ### Benchmarks — pre-Nova vs Nova
 
-Measured on the same machine (4 × 31 GB) with the `nova` release binary, `snarkjs` for witness generation, one shared key, single runs.
+Measured on **host `pure` (Intel Core i7-7500U @ 2.70 GHz, 2C/4T, 32 GiB RAM, Debian 12)** with the `nova` release binary, `snarkjs` for witness generation, one shared key, single runs.
 
 | Phase | Pre-Nova (monolithic) | Nova (step-chain) |
 |---|---|---|
@@ -292,21 +292,21 @@ The strong family proves ownership of the **entire wallet chain** `m/1852H/1815H
 | wires | 5,910,830 |
 | public in / out | 1024 / 1024 (kL‖kR‖cc‖apk) |
 | private | 802 (768 master + 2 op + 32 idx) |
-| r1cs size | 980.7 MiB |
+| r1cs size | 980,739,856 B (≈936 MiB) |
 
-| Strong measurements (4-core box, 2026-09-10) | Impl 10 (sumcheck, transparent) | Monolithic Groth16 |
+| Strong measurements (host `pure`, 2C/4T, 32 GiB RAM, 2026-09-10) | Impl 10 (sumcheck, transparent) | Monolithic Groth16 |
 |---|---|---|
 | step witnesses (6) | ~2 min each | — |
 | fold | **≈5.2 h** (single-core, no `--opt`) | — |
-| ceremony | none (transparent) | **infeasible**: `ceremony-dev` dense peaked 29.1 GiB RSS → OOM on 31 GiB; sparse attempt also died |
+| ceremony | none (transparent) | **infeasible**: `ceremony-dev` dense peaked 29.1 GiB RSS → OOM on the 32 GiB host; sparse attempt also died |
 | witness | — | 2 min 15 s / 1.9 GiB / 503 MB wtns |
 | circuit footprint | 5.93M constraints step | 15.81M constraints / 2.58 GiB r1cs |
 
-**Takeaway:** the strong chain is the circuit that **breaks monolithic Groth16** (the ceremony for a 15.8M-constraint circuit needs ~29+ GiB) and is only practical as a Nova step-chain, but even that is **~15 min per fold-step** (vs ~0.6 s/step for the 255 × 7.7K iko/smt chains) — a ~1500× slower fold per step. Strong is the argument *for* circuit decomposition (e.g. `nova fold --opt parallel`, or a multi-step/`Poseidon`-based rollup), not against Nova.
+**Takeaway:** the strong chain is the circuit that **breaks monolithic Groth16** (the ceremony for a 15.8M-constraint circuit needs ~29+ GiB) and is only practical as a Nova step-chain, but the fold is still **≈5.2 h total ≈ 52 min per fold-step** (a ~4 h single-core cold-start MSM setup dominates; the marginal later steps folded in ~5–7 min) — vs ~0.6 s/step for the 255 × 7.7K cko/smt chains. Strong is the argument *for* circuit decomposition (e.g. `nova fold --opt parallel`, or a multi-step/`Poseidon`-based rollup), not against Nova.
 
 ### End-to-end comparison — Implementation 8 (step-chain) vs Implementation 9 (NIFS) vs Implementation 10 (sumcheck)
 
-Measured on the **same machine / same 255 step witnesses** (full-size state values): Impl 8 from `benchmark_nova`, Impl 9 via the real CLI e2e (`nova fold --nifs` → `trusted-setup ceremony-dev` → `nova compress` → `nova verify`), Impl 10 via `benchmark_nova --sumcheck`. Step-witness generation is identical for all three, so it is excluded.
+Measured on **host `pure` (Intel Core i7-7500U @ 2.70 GHz, 2C/4T, 32 GiB RAM, Debian 12) / same 255 step witnesses** (full-size state values): Impl 8 from `benchmark_nova`, Impl 9 via the real CLI e2e (`nova fold --nifs` → `trusted-setup ceremony-dev` → `nova compress` → `nova verify`), Impl 10 via `benchmark_nova --sumcheck`. Step-witness generation is identical for all three, so it is excluded.
 
 | Phase (per key, `cardano_ed25519_ownership_nova`, 255 × 7,724 constraints) | Impl 8 (step-chain) | Impl 9 (NIFS) | Impl 10 (sumcheck) |
 |---|---|---|---|
