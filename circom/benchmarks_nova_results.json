@@ -1,0 +1,31 @@
+{
+  "date": "2026-09-10",
+  "machine": "4 x CPU, 31 GiB RAM, bls host (strong measurements single-core)",
+  "cko": {
+    "family": "CardanoKeyOwnership Ed25519 (cardano_ed25519_ownership_nova.r1cs, 7724 constraints, n_pub_in==n_pub_out==24)",
+    "witnesses": 255,
+    "nova_impl10": {"fold_s": 152.8, "compress_s": 161.5, "verify_s": 27.2, "sumcheck_proof_bytes": 686929},
+    "nova_slim": {"fold_s": 152.5, "compress_s": 187.5, "slim_proof_bytes": 721, "verify_s": 0.025}
+  },
+  "smt": {
+    "family": "CardanoKeyOwnershipSMT (cardano_key_ownership_smt_nova.r1cs, wire-identical r1cs to cko, 7724 constraints)",
+    "witnesses": 255,
+    "nova_impl10": {"fold_s": 150.3, "compress_s": 174.9, "verify_s": 25.4, "sumcheck_proof_bytes": 686929},
+    "nova_slim": {"fold_s": 162.1, "compress_s": 176.4, "slim_proof_bytes": 721, "verify_s": 0.031}
+  },
+  "strong": {
+    "family": "CardanoKeyOwnershipStrong CIP-1852 CKD chain m/1852H/1815H/0H/0/0 from master=bytes(range(96)), golden A=63658c2ec89f2fc978bd99c4ee00c6057d6a5b0baa29dc9d62beb4c5e511862c",
+    "nova_step_circuit": "cardano_ed25519_ownership_strong_nova.r1cs (O1): 5,910,830 wires / 5,933,764 constraints, n_pub 1024 in/out, +802 private (768 master + 2 op + 32 idx), 980.7 MiB",
+    "step_op_codes": ["00 seed", "10 hard", "10 hard", "01 soft", "01 soft", "11 final"],
+    "witnesses": 6,
+    "step_witness_s": "~120-180 each (snarkjs wasm, O1)",
+    "nova_impl10": {"fold_s": 18700, "compress_s": null, "verify_s": null, "sumcheck_proof_bytes": null, "ivc_bundle_bytes": 179775, "note": "fold measured 2026-09-10 (single-core, no --opt parallel); compress/verify still running, omitted from this commit"},
+    "nova_slim": {"fold_s": null, "compress_s": null, "slim_proof_bytes": null, "verify_s": null, "note": "not yet run"},
+    "monolithic": {
+      "circuit": "cardano_ed25519_ownership_strong.r1cs (O2): 15,806,867 constraints / 15,734,799 wires (public 1 out + 416 in, private 768), 2.58 GiB",
+      "witness": {"s": 134.75, "peak_rss": "1.9 GiB", "wtns_bytes": 503513644},
+      "ceremony": "trusted-setup ceremony-dev: dense peaked 29.1 GiB RSS (OOM-killed on 31 GiB); sparse attempt also died. Groth16 monolithic for Strong is infeasible on this machine."
+    }
+  },
+  "note": "cko & smt share the same step r1cs (sha256 137d95b2...) and final transcript hash f0f795a4...; compress re-folds deterministically as of 2026-09-09."
+}
