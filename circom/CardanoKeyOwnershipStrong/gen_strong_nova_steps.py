@@ -26,13 +26,93 @@ Usage:
 """
 
 import argparse
+import hashlib
+import hmac as _hmac
 import json
 import os
 import struct
 import subprocess
 import sys
 
-from gen_cardano_address_input import ckd_hardened, ckd_soft, compress_point, point_mul
+
+def hmac_sha512(key, data):
+    return _hmac.new(key, data, hashlib.sha512).digest()
+
+
+def le28(b):
+    return int.from_bytes(b[:28], "little")
+
+
+def le256(b):
+    return int.from_bytes(b, "little")
+
+
+def _add(P, Q, d, p):
+    X1, Y1, Z1, T1 = P
+    X2, Y2, Z2, T2 = Q
+    A = (Y1 - X1) * (Y2 - X2) % p
+    B = (Y1 + X1) * (Y2 + X2) % p
+    C = 2 * T1 * d * T2 % p
+    D = 2 * Z1 * Z2 % p
+    E = (B - A) % p
+    F = (D - C) % p
+    G = (D + C) % p
+    H = (B + A) % p
+    return (E * F % p, G * H % p, F * G % p, E * H % p)
+
+
+def point_mul(s, base):
+    y_int = int.from_bytes(base, "little")
+    sign_x = y_int >> 255
+    y = y_int & ((1 << 255) - 1)
+    p = 2 ** 255 - 19
+    d = (-121665 * pow(121666, p - 2, p)) % p
+    y2 = y * y % p
+    u = (y2 - 1) % p
+    v = (d * y2 + 1) % p
+    x2 = u * pow(v, p - 2, p) % p
+    x = pow(x2, (p + 3) // 8, p)
+    if x * x % p != x2:
+        x = x * pow(2, (p - 1) // 4, p) % p
+    if (x & 1) != sign_x:
+        x = (-x) % p
+    X, Y, Z, T = 0, 1, 0, 0
+    cur = (x, y, 1, x * y % p)
+    for i in range(256):
+        if (s >> i) & 1:
+            if Z == 0:
+                X, Y, Z, T = cur
+            else:
+                X, Y, Z, T = _add((X, Y, Z, T), cur, d, p)
+        cur = _add(cur, cur, d, p)
+    zi = pow(Z, p - 2, p)
+    return (X * zi % p, Y * zi % p)
+
+
+def compress_point(P):
+    p = 2 ** 255 - 19
+    x, y = P
+    return (x & 1) << 255 | y
+
+
+def ckd_hardened(ext, idx):
+    kL, kR, cc = ext
+    idxLE = idx.to_bytes(4, "little")
+    z = hmac_sha512(cc, b"\x00" + kL + kR + idxLE)
+    nkL = (8 * le28(z) + le256(kL)) % (1 << 256)
+    nkR = (le256(z[32:]) + le256(kR)) % (1 << 256)
+    ncc = hmac_sha512(cc, b"\x01" + kL + kR + idxLE)[32:]
+    return (nkL.to_bytes(32, "little"), nkR.to_bytes(32, "little"), ncc)
+
+
+def ckd_soft(ext, Apub, idx):
+    kL, kR, cc = ext
+    idxLE = idx.to_bytes(4, "little")
+    z = hmac_sha512(cc, b"\x02" + Apub + idxLE)
+    nkL = (8 * le28(z) + le256(kL)) % (1 << 256)
+    nkR = (le256(z[32:]) + le256(kR)) % (1 << 256)
+    ncc = hmac_sha512(cc, b"\x03" + Apub + idxLE)[32:]
+    return (nkL.to_bytes(32, "little"), nkR.to_bytes(32, "little"), ncc)
 
 P_ED = 2 ** 255 - 19
 N_ED = 2 ** 252 + 27742317777372353535851937790883648493
