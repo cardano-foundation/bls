@@ -1636,7 +1636,7 @@ Part 1 commits the prover to the private witness values; part 2 encodes the fact
 Part 1 — private wire contributions:
 
 ```
-Σ a_i · Psi_P_G1[i] = 1·(35/13) + 2·(25/13) + 3·(q-21/13) + 4·(q-15/13) + 5·(22/13) + 6·(12/13) + 7·(q-40/13) + 8·(q-40/13) + 2·(80/13) + 12·(51/13) + 30·(120/13) + 56·(35/13)
+Σ a_i · Psi_P_G1[i] = 1·(35/13) + 2·(25/13) + 3·(q-168)/13 + 4·(q-120)/13 + 5·(315/13) + 6·(225/13) + 7·(q-280)/13 + 8·(q-200)/13 + 2·(80/13) + 12·(51/13) + 30·(120/13) + 56·(35/13)
 ```
 
 (Public variables 0 and 1 are excluded from this sum.)
