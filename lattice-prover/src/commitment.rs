@@ -72,7 +72,7 @@ mod tests {
     fn test_ajtai_commitment_short_vector() {
         let params = AjtaiParams::new(16, 8);
         let mut rng = rand::thread_rng();
-        let s = Vector::from_fn(8, |_, _| Z2_64::from(rng.gen::<u8>() as i64));
+        let s = Vector::from_fn(8, |_, _| Z2_64::from(rng.r#gen::<u8>() as i64));
         let c = params.commit(&s);
         assert!(verify_commitment(&params, &s, &c));
     }

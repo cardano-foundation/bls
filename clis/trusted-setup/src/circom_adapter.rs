@@ -611,8 +611,8 @@ mod tests {
                 let expected: Vec<(u32, Fr)> = row
                     .iter()
                     .enumerate()
-                    .filter(|(_, &val)| !val.is_zero())
-                    .map(|(j, &val)| (j as u32, val))
+                    .filter(|(_, val)| !val.is_zero())
+                    .map(|(j, val)| (j as u32, *val))
                     .collect();
                 assert_eq!(&expected, terms, "constraint {i} coefficient mismatch");
             }
