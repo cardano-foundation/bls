@@ -1722,11 +1722,53 @@ Trustless? **No** — the compression proof is a pairing-based object and still 
 
 #### Step 3 — Implementation 10: fold, then compress transparently ✅ done — trustless
 
-> **Status:** ✅ done. The last swap on the climb.
+> **Status:** ✅ done. The last swap on the climb — and the whole point of it.
+>
+> **What we're improving:** the last lever trust still had on steps 1–2: a Groth16 compression proof means a ceremony, secret scalars, and an SRS that someone could corrupt. Step 3 removes trust itself.
+> **The idea:** replace the Groth16 compression *proof* with a **transparent sumcheck argument** — an object whose validity anyone can verify from public parameters alone.
+> **Why it's reasonable:** the sumcheck protocol is essentially information-theoretic. It argues about polynomial identities using nothing but field arithmetic and public challenge coins, so it needs no hidden scalars, no SRS, and no ceremony — transparency is a property of the argument's construction, not an extra feature bolted on.
 
-Replace the Groth16 compression *proof* with a **transparent sumcheck argument**. The sumcheck protocol is essentially information-theoretic: it argues about polynomial identities using field arithmetic and needs **no SRS, no toxic waste, no MPC**. With the compression transparent, nothing in the whole system depends on a secret anymore — the Pedersen commitment bases were already deterministic (hash-to-scalar), and the fold never used a setup. The bundle is now constant in both step count and step width — **~317.8 KiB** (sumcheck + hash-PC opening proofs), now zero-knowledge (the final `Z`/`E` are no longer revealed), and verified **pairing-free** (sumcheck + hash-PC + Pedersen recomputation).
+**How trustlessness was achieved.** The clean way to see it is to audit the whole system for things a user must take on faith. In steps 1–2 the ledger looked like this:
 
-Trustless? **Yes** — this is the moment Nova becomes trustless: step 3 of the climb. The price is exactly where you would expect: ~318 KiB per bundle, three orders of magnitude heavier than Groth16's 192 bytes. Becoming trustless buys a ceremony-free, pairing-free system with proof size to match. That is where we stop.
+| In steps 1–2, trust hung on… | What step 3 does with it |
+|------------------------------|--------------------------|
+| Groth16 proving key from a ceremony — secret scalars `τ, α, β, γ, δ` hidden behind the compression circuit's SRS | Gone. The compression is now a sumcheck argument: nothing is secret, there is no SRS to precompute, no MPC to run |
+| Proofs are pairing-based objects (the compression proof verifies with a pairing) | Gone from compression *and* from verification — sumcheck + hash-PC need no pairing object at all |
+| The fold's Pedersen commitment bases | Clean already — derived deterministically (hash-to-scalar), never ceremony-bound |
+| Anything else worth trusting? | The only assumptions left are **standard public maths**: discrete log (Pedersen binding) and a hash (the hash-PC) — research-grade computational assumptions, not a trusted-setup assumption |
+
+That is the exact sense of "trustless" here: the set of things you must take on faith shrank from *{secret scalars, ceremony participants, SRS integrity}* to *{well-studied public assumptions}*. Nobody runs a ceremony, there is nothing to corrupt, and the parameters are reproducible from source by anyone. This is the textbook definition of a **transparent SNARK**.
+
+The mechanics in one breath: after the 255 folds, the claim "the relaxed equation holds for `U_N`" is checked by running a **sumcheck protocol** — the prover commits to a witness polynomial, the verifier challenges evaluation points, and the **hash-PC** (a hash-based polynomial commitment, no pairings) supplies short opening proofs that the claimed evaluations are the honest ones. The verifier re-squeezes the fold challenges in O(1) per step, checks the transcript/state chain, and runs the sumcheck check — **no pairings anywhere**.
+
+And notice what the commands now *don't* contain. There is no ceremony step:
+
+```bash
+# fold N steps → ONE relaxed instance (transparent, no keys of any kind)
+nova fold --nifs --circuit step_circuit.r1cs --steps ./step_witnesses/ --out bundle.ivc.json
+
+# compress: prove the final instance with a transparent sumcheck argument
+nova compress --circuit step_circuit.r1cs --steps ./step_witnesses/ --out sumcheck.proof.json
+
+# verify: transcript/state-chain check + sumcheck (pairing-free)
+nova verify --ivc bundle.ivc.json --sumcheck-proof sumcheck.proof.json
+```
+
+What step 3 buys beyond transparency:
+
+- **Zero-knowledge.** Step 2's compression made the final `Z`/`E` public inputs — anyone saw the final state. The sumcheck path no longer reveals them; the bundle hides the state (constant ~317.8 KiB, in both `N` and step width).
+- **Pairing-free verification.** The last pairing in the whole pipeline is gone.
+
+And what it costs — the honest ledger, one final row on the scoreboard:
+
+| | Step 1 (Impl 8) | Step 2 (Impl 9) | Step 3 (Impl 10) |
+|---|---|---|---|
+| Bundle | ~334.7 KiB (O(N)) | ~312.9 KiB (O(step)) | **~317.8 KiB (constant)** |
+| On-chain verify | 255 pairings | 1 pairing | **0 pairings (sumcheck + hash-PC)** |
+| Ceremony | per step shape | one small reusable circuit | **none** |
+| Zero-knowledge | No | No | **Yes** |
+
+Trustless? **Yes** — this is the moment Nova becomes trustless: step 3 of the climb. The price is exactly where you would expect: ~318 KiB per bundle, three orders of magnitude heavier than Groth16's 192 bytes. Becoming trustless buys a ceremony-free, pairing-free, zero-knowledge system with proof size to match. One qualification, so the word is used honestly: "trustless" is a statement about *setup* — no ceremony, no secrets — not about quantum computers. The Pedersen layer is still discrete-log based, so under Shor's algorithm Nova breaks just as Groth16 does; the post-quantum road is the same swap to lattice commitments for both. That is where we stop.
 
 ### What the trick costs — the trade-offs
 
