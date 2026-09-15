@@ -1663,7 +1663,20 @@ flowchart TB
 
 > **Status:** ✅ done (baseline, superseded). This is the "step-chain" — the very first Nova in this repo, before folding existed.
 
-Each of the `N` identical step circuits is proven **standalone with Groth16**, and the chain is bound by a BLAKE2b512 transcript. Nothing about the scheme is new yet: it is the sprint's own proving machinery applied `N` times, which means **one ceremony per step shape** — the same toxic-waste dance as Part Two, repeated per step. For the 255-step Ed25519 step we have been following, the bundle is **~334.7 KiB** (one proof per step, O(N)) and on-chain verification needs **255 pairing checks**.
+Each of the `N` identical step circuits is proven **standalone with Groth16**, and the chain is bound by a BLAKE2b512 transcript. Nothing about the scheme is new yet: it is the sprint's own proving machinery applied `N` times, which means **one ceremony per step shape** — the same toxic-waste dance as Part Two, repeated per step. For the 255-step Ed25519 step we have been following, the bundle is **~334.7 KiB** (one proof per step, O(N)) and on-chain verification needs **255 pairing checks**. The commands show how little was new — this is the sprint's own prover, per step:
+
+```bash
+# inspect the step circuit, then run one ceremony per step shape
+nova params --circuit step_circuit.r1cs
+nova ceremony --circuit step_circuit.r1cs --proving-key step.pk --verifying-key step.vk
+
+# prove every step with the step's proving key, bind the chain
+nova fold --circuit step_circuit.r1cs --proving-key step.pk \
+  --steps ./step_witnesses/ --out bundle.ivc.json
+
+# verify: the whole chain, N pairing checks
+nova verify --ivc bundle.ivc.json --verifying-key step.vk
+```
 
 Trustless? **No** — it inherited Groth16's trust model wholesale.
 
@@ -1799,6 +1812,8 @@ The trade-off ledger, stated as honestly as the sprint's:
 Which do you reach for? For a **one-shot statement** — "I own this key" and nothing more — Groth16 stays the right tool: smallest proof, one pairing, and a ceremony that Part Two above showed how to run safely. For a **step-by-step computation** — an Ed25519 signature verified limb-by-limb, a Merkle path walked one hash at a time, a serial state machine — Nova removes both the ceremony and the per-step proof blow-up, trading a much larger proof (~318 KiB) for a pairing-free verifier that fits Cardano's execution-cost model without paying for an on-chain pairing.
 
 The stacks share their foundation on purpose: `nova-prover` reuses the R1CS/QAP engine, ceremony, and circom adapter of `groth16-prover` / `trusted-setup` and adds the IVC layer on top — the same `.r1cs` computation can be packaged either way, and the choice is a workflow one, not a rewrite.
+
+One last word before we leave Nova. **Transparent is an endpoint for *setup*, not the end of the story.** A transparent Nova can still be *bolstered* — slimmed down to on-chain-sized proofs, and hardened for the quantum era — which is exactly what the [`paweljakubas/nova-slim`](https://github.com/paweljakubas/nova-slim) project does: the same sumcheck foundations we saw in step 3, carrying both slim proofs and post-quantum security. That belongs to a later installment of this series; for now, step 3 gives us everything needed to understand it.
 
 ---
 
