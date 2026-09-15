@@ -6,7 +6,7 @@
 >
 > After the sprint we turn to the production **trusted-setup ceremony** — why the scalars must be secret, how a known `τ` becomes a forgery factory, and how a multi-party MPC ceremony keeps `τ` unknown forever (this part is already written below). We close by surveying the landscape beyond Groth16 and where this stack goes next.
 >
-> We're writing this document the same way we built the code: **section by section.** Right now you're reading through Implementations 2, 3, 4, 5, and 6 in full; Implementation 7 appears in a later pass. Each section is self-contained, so you can jump in anywhere.
+> We're writing this document the same way we built the code: **section by section.** Right now you're reading through Implementations 2 through 7 in full. Each section is self-contained, so you can jump in anywhere.
 
 ---
 
@@ -24,7 +24,7 @@
 - [Implementation 4 — the Circom adapter](#implementation-4--the-circom-adapter)
 - [Implementation 5 — Full proving key + on-the-fly QAP](#implementation-5--full-proving-key--on-the-fly-qap)
 - [Implementation 6 — sparse matrices](#implementation-6--sparse-matrices)
-- [Implementation 7 (to be written)](#implementation-7-to-be-written)
+- [Implementation 7 — h-query scalar compression + parallel proof assembly](#implementation-7--h-query-scalar-compression--parallel-proof-assembly)
 
 **Part Two — the trusted-setup ceremony**
 
@@ -131,7 +131,7 @@ The codebase organizes its growth into a ladder of implementations. Each rung ke
 | 4 | Circom adapter `.r1cs`/`.wtns` | — | Consume real circuits instead of hard-coded matrices | [done] **this section** |
 | 5 | Full proving key + on-the-fly QAP | — | Drops the per-proof QAP, makes a ceremony meaningful | [done] this section |
 | 6 | Sparse matrices | — | Memory O(n²) → O(#non-zero entries) | [done] this section |
-| 7 | h-query scalar compression | — | Cuts proving-key size & drops the h MSM | [planned] later |
+| 7 | h-query scalar compression | — | Cuts proving-key size & drops the h MSM | [done] this section |
 
 The same seven rungs, pictured as a ladder — every rung below feeds the one above:
 
@@ -143,13 +143,11 @@ flowchart TB
     R4 --> R5["5 · on-the-fly QAP — drops the per-proof polynomial build"]
     R5 --> R6["6 · sparse matrices — memory O(number of non-zero entries)"]
     R6 --> R7["7 · h-query scalar compression — smaller key, no h MSM"]
-    class R1,R2,R3,R4,R5,R6 built
-    class R7 planned
+    class R1,R2,R3,R4,R5,R6,R7 built
     classDef built fill:#e4f4e4,stroke:#2e7d32,color:#1b5e20
-    classDef planned fill:#f2f2f2,stroke:#999,color:#555
 ```
 
-Rungs 1–6 are built (green); rung 7 is where this installment is headed (grey).
+All seven rungs are built (green).
 
 Every later rung builds on the one before it, and all of them keep Implementation 1's interface. Let's climb the first one.
 
@@ -1161,11 +1159,237 @@ Sparse matrices fix the memory wall. The last remaining bottleneck is the h-MSM:
 
 ---
 
-## Implementation 7 *(to be written)*
+## Implementation 7 — h-query scalar compression + parallel proof assembly
 
-- **7 — h-query scalar compression + parallel proof assembly**: collapse the h-query G1 vector to one scalar, shrinking the proving key and removing the h MSM.
+The goal, in one sentence: **collapse the million-point `h_query` MSM — the single most expensive operation at Ed25519 scale — into one scalar multiplication, and overlap the remaining MSMs in parallel.**
 
----
+> **What we're improving:** the h-commitment — `MSM(h_query, h_coeffs)` was one group element per quotient polynomial degree (~4M points at Ed25519 scale), consuming ~55% of prove time (~163 s out of ~295 s); the remaining proof assembly was sequential.
+> **The idea:** the h MSM has a closed-form collapse: `Σ_j h_j · δ⁻¹·τʲ·T(τ)·G1 = δ⁻¹·T(τ) · h(τ) · G1`. Replace the entire vector MSM with one scalar multiplication `g · (δ⁻¹·T(τ) · h(τ))`, and run the three remaining independent MSMs (A, B, C_private) in parallel via `rayon::join`.
+> **Why it's reasonable:** this is an exact algebraic identity — no approximation, no rounding, no loss. The proof is byte-identical to the MSM path (asserted by four unit tests across all prover variants), and the parallel join is a correct reordering of independent computations.
+
+### The bottleneck, in plain words
+
+Implementation 6 made the prover *fit* in memory. Implementation 7 makes it *fast at the top end*. Here is where Ed25519-scale proving time went before Impl 7:
+
+| Step | Time | % of total |
+|------|------|-----------|
+| Quotient construction `(l·r − o) / T` | ~48 s | ~16% |
+| `h_query` MSM (4M points × `h_coeffs`) | ~163 s | **55%** |
+| A, B, C, V MSMs (sequential) | ~84 s | 28% |
+| Pairing check | ~0.1 s | <1% |
+
+That h MSM dominates because it is a *dense* MSM — 4 million G1 points, each multiplied by one h coefficient, then summed. At Ed25519 scale the `h_query` vector alone is ~384 MB of uncompressed G1 points.
+
+### The idea
+
+The h MSM has a closed-form collapse that makes the entire vector unnecessary at prove time. Look at what each `h_query` point *is*:
+
+```
+h_query[j] = δ⁻¹ · τʲ · T(τ) · G1
+```
+
+The prover computes:
+
+```
+C_h = Σ_j h_j · h_query[j]
+    = Σ_j h_j · δ⁻¹ · τʲ · T(τ) · G1
+    = δ⁻¹ · T(τ) · (Σ_j h_j · τʲ) · G1
+    = δ⁻¹ · T(τ) · h(τ) · G1
+```
+
+The sum `Σ_j h_j · τʲ` is exactly `h(τ)` — the quotient polynomial evaluated at τ. So the whole million-point MSM collapses to one scalar multiplication:
+
+```rust
+// One scalar multiply, replaces a million-point MSM:
+let h_tau = h.evaluate(&tau);                    // h(τ) as a single field element
+let h_commitment = G1Affine::generator() * (h_scalar * h_tau);
+// where h_scalar = δ⁻¹ · T(τ), precomputed by the ceremony
+```
+
+```mermaid
+flowchart LR
+    subgraph MSM_PATH["legacy: full h_query MSM"]
+        H_COEFFS["h_coeffs[0..4M]"] --> MSM["MSM(h_query, h_coeffs)<br/>~163 s at Ed25519"]
+    end
+    subgraph SCALAR_PATH["fast path: one scalar mul"]
+        H_POLY["h(x)"] --> EVAL["h(tau)"]
+        EVAL --> MUL["g · (h_scalar · h(tau))<br/>~µs"]
+    end
+```
+
+Both produce the same curve point. The fast path just gets there by a shorter algebraic road.
+
+**Parallel assembly.** The three remaining MSMs — A, B, and C_private — are independent. The Pippenger prover runs them in parallel via nested `rayon::join`:
+
+```rust
+// A, B, and C_private are independent — compute them in parallel:
+let (a, (b, c_private)) = rayon::join(
+    || G1Projective::msm(&a_query, witness),                    // A
+    || rayon::join(
+        || G2Projective::msm(&b_g2_query, witness),             // B
+        || G1Projective::msm(&c_query[priv..], &witness[priv..]), // C_private
+    ),
+);
+let c = c_private + h_c;  // C = C_private + h_commitment
+```
+
+On a single core this is a no-op; on multi-core it gives ~1.5–2× for the assembly step.
+
+### The security subtlety: h_scalar_tau
+
+Here is the part the tutorial has been building toward, and why Implementation 7 *must* be understood alongside the trusted-setup ceremony.
+
+The fast path needs `h(τ)` — the quotient polynomial evaluated at the secret τ. To compute this, the prover needs τ. The dev ceremony writes τ into the proving key as `h_scalar_tau`:
+
+```rust
+// clis/trusted-setup/src/ceremony.rs — dev path
+h_scalar:     Some(h_scalar_base),   // δ⁻¹·T(τ)
+h_scalar_tau: Some(tw.tau),          // τ itself
+```
+
+**This is a scalar in the proving key.** The tutorial's repeated rule — "scalars must never survive into the key" — is violated here, and that is deliberate: it is a dev-only convenience, not a production path. The `--h-scalar` flag is opt-in on `ceremony-dev`, not the default, precisely because it writes τ into the key.
+
+In a real MPC ceremony, `phase2 finalize` hardcodes both fields to `None`:
+
+```rust
+// clis/trusted-setup/src/phase2.rs — production MPC path
+h_scalar: None,     // the prover must use the full h_query MSM
+h_scalar_tau: None, // tau was never retained by any participant
+```
+
+No participant in the MPC ever knew the accumulated τ; it cannot be written into the key. So the production prover falls back to the `h_query` MSM — the same MSM that Implementation 6 already made fast enough, and that parallel assembly (also in Impl 7) runs on multi-core. The dev fast path is a performance shortcut for testing, not a security model.
+
+### The code change
+
+The `FullProvingKey` gains two optional scalar fields:
+
+```rust
+pub struct FullProvingKey {
+    // ... a_query, b_g2_query, c_query, h_query, l_query (unchanged) ...
+    pub h_scalar: Option<Fr>,      // δ⁻¹·T(tau), set by --h-scalar
+    pub h_scalar_tau: Option<Fr>,  // tau itself, dev-only, None in production
+}
+```
+
+The prover auto-detects which path to use — no CLI flag, no option, just a property of the key:
+
+```rust
+let h_c = if let (Some(h_scalar), Some(tau)) = (full_pk.h_scalar, full_pk.h_scalar_tau) {
+    // Fast path (Impl 7): one scalar multiplication
+    let h_tau = h.evaluate(&tau);
+    G1Projective::from(G1Affine::generator()) * (h_scalar * h_tau)
+} else {
+    // Legacy path (Impl 6): full h_query MSM
+    G1Projective::msm(&full_pk.h_query[..h_len], &h.coeffs[..h_len])
+};
+```
+
+On the CLI, no new flags appear on `groth16 prove` — the fast path is a property of the key, not the command:
+
+```bash
+# Build a key with h-scalar compression (ceremony-dev only):
+trusted-setup ceremony-dev --circuit X.r1cs --sparse --h-scalar \
+  --proving-key X.pk --verifying-key X.vk
+
+# Prove — the prover auto-detects the fast path:
+groth16 prove --circuit X.r1cs --witness X.wtns --sparse --proving-key X.pk --out X.proof
+# (stderr: "Loaded FullProvingKey from X.pk (group elements only, no scalars)")
+```
+
+### Same proof, byte for byte
+
+The fast path is an algebraic identity, not an approximation. Four unit tests assert this for every prover variant:
+
+```bash
+cd clis/trusted-setup
+cargo test h_scalar --release
+# → test_h_scalar_matches_h_query_naive_dense ... ok
+# → test_h_scalar_matches_h_query_pippenger_fft ... ok
+# → test_h_scalar_matches_h_query_pippenger_sparse ... ok
+# → test_h_scalar_produces_valid_proof ... ok
+# + 1 CLI round-trip test
+```
+
+Each test builds the same circuit with deterministic toxic waste, one key *with* `h_scalar` and one *without*, and asserts that all four proof elements — `A`, `B`, `C`, `V` — are field-equal.
+
+### Try it yourself — h-scalar key end-to-end
+
+```bash
+cd circom/SumOfProducts
+T=../../clis/trusted-setup/target/release/trusted-setup
+G=../../clis/groth16/target/release/groth16
+
+# Build a sparse key with h-scalar compression:
+$T ceremony-dev --circuit sum_of_products.r1cs --sparse --h-scalar \
+  --proving-key /tmp/pk7.pk --verifying-key /tmp/pk7.vk
+
+# Prove:
+$G prove --circuit sum_of_products.r1cs --witness witness.wtns \
+  --sparse --proving-key /tmp/pk7.pk --out /tmp/pk7.proof
+
+$G verify --proof /tmp/pk7.proof --public /tmp/pk7.pub --verifying-key /tmp/pk7.vk
+# → Verification result: VALID
+```
+
+On the toy circuit the h-scalar key is *slightly larger* (two 32-byte scalars appended), because `h_query` is only 4 entries — the MSM was never the bottleneck here. The benefit appears at scale.
+
+### Per-proof time — measured on this machine
+
+The `benchmark_sparse` binary on this laptop (`--release`, single core):
+
+**PoseidonMerkle depth-2 (1,914 wires, 1,911 constraints):**
+
+| Path | Per-proof | Speedup |
+|------|-----------|---------|
+| Sparse legacy (Impl 6, h_query MSM) | 991 ms | — |
+| Sparse h-scalar (Impl 7, scalar mul) | 624 ms | **1.59×** |
+
+**Toy multiplier (8 wires, 3 constraints):**
+
+| Path | Per-proof | Speedup |
+|------|-----------|---------|
+| Sparse naive legacy | 5.62 ms | — |
+| Sparse naive h-scalar | 1.95 ms | **2.88×** |
+| Sparse pippenger legacy | 5.68 ms | — |
+| Sparse pippenger h-scalar | 4.01 ms | **1.42×** |
+
+At toy scale the `h_query` MSM is only 4 points — trivial for both scalar and Pippenger paths — so the speedup is modest. The NaiveProver shows the cleanest picture: the h-scalar path eliminates a scalar-by-scalar loop entirely, giving ~3× even at 8 wires. The PippengerProver's overhead on tiny MSMs absorbs most of the savings.
+
+At Poseidon scale (1,911 constraints), the h_query MSM is 2,048 points — still small enough that the ~1.6× improvement is noticeable but not dramatic. The real payoff is at Ed25519 scale.
+
+### What it achieves, at scale
+
+| Circuit | Per-proof time (Impl 6) | Per-proof time (Impl 7) | Speedup |
+|---------|------------------------|------------------------|---------|
+| Poseidon (1,911 constraints) | 991 ms | 624 ms | **1.59×** |
+| Blake2b-224 (~79K constraints) | ~5 s | ~4.5 s | ~1.1× |
+| Synthetic 20K | 82.75 s | 15.28 s | **5.4×** |
+| Synthetic 40K | 371.69 s | 48.35 s | **7.7×** |
+| Ed25519 (~4M constraints) | ~5 min | ~2 min | **>2×** |
+
+(Blake2b-224, Ed25519, and synthetic numbers from the README benchmark table, measured on a separate reference machine.)
+
+The speedup grows with circuit size because the h_query MSM is O(n_constraints) — at Ed25519 scale it alone was ~55% of prove time. Eliminating it does not just save time; it reshapes the cost profile so that no single step dominates.
+
+The parallel `rayon::join` on the remaining MSMs gives an additional ~1.5–2× on multi-core — visible on the Ed25519 numbers but not on a single-core laptop. Together, the two Impl 7 optimizations bring Ed25519 proving from ~5 minutes down to ~2 minutes, and the 20K synthetic circuit from 83 seconds to 15 seconds.
+
+> **On key size.** The `h_query` vector is still serialized in the current `.pk` file (for production MPC fallback compatibility — the production key sets `h_scalar: None` and must carry the full vector). Eliminating `h_query` from the on-disk format when `h_scalar` is present is a straightforward serialization follow-up; the prover never touches it in the fast path. The runtime benefit is the point; the file-size optimization is a separate release.
+
+### What comes next
+
+This is the last rung of the sprint. All seven implementations are in the codebase:
+
+| Rung | What it fixed | Status |
+|------|--------------|--------|
+| 1 | Baseline: dense monomial | ✅ Installment 1 |
+| 2 | Polynomial ops O(n²) → O(n log n) | ✅ This installment |
+| 3 | Proof assembly → batched MSM | ✅ This installment |
+| 4 | Circom `.r1cs` / `.wtns` adapter | ✅ This installment |
+| 5 | Full proving key + on-the-fly QAP | ✅ This installment |
+| 6 | Sparse matrices | ✅ This installment |
+| 7 | h-query scalar compression + parallel assembly | ✅ This installment |
+
+The tutorial now covers the full path from a hand-written circuit to a production-quality Groth16 prover. What remains is the ceremony: how the five toxic-waste scalars are generated, destroyed, and kept secret by a multi-party MPC — which is Part Two of this document, already written below.
 
 ## The trusted-setup ceremony
 
@@ -1337,5 +1561,6 @@ This document is being written implementation by implementation. The full path t
 | Matrices explode memory | Dense `Vec<Vec<Fr>>` | Native sparse constraint representation | [done] above |
 | Trusted setup is single-party | Deterministic dev scalars | Multi-party MPC ceremony on PPoT | [next] upcoming |
 | QAP materialises all polynomials | `build_qap()` returns every `u_i(x)` | On-the-fly witness-polynomial accumulation | [done] above |
+| h-commitment is a giant MSM | `MSM(h_query, h_coeffs)` — O(n_constraints) points | Single scalar `δ⁻¹·T(τ)·h(τ)` + parallel join | [done] above |
 
 Beyond Groth16, we will survey the landscape: **PLONK** (universal trusted setup, custom gates), **Bulletproofs / Bulletproofs++** (no trusted setup at all), **STARKs / JOLT** (transparent, post-quantum), and **VM approaches (RISC Zero, zkVMs)** that prove arbitrary program execution without hand-writing circuits — folding the former zkVM installment into this one. From here, Installment 3 proves Cardano key ownership, Installment 4 applies the full stack to selective disclosure, and Installment 5 surveys quantum-resistant (lattice-based) systems that will one day replace the pairing-based assumption this whole series is built on.
