@@ -35,8 +35,7 @@
 
 - [Nova vs Groth16 — the folding trick, up close](#nova-vs-groth16--the-folding-trick-up-close)
 - [The landscape beyond Groth16 — where Nova fits](#the-landscape-beyond-groth16--where-nova-fits)
-
-- [What's next in this installment](#whats-next-in-this-installment)
+- [Farewell — and what's next](#farewell--and-whats-next)
 
 ---
 
@@ -1866,18 +1865,20 @@ Three axes decide between the rows. **Proof size and trust go together**: the pa
 
 ---
 
-## What's next in this installment
+## Farewell — and what's next
 
-This document is being written implementation by implementation. The full path through the sprint and ceremony:
+**Where this installment left us.** We took the installment-1 pipeline — dense monomial, long division, scalar-by-scalar proof assembly, fixed dev scalars — and climbed seven rungs to a production-grade prover. The same Poseidon proof that took ~26 s at the bottom runs in **624 ms** at the top, from a real Circom `.r1cs`/`.wtns` circuit, with matrix memory down **1,389×**; the h-commitment that was a multi-thousand-point MSM is a single scalar; and a ceremony once fixed to printable primes (`τ = 6`) is now understood as the system's heartbeat — the five scalars `τ, α, β, γ, δ` held secret and random by an MPC, because knowing `τ` is the ability to forge. Beyond the sprint, we climbed Nova's three steps to trustlessness, and judged the whole landscape of alternatives — PLONK, Bulletproofs++, STARKs, JOLT, zkVMs, lattice folding — against the rows we measured.
 
-| Bottleneck | First-principles fix (Installment 1) | Production fix (this installment) | Status |
-|------------|--------------------------------------|-----------------------------------|--------|
-| Polynomial ops are O(n²) | Dense coefficient vectors | **FFT over roots of unity** | [done] above |
-| Proof assembly is O(n) scalar muls | One-by-one multiplication | Pippenger multi-scalar multiplication | [done] above |
-| Circuit inputs are hard-coded | Rust `const` arrays | Circom `.r1cs` / `.wtns` parser | [done] above |
-| Matrices explode memory | Dense `Vec<Vec<Fr>>` | Native sparse constraint representation | [done] above |
-| Trusted setup is single-party | Deterministic dev scalars | Multi-party MPC ceremony on PPoT | [next] upcoming |
-| QAP materialises all polynomials | `build_qap()` returns every `u_i(x)` | On-the-fly witness-polynomial accumulation | [done] above |
-| h-commitment is a giant MSM | `MSM(h_query, h_coeffs)` — O(n_constraints) points | Single scalar `δ⁻¹·T(τ)·h(τ)` + parallel join | [done] above |
+> **Honesty caveat — what this installment left at the trailhead.** Two things are designed and explained here but not demonstrated end to end. First, the **real multi-party ceremony**: the forgery attack, the secrecy argument, and the MPC machinery are all in front of you, but the orchestration itself (the PPoT challenge flow) was deferred — it still sits in the `[next]` slot of the sprint table, awaiting its hands-on walkthrough. Second, **Nova's transparency is a statement about setup, not about assumptions**: "no ceremony" buys trustlessness over a discrete-log Pedersen layer, which is not post-quantum — the exact seam installment 5's lattice survey will revisit.
 
-The landscape matrix above gives each approach the one-paragraph essence it is due; this installment has already covered the pairing family in full (the whole sprint) and the Nova folding line in depth (the hinges of the trick). From here, Installment 3 proves Cardano key ownership, Installment 4 applies the full stack to selective disclosure, and Installment 5 surveys quantum-resistant (lattice-based) systems — the nova-slim direction included — that will one day replace the pairing-based assumption this whole series is built on.
+### Installment 3 — a practical problem, end to end
+
+Which brings us to the point of this whole exercise. The next installment stops optimizing the engine and starts *using* it: **proving Cardano key ownership**. You hold a private key; you want to convince an on-chain verifier that the public key behind a Cardano address was derived from a key you control — without revealing it, and without asking the on-chain script to trust a signature. That statement is the ~1.97M-constraint `cardano_ed25519_ownership` circuit; its proof is **192 bytes and one pairing check**, small enough to travel in a Cardano transaction and cheap enough to gate a spending script on. Nova is waiting in the wings: the same ownership statement split into 255 identical steps, folded into a single pairing-free proof — the choose-your-package question resolved, as the Nova walkthrough left it, by the shape of the computation.
+
+### The installments after
+
+Installment 4 applies the same stack to **selective disclosure** — proving predicates (`age ≥ 21`, `country ∈ S`) without revealing credential fields or the holder's address. Installment 5 closes the series on the frontier the landscape table opened: **quantum-resistant, lattice-based** systems — the nova-slim direction included — and when the pairing-based assumption this series is built on will, and will not, be safe.
+
+The code for all installments lives in the [cardano-foundation/bls](https://github.com/cardano-foundation/bls) repository.
+
+Stay tuned for the next ZKP installment!
