@@ -69,6 +69,8 @@ From here on, "your terminal" means `cd`'d to the directory shown in each snippe
 
 > **A note on numbers.** Times in this document come from two sources: the reference benchmark tables in `groth16-prover/README.md`, and measurements taken on a mid-range laptop. Absolute numbers will differ on your machine — what matters are the *shapes*: which configurations are faster, and *why*. We'll always tell you which is which.
 
+> **A note on the format.** Every implementation section follows the same beat: a one-sentence **goal**, the **bottleneck** in plain words, **the idea** (with a diagram whenever a picture helps more than prose), the **code change**, a **try-it-yourself** drill you can run in a few minutes, and finally what the change buys you at scale. The figures are mermaid diagrams — they render inline here on GitHub, so what you read is what the code does.
+
 ---
 
 ## The baseline: Implementation 1 — dense monomial
@@ -129,6 +131,24 @@ The codebase organizes its growth into a ladder of implementations. Each rung ke
 | 6 | Sparse matrices | — | Memory O(n²) → O(#non-zero entries) | [planned] later |
 | 7 | h-query scalar compression | — | Cuts proving-key size & drops the h MSM | [planned] later |
 
+The same seven rungs, pictured as a ladder — every rung below feeds the one above:
+
+```mermaid
+flowchart TB
+    R1["1 · dense monomial — the baseline engine"] --> R2["2 · FFT — polynomial ops O(n log n)"]
+    R2 --> R3["3 · Pippenger — batched multi-scalar multiplication"]
+    R3 --> R4["4 · Circom adapter — real .r1cs / .wtns inputs"]
+    R4 --> R5["5 · on-the-fly QAP — drops the per-proof polynomial build"]
+    R5 --> R6["6 · sparse matrices — memory O(number of non-zero entries)"]
+    R6 --> R7["7 · h-query scalar compression — smaller key, no h MSM"]
+    class R1,R2,R3,R4 built
+    class R5,R6,R7 planned
+    classDef built fill:#e4f4e4,stroke:#2e7d32,color:#1b5e20
+    classDef planned fill:#f2f2f2,stroke:#999,color:#555
+```
+
+Rungs 1–4 are built (green); rungs 5–7 are where this installment is headed (grey).
+
 Every later rung builds on the one before it, and all of them keep Implementation 1's interface. Let's climb the first one.
 
 ---
@@ -166,6 +186,23 @@ Why does anyone care? Because some operations are cheap in one passport and expe
 - **Evaluating** at a point, or **interpolating** back to coefficients: in coefficient form these are also O(n²) for us. But there's a pair of algorithms — the **FFT** and its inverse — that converts between the two passports in **O(n log n)**.
 
 So the grand bargain is: *do the arithmetic in evaluation form (cheap), and use the FFT only to convert in and out (still cheap).*
+
+The same polynomial, two passports, and the price of each operation in each one:
+
+```mermaid
+flowchart LR
+    subgraph coef["coefficient passport"]
+        C["P(x) = c0 + c1·x + c2·x2 + ..."]
+    end
+    subgraph eval["evaluation passport"]
+        E["P(x0), P(x1), ..., P(xN-1)"]
+    end
+    C <-->|"FFT / inverse FFT · O(n log n)"| E
+    C -->|"multiplying · schoolbook"| SLOW["O(n2) · slow"]
+    E -->|"multiplying · pointwise"| FAST["O(n) · fast"]
+```
+
+Note the price difference on the bottom two rows — *that* is the win Implementation 2 harvests.
 
 **Ingredient 2: pick the right points.** The FFT is fast specifically because it evaluates at very special points: the **N-th roots of unity** — the N numbers `ω⁰, ω¹, …, ω^{N−1}` in our field with the property that `ω^N = 1`. Their beauty is algebra: because they close under multiplication (`ω^i · ω^j = ω^{i+j mod N}`), evaluating a polynomial at all of them can be shared and reused — that sharing is precisely where the log factor comes from. (Rest assured: over BLS12-381's scalar field there are roots of unity of every power-of-two size we will ever need, up to 2²⁵⁵.)
 
@@ -411,6 +448,20 @@ That is exactly what **Pippenger's bucket MSM** (multi-scalar multiplication) do
 
 The cost arithmetic is now: `n × (256/c)` point-additions (filling buckets across windows) + `(256/c) × 2^c` additions (combining buckets within windows). That is roughly **`n × 64` additions** instead of **`n × ~383` operations** — about a **6× reduction in group operations** for `c = 4`, and the per-point cost drops from "full double-and-add ladder" to "one addition per window."
 
+The whole pipeline, in one picture:
+
+```mermaid
+flowchart TD
+    IN["n points P-i, each with a 256-bit scalar a-i"] --> SPLIT["split each scalar into 4-bit windows<br/>(64 window positions)"]
+    SPLIT --> PASS["for each window position w:<br/>read digit d of every scalar"]
+    PASS --> BUCKET["drop each point into bucket d<br/>(1 point-add per point per window)"]
+    BUCKET --> RUNSUM["combine the 16 buckets with a running sum<br/>(16 adds per window, not 16 ladders)"]
+    RUNSUM --> SHIFT["shift the place value up by c bits<br/>and fold into the result"]
+    SHIFT --> OUT["one batched result: sum of a-i · P-i"]
+```
+
+Every window adds each point to exactly one bucket, and the windows quickly shift together — no point ever walks a full 255-step ladder alone.
+
 > **A shopkeeper analogy.** Pippenger is the difference between counting a pile of coins one at a time and sorting them into denomination piles first — once sorted, you count each pile once instead of once per coin.
 
 In code, the switch is from the for-loop `c_proj += g1_proj * scalar` to `G1Projective::msm(bases, scalars)` — a single library call to arkworks' Pippenger implementation (`clis/trusted-setup/src/prover.rs`, lines 470–472):
@@ -622,6 +673,15 @@ The three sections of a `.r1cs`:
 | 2 | **Constraints** — one per constraint: three sparse vectors, each a list of `(wire, coefficient)` pairs | 672 B | The bulk of the file |
 | 3 | **Wire labels** — human-readable signal names | 112 B | The adapter ignores them |
 
+And how the sections actually sit inside the toy file — a serial run of three variable-length chunks behind an 8-byte header:
+
+```mermaid
+flowchart LR
+    M["'r1cs' · version 1 · 3 sections<br/>bytes 0–11"] --> S2["constraints section · type 2<br/>672 bytes · bytes 12–695"]
+    S2 --> S1["header section · type 1<br/>64 bytes · bytes 696–759"]
+    S1 --> S3["labels section · type 3<br/>112 bytes · bytes 760–895"]
+```
+
 The `.wtns` is the same idea with two sections: a header (field size, prime, `n_wires`) and the raw witness values (one 32-byte little-endian field element per wire). Sections may appear in any order — in this file the constraints come first, the header second, the labels last — and the adapter reads them whichever way they arrive.
 
 The parser also explains the memory math you'll meet again in Implementation 6: `CircomCircuit` keeps the matrices **densely** (`Vec<Vec<Fr>`, constraints × wires). The toy's 896-byte file becomes a 5×14 dense matrix; the Poseidon circuit's 260 KB file becomes a **1914 × 1914 × 3 ≈ 352 MB** of field elements in RAM. That number will matter two sections from now.
@@ -704,21 +764,23 @@ $G prove --circuit sum_of_products.r1cs \
 
 A clean, immediate failure: the parse succeeds, but the sanity check on sizes catches the mix-up before any cryptography runs.
 
-**It does not check: the field.** Coefficients are decoded with `Fr::from_le_bytes_mod_order`, which reduces modulo the BLS12-381 scalar order — and the file's declared prime is stored but never compared. Here is the destructive demonstration: compile the *same* `multiplier.circom` with `--prime bn128`, generate its witness, and prove it through the default CLI (in a scratch directory, so the bls12381 artifacts from the drill above stay intact):
+**It does not check: the field.** Coefficients are decoded with `Fr::from_le_bytes_mod_order`, which reduces modulo the BLS12-381 scalar order — and the file's declared prime is stored but never compared. Here is the destructive demonstration: **forget the `--prime bls12381` flag.** Circom's default field is *not* BLS12-381 — `--prime` is required to opt out of it — so the compile silently yields a `.r1cs` for a different curve, and our adapter accepts it all the way through to a *valid* proof:
 
 ```bash
 cd circom/SimpleExample
 G=../../clis/groth16/target/release/groth16
 mkdir -p /tmp/wrongfield
 
-circom multiplier.circom --r1cs --wasm --prime bn128 -o /tmp/wrongfield
+circom multiplier.circom --r1cs --wasm -o /tmp/wrongfield     # ← no --prime flag!
 snarkjs wtns calculate /tmp/wrongfield/multiplier_js/multiplier.wasm input.json /tmp/wrongfield/witness.wtns
 $G prove  --circuit /tmp/wrongfield/multiplier.r1cs --witness /tmp/wrongfield/witness.wtns --out /tmp/wrongfield/wrong.proof
 $G verify --proof /tmp/wrongfield/wrong.proof --public /tmp/wrongfield/wrong.pub
 # → Verification result: VALID
 ```
 
-It parses, it proves, it *verifies* — silently. The lesson is not "the check is missing", it's *why* it matters. Groth16 is pure algebra: it never asks which prime the file claims. For tiny values like these, the two fields agree, so the proof is honestly valid. The hazard appears the moment coefficients or witnesses step past the boundary of the smaller prime — the adapter silently reinterprets them, and a "valid" proof then attests to a different statement than the circuit intended. That is exactly why the SimpleExample workflow insists on `--prime bls12381`: the field must match the stack, and the file's header is not a substitute for checking it.
+You can see the divergence with your own eyes: with `--prime bls12381` the r1cs header's prime field begins `01 00 00 00 ff ff ff ff …`, while without the flag it begins `01 00 00 f0 93 f5 e1 43 …` — two entirely different numbers, and the parser reads both happily.
+
+It parses, it proves, it *verifies* — silently. The lesson is not "the check is missing", it's *why* it matters. Groth16 is pure algebra: it never asks which prime the file claims. For tiny values like these, the two fields agree, so the proof is honestly valid. The hazard appears the moment coefficients or witnesses step past the boundary of the smaller prime — the adapter silently reinterprets them, and a "valid" proof then attests to a different statement than the circuit intended. And because this rack is **BLS12-381-only**, that must never happen: the stack's ceremonies, pairings, and constants all speak BLS12-381, so the circuit must too. The file's header is not a substitute for the flag — if `--prime bls12381` is ever forgotten, the proof still comes out "VALID", and every one of those checks is lying.
 
 ### What it achieves, and what comes next
 
@@ -848,7 +910,17 @@ The production ceremony is a **multi-party Phase-2 ceremony** that reuses a publ
 | `verify` | Check all contributions are valid |
 | `finalize` | Convert accumulator to `.pk` / `.vk` |
 
-The full workflow:
+The full workflow, and the story it tells: the coordinator never sees randomness, only files shuffling between hands:
+
+```mermaid
+flowchart LR
+    P["Phase-1 SRS<br/>(e.g. Perpetual Powers of Tau)"] --> N["phase2 new<br/>accumulator 0000.zkey"]
+    N --> A["Alice contributes<br/>0001.zkey"]
+    A --> B["Bob contributes<br/>0002.zkey"]
+    B --> MORE["... and so on ..."]
+    MORE --> V["phase2 verify<br/>(anyone can check)"]
+    V --> FIN["phase2 finalize<br/>circuit.pk · circuit.vk"]
+```
 
 ```bash
 # 1. Initialize from universal SRS
