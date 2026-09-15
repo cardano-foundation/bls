@@ -6,7 +6,7 @@
 >
 > After the sprint we turn to the production **trusted-setup ceremony** — why the scalars must be secret, how a known `τ` becomes a forgery factory, and how a multi-party MPC ceremony keeps `τ` unknown forever (this part is already written below). We close by surveying the landscape beyond Groth16 and where this stack goes next.
 >
-> We're writing this document the same way we built the code: **section by section.** Right now you're reading through Implementations 2 and 3 in full; Implementations 4–7 appear in a later pass. Each section is self-contained, so you can jump in anywhere.
+> We're writing this document the same way we built the code: **section by section.** Right now you're reading through Implementations 2, 3, and 4 in full; Implementations 5–7 appear in a later pass. Each section is self-contained, so you can jump in anywhere.
 
 ---
 
@@ -21,7 +21,8 @@
   - [A first real circuit: Poseidon](#a-first-real-circuit-poseidon)
   - [Try it on a slightly bigger circuit](#try-it-on-a-slightly-bigger-circuit)
 - [Implementation 3 — Pippenger MSM](#implementation-3--pippenger-msm)
-- [Implementations 4–7 (to be written)](#implementations-47-to-be-written)
+- [Implementation 4 — the Circom adapter](#implementation-4--the-circom-adapter)
+- [Implementations 5–7 (to be written)](#implementations-57-to-be-written)
 
 **Part Two — the trusted-setup ceremony**
 
@@ -123,7 +124,7 @@ The codebase organizes its growth into a ladder of implementations. Each rung ke
 | 1 | `DenseQapEngine` | `NaiveProver` | Baseline: Lagrange + dense polynomials + scalar-by-scalar MSM | [done] Installment 1 |
 | 2 | `FftQapEngine` | `NaiveProver` | Polynomial ops O(n²) → O(n log n); unlocks any circuit size | [done] **this section** |
 | 3 | `FftQapEngine` | `PippengerProver` | Proof assembly O(n) → O(n log n) batched MSM | [done] **this section** |
-| 4 | Circom adapter `.r1cs`/`.wtns` | — | Consume real circuits instead of hard-coded matrices | [planned] later |
+| 4 | Circom adapter `.r1cs`/`.wtns` | — | Consume real circuits instead of hard-coded matrices | [done] **this section** |
 | 5 | Full proving key + on-the-fly QAP | — | Drops the per-proof QAP, makes a ceremony meaningful | [planned] later |
 | 6 | Sparse matrices | — | Memory O(n²) → O(#non-zero entries) | [planned] later |
 | 7 | h-query scalar compression | — | Cuts proving-key size & drops the h MSM | [planned] later |
@@ -582,13 +583,157 @@ The next section tackles Implementation 4: reading `.r1cs` and `.wtns` files fro
 
 ---
 
-## Implementations 4–7 *(to be written)*
+## Implementation 4 — the Circom adapter
+
+The goal, in one sentence: **replace the hard-coded Rust matrices with a parser for circom's standard `.r1cs` / `.wtns` binary formats, so that any circuit you can compile with circom becomes a circuit you can prove — without touching Rust.**
+
+### The bottleneck, in plain words
+
+Until now, every R1CS reached the prover as hard-coded Rust `const` arrays: `L`, `R`, `O`, `WITNESS` carved into `clis/trusted-setup/src/r1cs.rs`, with a `select_circuit(name)` helper that knows exactly two circuits (`"multiplier"`, `"sumofproducts"`) and fixed-size matrices like `[[u64; 8]; 3]`, typed by hand.
+
+That is a teaching scaffold. It cannot survive contact with the real world: production circuits are written in **circom**, compiled to binary files, and shipped. Real R1CS files are 260 KB, not 900 bytes, and their matrices are far too large to put in source by hand. Implementation 4 is the *input layer* that closes that gap: a parser for the two file formats circom writes.
+
+### The file formats: what circom actually writes
+
+Two files matter: the circuit `.r1cs` and the witness `.wtns`. Both are small, versioned binary formats. You can read them with the same tool we use for any binary — here is the first 28 bytes of the tutorial's toy (run from the repository root):
+
+```bash
+xxd -l 28 circom/SumOfProducts/sum_of_products.r1cs
+```
+
+```
+00000000: 7231 6373 0100 0000 0300 0000 0200 0000  r1cs............
+00000010: a002 0000 0000 0000 0100 0000 0200 0000  ................
+```
+
+Reading it:
+
+- **bytes 0–3** — magic `"r1cs"`;
+- **bytes 4–7** — file-format version (1);
+- **bytes 8–11** — number of sections (3);
+- **bytes 12–19** — first section: type 2 (constraints), 672 bytes;
+- **byte 24 onward** — constraint 0's `L` row: `1` term, wire `2`, coefficient `1`, and so on.
+
+The three sections of a `.r1cs`:
+
+| Type | Content | Toy size | Note |
+|------|---------|----------|------|
+| 1 | **Header** — field size (32 bytes), the field prime, `n_wires`, `n_pub_out`, `n_pub_in`, `n_prv_in`, `n_labels`, `n_constraints` | 64 B | Always 64 bytes on BLS12-381 |
+| 2 | **Constraints** — one per constraint: three sparse vectors, each a list of `(wire, coefficient)` pairs | 672 B | The bulk of the file |
+| 3 | **Wire labels** — human-readable signal names | 112 B | The adapter ignores them |
+
+The `.wtns` is the same idea with two sections: a header (field size, prime, `n_wires`) and the raw witness values (one 32-byte little-endian field element per wire). Sections may appear in any order — in this file the constraints come first, the header second, the labels last — and the adapter reads them whichever way they arrive.
+
+The parser also explains the memory math you'll meet again in Implementation 6: `CircomCircuit` keeps the matrices **densely** (`Vec<Vec<Fr>`, constraints × wires). The toy's 896-byte file becomes a 5×14 dense matrix; the Poseidon circuit's 260 KB file becomes a **1914 × 1914 × 3 ≈ 352 MB** of field elements in RAM. That number will matter two sections from now.
+
+### The code change: a parser behind the same traits
+
+```rust
+use groth16_prover::circom_adapter::CircomCircuit;
+
+let mut circuit = CircomCircuit::from_r1cs("multiplier.r1cs")?; // parse .r1cs
+circuit.load_witness("witness.wtns")?;                          // parse .wtns
+
+// The SAME traits as before — only the input source changed:
+let engine = FftQapEngine::new();
+let prover = PippengerProver::new();
+let (proof, public) = prover.prove(
+    &engine, &circuit.l, &circuit.r, &circuit.o,
+    &circuit.witness, tau, alpha, beta, gamma, delta,
+);
+```
+
+`clis/trusted-setup/src/circom_adapter.rs` is a hand-rolled `nom` parser — no external `ark-circom` dependency. Both `QapEngine` and `Prover` were already generic over the matrix type (`T: Copy + Into<Fr>`), so parsed `Vec<Vec<Fr>>` matrices and the hard-coded `[[u64; 8]; 3]` constants flow through the same code paths with zero conversion.
+
+### Same input, identical proof
+
+The parity guarantee: the parsed toy matrices are bit-for-bit the hard-coded Rust arrays, so the downstream proof is identical until an *optimization* changes it. Two demonstrations:
+
+- `cargo run --release --features bins --bin print_circom_proof` — proves the parsed multiplier with `DenseQapEngine` + `NaiveProver` and with `DenseQapEngine` + `PippengerProver`, and asserts **A, B, C, V match the hard-coded circuit's proof exactly** (the FFT engine produces a different-but-valid proof, as we know from Implementation 2);
+- `cargo test circom_adapter` — the parser's unit suite builds synthetic `.r1cs` / `.wtns` byte streams and asserts every parsed entry matches `L`, `R`, `O`, `WITNESS`.
+
+### Try it yourself — your own circuit, zero Rust edits
+
+This is the rung that changes your workflow. The repo ships a tiny circuit we haven't compiled yet: `circom/SimpleExample/multiplier.circom`, proving `a = x1·x2·x3·x4` with four secrets. Build it, witness it, prove it:
+
+```bash
+cd circom/SimpleExample
+G=../../clis/groth16/target/release/groth16
+
+# 1. A tiny input file (constraint: a = 2·2·3·4 = 48):
+printf '{"x1":"2","x2":"2","x3":"3","x4":"4"}' > input.json
+
+# 2. Compile with circom (R1CS + WASM witness calculator; MUST be bls12381):
+circom multiplier.circom --r1cs --wasm --sym --prime bls12381
+# → wires: 8, labels: 8
+
+# 3. Generate the witness with snarkjs:
+snarkjs wtns calculate multiplier_js/multiplier.wasm input.json witness.wtns
+
+# 4. Prove and verify with the all-Rust stack:
+$G prove  --circuit multiplier.r1cs --witness witness.wtns --out /tmp/me.proof
+$G verify --proof /tmp/me.proof --public /tmp/me.pub
+# → Verification result: VALID
+```
+
+The CLI reports what it loaded:
+
+```txt
+Loaded circuit: 8 wires, 3 constraints
+Using on-the-fly QAP construction (Implementation 5)
+Proof generated successfully.
+```
+
+Now point the other machinery at these same two files — `--engine dense`, `--prover naive`, `--qap-not-on-fly`, a `ceremony-dev` key, `--sparse`. Every one of them verifies. That is the point: **one compile, one witness, and every implementation in this document consumes the result unchanged.** Before this rung, adding that circuit meant hand-typing three matrices into Rust and recompiling.
+
+> **A note on numbering.** The CLI prints "legacy scalar-based QAP construction (Implementation 4)" for the `--qap-not-on-fly` path. In the README's bundled view, "Implementation 4" is the adapter *plus* the scalar QAP path. In this document we separate the two concerns — where the R1CS comes from (this section) and how the QAP is consumed (Implementation 5). Same code, same history, two ways of slicing it; the sprint table at the top is our slice.
+
+### What the parser checks — and what it doesn't
+
+Two failure modes are worth seeing with your own eyes, because they behave very differently.
+
+**It checks: witness length.** Hand the adapter a witness from a *different* circuit:
+
+```bash
+cd circom/SumOfProducts
+G=../../clis/groth16/target/release/groth16
+$G prove --circuit sum_of_products.r1cs \
+         --witness ../PoseidonMerkle/witness.wtns --out /tmp/x.proof
+# → Error: "failed to load witness: Witness length 1914 does not match n_wires 14"
+```
+
+A clean, immediate failure: the parse succeeds, but the sanity check on sizes catches the mix-up before any cryptography runs.
+
+**It does not check: the field.** Coefficients are decoded with `Fr::from_le_bytes_mod_order`, which reduces modulo the BLS12-381 scalar order — and the file's declared prime is stored but never compared. Here is the destructive demonstration: compile the *same* `multiplier.circom` with `--prime bn128`, generate its witness, and prove it through the default CLI (in a scratch directory, so the bls12381 artifacts from the drill above stay intact):
+
+```bash
+cd circom/SimpleExample
+G=../../clis/groth16/target/release/groth16
+mkdir -p /tmp/wrongfield
+
+circom multiplier.circom --r1cs --wasm --prime bn128 -o /tmp/wrongfield
+snarkjs wtns calculate /tmp/wrongfield/multiplier_js/multiplier.wasm input.json /tmp/wrongfield/witness.wtns
+$G prove  --circuit /tmp/wrongfield/multiplier.r1cs --witness /tmp/wrongfield/witness.wtns --out /tmp/wrongfield/wrong.proof
+$G verify --proof /tmp/wrongfield/wrong.proof --public /tmp/wrongfield/wrong.pub
+# → Verification result: VALID
+```
+
+It parses, it proves, it *verifies* — silently. The lesson is not "the check is missing", it's *why* it matters. Groth16 is pure algebra: it never asks which prime the file claims. For tiny values like these, the two fields agree, so the proof is honestly valid. The hazard appears the moment coefficients or witnesses step past the boundary of the smaller prime — the adapter silently reinterprets them, and a "valid" proof then attests to a different statement than the circuit intended. That is exactly why the SimpleExample workflow insists on `--prime bls12381`: the field must match the stack, and the file's header is not a substitute for checking it.
+
+### What it achieves, and what comes next
+
+Implementation 4 turns the prover into a consumer of the standard circom ecosystem: every circuit cross-compiled with `--prime bls12381` is provable with zero Rust changes. It is the input layer that makes the remaining rungs meaningful — dense matrix blow-up (fixed by Implementation 6) and the per-proof QAP construction (fixed by Implementation 5) stop being theoretical the moment you load a real R1CS file.
+
+Still, this rung hasn't made anything *faster*. The QAP is still rebuilt per proof (scalar path) or from ceremony group elements (on-the-fly path), and the matrix memory is still quadratic in the circuit size. Implementation 5 attacks the per-proof QAP.
+
+---
+
+## Implementations 5–7 *(to be written)*
 
 Coming in later passes:
 
-- **4 — Circom adapter**: read `.r1cs` constraints and `.wtns` witnesses from real circuits instead of hard-coded matrices.
 - **5 — Full proving key + on-the-fly QAP**: ceremony outputs group elements only (no scalars survive); the prover accumulates witness polynomials on the fly instead of materialising every `u_s(x)`.
-- **6 — Sparse matrices**: keep `.r1cs`' native sparsity instead of inflating to `n_constraints × n_wires`; memory drops from ~200 GiB (Blake2b-224) to ~280 MiB.
+- **6 — Sparse matrices**: keep `.r1cs`' native sparsity instead of inflating to `n_constraints × n_wires`; memory drops from ~200 GiB (Blake2b-224) to ~280 MiB. It is the fix for the 352 MB dense blow-up this section measured on Poseidon.
 - **7 — h-query scalar compression + parallel proof assembly**: collapse the h-query G1 vector to one scalar, shrinking the proving key and removing the h MSM.
 
 ---
@@ -749,6 +894,7 @@ This document is being written implementation by implementation. The full path t
 |------------|--------------------------------------|-----------------------------------|--------|
 | Polynomial ops are O(n²) | Dense coefficient vectors | **FFT over roots of unity** | [done] above |
 | Proof assembly is O(n) scalar muls | One-by-one multiplication | Pippenger multi-scalar multiplication | [done] above |
+| Circuit inputs are hard-coded | Rust `const` arrays | Circom `.r1cs` / `.wtns` parser | [done] above |
 | Matrices explode memory | Dense `Vec<Vec<Fr>>` | Native sparse constraint representation | [planned] later |
 | Trusted setup is single-party | Deterministic dev scalars | Multi-party MPC ceremony on PPoT | [next] upcoming |
 | QAP materialises all polynomials | `build_qap()` returns every `u_i(x)` | On-the-fly witness-polynomial accumulation | [planned] later |
