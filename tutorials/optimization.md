@@ -6,7 +6,7 @@
 >
 > After the sprint we turn to the production **trusted-setup ceremony** — why the scalars must be secret, how a known `τ` becomes a forgery factory, and how a multi-party MPC ceremony keeps `τ` unknown forever (this part is already written below). We close by surveying the landscape beyond Groth16 and where this stack goes next.
 >
-> We're writing this document the same way we built the code: **section by section.** Right now you're reading through Implementations 2, 3, and 4 in full; Implementations 5–7 appear in a later pass. Each section is self-contained, so you can jump in anywhere.
+> We're writing this document the same way we built the code: **section by section.** Right now you're reading through Implementations 2, 3, 4, and 5 in full; Implementations 6–7 appear in a later pass. Each section is self-contained, so you can jump in anywhere.
 
 ---
 
@@ -22,7 +22,8 @@
   - [Try it on a slightly bigger circuit](#try-it-on-a-slightly-bigger-circuit)
 - [Implementation 3 — Pippenger MSM](#implementation-3--pippenger-msm)
 - [Implementation 4 — the Circom adapter](#implementation-4--the-circom-adapter)
-- [Implementations 5–7 (to be written)](#implementations-57-to-be-written)
+- [Implementation 5 — Full proving key + on-the-fly QAP](#implementation-5--full-proving-key--on-the-fly-qap)
+- [Implementations 6–7 (to be written)](#implementations-67-to-be-written)
 
 **Part Two — the trusted-setup ceremony**
 
@@ -127,7 +128,7 @@ The codebase organizes its growth into a ladder of implementations. Each rung ke
 | 2 | `FftQapEngine` | `NaiveProver` | Polynomial ops O(n²) → O(n log n); unlocks any circuit size | [done] **this section** |
 | 3 | `FftQapEngine` | `PippengerProver` | Proof assembly O(n) → O(n log n) batched MSM | [done] **this section** |
 | 4 | Circom adapter `.r1cs`/`.wtns` | — | Consume real circuits instead of hard-coded matrices | [done] **this section** |
-| 5 | Full proving key + on-the-fly QAP | — | Drops the per-proof QAP, makes a ceremony meaningful | [planned] later |
+| 5 | Full proving key + on-the-fly QAP | — | Drops the per-proof QAP, makes a ceremony meaningful | [done] this section |
 | 6 | Sparse matrices | — | Memory O(n²) → O(#non-zero entries) | [planned] later |
 | 7 | h-query scalar compression | — | Cuts proving-key size & drops the h MSM | [planned] later |
 
@@ -141,13 +142,13 @@ flowchart TB
     R4 --> R5["5 · on-the-fly QAP — drops the per-proof polynomial build"]
     R5 --> R6["6 · sparse matrices — memory O(number of non-zero entries)"]
     R6 --> R7["7 · h-query scalar compression — smaller key, no h MSM"]
-    class R1,R2,R3,R4 built
-    class R5,R6,R7 planned
+    class R1,R2,R3,R4,R5 built
+    class R6,R7 planned
     classDef built fill:#e4f4e4,stroke:#2e7d32,color:#1b5e20
     classDef planned fill:#f2f2f2,stroke:#999,color:#555
 ```
 
-Rungs 1–4 are built (green); rungs 5–7 are where this installment is headed (grey).
+Rungs 1–5 are built (green); rungs 6–7 are where this installment is headed (grey).
 
 Every later rung builds on the one before it, and all of them keep Implementation 1's interface. Let's climb the first one.
 
@@ -790,11 +791,223 @@ Still, this rung hasn't made anything *faster*. The QAP is still rebuilt per pro
 
 ---
 
-## Implementations 5–7 *(to be written)*
+## Implementation 5 — Full proving key + on-the-fly QAP
+
+The goal, in one sentence: **stop rebuilding the QAP on every proof. Bake the per-variable evaluations into a one-time ceremony output — a `FullProvingKey` of group elements with no scalars in it — and let the prover spend each proof doing fast MSMs over that key instead of re-doing polynomial arithmetic.**
+
+### The bottleneck, in plain words
+
+Look at what the scalar path (`--qap-not-on-fly`, the machinery of Implementations 1–4) did *per proof* — even with the FFT engine, even with Pippenger:
+
+1. `engine.evaluate_qap_at_tau(l, r, o, tau)` — compute the Lagrange coefficients `L_c(τ)` at the secret point, then for **every variable** the double loop `Σ_c L[c][s]·L_c(τ)` for `u`, `v`, *and* `w`. That is `O(n_vars × n_constraints)` scalar operations, done from scratch on **every single proof**;
+2. `engine.build_qap(l, r, o)` — materialise every `u_i(x)`, `v_i(x)`, `w_i(x)`: `3 × n_vars` polynomials of `domain_size` coefficients. For our 1,911-constraint Poseidon circuit that is about **376 MB** of intermediate field data (`1914 × 2048 × 32 B × 3`), allocated and freed again without the proof changing by a byte;
+3. only *then* — assemble `A`, `B`, `C`, `V` and run the MSMs.
+
+Everything in steps 1–2 depends only on the circuit and `τ, α, β, γ, δ`. The witness changes, the **evaluations do not**. And yet the scalar path recomputes them every single time. Worse: it carries the five scalars *itself*. On the legacy key path, the scalars literally sit in the `.pk` file — anyone who gets the proving key can forge every proof undetected.
+
+Two complaints, one fix:
+
+- **it's wasteful** — the per-proof QAP rebuild is the same O(n²)-shaped wall the dense engine hit, just hiding in scalar field arithmetic;
+- **it's fragile** — a prover that holds `τ` (in RAM or on disk) is a prover that can be turned into a forger.
+
+### The idea
+
+Move the QAP evaluation **back into the ceremony**, where it belongs, and hand the prover only the *results*: one group element per variable, per query. The ceremony computes — once, then throws the scalars away:
+
+```rust
+pub struct FullProvingKey {
+    pub vk: VerifyingKey,          // alpha·G1, beta·G2, gamma·G2, delta·G2
+    // helper points + the four query vectors the prover MSMs against:
+    pub a_query:    Vec<G1Affine>, // u_i(τ)·G1                     → drives A
+    pub b_g2_query: Vec<G2Affine>, // v_i(τ)·G2                     → drives B
+    pub c_query:    Vec<G1Affine>, // δ⁻¹(β·u_i + α·v_i + w_i)(τ)·G1 → drives C
+    pub h_query:    Vec<G1Affine>, // δ⁻¹·τʲ·T(τ)·G1                → drives h·G1
+    pub l_query:    Vec<G1Affine>, // public-input part of c_query   → drives V
+    // (β·G1 for the C MSM, δ·G1 for arkworks parity, and — only once
+    //  Implementation 7 lands — an optional h_scalar replacing h_query)
+}
+```
+
+No scalars. The secret `τ, α, β, γ, δ` are consumed by the ceremony (`ToxicWaste::random`, then dropped) and never survive into the key, the CLI, or the prover. The proof elements become pure multi-scalar multiplications:
+
+```rust
+A = MSM(a_query,    witness)   + alpha_g1
+B = MSM(b_g2_query, witness)   + beta_g2
+C = MSM(c_query[private..], witness[private..])  + MSM(h_query, h.coeffs)
+V = MSM(l_query[..n_public],  witness[..n_public])
+```
+
+The "on-the-fly" half is about the polynomial side. Instead of `build_qap()` materialising every `u_i(x)` and *then* summing `w_i·u_i(x)` into `l(x)` (O(n_vars × domain_size) memory), the prover walks the variables one at a time, runs one IFFT per **column**, and folds `w_i·column_i` straight into `l(x)` — it never holds more than the growing witness polynomials (each O(domain_size)). Same arithmetic, a fraction of the memory.
+
+```mermaid
+flowchart LR
+    subgraph ONCE["one-time ceremony"]
+        TW["toxic waste<br/>(tau, alpha, beta, gamma, delta)"] -->|"evaluate QAP at tau"| G["FullProvingKey<br/>group elements only"]
+        TW -->|"erased"| ASH["scalars destroyed"]
+    end
+    subgraph EVERY["every proof — no scalars in sight"]
+        CIR["R1CS + witness"] --> H["l, r, o built on the fly<br/>(one IFFT per column)"]
+        H --> MSM["MSMs over the key<br/>(a_query, b_query, c_query, ...)"]
+        MSM --> PROOF["proof (A, B, C, V)"]
+    end
+    G --> MSM
+```
+
+The ceremony is what the previous part of this document called the **trusted setup** — this is precisely the artifact it produces. `ceremony-dev` (dev) and `phase2 finalize` (production MPC) both emit this key format; the file contains **no secrets**, so it can be published, mirrored, and reused with zero security cost.
+
+### The code change
+
+The `Prover` trait gains a second entry point. Implementations 1–4 used the first; Implementation 5 uses the second:
+
+```rust
+// Before (Implementations 1–4) — the prover needs the five scalars,
+// and rebuilds the whole QAP at tau on every proof:
+let (proof, pub) = prover.prove(&engine, &l, &r, &o, &witness,
+    tau, alpha, beta, gamma, delta);
+
+// After (Implementation 5, now the default) — the prover needs only a key
+// of group elements, and spends the whole proof doing MSMs:
+let (proof, pub) = prover.prove_with_full_pk(&engine, &full_pk, &l, &r, &o, &witness);
+```
+
+On the CLI, this is now the **default** — you have been using it since Implementation 3's drills! The scalar path is opt-in:
+
+```bash
+groth16 prove ...                       # Implementation 5: on-the-fly FPK path
+groth16 prove ... --qap-not-on-fly      # Implementation 4: legacy scalar path
+```
+
+(The stderr echoes your choice: `Using on-the-fly QAP construction (Implementation 5)` vs `Using legacy scalar-based QAP construction (Implementation 4)`.)
+
+### Same proof, byte for byte
+
+This is the best part. The scalar path and the FPK path are the *same mathematics* — identical `u_i(τ)`, identical `h(τ)`, identical proof formula. Only the computational machinery differs. So with the same deterministic toxic waste, they must emit **the exact same proof bytes**:
+
+```bash
+cd circom/SumOfProducts
+G=../../clis/groth16/target/release/groth16
+
+# Implementation 4's machinery — scalar path
+$G prove --circuit sum_of_products.r1cs --witness witness.wtns \
+         --engine fft --prover pippenger --qap-not-on-fly --out /tmp/i4.proof
+# Implementation 5's machinery — on-the-fly (default), no proving key
+$G prove --circuit sum_of_products.r1cs --witness witness.wtns \
+         --engine fft --prover pippenger --out /tmp/i5.proof
+
+cmp /tmp/i4.proof /tmp/i5.proof   # silent = identical
+$G verify --proof /tmp/i4.proof --public /tmp/i4.pub   # VALID
+$G verify --proof /tmp/i5.proof --public /tmp/i5.pub   # VALID
+```
+
+And the same trick at 1,911 constraints (each Poseidon run takes a few seconds, but the comparison is the point):
+
+```bash
+cd circom/PoseidonMerkle
+$G prove --circuit poseidon_merkle_depth2.r1cs --witness witness.wtns \
+         --engine fft --prover pippenger --qap-not-on-fly --out /tmp/pm4.proof
+$G prove --circuit poseidon_merkle_depth2.r1cs --witness witness.wtns \
+         --engine fft --prover pippenger --out /tmp/pm5.proof
+cmp /tmp/pm4.proof /tmp/pm5.proof   # silent = identical, at scale too
+```
+
+Both verifications report `VALID`. Where the engine swap (Implementation 2) honestly changed the proof bytes because it changed the QAP *domain*, Implementation 5 changes nothing at all — the same statement, proven by the same numbers, priced differently. This is the strongest "same protocol, different machinery" claim in the document so far, because it now covers **four** stacks (dense/scalar, FFT/scalar, dense/FPK, FFT/FPK) all reproducing one proof.
+
+### Try it yourself — a ceremony key, and a bit of honesty about sizes
+
+`ceremony-dev` builds a real `FullProvingKey` (dev randomness, same shape as the production MPC output) and the prover happily consumes it:
+
+```bash
+cd circom/SumOfProducts
+T=../../clis/trusted-setup/target/release/trusted-setup
+G=../../clis/groth16/target/release/groth16
+
+$T ceremony-dev --circuit sum_of_products.r1cs \
+   --proving-key /tmp/spk.pk --verifying-key /tmp/spk.vk
+
+$G prove --circuit sum_of_products.r1cs --witness witness.wtns \
+         --proving-key /tmp/spk.pk --out /tmp/spk.proof
+# → Loaded FullProvingKey from /tmp/spk.pk (group elements only, no scalars)
+
+$G verify --proof /tmp/spk.proof --public /tmp/spk.pub --verifying-key /tmp/spk.vk
+# → Verification result: VALID
+```
+
+Notice what the driver line says: *group elements only, no scalars.* The key is bigger than the legacy one — it stores every `a_query`/`c_query`/`h_query` point — but it stores **no secrets**. That trade is the whole point: a key that has nothing to steal is a key that can live in the open.
+
+The CLI is also defensive about the two formats, and its errors teach you which flag you forgot:
+
+```bash
+# Feed the FullProvingKey to the scalar path:
+$G prove ... --proving-key /tmp/spk.pk --qap-not-on-fly --out /tmp/x.proof
+# → Error: "failed to deserialize legacy ProvingKey: ... If your proving key is a
+#   FullProvingKey, use --qap-on-fly (or omit the flag)."
+
+# Feed a legacy scalar key to the on-the-fly path:
+$T ceremony --circuit sum_of_products.r1cs --proving-key /tmp/legacy.pk --verifying-key /tmp/legacy.vk
+$G prove ... --proving-key /tmp/legacy.pk --out /tmp/x.proof
+# → Error: "failed to deserialize FullProvingKey: ... If your proving key is a
+#   legacy scalar-based key, use --qap-not-on-fly."
+```
+
+(The legacy `ceremony` command exists only for diagnostics; its help text marks it **deprecated**, precisely because it writes the scalars into a file.)
+
+### Per-proof time at 1,911 constraints — measured
+
+The speed story requires one discipline: build the key **once**, outside the timed loop, because the key build is the very thing we're amortising. On this tutorial's machine (single core, `--release`):
+
+```bash
+cd circom/PoseidonMerkle
+T=../../clis/trusted-setup/target/release/trusted-setup
+G=../../clis/groth16/target/release/groth16
+
+# 1. The key, once (this includes the QAP evaluation — one-time tax):
+time $T ceremony-dev --circuit poseidon_merkle_depth2.r1cs \
+       --proving-key /tmp/pm.pk --verifying-key /tmp/pm.vk
+# → real 6.8s
+
+# 2. Per-proof, Implementation 5, key already built:
+time $G prove --circuit poseidon_merkle_depth2.r1cs --witness witness.wtns \
+       --engine fft --prover pippenger --proving-key /tmp/pm.pk --out /tmp/pm.proof
+# → real 18.6s
+
+# 3. The same circuit through the scalar path (Implementation 4):
+time $G prove --circuit poseidon_merkle_depth2.r1cs --witness witness.wtns \
+       --engine fft --prover pippenger --qap-not-on-fly --out /tmp/pm_s.proof
+# → real 26.0s
+```
+
+| | Scalar path (Impl 4) | FullProvingKey path (Impl 5) |
+|---|---|---|
+| one-time ceremony | — | ~6.8 s |
+| per-proof, Poseidon 1,911 constraints | ~26.0 s | ~18.6 s |
+| ratio | — | **≈ 1.4×** |
+| per-proof, README reference toy | 4.00 ms (impl 4c) | 1.72 ms (impl 5b) — **≈ 2.3×** |
+
+The toy's gap is larger because the on-the-fly overhead is negligible for 8 wires while the scalar path still re-evaluates the QAP; at 1,911 constraints the FPK path still rebuilds the witness polynomials `l, r, o` and the quotient `h` (that part remains per-proof — it depends on the witness), so the ~1.4× is the honest saving from dropping exactly the `build_qap` + `evaluate_qap_at_tau` tax.
+
+> **Amortisation is the message.** The ceremony is a one-time, circuit-lifetime cost — its ~7 s buys every proof for that circuit. The more proofs you produce, the cheaper each one's share of the key becomes; the scalar path pays its QAP tax *every single time*, forever.
+
+### What it achieves, at scale
+
+- **It removes a quadratic wall from the critical path.** The scalar path's `evaluate_qap_at_tau` is `O(n_vars × n_constraints)`; at Blake2b-224 scale (~79K wires) that alone swamps everything else, and at Ed25519 scale (~4M constraints) it is simply infeasible per-proof. The FPK path pays that cost once, at ceremony time, via fixed-base batch MSMs — O(n_vars) group operations instead of O(n_vars × n_constraints) field operations.
+- **It makes the certificate safe to store and ship.** No `τ, α, β, γ, δ` anywhere: the key's silence about the scalars is what makes the MPC ceremony (Part Two of this document) meaningful, and the on-chain verifier compatible with the on-disk artifacts.
+- **It sets the table for what's left.** With the QAP tax gone, per-proof time is now dominated by the h-MSM and the matrix memory — which is precisely what Implementations 6 and 7 dismantle next.
+
+### What comes next
+
+Both remaining bottlenecks are now visible in the open:
+
+- **Memory is still dense.** The `CircomCircuit` matrices are `n_constraints × n_wires` — 352 MB for Poseidon, ~200 GiB for Blake2b-224. On-the-fly fixed the *QAP* blow-up; Implementation 6 keeps the `.r1cs` sparsity and fixes the *matrix* blow-up, and it's why the 79K-constraint circuit becomes practically provable.
+- **The h-MSM is still the biggest single point cost.** `h_query` is one group element per coefficient of `h`; at Ed25519 scale that MSM alone was ~55% of prove time. Implementation 7 collapses it to a single scalar multiplication.
+
+Implementation 6 attacks the memory; Implementation 7 attacks the h-MSM.
+
+---
+
+## Implementations 6–7 *(to be written)*
 
 Coming in later passes:
 
-- **5 — Full proving key + on-the-fly QAP**: ceremony outputs group elements only (no scalars survive); the prover accumulates witness polynomials on the fly instead of materialising every `u_s(x)`.
 - **6 — Sparse matrices**: keep `.r1cs`' native sparsity instead of inflating to `n_constraints × n_wires`; memory drops from ~200 GiB (Blake2b-224) to ~280 MiB. It is the fix for the 352 MB dense blow-up this section measured on Poseidon.
 - **7 — h-query scalar compression + parallel proof assembly**: collapse the h-query G1 vector to one scalar, shrinking the proving key and removing the h MSM.
 
@@ -969,6 +1182,6 @@ This document is being written implementation by implementation. The full path t
 | Circuit inputs are hard-coded | Rust `const` arrays | Circom `.r1cs` / `.wtns` parser | [done] above |
 | Matrices explode memory | Dense `Vec<Vec<Fr>>` | Native sparse constraint representation | [planned] later |
 | Trusted setup is single-party | Deterministic dev scalars | Multi-party MPC ceremony on PPoT | [next] upcoming |
-| QAP materialises all polynomials | `build_qap()` returns every `u_i(x)` | On-the-fly witness-polynomial accumulation | [planned] later |
+| QAP materialises all polynomials | `build_qap()` returns every `u_i(x)` | On-the-fly witness-polynomial accumulation | [done] above |
 
 Beyond Groth16, we will survey the landscape: **PLONK** (universal trusted setup, custom gates), **Bulletproofs / Bulletproofs++** (no trusted setup at all), **STARKs / JOLT** (transparent, post-quantum), and **VM approaches (RISC Zero, zkVMs)** that prove arbitrary program execution without hand-writing circuits — folding the former zkVM installment into this one. From here, Installment 3 proves Cardano key ownership, Installment 4 applies the full stack to selective disclosure, and Installment 5 surveys quantum-resistant (lattice-based) systems that will one day replace the pairing-based assumption this whole series is built on.
