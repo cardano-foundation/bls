@@ -1562,7 +1562,7 @@ The table at the end of this section is the one-minute summary. Before you get t
 Our concrete example is Cardano Ed25519 key ownership — "prove I know the private key behind this public key" — which needs ~1.97M constraints when written as one circuit. Both implementations in this repo prove the *same* ownership statement, and both end up touching the same ~1.97M constraints (`255 × 7,724 ≈ 1.97M`):
 
 - **Package 1 — Groth16 (this sprint's Impl 7):** one monolithic circuit `cardano_ed25519_ownership`, proven all at once. This is the whole POV of Part One: make one big instance fast.
-- **Package 2 — Nova (Impl 11 in `nova-prover/`):** the same signature check split into **255 identical step circuits** of 7,724 constraints each (`cardano_ed25519_ownership_nova`), each wrapping one "limb" of the Ed25519 arithmetic and threading a running state.
+- **Package 2 — Nova (its trustless version, Implementation 10 in `nova-prover/`):** the same signature check split into **255 identical step circuits** of 7,724 constraints each (`cardano_ed25519_ownership_nova`), each wrapping one "limb" of the Ed25519 arithmetic and threading a running state. We deliberately present Nova at version 10, the **first version that needs no ceremony** — the versioned road to get there follows in a moment, and once we are there we stop: the refinements built after version 10 are out of scope here.
 
 Same math, same total constraint count. The difference is the word **when** — when the constraints are processed, when the setup happens, and when the verifier pays.
 
@@ -1623,7 +1623,7 @@ flowchart TB
 
     subgraph VER2["3 · Compress + verify — pairing-free"]
         direction LR
-        C2["compress: a sumcheck argument that U_N<br/>satisfies the relaxed equation<br/>~1.5 KiB 'slim' proof"]
+        C2["compress: a transparent sumcheck argument that U_N<br/>satisfies the relaxed equation — no ceremony, no proving key<br/>proof ≈ 318 KiB (sumcheck + hash-PC opening proofs)"]
         V2["verify: re-squeeze r once per fold (O(1)/step)<br/>+ one sumcheck check — NO pairing<br/>final state and transcript are public"]
         C2 --> V2
     end
@@ -1645,33 +1645,71 @@ Two engineering freedoms make this practical off-circuit:
 - **No recursion of verifiers.** Nova never embeds a verifier inside a circuit, so there is no needs-for-a-curve-cycle or a pairing inside a circuit. Folding is a prover-side algebraic operation on commitments — two MSMs per step, all transparent.
 - **The "relaxed" equation absorbs error.** An ordinary R1CS instance must satisfy `(AZ)∘(BZ) = CZ` exactly. The folded instances use a *relaxed* equation `(AZ)∘(BZ) = u·(CZ) + E` with a slack scalar `u` and an explicit error commitment `Ē`. Mixing two valid steps produces a small cross-term `(AZ₁)∘(BZ₂) + (AZ₂)∘(BZ₁)` that the fold captures in `Ē`; the final compress step proves it too small to hide anything — the accumulated error is a commitment to zero.
 
+### Ceding nothing: the road to a trustless Nova
+
+By now you may be wondering *how* Nova got permission-free. It was not born that way: Nova in this repo is a **climb of three implementations — 8, 9, and 10** — and trustlessness appears only at the top of the climb. We describe the three steps one at a time; each one is done; once we reach the trustless step, we stop.
+
+```mermaid
+flowchart TB
+    V8["Step 1 · Impl 8 — prove every step with Groth16<br/>N proofs · N pairings · ceremony per step shape"] --> V9["Step 2 · Impl 9 — fold, then one Groth16 compression<br/>one pairing · one small reusable ceremony"]
+    V9 --> V10["Step 3 · Impl 10 — fold, then transparent sumcheck<br/>no ceremony, no proving key — TRUSTLESS"]
+    class V8,V9 trusted
+    class V10 trustless
+    classDef trusted fill:#fdecea,stroke:#c62828,color:#b71c1c
+    classDef trustless fill:#e4f4e4,stroke:#2e7d32,color:#1b5e20
+```
+
+#### Step 1 — Implementation 8: prove every step with Groth16 ✅ done
+
+> **Status:** ✅ done (baseline, superseded). This is the "step-chain" — the very first Nova in this repo, before folding existed.
+
+Each of the `N` identical step circuits is proven **standalone with Groth16**, and the chain is bound by a BLAKE2b512 transcript. Nothing about the scheme is new yet: it is the sprint's own proving machinery applied `N` times, which means **one ceremony per step shape** — the same toxic-waste dance as Part Two, repeated per step. For the 255-step Ed25519 step we have been following, the bundle is **~334.7 KiB** (one proof per step, O(N)) and on-chain verification needs **255 pairing checks**.
+
+Trustless? **No** — it inherited Groth16's trust model wholesale.
+
+#### Step 2 — Implementation 9: fold, then compress with one Groth16 proof ✅ done
+
+> **Status:** ✅ done (superseded by step 3). This is where the fold from "the trick" first arrives.
+
+Instead of proving each step, fold all `N` steps into a single Relaxed-R1CS instance with the running-tally fold (transparent, two MSMs per step), then prove **that one instance** with a single Groth16 proof from a small **compression circuit** (~2·step constraints). The ceremony shrinks from per-step to **one small reusable compression circuit**, and verification drops from `N` pairings to **one pairing check**. The compression proof reveals the final instance's `Z`/`E`, so the bundle is O(step) — **~312.9 KiB** for the 7.7K-constraint step.
+
+Trustless? **No** — the compression proof is itself pairing-based, so it still needs toxic waste; just much less of it, and only once.
+
+#### Step 3 — Implementation 10: fold, then compress transparently ✅ done — trustless
+
+> **Status:** ✅ done. The last swap on the climb.
+
+Replace the Groth16 compression *proof* with a **transparent sumcheck argument**. The sumcheck protocol is essentially information-theoretic: it argues about polynomial identities using field arithmetic and needs **no SRS, no toxic waste, no MPC**. With the compression transparent, nothing in the whole system depends on a secret anymore — the Pedersen commitment bases were already deterministic (hash-to-scalar), and the fold never used a setup. The bundle is now constant in both step count and step width — **~317.8 KiB** (sumcheck + hash-PC opening proofs), now zero-knowledge (the final `Z`/`E` are no longer revealed), and verified **pairing-free** (sumcheck + hash-PC + Pedersen recomputation).
+
+Trustless? **Yes** — this is the moment Nova becomes trustless: step 3 of the climb. The price is exactly where you would expect: ~318 KiB per bundle, three orders of magnitude heavier than Groth16's 192 bytes. Becoming trustless buys a ceremony-free, pairing-free system with proof size to match. That is where we stop.
+
 ### What the trick costs — the trade-offs
 
 The trade-off ledger, stated as honestly as the sprint's:
 
 - **You must linearize your computation.** Nova works on one *identical step shape* repeated N times, with a public state inflow and outflow (`n_pub_in == n_pub_out`). A Merkle path or an Ed25519 limb loop linearizes beautifully; an arbitrary R1CS circuit does not — you must restructure it into a state machine, and that is author work in circom, not an implementation decision.
 - **Prover time is not free.** You still touch every constraint — the fold is O(step) per step, so N folds are O(N·step) ≈ the same total work as the monolithic prover. There is no 100× prover speedup lurking here: for this exact circuit the measured total is ~55 s (fold 47 s + compress ~8 s) vs ~1.7 min monolithic — comparable, not miraculous. The wins are elsewhere: memory (O(step) instead of ~2.5 GiB peak), per-step re-proving of any prefix, and the setup.
-- **Proofs are ~8× bigger.** ~1.5 KiB (slim) vs 192 bytes. Still tiny on-chain, but a datum footprint costs something.
-- **Verification is pairing-free, not free.** No on-chain pairing opcode (the single most expensive Plutus operation), but the verifier still re-derives one challenge per fold and checks the sumcheck. The win is *what* the script computes (native field arithmetic), not a zero-cost check.
-- **ZK cuts both ways.** Nova Impl 11 is genuinely zero-knowledge: the Pedersen commitments hide the intermediate state, while Groth16 puts every public input on the cutting-room floor for the verifier to see. That is a feature for selective disclosure and a nuisance when you actually want the public state visible on-chain (you must re-expose it as a public input — the "final transcript" in the CLI output).
-- **Soundness moves off the ceremony, but stays in the store.** Nova removes the single most dangerous operational step Groth16 has — the trusted ceremony — because its commitment bases are deterministic and its compression (Impl 11) is transparent. But Nova is *not* post-quantum either: the Pedersen commitments are still discrete-log based, exactly the assumption Shor's algorithm dismantles. The sumcheck layer is information-theoretic, which is why the post-quantum road for both systems is the same one — swap the curve-based commitment for a lattice one (the direction this stack's `lattice-prover/` explores).
+- **Proofs are orders of magnitude bigger.** ~318 KiB (sumcheck + hash-PC, constant in `N` and step width) vs 192 bytes — the price of transparency. Small enough to ship, too big for the thinnest datums.
+- **Verification is pairing-free, not free.** No on-chain pairing opcode (the single most expensive Plutus operation), but the verifier still re-derives one challenge per fold and checks the sumcheck and the hash-PC openings. The win is *what* the script computes (native field arithmetic), not a zero-cost check.
+- **ZK cuts both ways.** Nova's step 3 (Impl 10) is genuinely zero-knowledge: the Pedersen commitments (and the sumcheck) hide the intermediate state, while Groth16 puts every public input on the cutting-room floor for the verifier to see. That is a feature for selective disclosure and a nuisance when you actually want the public state visible on-chain (you must re-expose it as a public input — the final transcript the CLI prints).
+- **Soundness moves off the ceremony, but stays in the store.** Nova removes the single most dangerous operational step Groth16 has — the trusted ceremony — because its commitment bases are deterministic and its compression (Impl 10) is transparent. But Nova is *not* post-quantum either: the Pedersen commitments are still discrete-log based, exactly the assumption Shor's algorithm dismantles. The sumcheck layer is information-theoretic, which is why the post-quantum road for both systems is the same one — swap the curve-based commitment for a lattice one (the direction this stack's `lattice-prover/` explores).
 
 ### At a glance
 
-| Angle | Groth16 Impl 7 (this sprint) | Nova Impl 11 (current default) |
+| Angle | Groth16 Impl 7 (this sprint) | Nova Impl 10 (transparent sumcheck) |
 |-------|-------------------------------|--------------------------------|
-| **Trusted setup** | Per-circuit MPC ceremony (Part Two above) — the whole toxic-waste dance | **None in the current default** — and none was needed at first: the legacy Impl 8 needed a ceremony per step shape (each step was a Groth16 proof), Impl 9 trimmed it to one small reusable compression circuit, and Impl 10/11 removed it entirely (Pedersen bases are derived deterministically, hash-to-scalar) |
-| **Proof size** | 192 bytes — three curve points + public inputs, constant | ~1.5 KiB (slim) — constant in step count `N` (a ~200× reduction vs Nova Impl 9 at N = 255) |
-| **On-chain verification** | One pairing check (~20% of a Plutus script's CPU budget) | Sumcheck only — **pairing-free**. Eliminates the single most expensive operation PoS chains pay for |
+| **Trusted setup** | Per-circuit MPC ceremony (Part Two above) — the whole toxic-waste dance | **None** — and none was needed at first: implementation 8 needed a ceremony per step shape (each step was a Groth16 proof), implementation 9 trimmed it to one small reusable compression circuit, and implementation 10 removed it entirely (Pedersen bases are derived deterministically, hash-to-scalar) |
+| **Proof size** | 192 bytes — three curve points + public inputs, constant | ~318 KiB (sumcheck + hash-PC) — constant in step count `N` and step width; the price of transparency |
+| **On-chain verification** | One pairing check (~20% of a Plutus script's CPU budget) | sumcheck + hash-PC — **pairing-free**. Removes the pairing (the single most expensive curve operation), but the ~318 KiB bundle is heavy |
 | **Recursive composition** | Not native — each proof stands alone; a chain of steps needs a proof per step | **Native IVC** — `N` steps fold into one instance; verifier's per-step cost is O(1) |
 | **Prover cost** | Fast (O(n log n) FFT + Pippenger); Poseidon ~624 ms/proof on this machine | Fast per fold (2 MSMs/step); 255 × 7,724-constraint steps fold in ~47 s for this circuit |
 | **Setup portability** | One proving key per circuit; a new circuit = a new ceremony | One deterministic setup reused for *any* step shape; nothing to leak |
 | **Zero-knowledge** | Not ZK on-chain — the public inputs are visible | **ZK** — Pedersen commitments hide the public inputs/state |
 | **Soundness model** | Knowledge-of-exponent (KEA) + trusting ceremony participants | Pedersen binding (curve DL) + sumcheck (information-theoretic, pairing-free) |
 | **Post-quantum** | No — discrete log / pairings | No in this implementation — the Pedersen layer is curve-based (DL). The sumcheck layer is information-theoretic, so swapping in lattice commitments is the road to PQ |
-| **Sweet spot** | Single prove→verify: one circuit, one proof, one check | Proofs about *longer computations*: many identical steps folded into one compact on-chain check |
+| **Sweet spot** | Single prove→verify: one circuit, one proof, one check | Proofs about *longer computations*: many identical steps folded into one pairing-free check |
 
-Which do you reach for? For a **one-shot statement** — "I own this key" and nothing more — Groth16 stays the right tool: smallest proof, one pairing, and a ceremony that Part Two above showed how to run safely. For a **step-by-step computation** — an Ed25519 signature verified limb-by-limb, a Merkle path walked one hash at a time, a serial state machine — Nova removes both the ceremony and the per-step proof blow-up, at the cost of a larger proof and a pairing-free verifier that fits Cardano's execution-cost model without paying for an on-chain pairing.
+Which do you reach for? For a **one-shot statement** — "I own this key" and nothing more — Groth16 stays the right tool: smallest proof, one pairing, and a ceremony that Part Two above showed how to run safely. For a **step-by-step computation** — an Ed25519 signature verified limb-by-limb, a Merkle path walked one hash at a time, a serial state machine — Nova removes both the ceremony and the per-step proof blow-up, trading a much larger proof (~318 KiB) for a pairing-free verifier that fits Cardano's execution-cost model without paying for an on-chain pairing.
 
 The stacks share their foundation on purpose: `nova-prover` reuses the R1CS/QAP engine, ceremony, and circom adapter of `groth16-prover` / `trusted-setup` and adds the IVC layer on top — the same `.r1cs` computation can be packaged either way, and the choice is a workflow one, not a rewrite.
 
@@ -1691,4 +1729,4 @@ This document is being written implementation by implementation. The full path t
 | QAP materialises all polynomials | `build_qap()` returns every `u_i(x)` | On-the-fly witness-polynomial accumulation | [done] above |
 | h-commitment is a giant MSM | `MSM(h_query, h_coeffs)` — O(n_constraints) points | Single scalar `δ⁻¹·T(τ)·h(τ)` + parallel join | [done] above |
 
-Beyond Groth16, we will survey the landscape: **PLONK** (universal trusted setup, custom gates), **Bulletproofs / Bulletproofs++** (no trusted setup at all), **STARKs / JOLT** (transparent, post-quantum), and **VM approaches (RISC Zero, zkVMs)** that prove arbitrary program execution without hand-writing circuits — folding the former zkVM installment into this one. One member of that landscape, **Nova folding**, already got its close-up in the walkthrough above: same BLS12-381 foundation as this sprint, no ceremony, pairing-free on-chain verification. From here, Installment 3 proves Cardano key ownership, Installment 4 applies the full stack to selective disclosure, and Installment 5 surveys quantum-resistant (lattice-based) systems that will one day replace the pairing-based assumption this whole series is built on.
+Beyond Groth16, we will survey the landscape: **PLONK** (universal trusted setup, custom gates), **Bulletproofs / Bulletproofs++** (no trusted setup at all), **STARKs / JOLT** (transparent, post-quantum), and **VM approaches (RISC Zero, zkVMs)** that prove arbitrary program execution without hand-writing circuits — folding the former zkVM installment into this one. One member of that landscape, **Nova folding**, already got its close-up in the walkthrough above: same BLS12-381 foundation as this sprint, no ceremony, pairing-free verification. From here, Installment 3 proves Cardano key ownership, Installment 4 applies the full stack to selective disclosure, and Installment 5 surveys quantum-resistant (lattice-based) systems that will one day replace the pairing-based assumption this whole series is built on.
