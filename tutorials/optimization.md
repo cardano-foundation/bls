@@ -1669,11 +1669,56 @@ Trustless? **No** — it inherited Groth16's trust model wholesale.
 
 #### Step 2 — Implementation 9: fold, then compress with one Groth16 proof ✅ done
 
-> **Status:** ✅ done (superseded by step 3). This is where the fold from "the trick" first arrives.
+> **Status:** ✅ done (POC, superseded by step 3). This is where the fold from "the trick" first arrives in `nova-prover`.
+>
+> **What we're improving:** implementation 8's cost model — one ceremony per step shape, `N` proofs in the bundle, `N` pairing checks on-chain. Everything that scaled with the number of steps.
+> **The idea:** don't prove the steps at all. Fold them into one instance (transparently), then prove *that one instance* with a single Groth16 proof.
+> **Why it's reasonable:** the fold is already a binding operation — the "running tally" from the trick — so the only object left that still needs a *proof* is the final folded instance itself. One Groth16 proof can vouch for all `N` steps at once.
 
-Instead of proving each step, fold all `N` steps into a single Relaxed-R1CS instance with the running-tally fold (transparent, two MSMs per step), then prove **that one instance** with a single Groth16 proof from a small **compression circuit** (~2·step constraints). The ceremony shrinks from per-step to **one small reusable compression circuit**, and verification drops from `N` pairings to **one pairing check**. The compression proof reveals the final instance's `Z`/`E`, so the bundle is O(step) — **~312.9 KiB** for the 7.7K-constraint step.
+The fold is exactly the machinery from "the trick": a running Relaxed-R1CS instance `U = (x, u, W̄, Ē)`, one challenge `r` and two Pedersen MSMs per step, all transparent and off-circuit. Per step it is O(step) for the prover and O(1) for the verifier. By step 255 we hold *one instance* `U_N` — a claim that the whole chain's relaxed equation `(AZ)∘(BZ) = u·(CZ) + E` holds. Proving that single claim is now the whole remaining job.
 
-Trustless? **No** — the compression proof is itself pairing-based, so it still needs toxic waste; just much less of it, and only once.
+The compression works like this:
+
+- A small **compression circuit** — built in Rust (`nova-prover/src/compression.rs`), no circom needed — reuses the step circuit's sparse `A`/`B`/`C` matrices and checks the relaxed equation row by row, with `Z`, `u`, and `E` as its public inputs. Its size is `2·n_constraints` of the step (~15.4K constraints for the 7.7K-constraint Ed25519 step).
+- Prove *that* circuit with Groth16 → one ~192-byte proof. This is the sprint's prover unchanged.
+- The verifier's job becomes: re-derive the folds' challenges off the transcript (O(1) per step), then run **one pairing check** on the compression proof.
+
+The scoreboard vs step 8, for the 255-step Ed25519 step we are following:
+
+| | Step 1 (Impl 8) | Step 2 (Impl 9) |
+|---|---|---|
+| Bundle | ~334.7 KiB (O(N) — one proof per step) | ~312.9 KiB (O(step) — reveals final `Z`/`E`) |
+| On-chain verify | 255 pairing checks | **1 pairing check** + accumulator recomputation |
+| Ceremony | one per step shape | **one small reusable compression circuit** (~2·step constraints) |
+
+The commands tell the story:
+
+```bash
+# one-time ceremony for the small, reusable compression circuit
+trusted-setup ceremony-dev --sparse --circuit compression.r1cs \
+  --proving-key compression.pk --verifying-key compression.vk
+
+# fold N steps → ONE relaxed instance (and emit the compression circuit)
+nova fold --nifs --circuit step_circuit.r1cs --steps ./step_witnesses/ \
+  --compression-r1cs compression.r1cs --out bundle.ivc.json
+
+# prove the single folded instance with Groth16
+nova compress --groth16 --circuit step_circuit.r1cs --steps ./step_witnesses/ \
+  --proving-key compression.pk --out compression.proof.json
+
+# verify: transcript/state-chain check + ONE pairing check
+nova verify --ivc bundle.ivc.json --compression-proof compression.proof.json \
+  --compression-vk compression.vk
+```
+
+The fold itself costs ~47 s for our 255 steps (≈185 ms/step, measured on this machine's single core); proving and checking the one compression proof then adds a single pairing.
+
+Two limitations remain, and both point straight at step 3:
+
+- **The final `Z` and `E` are public inputs of the compression proof**, so the bundle is O(step) and the state is not hidden — no zero-knowledge.
+- **The compression proof is still Groth16**, so the scheme still hangs on a ceremony — smaller (one reusable circuit) than step 8's per-shape ones, but a ceremony nonetheless.
+
+Trustless? **No** — the compression proof is a pairing-based object and still needs toxic waste; just much less of it, and only once. Closing that last door is exactly what step 3 does.
 
 #### Step 3 — Implementation 10: fold, then compress transparently ✅ done — trustless
 
