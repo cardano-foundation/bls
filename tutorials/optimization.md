@@ -34,6 +34,7 @@
 - [The ceremony in our repository](#the-ceremony-in-our-repository)
 
 - [Nova vs Groth16 — the folding trick, up close](#nova-vs-groth16--the-folding-trick-up-close)
+- [The landscape beyond Groth16 — where Nova fits](#the-landscape-beyond-groth16--where-nova-fits)
 
 - [What's next in this installment](#whats-next-in-this-installment)
 
@@ -1817,6 +1818,54 @@ One last word before we leave Nova. **Transparent is an endpoint for *setup*, no
 
 ---
 
+## The landscape beyond Groth16 — where Nova fits
+
+Everything so far lives in the *pairing family*: proofs measured in bytes, verification settled by one pairing check. The rest of the ZKP zoo trades parts of that foundation for other guarantees. Below, each major alternative's **essence** — the single idea it hangs on — then a comparison table with the systems we have built, and the axes that decide between them.
+
+### PLONK
+
+**Essence:** a *universal* circuit. One shared, updatable SRS is big enough for any circuit up to a size, and each individual circuit supplies only its wiring — custom gates plus a permutation argument proving the wires connect as described. The setup is still trusted, but you run it once, globally, instead of once per circuit.
+
+### Bulletproofs / Bulletproofs++
+
+**Essence:** *no setup and no pairings*. Proof size shrinks logarithmically through a recursive inner-product argument: the verifier walks a binary tree of commitment products instead of evaluating a pairing. Transparent, but the commitment generators are still discrete-log based, so it is not post-quantum.
+
+### STARKs (FRI)
+
+**Essence:** commit to the computation's *trace* with hashing rather than curves, then prove the committed polynomial is low-degree by many random spot-checks (the FRI protocol). Hash-based end to end, so transparent **and post-quantum** — at the price of proof size: the spot-check commitments are large.
+
+### JOLT
+
+**Essence:** a *lookup-based* zkVM. Rather than encoding a whole program as one circuit, JOLT commits to the execution *trace* and uses lookup arguments to certify that every accessed row really is in the instruction table. Adding instructions becomes cheap, the verifier stays fast, and being hash-committed it is transparent and post-quantum.
+
+### VM approaches (RISC Zero, zkVMs)
+
+**Essence:** *don't hand-write a circuit at all* — compile a program to a virtual-machine tape, prove the whole tape, and use recursive composition so one small proof stands for an entire run. Transparent and post-quantum, but proofs run into the hundreds of KB and the toolchain is heavy.
+
+### Quantum-era folding (HyperNova, LatticeFold, Lova, …)
+
+**Essence:** replace the discrete-log assumption (which Shor's algorithm destroys) with *module-lattice* hardness — the same family the post-quantum world standardized on. HyperNova / LatticeFold / Lova generalize Nova's folding to lattice commitments; `paweljakubas/nova-slim` is this stack's lineage's version of that idea: slim proofs and post-quantum, built on the sumcheck machinery of step 3.
+
+### The comparison table
+
+> **Reading the numbers.** The Groth16 and Nova rows are measured in this repo / on this machine. The other rows are representative published ranges for comparable (~1.97M-constraint) statements — treat them as orders of magnitude, not benchmarks.
+
+| Approach | Trusted setup | Proof size | Verification (rough) | Post-quantum | Essence in one line |
+|---|---|---|---|---|---|
+| **Groth16 (Impl 7)** | MPC ceremony, per circuit | **192 B** · measured | one pairing · ~0.2 s off-chain | No | smallest proofs; this installment's whole sprint |
+| **Nova — trustless (Impl 10)** | **none** | ~318 KiB · measured | sumcheck + hash-PC, pairing-free · ~8 s tooling, full proof | No | IVC: fold N identical steps into one instance |
+| **nova-slim** | none | few KiB (slim) | pairing-free sumcheck | **Yes** | Nova, bolstered: slim + quantum-safe (later installment) |
+| **PLONK** | universal updatable SRS (once) | ~400–600 B | one pairing + MSM | No | universal circuit, custom gates |
+| **Bulletproofs++** | none | ~1–3 KiB | inner-product walk, no pairing | No | setup-free, logarithmic proofs |
+| **STARKs (FRI)** | none | ~45 KiB–1 MB | hash spot-checks, ~ms | **Yes** | hash-committed trace, many random checks |
+| **JOLT** | none | ~100 KB–1 MB | lookup + hash checks, fast | **Yes** | lookup-based zkVM over execution traces |
+| **zkVMs (RISC Zero)** | none | ~70 KB–1 MB | recursive STARK verify, ~ms | **Yes** | prove a whole program, not a circuit |
+| **Quantum-era folding** | none | moderate | folded lattice checks (heavier field work) | **Yes** | Nova's fold on lattice commitments — installment 5's settlement |
+
+Three axes decide between the rows. **Proof size and trust go together**: the pairing family (Groth16, PLONK) delivers sub-KB proofs and pays with a ceremony; the transparent family forfeits size instead. **Post-quantum is a hard divide**: only the hash/lattice lines — STARKs, JOLT, zkVMs, quantum-era folding, and nova-slim — survive Shor's algorithm; Groth16, PLONK, and Bulletproofs++ do not. **The Nova line turns on one pivot**: trusted at step 1, transparent at step 3, and via nova-slim quantum-safe *and* slim afterwards. The mechanics for that pivot are exactly the step-3 sumcheck, and that is where installment 5 of this series lands.
+
+---
+
 ## What's next in this installment
 
 This document is being written implementation by implementation. The full path through the sprint and ceremony:
@@ -1831,4 +1880,4 @@ This document is being written implementation by implementation. The full path t
 | QAP materialises all polynomials | `build_qap()` returns every `u_i(x)` | On-the-fly witness-polynomial accumulation | [done] above |
 | h-commitment is a giant MSM | `MSM(h_query, h_coeffs)` — O(n_constraints) points | Single scalar `δ⁻¹·T(τ)·h(τ)` + parallel join | [done] above |
 
-Beyond Groth16, we will survey the landscape: **PLONK** (universal trusted setup, custom gates), **Bulletproofs / Bulletproofs++** (no trusted setup at all), **STARKs / JOLT** (transparent, post-quantum), and **VM approaches (RISC Zero, zkVMs)** that prove arbitrary program execution without hand-writing circuits — folding the former zkVM installment into this one. One member of that landscape, **Nova folding**, already got its close-up in the walkthrough above: same BLS12-381 foundation as this sprint, no ceremony, pairing-free verification. From here, Installment 3 proves Cardano key ownership, Installment 4 applies the full stack to selective disclosure, and Installment 5 surveys quantum-resistant (lattice-based) systems that will one day replace the pairing-based assumption this whole series is built on.
+The landscape matrix above gives each approach the one-paragraph essence it is due; this installment has already covered the pairing family in full (the whole sprint) and the Nova folding line in depth (the hinges of the trick). From here, Installment 3 proves Cardano key ownership, Installment 4 applies the full stack to selective disclosure, and Installment 5 surveys quantum-resistant (lattice-based) systems — the nova-slim direction included — that will one day replace the pairing-based assumption this whole series is built on.
