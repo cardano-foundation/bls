@@ -1,33 +1,400 @@
 # Groth16 from first principles — Installment 2: Optimizations and the trusted-setup ceremony
 
-> **Installment 2 of 5.** In [Installment 1](zkp-from-first-principles.md) we built the entire Groth16 pipeline from first principles: R1CS → QAP → trusted setup → proof → pairing check, walking a tiny 5-constraint `SumOfProducts` circuit through 16 printable binaries. That article deliberately used the *dev* ceremony — fixed, deterministic scalars (`τ=6, α=5, β=7, γ=11, δ=13`) — so that every intermediate value is reproducible.
+> **Installment 2 of 5.** In [Installment 1](zkp-from-first-principles.md) we built the entire Groth16 pipeline from first principles: R1CS → QAP → trusted setup → proof → pairing check, walking a tiny 5-constraint `SumOfProducts` circuit through 16 printable binaries. Along the way we deliberately leaned on the *dev* ceremony — fixed, deterministic scalars — so that every intermediate value is reproducible.
 >
-> What it did *not* cover in depth is the **ceremony itself**: why the scalars must be secret and random, how a malicious `τ` turns the proof system into a forgery factory, and how a production trusted-setup ceremony generates those scalars so that nobody ever learns them. That explanation lived awkwardly inside Installment 1 — decoupled from the `groth16-prover` pipeline it was walking through, because the ceremony code actually lives in a separate CLI (`clis/trusted-setup`). We relocated it here, where it belongs: Installment 2 is the *production* installment, and the trusted setup is the first production concern we must get right before we can talk about FFT, MSM, and other optimizations.
+> The dev pipeline is correct, but it is also **slow, memory-hungry, single-party, and capped at 14 constraints**. This installment replaces each bottleneck with a production technique, and it does so the way the codebase actually grew: **one implementation at a time**, from the monomial baseline (Implementation 1) through the FFT engine (2), Pippenger MSM (3), the Circom adapter (4), on-the-fly QAP (5), sparse matrices (6), and h-query compression (7). Each section explains the bottleneck in plain words, shows the fix, and then hands you the exact CLI commands to see the difference for yourself — with real before/after numbers.
 >
-> The rest of this installment — the engineering optimizations (FFT, Pippenger MSM, sparse matrices, on-the-fly witness accumulation), the survey of competing proof systems (PLONK, Bulletproofs++, STARKs), and the zkVM detour — will be filled in as we go. This document is the ceremony foundation for that work.
+> After the sprint we turn to the production **trusted-setup ceremony** — why the scalars must be secret, how a known `τ` becomes a forgery factory, and how a multi-party MPC ceremony keeps `τ` unknown forever (this part is already written below). We close by surveying the landscape beyond Groth16 and where this stack goes next.
+>
+> We're writing this document the same way we built the code: **section by section.** Right now you're reading through Implementation 2 in full; Implementations 3–7 appear in a later pass. Each section is self-contained, so you can jump in anywhere.
 
 ---
 
 ## Table of Contents
 
-- [Why the scalars must be secret and random](#why-the-scalars-must-be-secret-and-random)
-- [The forgery attack if τ is known](#the-forgery-attack-if-τ-is-known)
-- [Why randomness matters](#why-randomness-matters)
-- [The ceremony intuition: 1-of-N trust](#the-ceremony-intuition-1-of-n-trust)
-- [Dev ceremony vs. production ceremony](#dev-ceremony-vs-production-ceremony)
-- [The scalars and who must not know them](#the-scalars-and-who-must-not-know-them)
-- [The ceremony in our repository](#the-ceremony-in-our-repository)
+**Part One — the optimization sprint**
+
+- [How to follow along](#how-to-follow-along)
+- [The baseline: Implementation 1 — dense monomial](#the-baseline-implementation-1--dense-monomial)
+- [The optimization sprint](#the-optimization-sprint)
+- [Implementation 2 — FFT: polynomial arithmetic, O(n²) → O(n log n)](#implementation-2--fft)
+  - [A first real circuit: Poseidon](#a-first-real-circuit-poseidon)
+  - [Try it on a slightly bigger circuit](#try-it-on-a-slightly-bigger-circuit)
+- [Implementation 3 — Pippenger MSM (to be written)](#implementation-3--pippenger-msm-to-be-written)
+- [Implementations 4–7 (to be written)](#implementations-47-to-be-written)
+
+**Part Two — the trusted-setup ceremony**
+
+- [The trusted-setup ceremony](#the-trusted-setup-ceremony)
+  - [Why the scalars must be secret and random](#why-the-scalars-must-be-secret-and-random)
+  - [The scalars and who must not know them](#the-scalars-and-who-must-not-know-them)
+  - [The ceremony in our repository](#the-ceremony-in-our-repository)
+
 - [What's next in this installment](#whats-next-in-this-installment)
 
 ---
 
-## Why the scalars must be secret and random
+## How to follow along
+
+Everything runs from the existing repository. You need:
+
+- **Rust** (stable) for the two CLIs and the `groth16-prover` binaries.
+- **circom** and **snarkjs** — but only if you want to compile a circuit yourself. For most of this tutorial the circuit is already compiled, so this is optional.
+
+Three crates, three jobs:
+
+| Where | What it is | What you'll run |
+|-------|-----------|-----------------|
+| `groth16-prover/` | The library + the didactic binaries | `benchmark_provers`, `print_qap_engines`, and friends |
+| `clis/trusted-setup/` | The ceremony CLI (`trusted-setup`) | `ceremony-dev`, later `phase2` |
+| `clis/groth16/` | The proving CLI (`groth16`) | `prove`, `verify`, `export-vk` |
+
+Build them once, up front (a few minutes with `--release`):
+
+```bash
+cd groth16-prover && cargo build --release --features bins
+cd clis/trusted-setup   && cargo build --release
+cd clis/groth16         && cargo build --release
+```
+
+The tutorial circuit is the same 5-constraint `SumOfProducts` we met in Installment 1 — you'll find it (already compiled, plus a ready witness) in the repo:
+
+```bash
+cd circom/SumOfProducts
+ls           # input.json, sum_of_products.r1cs, witness.wtns, ...
+```
+
+From here on, "your terminal" means `cd`'d to the directory shown in each snippet. If you prefer to see every intermediate quantity, keep the `print_*` binaries from Installment 1 handy — do **not** delete that `groth16-prover/target` directory, or you'll have to rebuild it.
+
+> **A note on numbers.** Times in this document come from two sources: the reference benchmark tables in `groth16-prover/README.md`, and measurements taken on a mid-range laptop. Absolute numbers will differ on your machine — what matters are the *shapes*: which configurations are faster, and *why*. We'll always tell you which is which.
+
+---
+
+## The baseline: Implementation 1 — dense monomial
+
+Installment 1 shipped a working prover we here call **Implementation 1**: the `DenseQapEngine` (every polynomial is a plain coefficient vector, built by *Lagrange interpolation* at the constraint points) driving the `NaiveProver` (every group operation one point at a time). Nothing about it is wrong. It just doesn't *scale*.
+
+Three things are expensive, and each bites harder as the circuit grows:
+
+1. **QAP construction is O(n²).** To build a single `u_s(x)` we solve a Lagrange interpolation over `n` constraint points — and we do that for every one of the `m` wires. Building the whole QAP is `O(n · m)` field operations. For 5 constraints that's nothing. For 79,000 (a Blake2b-224 hash) it's billions. For 4 million (an Ed25519 signature) it's effectively impossible.
+
+2. **Polynomial arithmetic is O(n²).** Multiplying `l(x) · r(x)` with schoolbook (dense) multiplication is quadratic in the degree. Dividing `l·r − o` by the target polynomial is long division — also quadratic. The quotient `h(x)` alone, for a 4-million-constraint circuit, would take roughly 16 *trillion* field multiplications.
+
+3. **Proof assembly is O(n) scalar-multiplies.** Each commitment `A, B, C` is built by adding up hundreds of thousands of curve points, one scalar multiplication at a time — the `NaiveProver` never batches.
+
+The first two are what Implementation 2 attacks. The third waits for Implementation 3.
+
+There's a fourth, humiliating ceiling that makes the point without any math: **the dense engine refuses to build a QAP for more than 14 constraints.**
+
+```rust
+// clis/trusted-setup/src/engine.rs — DenseQapEngine::build_qap
+assert!(n_constraints >= 1 && n_constraints <= 14,
+    "DenseQapEngine supports 1-14 constraints, got {}", n_constraints);
+```
+
+Try it yourself — point the dense engine at a real circuit:
+
+```bash
+cd circom/PoseidonMerkle
+groth16 prove --circuit poseidon_merkle_depth2.r1cs \
+              --witness witness.wtns \
+              --engine dense --out /tmp/x.proof
+```
+
+(That circuit has 1,911 constraints.) The output is a hard panic:
+
+```
+thread 'main' panicked at .../src/engine.rs:72:9:
+DenseQapEngine supports 1-14 constraints, got 1911
+```
+
+The 14-constraint cap is not a lazy engineer's shortcut — it is an honest admission that the dense representation is a teaching tool. Lagrange interpolation at `{0, 1, …, n−1}` and schoolbook polynomial math are the *definition* of Groth16; they are just not an *implementation* of it that anyone can afford past a handful of gates. Keep that cap in mind — it's the reason the first real optimization exists at all.
+
+So the shape of the fix is clear before we write any code: **stop doing polynomial algebra in coefficient form, and stop using `{0, 1, …, n−1}` as our playground.** That is exactly what the next section does.
+
+---
+
+## The optimization sprint
+
+The codebase organizes its growth into a ladder of implementations. Each rung keeps the *same protocol* — the same R1CS, the same QAP identity `l(x)·r(x) − o(x) = h(x)·T(x)`, the same Groth16 proof shape, the same pairing check — and only swaps the machinery underneath. That is the whole trick: the cryptography never changes, so we are free to make it fast.
+
+| Impl | Engine | Prover | What it fixes | Status |
+|------|--------|--------|---------------|--------|
+| 1 | `DenseQapEngine` | `NaiveProver` | Baseline: Lagrange + dense polynomials + scalar-by-scalar MSM | [done] Installment 1 |
+| 2 | `FftQapEngine` | `NaiveProver` | Polynomial ops O(n²) → O(n log n); unlocks any circuit size | [done] **this section** |
+| 3 | `FftQapEngine` | `PippengerProver` | Proof assembly O(n) → O(n log n) batched MSM | [planned] next |
+| 4 | Circom adapter `.r1cs`/`.wtns` | — | Consume real circuits instead of hard-coded matrices | [planned] later |
+| 5 | Full proving key + on-the-fly QAP | — | Drops the per-proof QAP, makes a ceremony meaningful | [planned] later |
+| 6 | Sparse matrices | — | Memory O(n²) → O(#non-zero entries) | [planned] later |
+| 7 | h-query scalar compression | — | Cuts proving-key size & drops the h MSM | [planned] later |
+
+Every later rung builds on the one before it, and all of them keep Implementation 1's interface. Let's climb the first one.
+
+---
+
+## Implementation 2 — FFT
+
+The goal, in one sentence: **replace the O(n²) polynomial bookkeeping of Implementation 1 with FFT, so that a circuit the dense engine could never even build becomes a routine 5-second prove.**
+
+### The bottleneck, in plain words
+
+Every Groth16 prover runs the same playbook:
+
+1. build the QAP polynomials `u_s(x), v_s(x), w_s(x)` from the constraint matrices;
+2. assemble `l(x) = Σ a_s·u_s(x)`, `r(x) = Σ a_s·v_s(x)`, `o(x) = Σ a_s·w_s(x)`;
+3. compute the quotient `h(x) = (l·r − o) / T(x)`;
+4. evaluate everything at the secret point τ, "in the exponent".
+
+Steps 1–3 are pure polynomial arithmetic, and in Implementation 1 every one of them is implemented in the most literal, "schoolbook" way possible:
+
+- interpolation — solving for `n` unknown coefficients from `n` points by brute force (O(n²));
+- multiplication `l·r` — the nested loop you learned in middle school (O(n²));
+- division `(l·r − o) / T` — long division, position by position (O(n²)).
+
+Nothing is wrong with any of it. But "schoolbook" is the slowest valid recipe, and for a circuit with `n` constraints the cost of the whole polynomial section is quadratic in `n`. Quadratic is the wall: at 79,000 constraints the multiplication inside `h(x)` is already `~6·10⁹` field operations, and at 4 million it explodes beyond feasibility — before a single curve point is touched.
+
+### The idea
+
+There is a fundamentally better way to work with polynomials, and it has two ingredients.
+
+**Ingredient 1: a polynomial is two interchangeable representations.** Any polynomial of degree < N can be written either as a list of `N` *coefficients* (`c₀ + c₁x + c₂x² + …`) or as a list of `N` *evaluations* (`P(x₀), P(x₁), …, P(x_{N−1})`). Same animal, two passports. The passport costs nothing to pick — you just have to be careful never to *mix* them.
+
+Why does anyone care? Because some operations are cheap in one passport and expensive in the other:
+
+- **Multiplying** two polynomials. In coefficient form this is the O(n²) schoolbook loop. But in evaluation form it's a **pointwise product** — multiply the two lists entry by entry, O(n), done. (A degree-(d) product is determined by its values at 2d+1 points; if we agreed to work below that, the pointwise product *is* the product.)
+- **Evaluating** at a point, or **interpolating** back to coefficients: in coefficient form these are also O(n²) for us. But there's a pair of algorithms — the **FFT** and its inverse — that converts between the two passports in **O(n log n)**.
+
+So the grand bargain is: *do the arithmetic in evaluation form (cheap), and use the FFT only to convert in and out (still cheap).*
+
+**Ingredient 2: pick the right points.** The FFT is fast specifically because it evaluates at very special points: the **N-th roots of unity** — the N numbers `ω⁰, ω¹, …, ω^{N−1}` in our field with the property that `ω^N = 1`. Their beauty is algebra: because they close under multiplication (`ω^i · ω^j = ω^{i+j mod N}`), evaluating a polynomial at all of them can be shared and reused — that sharing is precisely where the log factor comes from. (Rest assured: over BLS12-381's scalar field there are roots of unity of every power-of-two size we will ever need, up to 2²⁵⁵.)
+
+For a circuit with `n` constraints we:
+
+1. choose `N = next power of two ≥ n` (that's our evaluation domain size);
+2. stick the constraints on the points `ω⁰, …, ω^{n−1}` instead of `0, 1, …, n−1`;
+3. zero-pad the constraint matrices up to `N` rows (the last few evaluation slots just say "constraint value 0").
+
+Everything downstream now falls out of these two choices:
+
+- **QAP construction becomes one IFFT per column.** A column of the padded matrix (with a 1 in row `j`, elsewhere 0) is, by definition, the evaluation form of Lagrange basis polynomial `ℓ_j(x)` — the *unique* degree-<N polynomial that is 1 at `ωʲ` and 0 at the other `N−1` points. So instead of *solving* for `u_s(x)` by Lagrange's formula, we **inverse-FFT** the column into coefficient form. Same polynomial, O(N log N) instead of O(n²).
+
+- **The target polynomial becomes trivial.** `T(x) = x^N − 1` — the monic polynomial with exactly the roots of unity as its roots. No `(x−0)(x−1)…(x−n+1)` product needed; it's two non-zero coefficients.
+
+- **The quotient uses a vanishing-poly division.** `T(x) = x^N − 1` is a "vanishing polynomial" over our domain, and dividing by it has a dedicated fast routine (`divide_by_vanishing_poly`). Combined with the FFT-based product `l·r` (pointwise, O(N)), the whole quotient step drops from quadratic to O(N log N).
+
+That's the whole optimization. Nothing about the *proof* changes — same witness, same QAP identity, same A/B/C, same pairing check. We only changed *where we stand* and *how we compute*. It deserves emphasis:
+
+> **Implementation 2 is not a different proof system. It is the same proof system with cheaper machinery.** Swapping the engine does not change a single proof that Installment 1 verified — it changes the price of producing it.
+
+### The code change is one word
+
+Because both engines back the same trait, the switch is embarrassingly small:
+
+```rust
+// Before (Implementation 1)
+let engine = DenseQapEngine::new();
+
+// After (Implementation 2)
+let engine = FftQapEngine::new();
+```
+
+Both satisfy the `QapEngine` trait (`build_qap`, `target_poly`, `compute_quotient`, `evaluate_qap_at_tau`, and friends in `clis/trusted-setup/src/engine.rs`), and the prover — the thing that turns the QAP into a proof — never looks at which engine it is holding. This trait is the architectural bet the whole sprint relies on: **optimizations are experiment swap**, not protocol surgery. The CLI exposes exactly this knob:
+
+```bash
+groth16 prove ... --engine dense   # Implementation 1 machinery
+groth16 prove ... --engine fft     # Implementation 2 machinery
+```
+
+### Wait — the two engines produce *different* proofs. Is that a bug?
+
+Great question, and no. The dense engine anchors its constraints at `{0, 1, …, n−1}`; the FFT engine anchors them at the `N`-th roots of unity. Those are *different points*, so the QAP polynomials — and hence the concrete values of `A, B, C` — come out different.
+
+Think of it like two survey teams mapping the same square mile: one uses metric coordinates, the other imperial. Both maps are internally consistent; a route planned on one map simply cannot be overlaid on the other. In Groth16 the "units" are baked into the ceremony (the target polynomial `T`, and every SRS point): a proof built against the roots-of-unity `T(x) = x^N − 1` only verifies against a ceremony that committed to *that* `T`. The pairing check knows nothing about engines — it just verifies the algebra `A·B = α·β · V·γ · C·δ` — and that algebra passes exactly when the proof and the ceremony speak the same coordinate system, regardless of which one it is.
+
+The corollary is something you can *demonstrate* in one command (and enjoy doing so): use an FFT ceremony's proving key but ask the dense engine to produce the proof. It is a perfectly reasonable proof — fed to the *right* verifier. Fed to this one, it's garbage, and the verifier says so.
+
+### Try it yourself
+
+**1. See both engines build the same toy circuit.**
+
+```bash
+cd groth16-prover
+cargo run --release --features bins --bin print_qap_engines
+```
+
+This prints the dense QAP (constraint points `{0,1,2}`) and the FFT QAP (domain size 4, roots of unity) for the 3-constraint multiplier circuit, then the two target polynomials. Note the shapes:
+
+- dense: `T(x)` printed with degree 3, coefficients `["", "2", "…510", "1"]` — a real product `(x)(x−1)(x−2)`, ending in `1`;
+- FFT: `T(x)` printed with degree 4, coefficients `["…512", "", "", "", "1"]` — read as `x⁴ − 1`, two non-zero terms (the silent `"…512"` entries are `-1` / `0` printed as field elements).
+
+Two different `T`, two different worlds — both perfectly fine.
+
+**2. Benchmark the switch (Implementation 1 vs 2 in the scalar path).**
+
+```bash
+cd groth16-prover
+cargo run --release --features bins --bin benchmark_provers   # ~5–7 minutes, 10,000 proofs each
+```
+
+On the reference machine from `README.md` (3-constraint multiplier, single core):
+
+| Implementation | Engine | Prover | Per-proof | vs. Impl 1 |
+|----------------|--------|--------|-----------|------------|
+| 1 (dense) | `DenseQapEngine` | `NaiveProver` | 3.99 ms | — |
+| 2 (FFT) | `FftQapEngine` | `NaiveProver` | 5.56 ms | 0.72× |
+
+Let's be honest about what this shows: **on a 3-constraint toy, the FFT path is a bit *slower*.** The padding overhead (N = 4, plus extra IFFT steps) outweighs the O(n log n) win at this size. Nothing is broken — quadratic beats `n log n` for tiny `n`. The tables turn the moment the circuit stops being toy-sized, which is exactly what the numbers in [What it achieves](#what-it-achieves-at-scale) show. Benchmark runs on your machine will produce different absolutes but the same story.
+
+**3. Prove the same statement through both engines end-to-end.**
+
+Use the deterministic on-the-fly ceremony (no proving key) — each engine generates its own ceremony with the *same* scalars, so the comparison is apples-to-apples:
+
+```bash
+cd circom/SumOfProducts
+G=../../clis/groth16/target/release/groth16
+
+# Implementation 1 machinery
+$G prove --circuit sum_of_products.r1cs --witness witness.wtns \
+         --engine dense --out /tmp/sop_dense.proof
+$G verify --proof /tmp/sop_dense.proof --public /tmp/sop_dense.pub
+# → Verification result: VALID
+
+# Implementation 2 machinery
+$G prove --circuit sum_of_products.r1cs --witness witness.wtns \
+         --engine fft --out /tmp/sop_fft.proof
+$G verify --proof /tmp/sop_fft.proof --public /tmp/sop_fft.pub
+# → Verification result: VALID
+
+# Same statement, same witness, same scalars — but different proof bytes:
+cmp /tmp/sop_dense.proof /tmp/sop_fft.proof && echo "same" || echo "different"
+# → different
+```
+
+Both verify. The bytes differ. Same system, different coordinates — just as promised.
+
+**4. Watch the coordinate systems collide.**
+
+Now run a proper FFT ceremony (the real thing, via `ceremony-dev`), then ask the *dense* engine to prove against it:
+
+```bash
+TS=../../clis/trusted-setup/target/release/trusted-setup
+cd circom/SumOfProducts
+
+# FFT ceremony → /tmp/sop.pk (and a matching verifying key)
+$TS ceremony-dev --circuit sum_of_products.r1cs \
+                 --proving-key /tmp/sop.pk --verifying-key /tmp/sop.vk
+
+# Dense-engine proof against the FFT ceremony's key — square peg, round hole:
+$G prove --circuit sum_of_products.r1cs --witness witness.wtns \
+         --proving-key /tmp/sop.pk --engine dense --out /tmp/sop_mix.proof
+$G verify --proof /tmp/sop_mix.proof --public /tmp/sop_mix.pub \
+          --verifying-key /tmp/sop.vk
+# → Error: "Verification result: INVALID — pairing equation does not hold"
+
+# Same ceremony key, FFT engine → fine:
+$G prove --circuit sum_of_products.r1cs --witness witness.wtns \
+         --proving-key /tmp/sop.pk --engine fft --out /tmp/sop_match.proof
+$G verify --proof /tmp/sop_match.proof --public /tmp/sop_match.pub \
+          --verifying-key /tmp/sop.vk
+# → Verification result: VALID
+```
+
+The moral: engines aren't interchangeable at the ceremony level — they each define their own QAP `T`. Pick one when you run the ceremony, and stay with it. In this repo, the ceremony always uses FFT.
+
+> **What you just achieved.** You ran Implementation 2 back-to-back with Implementation 1, saw both produce valid proofs for the same statement, saw the two coordinate systems collide when mixed, and confirmed the FFT engine certifies proofs for the multi-thousand-constraint circuits the dense engine refuses to touch. Don't worry about the toy-speed being "slower" — that's the O(n²) curve briefly winning a race it always loses. Now watch Implementation 2 earn its keep on a real circuit.
+
+### A first real circuit: Poseidon
+
+The toy is lovely, and useless. Our first "real" circuit is a **Merkle-tree membership proof** built on the **Poseidon hash** — it lives in `circom/PoseidonMerkle/`. It plays the same role (a privacy gadget) as circuits we'll revisit in later installments: prove *"I know a secret commitment that sits inside this public Merkle tree whose root is `digest`"* — without revealing which leaf you mean, or any of the path.
+
+**What is Poseidon, and why was it invented?** Poseidon is a hash function introduced in 2019 by Grassi, Rechberger, Rotaru, Scholl, and Smart, with a single design goal: *be cheap to compute inside a zero-knowledge circuit.* The problem it attacks is that classic hashes are built for the wrong machine:
+
+- **SHA-256 is a chip hash.** Its ANDs, XORs, and rotates are free on a CPU but brutal in an arithmetic circuit over a large prime field — every bit of every word has to be turned into constraints. A SHA-256 hash inside a circuit costs roughly **27,000 constraints**.
+- **Poseidon is a field hash.** Its only operations are field additions and field multiplications — precisely the one thing an R1CS constraint already is. No bit-slicing, no integer emulation, no overhead.
+
+Mechanically, Poseidon is a **sponge built on a permutation** over the field, arranged as an SPN: rounds of a tiny S-box (`x → x⁵`, chosen so it permutes the field), a linear diffusion layer (an MDS matrix), and round constants. To keep constraints low it uses the **Hades** round structure — most rounds are *partial* (only one S-box fires) with a few *full* rounds providing the security. The payoff: **a complete 2-to-1 Poseidon compression costs on the order of ~250 constraints** — about a *hundredth* of SHA-256 — and an entire Merkle *path*, the whole membership circuit above, fits in roughly 2,000.
+
+Why is this our "slightly bigger" circuit? Because Poseidon is instantiated **over the exact scalar field we already prove in** (`PoseidonBLS12_381`): the hash field and the proof field are the same field, so hashing inside the circuit costs native field multiplications — no cross-field plumbing. That one property is what lets the stack ship real, on-chain-verifiable membership logic at all, and it's why a "slightly bigger" circuit means **1,911 constraints** here instead of hundreds of thousands. (For context, the earlier field-hash standard *MiMC* was even cheaper per level — the README notes ~38 vs ~250 constraints — but Poseidon carries far better security margins against the algebraic attacks that field hashes attract, and it is already the hash used everywhere else in this BLS12-381 stack.)
+
+### Try it on a slightly bigger circuit
+
+Now the payoff. Point the two engines at the membership circuit and watch:
+
+```bash
+cd circom/PoseidonMerkle
+
+# Implementation 2 machinery (FFT, naive scalar path) on a real circuit:
+groth16 prove --circuit poseidon_merkle_depth2.r1cs \
+              --witness witness.wtns \
+              --engine fft --prover naive --qap-not-on-fly \
+              --out /tmp/pm.proof
+groth16 verify --proof /tmp/pm.proof --public /tmp/pm.pub
+# → Verification result: VALID
+
+# Now retry the same statement with the dense engine:
+groth16 prove --circuit poseidon_merkle_depth2.r1cs \
+              --witness witness.wtns \
+              --engine dense --out /tmp/x.proof
+# → thread 'main' panicked ... DenseQapEngine supports 1-14 constraints, got 1911
+```
+
+(`--qap-not-on-fly` keeps us strictly on Implementation 2's machinery — the Impl 1/2 scalar path — rather than the on-the-fly shortcut we'll meet as Implementation 5.)
+
+On this tutorial's machine (single core, `--release`), one run looked like this:
+
+| | toy (drill 2's multiplier) | PoseidonMerkle depth-2 |
+|---|---|---|
+| constraints / wires | 3 / 8 | 1,911 / 1,914 |
+| dense engine (Impl 1) | works — ~12 ms/proof | **refuses** (14-constraint cap) |
+| FFT engine, scalar path (Impl 2) | works — ~17 ms/proof | works — ~34 s, proof VALID |
+| ceremony `ceremony-dev --sparse` | instant | ~2 s |
+
+(The toy rows come from `benchmark_provers` in drill 2 — its hard-coded 3-gate multiplier. Our 5-gate `SumOfProducts` sits in the same millisecond band, as you saw in drills 3–4.)
+
+Read that table like a story. At toy scale the FFT engine is a hair slower than dense, and nobody cares. At two thousand constraints the dense engine is not slower — it has **stopped existing** — while the FFT engine calmly produces a valid proof in half a minute on this laptop. The reference machine in the README clocks the same shape at a friendlier ~7 s for the comparable 1,107-constraint circuit, and by the time we've climbed Implementations 5–7 the same 1.9K-constraint proof drops to well under a second there. That gap — "impossible" on the left side of the table, "routine" on the right — is precisely the O(n²) → O(n log n) curve we sketched in [The idea](#the-idea), showing up in the real world.
+
+> **What this section achieves.** You watched the FFT engine cross the line the dense engine can never cross: a non-toy circuit, thousands of constraints, produced and verified end-to-end on implementation 2's own machinery. The ~34 s is the last time we pay the naive-tax at this scale on purpose — Implementations 3–7 exist to break exactly that cost, and we get to dismantle it one wall at a time.
+
+### What it achieves, at scale
+
+The dense engine's 14-constraint cap means the comparison can't even be run head-to-head on real circuits — that's the point. Here is what the FFT path buys relative to the implementation we left behind (`groth16-prover/README.md`):
+
+- **~1000× faster QAP construction at 10⁴ gates.** Per the reference benchmarks, the dense Lagrange path is O(n²) while the FFT path is O(N log N); at ten thousand gates the ratio is on the order of a thousand-fold, and it grows from there.
+- **Multi-million-constraint circuits become provable.** The Ed25519 signature circuit in this repo has ~4M constraints / ~4M wires. The dense engine cannot even *start*. With the FFT engine the same circuit proves end-to-end on commodity hardware.
+- **The quotient step alone went from >30 min to ~48 s** on the ~79K-constraint Blake2b-224 circuit once `l·r` switched from schoolbook to FFT-based multiplication (`README.md`, Implementation 6 notes).
+
+None of that is magic — it's the textbook O(n²) → O(n log n) curve, applied to a pipeline where `n` routinely reaches tens of thousands. The next implementations don't change the polynomial math; they attack the *other* walls: the O(n) scalar-multiplication loop in proof assembly (Implementation 3), and the O(n²) *memory* of dense matrices (Implementations 6, 7).
+
+---
+
+## Implementation 3 — Pippenger MSM *(to be written)*
+
+Coming in the next pass. It attacks the last O(n) wall from Implementation 1 — assembling `A`, `B`, `C` one scalar-multiplication at a time — with the **Pippenger multi-scalar multiplication** (MSM) algorithm. The reference numbers (README toy benchmark): Implementation 3 is ~1.48× faster than Implementation 2 at tiny scale, and the gap grows with the number of wires.
+
+---
+
+## Implementations 4–7 *(to be written)*
+
+Coming in later passes:
+
+- **4 — Circom adapter**: read `.r1cs` constraints and `.wtns` witnesses from real circuits instead of hard-coded matrices.
+- **5 — Full proving key + on-the-fly QAP**: ceremony outputs group elements only (no scalars survive); the prover accumulates witness polynomials on the fly instead of materialising every `u_s(x)`.
+- **6 — Sparse matrices**: keep `.r1cs`' native sparsity instead of inflating to `n_constraints × n_wires`; memory drops from ~200 GiB (Blake2b-224) to ~280 MiB.
+- **7 — h-query scalar compression + parallel proof assembly**: collapse the h-query G1 vector to one scalar, shrinking the proving key and removing the h MSM.
+
+---
+
+## The trusted-setup ceremony
+
+The engineering sprint makes Groth16 *fast*; the ceremony makes it *secure*. It is the one production concern we must get right before any of the speed matters — a fast prover for a broken system is just a fast way to forge. Here are the foundations; a full hands-on walkthrough of the production ceremony lands in a later section.
+
+### Why the scalars must be secret and random
 
 The five scalars `τ, α, β, γ, δ` are the *cryptographic heart* of Groth16. If any party knows them, the entire proof system collapses. This is not an exaggeration — it is a mathematical theorem. Let us see why.
 
 > **Recap from Installment 1.** The prover evaluates polynomials at a single secret point `τ` "in the exponent": proof element `A` encodes `l(τ) + α`, element `B` encodes `r(τ) + β`, and element `C` locks the witness to the circuit through `α`, `β`, `γ`, `δ`. The verifier never sees `τ` — it only sees the curve points `τⁱ·G1`, `τⁱ·G2` produced by the ceremony. The entire protocol rests on `τ` (and its friends) staying secret forever.
 
-### The forgery attack if τ is known
+#### The forgery attack if τ is known
 
 Suppose an attacker learns `τ = 6`. They can now compute `T(τ) = 720` directly. They can pick *any* fake witness they want — say, `a = 100, b = 100, c = 100, d = 100, e = 100, f = 100, g = 100, h = 100` — which gives intermediates `p1 = 10000, p2 = 10000, p3 = 10000, p4 = 10000, p5 = 10000, p6 = 10000`. This witness does not need to satisfy the R1CS constraints in the polynomial sense; the attacker can simply compute `l(τ), r(τ), o(τ)` and then *choose* `h(τ)` to make the equation balance:
 
@@ -39,7 +406,7 @@ Because the attacker knows `τ`, they can compute this quotient even when the wi
 
 In other words, **knowledge of `τ` lets the attacker "cheat" the single-point check without ever satisfying the multiplicative constraints.** The same logic applies to `α, β, γ, δ`: if any of them are known, the attacker can separate the public and private parts of the proof arbitrarily, forging a valid-looking proof for any statement.
 
-### Why randomness matters
+#### Why randomness matters
 
 You might ask: why not just hard-code `τ = 42` and publish it? Everyone would know it, but at least the system would be transparent.
 
@@ -47,7 +414,7 @@ The problem is **precomputation attacks.** If `τ` is predictable, an attacker w
 
 Moreover, `α, β, γ, δ` must be *independent* random values. If `α = β`, the proof element `C` loses its binding to the left input, and an attacker can swap `l(τ)` and `r(τ)` without detection. If `γ = δ`, the public and private input commitments collapse into one, destroying the zero-knowledge property.
 
-### The ceremony intuition: 1-of-N trust
+#### The ceremony intuition: 1-of-N trust
 
 Groth16 solves this with a **trusted setup ceremony**: multiple participants jointly generate the scalars, each contributing their own randomness. The security guarantee is simple and powerful:
 
@@ -55,7 +422,7 @@ Groth16 solves this with a **trusted setup ceremony**: multiple participants joi
 
 Even if every other participant colluded and shared their secrets, they cannot reconstruct `τ` without the missing contribution. This is why the ceremony needs many independent participants — the probability that *everyone* is dishonest and keeps a backup decreases as the participant count grows.
 
-### Dev ceremony vs. production ceremony
+#### Dev ceremony vs. production ceremony
 
 Our repository uses two different approaches for two different purposes:
 
@@ -68,9 +435,7 @@ The dev ceremony is completely insecure for production — anyone who reads the 
 
 > **The bottom line.** Groth16's speed and compactness come from a *single* secret evaluation point `τ`. That point must remain secret forever, or the proof system becomes a forgery factory. The trusted setup ceremony is the mechanism that creates `τ`, embeds it into curve points, and then destroys it — provided at least one participant was honest. This is the fundamental trade-off of Groth16: you get the smallest and fastest proofs in cryptography, but you must trust the ceremony once.
 
----
-
-## The scalars and who must not know them
+### The scalars and who must not know them
 
 All five scalars must be unknown to every party after the ceremony — the prover, the verifier, and any third party. The ceremony is run by a dedicated group of **organizers** who are independent of both the prover and the verifier: they generate the scalars jointly, embed them into curve points (the SRS), and then destroy the raw scalars. The prover and verifier never participate in the ceremony and never see the raw scalars — they interact only with the curve points. The prover uses the full SRS (power tables + proving key), and the verifier uses only a small subset (the verifying key). This is why the setup is "trusted": the security guarantee is that at least one organizer honestly destroyed their contribution, making it impossible to reconstruct any of the five scalars.
 
@@ -86,13 +451,11 @@ Note the *dev* values in the table are deterministic and public — that is exac
 
 > **The CRS vs. the SRS.** The SRS is the *power table* (`τ^i·G1`, `τ^i·G2`) — it lets the prover evaluate arbitrary polynomials at `τ`. The CRS *fixed points* are the *anchor points* (`α·G1`, `β·G2`, `γ·G2`, `δ·G2`) — they encode the mixed scalars that tie the proof to the specific circuit. In a production trusted setup, the SRS is universal (can be reused for many circuits), while the CRS fixed points are circuit-specific because they depend on `α`, `β`, `γ`, `δ`.
 
----
-
-## The ceremony in our repository
+### The ceremony in our repository
 
 The trusted-setup ceremony lives in the standalone [`clis/trusted-setup`](https://github.com/cardano-foundation/bls/blob/main/clis/trusted-setup/) crate (the `trusted_setup` library plus the `trusted-setup` CLI). Proof generation, verification, and verifying-key export live in the separate `groth16` CLI (`clis/groth16`). This split is deliberate: the ceremony is a one-time, circuit-lifecycle operation, while proving/verifying is what happens at runtime. The crate exposes the ceremony core as a reusable library with the modules `r1cs`, `qap`, `engine`, `ceremony`, `phase2`, `ptau`, `circom_adapter`, `prover`, and `cmd`; the `groth16-prover` library re-exports these modules.
 
-### `ceremony-dev` — the single-party dev ceremony
+#### `ceremony-dev` — the single-party dev ceremony
 
 ```bash
 cd clis/trusted-setup
@@ -120,7 +483,7 @@ trusted-setup ceremony-dev \
   --h-scalar
 ```
 
-### `phase2` — the production MPC ceremony
+#### `phase2` — the production MPC ceremony
 
 The production ceremony is a **multi-party Phase-2 ceremony** that reuses a publicly verified Phase-1 SRS (e.g. the **Perpetual Powers of Tau**). Each participant contributes randomness locally; the coordinator is just a passive file host. The workflow is split into four subcommands:
 
@@ -171,14 +534,14 @@ The `.pk` / `.vk` files produced by `ceremony-dev` or `phase2 finalize` are cons
 
 ## What's next in this installment
 
-This document is the ceremony foundation for Installment 2. The rest of the article — to be expanded — replaces each bottleneck of the dense-monomial prover with a production technique, all cross-checked against the pipeline of [Installment 1](zkp-from-first-principles.md):
+This document is being written implementation by implementation. The full path through the sprint and ceremony:
 
-| Bottleneck | First-principles fix (Installment 1) | Production fix (this installment) |
-|------------|--------------------------------------|-----------------------------------|
-| Polynomial ops are O(n²) | Dense coefficient vectors | FFT over roots of unity |
-| Proof assembly is O(n) scalar muls | One-by-one multiplication | Pippenger multi-scalar multiplication |
-| Matrices explode memory | Dense `Vec<Vec<Fr>>` | Native sparse constraint representation |
-| Trusted setup is single-party | Deterministic dev scalars | Multi-party MPC ceremony on PPoT — **covered above** |
-| QAP materialises all polynomials | `build_qap()` returns every `u_i(x)` | On-the-fly witness-polynomial accumulation |
+| Bottleneck | First-principles fix (Installment 1) | Production fix (this installment) | Status |
+|------------|--------------------------------------|-----------------------------------|--------|
+| Polynomial ops are O(n²) | Dense coefficient vectors | **FFT over roots of unity** | [done] above |
+| Proof assembly is O(n) scalar muls | One-by-one multiplication | Pippenger multi-scalar multiplication | [planned] next |
+| Matrices explode memory | Dense `Vec<Vec<Fr>>` | Native sparse constraint representation | [planned] later |
+| Trusted setup is single-party | Deterministic dev scalars | Multi-party MPC ceremony on PPoT | [next] upcoming |
+| QAP materialises all polynomials | `build_qap()` returns every `u_i(x)` | On-the-fly witness-polynomial accumulation | [planned] later |
 
 Beyond Groth16, we will survey the landscape: **PLONK** (universal trusted setup, custom gates), **Bulletproofs / Bulletproofs++** (no trusted setup at all), **STARKs / JOLT** (transparent, post-quantum), and **VM approaches (RISC Zero, zkVMs)** that prove arbitrary program execution without hand-writing circuits — folding the former zkVM installment into this one. From here, Installment 3 proves Cardano key ownership, Installment 4 applies the full stack to selective disclosure, and Installment 5 surveys quantum-resistant (lattice-based) systems that will one day replace the pairing-based assumption this whole series is built on.
