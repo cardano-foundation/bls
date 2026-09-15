@@ -6,7 +6,7 @@
 >
 > After the sprint we turn to the production **trusted-setup ceremony** — why the scalars must be secret, how a known `τ` becomes a forgery factory, and how a multi-party MPC ceremony keeps `τ` unknown forever (this part is already written below). We close by surveying the landscape beyond Groth16 and where this stack goes next.
 >
-> We're writing this document the same way we built the code: **section by section.** Right now you're reading through Implementations 2, 3, 4, and 5 in full; Implementations 6–7 appear in a later pass. Each section is self-contained, so you can jump in anywhere.
+> We're writing this document the same way we built the code: **section by section.** Right now you're reading through Implementations 2, 3, 4, 5, and 6 in full; Implementation 7 appears in a later pass. Each section is self-contained, so you can jump in anywhere.
 
 ---
 
@@ -23,7 +23,8 @@
 - [Implementation 3 — Pippenger MSM](#implementation-3--pippenger-msm)
 - [Implementation 4 — the Circom adapter](#implementation-4--the-circom-adapter)
 - [Implementation 5 — Full proving key + on-the-fly QAP](#implementation-5--full-proving-key--on-the-fly-qap)
-- [Implementations 6–7 (to be written)](#implementations-67-to-be-written)
+- [Implementation 6 — sparse matrices](#implementation-6--sparse-matrices)
+- [Implementation 7 (to be written)](#implementation-7-to-be-written)
 
 **Part Two — the trusted-setup ceremony**
 
@@ -129,7 +130,7 @@ The codebase organizes its growth into a ladder of implementations. Each rung ke
 | 3 | `FftQapEngine` | `PippengerProver` | Proof assembly O(n) → O(n log n) batched MSM | [done] **this section** |
 | 4 | Circom adapter `.r1cs`/`.wtns` | — | Consume real circuits instead of hard-coded matrices | [done] **this section** |
 | 5 | Full proving key + on-the-fly QAP | — | Drops the per-proof QAP, makes a ceremony meaningful | [done] this section |
-| 6 | Sparse matrices | — | Memory O(n²) → O(#non-zero entries) | [planned] later |
+| 6 | Sparse matrices | — | Memory O(n²) → O(#non-zero entries) | [done] this section |
 | 7 | h-query scalar compression | — | Cuts proving-key size & drops the h MSM | [planned] later |
 
 The same seven rungs, pictured as a ladder — every rung below feeds the one above:
@@ -142,13 +143,13 @@ flowchart TB
     R4 --> R5["5 · on-the-fly QAP — drops the per-proof polynomial build"]
     R5 --> R6["6 · sparse matrices — memory O(number of non-zero entries)"]
     R6 --> R7["7 · h-query scalar compression — smaller key, no h MSM"]
-    class R1,R2,R3,R4,R5 built
-    class R6,R7 planned
+    class R1,R2,R3,R4,R5,R6 built
+    class R7 planned
     classDef built fill:#e4f4e4,stroke:#2e7d32,color:#1b5e20
     classDef planned fill:#f2f2f2,stroke:#999,color:#555
 ```
 
-Rungs 1–5 are built (green); rungs 6–7 are where this installment is headed (grey).
+Rungs 1–6 are built (green); rung 7 is where this installment is headed (grey).
 
 Every later rung builds on the one before it, and all of them keep Implementation 1's interface. Let's climb the first one.
 
@@ -157,6 +158,10 @@ Every later rung builds on the one before it, and all of them keep Implementatio
 ## Implementation 2 — FFT
 
 The goal, in one sentence: **replace the O(n²) polynomial bookkeeping of Implementation 1 with FFT, so that a circuit the dense engine could never even build becomes a routine 5-second prove.**
+
+> **What we're improving:** polynomial arithmetic — every `u_i(τ)`, every product `l·r`, every quotient division paid O(n²) because the code walked monomials one by one.
+> **The idea:** work in the Lagrange basis over a roots-of-unity domain so that evaluation, multiplication, and division all collapse to pointwise O(N) operations — each backed by an O(N log N) FFT or IFFT.
+> **Why it's reasonable:** the DFT is the unique linear isomorphism between coefficient and evaluation forms, and roots-of-unity give it the butterfly structure that makes it O(N log N); no approximation, no new algebra, just a change of basis.
 
 ### The bottleneck, in plain words
 
@@ -412,6 +417,10 @@ None of that is magic — it's the textbook O(n²) → O(n log n) curve, applied
 
 The goal, in one sentence: **replace the O(n) scalar-multiplication loop in proof assembly with a batched multi-scalar multiplication, so that the prover can handle circuits where proof assembly would otherwise take thousands of independent curve-point multiplications.**
 
+> **What we're improving:** proof assembly — the prover was doing one curve-point multiplication per R1CS variable (or constraint), and that O(n) loop became the bottleneck once FFT eliminated the polynomial work.
+> **The idea:** sort the input scalars into buckets by their leading bits, accumulate each bucket sum with free additions, then pay for one final addition per bucket — turning n independent scalar multiplications into O(n / log n) work.
+> **Why it's reasonable:** bucket decomposition is exact (no approximation or loss of precision); each bucket sum uses only additions over known scalars, and the final reconstruction is a single fixed-base scalar multiplication per bucket. The trade of n scalar muls for n additions + a small number of final muls is strictly cheaper, both asymptotically and in practice.
+
 ### The bottleneck, in plain words
 
 Implementation 2 fixed the polynomial math. But once the QAP polynomials are evaluated at τ, the proof is still *assembled* one point at a time:
@@ -639,6 +648,10 @@ The next section tackles Implementation 4: reading `.r1cs` and `.wtns` files fro
 
 The goal, in one sentence: **replace the hard-coded Rust matrices with a parser for circom's standard `.r1cs` / `.wtns` binary formats, so that any circuit you can compile with circom becomes a circuit you can prove — without touching Rust.**
 
+> **What we're improving:** the input layer — all R1CS matrices were hard-coded Rust `const` arrays, capping us at 14 constraints and two toy circuits; no real circuit could be proven.
+> **The idea:** parse circom's binary `.r1cs` and `.wtns` files directly with a `nom` parser, filling the same `L`/`R`/`O` matrix and witness vector the prover already consumes — zero structural changes to the engine, the prover, or the ceremony.
+> **Why it's reasonable:** the R1CS binary format is public, simple, and sectioned (magic/version, then a constraints section of triplets, then a header, then labels); each constraint's `(wire_id, coeff)` triplet maps directly to one non-zero entry in the matrix the prover already knows. No algebraic subtlety — just format conversion.
+
 ### The bottleneck, in plain words
 
 Until now, every R1CS reached the prover as hard-coded Rust `const` arrays: `L`, `R`, `O`, `WITNESS` carved into `clis/trusted-setup/src/r1cs.rs`, with a `select_circuit(name)` helper that knows exactly two circuits (`"multiplier"`, `"sumofproducts"`) and fixed-size matrices like `[[u64; 8]; 3]`, typed by hand.
@@ -794,6 +807,10 @@ Still, this rung hasn't made anything *faster*. The QAP is still rebuilt per pro
 ## Implementation 5 — Full proving key + on-the-fly QAP
 
 The goal, in one sentence: **stop rebuilding the QAP on every proof. Bake the per-variable evaluations into a one-time ceremony output — a `FullProvingKey` of group elements with no scalars in it — and let the prover spend each proof doing fast MSMs over that key instead of re-doing polynomial arithmetic.**
+
+> **What we're improving:** the prover's per-proof QAP work — `evaluate_qap_at_tau` + `build_qap` ran O(n²) from scratch on every proof, and the five toxic-waste scalars sat in the proving key, making the file a forgery toolkit.
+> **The idea:** let the ceremony compute every `u_i(τ)·G1`, `v_i(τ)·G2`, etc. once, publish them as group elements (no scalars survive), and have the prover reconstruct the proof points via MSMs alone; build `l(x)`, `r(x)`, `o(x)` on the fly (one IFFT per column, O(domain_size) memory) instead of materializing all `u_i(x)` polynomials.
+> **Why it's reasonable:** each `u_i(τ)·G1` is a fixed curve point the ceremony computes from public circuit data; MSMing them with the witness reproduces the exact Groth16 algebra without ever touching `τ, α, β, γ, δ`. The on-the-fly accumulation is mathematically identical to building every `u_i(x)` first — same IFFT, same sums — just without the O(n_vars × domain_size) intermediate storage.
 
 ### The bottleneck, in plain words
 
@@ -1004,11 +1021,148 @@ Implementation 6 attacks the memory; Implementation 7 attacks the h-MSM.
 
 ---
 
-## Implementations 6–7 *(to be written)*
+## Implementation 6 — sparse matrices
 
-Coming in later passes:
+The goal, in one sentence: **stop inflating circom's native sparse constraint vectors into dense `n_constraints × n_wires` matrices, so that memory drops from O(n²) to O(#non-zero entries) and circuits like Blake2b-224 and Ed25519 become provable on commodity hardware.**
 
-- **6 — Sparse matrices**: keep `.r1cs`' native sparsity instead of inflating to `n_constraints × n_wires`; memory drops from ~200 GiB (Blake2b-224) to ~280 MiB. It is the fix for the 352 MB dense blow-up this section measured on Poseidon.
+> **What we're improving:** the matrix memory — Implementation 5's `CircomCircuit` stored `L`, `R`, `O` as dense `Vec<Vec<Fr>>` of shape `n_constraints × n_wires`, consuming 335 MiB for Poseidon, ~200 GiB for Blake2b-224, and ~512 TB for Ed25519 — all before a single proof computation began.
+> **The idea:** keep the `.r1cs` native sparse triplet format `(wire_id, coeff)` per constraint, and accumulate the witness polynomials `l(x)`, `r(x)`, `o(x)` by visiting only the non-zero entries — one per-variable IFFT per column, same as before, but the inner loop runs O(#non_zero) times instead of O(n_constraints × n_wires).
+> **Why it's reasonable:** each non-zero entry `(constraint_id, wire_id, coeff)` contributes exactly `coeff × witness[wire_id] × L_constraint(τ)` to the corresponding witness polynomial — the same term the dense loop would compute for that position, plus zero for every absent entry. Skipping the zeros changes nothing mathematically; the resulting `l(x)`, `r(x)`, `o(x)` polynomials are identical, the quotient `h(x)` is identical, and the proof is bit-for-bit the same.
+
+### The bottleneck, in plain words
+
+Implementation 5 eliminated the per-proof QAP rebuild and made the proving key safe to publish. But it still loaded the R1CS into dense matrices:
+
+```rust
+// CircomCircuit (dense, Impl 5) — n_constraints rows × n_wires columns
+let L: Vec<Vec<Fr>> = vec![vec![Fr::zero(); n_wires]; n_constraints];
+let R: Vec<Vec<Fr>> = vec![vec![Fr::zero(); n_wires]; n_constraints];
+let O: Vec<Vec<Fr>> = vec![vec![Fr::zero(); n_wires]; n_constraints];
+```
+
+For Poseidon (1,911 constraints × 1,914 wires) that is 335 MiB of zero-filled RAM. For Blake2b-224 (~79K × ~78K) it is ~200 GiB. For Ed25519 (~4M × ~4M) it is ~512 TB. The dense format stores *every* entry — including the zeros that correspond to wires that do not appear in a given constraint. Circom's `.r1cs` format does not do this: it stores only the non-zero `(wire_id, coeff)` pairs per constraint, typically 2–10 entries out of thousands. The dense adapter was a convenience; it is now the wall.
+
+### The idea
+
+Keep the sparse representation and accumulate witness polynomials directly from it:
+
+```mermaid
+flowchart LR
+    subgraph DENSE["dense path (Impl 5)"]
+        D_R1CS[".r1cs sparse triplets"] -->|inflate| D_MAT["n_constraints × n_wires<br/>zero-filled matrices"]
+        D_MAT --> D_LOOP["for every variable,<br/>for every constraint:<br/>add term"]
+    end
+    subgraph SPARSE["sparse path (Impl 6)"]
+        S_R1CS[".r1cs sparse triplets"] -->|keep sparse| S_LOOP["for every constraint,<br/>for every non-zero entry:<br/>add term"]
+    end
+    D_LOOP --> WITNESS["l(x), r(x), o(x)<br/>identical dense polynomials"]
+    S_LOOP --> WITNESS
+```
+
+The dense path walks `n_constraints × n_wires` positions (most of them zero). The sparse path walks only the positions where `coeff ≠ 0` — typically a few thousand per circuit, not millions. Both produce the same `l(x)`, `r(x)`, `o(x)` polynomials.
+
+The sparse adapter (`SparseCircomCircuit`) lives in `circom_adapter.rs` and parses the `.r1cs` constraint sections directly into per-constraint triplet vectors without expanding them:
+
+```rust
+pub struct SparseCircomCircuit {
+    pub n_wires: u32,
+    pub n_constraints: u32,
+    pub l: Vec<Vec<(u32, Fr)>>,  // per-constraint: (wire_id, coeff)
+    pub r: Vec<Vec<(u32, Fr)>>,
+    pub o: Vec<Vec<(u32, Fr)>>,
+    pub witness: Vec<Fr>,
+}
+```
+
+Each row stores exactly the non-zero `(wire_id, coeff)` pairs from the `.r1cs` binary — the same data the file contains, nothing expanded.
+
+The CLI makes sparse a flag, not a new engine:
+
+```bash
+groth16 prove ... --sparse               # sparse path, on-the-fly QAP
+trusted-setup ceremony-dev ... --sparse  # sparse key build
+```
+
+`--sparse` always uses the FFT engine internally (`FftQapEngine`) and rejects `--qap-not-on-fly` — the sparse path is only implemented for the on-the-fly FPK flow (Implementation 5's machinery). This keeps the code simple: sparse changes the *input representation and accumulation order*, not the engine, the quotient, or the MSMs.
+
+### Memory formula
+
+The dense path's memory scales as the product of constraints and wires:
+
+```
+dense = n_constraints × n_wires × 32 B × 3   (for L, R, O)
+```
+
+The sparse path's memory scales with the number of non-zero entries plus the domain-sized witness polynomials:
+
+```
+sparse = #non_zero_entries × 40 B  +  domain_size × 3 × 32 B
+```
+
+(The 40 B per entry is a `(u32, Fr)` pair — 4 bytes for the wire ID and 32 bytes for the coefficient, plus 4 bytes padding.) The witness polynomials `l(x)`, `r(x)`, `o(x)` are always dense polynomials of length `domain_size` — that part is unchanged from Implementation 5.
+
+### Per-proof time and memory — measured on this machine
+
+The `benchmark_sparse` binary on this laptop (`--release`, single core):
+
+**PoseidonMerkle depth-2 (1,914 wires, 1,911 constraints, 2 public):**
+
+| | Dense (Impl 5) | Sparse (Impl 6) | Reduction |
+|---|---|---|---|
+| Matrix memory | 335 MiB | 0.2 MiB | **1,389×** |
+| Per-proof (pippenger) | 18.8 s | 991 ms | **19.0×** |
+
+**Toy multiplier (8 wires, 3 constraints):**
+
+| | Dense (Impl 5) | Sparse (Impl 6) |
+|---|---|---|
+| Per-proof (pippenger) | 5.94 ms | 5.68 ms |
+
+At toy scale the sparse path is about the same speed — the overhead of iterating triplets instead of dense columns is lost in the noise. At 1,911 constraints the sparse path avoids allocating and zero-filling 1,914 columns of 2,048 elements each, and the **19× speedup** comes entirely from that avoided work.
+
+### Try it yourself — sparse and dense on the same circuit
+
+```bash
+cd circom/SumOfProducts
+G=../../clis/groth16/target/release/groth16
+
+# Dense (Impl 5 default):
+$G prove --circuit sum_of_products.r1cs --witness witness.wtns \
+         --engine fft --prover pippenger --out /tmp/dense.proof
+
+# Sparse (Impl 6):
+$G prove --circuit sum_of_products.r1cs --witness witness.wtns \
+         --engine fft --prover pippenger --sparse --out /tmp/sparse.proof
+
+cmp /tmp/dense.proof /tmp/sparse.proof   # silent = identical
+$G verify --proof /tmp/dense.proof  --public /tmp/dense.pub   # VALID
+$G verify --proof /tmp/sparse.proof --public /tmp/sparse.pub  # VALID
+```
+
+Same proof bytes. Same verification. The only difference is how much memory was allocated to get there.
+
+### What it achieves, at scale
+
+This is the rung where the memory story changes from "works on a laptop" to "works on production circuits":
+
+| Circuit | Wires | Constraints | Dense memory | Sparse memory | Reduction |
+|---------|-------|-------------|-------------|---------------|-----------|
+| Poseidon depth-2 | 1,914 | 1,911 | 335 MiB | 0.2 MiB | 1,389× |
+| Blake2b-224 | ~78K | ~79K | ~200 GiB | ~280 MiB | ~730,000× |
+| Ed25519 | ~4M | ~4M | ~512 TB | ~3 GiB | ~170,000,000× |
+
+(Blake2b-224 and Ed25519 numbers from the README benchmark table — single core, `--release`.)
+
+The proof does not change — the same Groth16 formulas, the same MSM vectors, the same pairing check. What changes is that the prover no longer needs to allocate a zero-filled matrix whose size is the product of two circuit dimensions, most of which are zero. At Blake2b-224 scale, the dense path OOMs before a single proof is computed; the sparse path runs in ~280 MiB and proves in ~5 s (with ceremony in ~18 s, end-to-end ~26 s). At Ed25519 scale the dense path is physically impossible on any existing hardware; the sparse path fits in ~3 GiB.
+
+### What comes next
+
+Sparse matrices fix the memory wall. The last remaining bottleneck is the h-MSM: `h_query` is one group element per coefficient of the quotient polynomial, and at Ed25519 scale that MSM alone was ~55% of prove time. Implementation 7 collapses it to a single scalar multiplication.
+
+---
+
+## Implementation 7 *(to be written)*
+
 - **7 — h-query scalar compression + parallel proof assembly**: collapse the h-query G1 vector to one scalar, shrinking the proving key and removing the h MSM.
 
 ---
@@ -1180,7 +1334,7 @@ This document is being written implementation by implementation. The full path t
 | Polynomial ops are O(n²) | Dense coefficient vectors | **FFT over roots of unity** | [done] above |
 | Proof assembly is O(n) scalar muls | One-by-one multiplication | Pippenger multi-scalar multiplication | [done] above |
 | Circuit inputs are hard-coded | Rust `const` arrays | Circom `.r1cs` / `.wtns` parser | [done] above |
-| Matrices explode memory | Dense `Vec<Vec<Fr>>` | Native sparse constraint representation | [planned] later |
+| Matrices explode memory | Dense `Vec<Vec<Fr>>` | Native sparse constraint representation | [done] above |
 | Trusted setup is single-party | Deterministic dev scalars | Multi-party MPC ceremony on PPoT | [next] upcoming |
 | QAP materialises all polynomials | `build_qap()` returns every `u_i(x)` | On-the-fly witness-polynomial accumulation | [done] above |
 
