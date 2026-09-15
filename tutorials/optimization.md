@@ -6,7 +6,7 @@
 >
 > After the sprint we turn to the production **trusted-setup ceremony** — why the scalars must be secret, how a known `τ` becomes a forgery factory, and how a multi-party MPC ceremony keeps `τ` unknown forever (this part is already written below). We close by surveying the landscape beyond Groth16 and where this stack goes next.
 >
-> We're writing this document the same way we built the code: **section by section.** Right now you're reading through Implementation 2 in full; Implementations 3–7 appear in a later pass. Each section is self-contained, so you can jump in anywhere.
+> We're writing this document the same way we built the code: **section by section.** Right now you're reading through Implementations 2 and 3 in full; Implementations 4–7 appear in a later pass. Each section is self-contained, so you can jump in anywhere.
 
 ---
 
@@ -20,7 +20,7 @@
 - [Implementation 2 — FFT: polynomial arithmetic, O(n²) → O(n log n)](#implementation-2--fft)
   - [A first real circuit: Poseidon](#a-first-real-circuit-poseidon)
   - [Try it on a slightly bigger circuit](#try-it-on-a-slightly-bigger-circuit)
-- [Implementation 3 — Pippenger MSM (to be written)](#implementation-3--pippenger-msm-to-be-written)
+- [Implementation 3 — Pippenger MSM](#implementation-3--pippenger-msm)
 - [Implementations 4–7 (to be written)](#implementations-47-to-be-written)
 
 **Part Two — the trusted-setup ceremony**
@@ -122,7 +122,7 @@ The codebase organizes its growth into a ladder of implementations. Each rung ke
 |------|--------|--------|---------------|--------|
 | 1 | `DenseQapEngine` | `NaiveProver` | Baseline: Lagrange + dense polynomials + scalar-by-scalar MSM | [done] Installment 1 |
 | 2 | `FftQapEngine` | `NaiveProver` | Polynomial ops O(n²) → O(n log n); unlocks any circuit size | [done] **this section** |
-| 3 | `FftQapEngine` | `PippengerProver` | Proof assembly O(n) → O(n log n) batched MSM | [planned] next |
+| 3 | `FftQapEngine` | `PippengerProver` | Proof assembly O(n) → O(n log n) batched MSM | [done] **this section** |
 | 4 | Circom adapter `.r1cs`/`.wtns` | — | Consume real circuits instead of hard-coded matrices | [planned] later |
 | 5 | Full proving key + on-the-fly QAP | — | Drops the per-proof QAP, makes a ceremony meaningful | [planned] later |
 | 6 | Sparse matrices | — | Memory O(n²) → O(#non-zero entries) | [planned] later |
@@ -253,15 +253,15 @@ Use the deterministic on-the-fly ceremony (no proving key) — each engine gener
 cd circom/SumOfProducts
 G=../../clis/groth16/target/release/groth16
 
-# Implementation 1 machinery
+# Implementation 1 machinery — dense engine, naive prover, scalar QAP path
 $G prove --circuit sum_of_products.r1cs --witness witness.wtns \
-         --engine dense --out /tmp/sop_dense.proof
+         --engine dense --prover naive --qap-not-on-fly --out /tmp/sop_dense.proof
 $G verify --proof /tmp/sop_dense.proof --public /tmp/sop_dense.pub
 # → Verification result: VALID
 
-# Implementation 2 machinery
+# Implementation 2 machinery — FFT engine, naive prover, scalar QAP path
 $G prove --circuit sum_of_products.r1cs --witness witness.wtns \
-         --engine fft --out /tmp/sop_fft.proof
+         --engine fft --prover naive --qap-not-on-fly --out /tmp/sop_fft.proof
 $G verify --proof /tmp/sop_fft.proof --public /tmp/sop_fft.pub
 # → Verification result: VALID
 
@@ -271,6 +271,8 @@ cmp /tmp/sop_dense.proof /tmp/sop_fft.proof && echo "same" || echo "different"
 ```
 
 Both verify. The bytes differ. Same system, different coordinates — just as promised.
+
+> **A note on `--prover naive --qap-not-on-fly`.** The CLI's *default* prover is already Pippenger, and you will meet it in the next section. Since Pippenger produces bit-for-bit identical proofs, the choice between naive and Pippenger does not change this comparison — we only pinned the flags here so the labels match the rungs on the ladder honestly.
 
 **4. Watch the coordinate systems collide.**
 
@@ -345,15 +347,15 @@ On this tutorial's machine (single core, `--release`), one run looked like this:
 | | toy (drill 2's multiplier) | PoseidonMerkle depth-2 |
 |---|---|---|
 | constraints / wires | 3 / 8 | 1,911 / 1,914 |
-| dense engine (Impl 1) | works — ~12 ms/proof | **refuses** (14-constraint cap) |
-| FFT engine, scalar path (Impl 2) | works — ~17 ms/proof | works — ~34 s, proof VALID |
+| dense engine (Impl 1) | works — ~14 ms/proof | **refuses** (14-constraint cap) |
+| FFT engine, scalar path (Impl 2) | works — ~15 ms/proof | works — ~27 s, proof VALID |
 | ceremony `ceremony-dev --sparse` | instant | ~2 s |
 
 (The toy rows come from `benchmark_provers` in drill 2 — its hard-coded 3-gate multiplier. Our 5-gate `SumOfProducts` sits in the same millisecond band, as you saw in drills 3–4.)
 
-Read that table like a story. At toy scale the FFT engine is a hair slower than dense, and nobody cares. At two thousand constraints the dense engine is not slower — it has **stopped existing** — while the FFT engine calmly produces a valid proof in half a minute on this laptop. The reference machine in the README clocks the same shape at a friendlier ~7 s for the comparable 1,107-constraint circuit, and by the time we've climbed Implementations 5–7 the same 1.9K-constraint proof drops to well under a second there. That gap — "impossible" on the left side of the table, "routine" on the right — is precisely the O(n²) → O(n log n) curve we sketched in [The idea](#the-idea), showing up in the real world.
+Read that table like a story. At toy scale the FFT engine is a hair slower than dense, and nobody cares. At two thousand constraints the dense engine is not slower — it has **stopped existing** — while the FFT engine calmly produces a valid proof in ~27 s on this laptop. The reference machine in the README clocks the same shape at a friendlier ~7 s for the comparable 1,107-constraint circuit, and by the time we've climbed Implementations 5–7 the same 1.9K-constraint proof drops to well under a second there. That gap — "impossible" on the left side of the table, "routine" on the right — is precisely the O(n²) → O(n log n) curve we sketched in [The idea](#the-idea), showing up in the real world.
 
-> **What this section achieves.** You watched the FFT engine cross the line the dense engine can never cross: a non-toy circuit, thousands of constraints, produced and verified end-to-end on implementation 2's own machinery. The ~34 s is the last time we pay the naive-tax at this scale on purpose — Implementations 3–7 exist to break exactly that cost, and we get to dismantle it one wall at a time.
+> **What this section achieves.** You watched the FFT engine cross the line the dense engine can never cross: a non-toy circuit, thousands of constraints, produced and verified end-to-end on implementation 2's own machinery. The ~27 s is the last time we pay the naive-tax at this scale on purpose — Implementations 3–7 exist to break exactly that cost, and we get to dismantle it one wall at a time.
 
 ### What it achieves, at scale
 
@@ -367,9 +369,216 @@ None of that is magic — it's the textbook O(n²) → O(n log n) curve, applied
 
 ---
 
-## Implementation 3 — Pippenger MSM *(to be written)*
+## Implementation 3 — Pippenger MSM
 
-Coming in the next pass. It attacks the last O(n) wall from Implementation 1 — assembling `A`, `B`, `C` one scalar-multiplication at a time — with the **Pippenger multi-scalar multiplication** (MSM) algorithm. The reference numbers (README toy benchmark): Implementation 3 is ~1.48× faster than Implementation 2 at tiny scale, and the gap grows with the number of wires.
+The goal, in one sentence: **replace the O(n) scalar-multiplication loop in proof assembly with a batched multi-scalar multiplication, so that the prover can handle circuits where proof assembly would otherwise take thousands of independent curve-point multiplications.**
+
+### The bottleneck, in plain words
+
+Implementation 2 fixed the polynomial math. But once the QAP polynomials are evaluated at τ, the proof is still *assembled* one point at a time:
+
+- `C = Σ_private a_i·Ψ_i + h(τ)·T(τ)/δ·G1` — one scalar multiplication per private wire;
+- `V = Σ_public a_i·Ψ_i` — one per public wire;
+- `A` and `B` — two more (small constants).
+
+Each of those scalar multiplications is a full "double-and-add" ladder: roughly 255 doublings and 128 additions for a 256-bit scalar, all independent. With thousands of wires, that's thousands of separate ladders. The code is clear about this — it is a `for` loop calling `generator * (psi * witness)` in each iteration (`clis/trusted-setup/src/prover.rs`, lines 285–289):
+
+```rust
+// C = sum_{private} a_i·Psi_P_G1 + h(tau)·T(tau)/delta·G1
+let mut c_proj = G1Projective::zero();
+for i in 2..witness.len() {
+    let psi_scalar = (vs_tau[i] * alpha + us_tau[i] * beta + ws_tau[i]) * delta_inv;
+    c_proj += g1_proj * (psi_scalar * witness[i]);
+}
+```
+
+Every iteration does an independent full scalar multiplication — roughly 255 doublings and 128 additions, repeated for every wire. No sharing. That is the last O(n) wall left from Implementation 1.
+
+### The idea: Pippenger's bucket algorithm
+
+The insight is simple: each scalar-multiplication ladder independently goes through ~255 doublings to reach its power of the generator, even though *all the points share the same base* and differ only in their scalar. If you could somehow share that ladder across points, you would save massively.
+
+That is exactly what **Pippenger's bucket MSM** (multi-scalar multiplication) does, introduced in 1987:
+
+1. **Split each scalar into fixed-width windows.** With `c` bits per window, a 256-bit scalar yields roughly `256/c` digit positions. Pick `c = 4` — that gives 64 windows, each with 16 possible digits (0–15).
+
+2. **One pass over all the points per window.** For each window position, sort the points into `2^c` buckets by their scalar's digit at that position — a point whose digit is `d` at window position `w` lands in bucket `d`. Each point gets added to exactly one bucket per window. Cost: `n` point-additions per window.
+
+3. **Combine each bucket with a running sum.** Within a window position, the buckets share a "place value" (the `w·c` doublings needed to shift to that position). So instead of combining them independently, add them once from the highest bucket down, accumulating into a running total. That is `2^c` additions, not `2^c` scalar multiplications.
+
+4. **Shift the accumulator across windows.** Moving from one window position to the next means shifting the place value up by `c` bits — a batch of `c` doublings. Combine the window accumulator into the final result.
+
+The cost arithmetic is now: `n × (256/c)` point-additions (filling buckets across windows) + `(256/c) × 2^c` additions (combining buckets within windows). That is roughly **`n × 64` additions** instead of **`n × ~383` operations** — about a **6× reduction in group operations** for `c = 4`, and the per-point cost drops from "full double-and-add ladder" to "one addition per window."
+
+> **A shopkeeper analogy.** Pippenger is the difference between counting a pile of coins one at a time and sorting them into denomination piles first — once sorted, you count each pile once instead of once per coin.
+
+In code, the switch is from the for-loop `c_proj += g1_proj * scalar` to `G1Projective::msm(bases, scalars)` — a single library call to arkworks' Pippenger implementation (`clis/trusted-setup/src/prover.rs`, lines 470–472):
+
+```rust
+// Before (NaiveProver) — one scalar mul per wire
+c_proj += g1_proj * (psi_scalar * witness[i]);
+
+// After (PippengerProver) — batched MSM over all wires
+c_proj = G1Projective::msm(&c_bases, &c_scalars).unwrap();
+```
+
+### The code change is one struct name
+
+Like the engine swap, the prover swap is trait-based — the `Prover` trait has `prove`, `prove_with_full_pk`, `prove_with_full_pk_sparse`, and the prover's job is only the *group arithmetic* of proof assembly:
+
+```rust
+// Before (Implementation 2)
+let prover = NaiveProver::new();
+
+// After (Implementation 3)
+let prover = PippengerProver::new();
+```
+
+Both `NaiveProver` and `PippengerProver` live in `clis/trusted-setup/src/prover.rs` and implement the same `Prover` trait. The engine, the witness, the QAP — none of that changes. You just hand the same inputs to a prover that batches its group arithmetic.
+
+The CLI exposes exactly this knob:
+
+```bash
+groth16 prove ... --prover naive      # Implementation 2 prover
+groth16 prove ... --prover pippenger  # Implementation 3 prover (default)
+```
+
+> **The CLI's default prover is already Pippenger.** Every drill in the Implementation 2 section that omitted `--prover` was *already* running the Implementation 3 prover — the QAP step differs, so the *engine* label was correct, but the proof assembly used Pippenger all along. We only added `--prover naive` in drills 3–4 so the labels matched the rungs on the ladder honestly.
+
+### Different proof? No — byte-identical
+
+This is the sharpest contrast to the FFT switch. Implementation 2 changed the *coordinate system* (roots of unity vs `0…n−1`), so the proof bytes changed. Implementation 3 changes only *how the group arithmetic is batched* — same scalars, same bases, same group elements, just computed in a different order. The result is **bit-for-bit identical**.
+
+You can prove it:
+
+```bash
+cd groth16-prover
+cargo run --release --features bins --bin print_proof_pippenger
+```
+
+This binary proves the toy 3-constraint circuit twice — once with `NaiveProver`, once with `PippengerProver` — and asserts that `A`, `B`, `C`, and `V` are element-equal (`groth16-prover/src/bin/print_proof_pippenger.rs`, lines 56–59):
+
+```rust
+assert_eq!(proof_naive.a, proof_pip.a, "A must match");
+assert_eq!(proof_naive.b, proof_pip.b, "B must match");
+assert_eq!(proof_naive.c, proof_pip.c, "C must match");
+assert_eq!(public_naive.v, public_pip.v, "V must match");
+```
+
+Output (bit-for-bit parity and pairing check):
+
+```
+✓ Pippenger proof matches naive proof bit-for-bit.
+✓ Both proofs pass pairing check.
+```
+
+### Try it yourself
+
+**1. Toy: byte parity and the benchmark.**
+
+The benchmark binary (`groth16-prover/src/bin/benchmark_provers.rs`) runs all three implementation paths on the 3-constraint multiplier, 10,000 proofs each:
+
+```bash
+cd groth16-prover
+cargo run --release --features bins --bin benchmark_provers   # ~5–7 minutes
+```
+
+On this laptop (fresh release build, single core):
+
+| Impl | Per-proof | vs Impl 2 |
+|------|-----------|-----------|
+| 1 (dense, naive) | ~13.86 ms | 0.94× (dense faster — overhead wins at tiny scale) |
+| 2 (FFT, naive) | ~14.68 ms | — |
+| 3 (FFT, Pippenger) | ~11.42 ms | **1.29×** |
+
+Reference machine from `README.md` (same circuit, same 10k proofs):
+
+| Impl | Per-proof | vs Impl 2 |
+|------|-----------|-----------|
+| 1 (dense, naive) | 3.99 ms | 0.72× |
+| 2 (FFT, naive) | 5.56 ms | — |
+| 3 (FFT, Pippenger) | 3.76 ms | **1.48×** |
+
+At toy scale the FFT path is a hair slower than dense (padded overhead outweighs polynomial savings at 3 constraints), and Pippenger barely squeezes past naive — there are only a handful of scalar multiplications, and the MSM machinery has some fixed overhead. The real story is at scale, where the MSM overhead is dwarfed by the savings. Next drill.
+
+**2. Poseidon 1,911 constraints: the FullProvingKey path.**
+
+The scalar path's QAP construction is so expensive relative to the MSMs that it drowns out Pippenger's advantage. The *FullProvingKey* path — used when you supply a `.pk` file from the ceremony — is where Pippenger shines: the QAP is already baked into the proving key, and per-proof time is dominated by MSMs over the full key vectors.
+
+```bash
+cd circom/PoseidonMerkle
+TS=../../clis/trusted-setup/target/release/trusted-setup
+G=../../clis/groth16/target/release/groth16
+
+# Build a full proving key (uses Impl 2/3 machinery already — production shape):
+$TS ceremony-dev --circuit poseidon_merkle_depth2.r1cs \
+                 --proving-key /tmp/pm.pk --verifying-key /tmp/pm.vk \
+                 --sparse
+
+# Prove with naive prover (Implementation 5 machinery, naive assembly):
+$G prove --circuit poseidon_merkle_depth2.r1cs --witness witness.wtns \
+         --proving-key /tmp/pm.pk --prover naive --out /tmp/pm_n.proof
+
+# Prove with Pippenger prover — same key, same witness, one struct swap:
+$G prove --circuit poseidon_merkle_depth2.r1cs --witness witness.wtns \
+         --proving-key /tmp/pm.pk --prover pippenger --out /tmp/pm_p.proof
+
+# Verify both:
+$G verify --proof /tmp/pm_n.proof --public /tmp/pm_n.pub --verifying-key /tmp/pm.vk
+# → Verification result: VALID
+$G verify --proof /tmp/pm_p.proof --public /tmp/pm_p.pub --verifying-key /tmp/pm.vk
+# → Verification result: VALID
+
+# Proof bytes — bit-for-bit identical:
+cmp /tmp/pm_n.proof /tmp/pm_p.proof && echo "IDENTICAL" || echo "different"
+# → IDENTICAL
+```
+
+On this laptop (fresh release build, single core):
+
+| | naive | Pippenger | ratio |
+|---|---|---|---|
+| Poseidon FPK (1,911 constraints) | ~25.2 s | ~19.9 s | **1.26×** |
+
+The proof bytes are bit-for-bit identical; the difference is purely a speedup on the same group arithmetic.
+
+**3. Scalar-path warning: why Pippenger helps little here.**
+
+If you run the same circuit on the *scalar* path (no `.pk`, `--qap-not-on-fly`):
+
+```bash
+$G prove --circuit poseidon_merkle_depth2.r1cs --witness witness.wtns \
+         --engine fft --prover naive --qap-not-on-fly --out /tmp/pm_scalar_n.proof
+$G prove --circuit poseidon_merkle_depth2.r1cs --witness witness.wtns \
+         --engine fft --prover pippenger --qap-not-on-fly --out /tmp/pm_scalar_p.proof
+```
+
+The results are only ~1.06× (27.0 s → 25.4 s) — the MSMs are a small slice of scalar-path time, because the QAP construction (`build_qap` + per-wire polynomial evaluation) dominates. **This is precisely why Implementations 5–7 exist:** once the ceremony bakes the QAP into a full proving key, the per-proof cost collapses to just the MSMs, and Pippenger's savings are no longer buried under the QAP tax. On the FullProvingKey path at 1.9K constraints, Pippenger delivers a credible 1.26× improvement; on larger circuits the gain is larger still.
+
+> **What this section achieves.** You swapped one struct name, and the proof assembly changed from O(n) independent scalar multiplications to a batched Pippenger MSM — the single most important optimization for proving at scale. The proof did not change bytes (unlike the FFT switch), confirming that this is purely a speed optimization, not a protocol change. You measured the gain on a real 1,911-constraint circuit and saw it land: modest on the scalar path (where QAP build dominates), solid on the FullProvingKey path (where MSMs are the game), and waiting to grow as circuits scale up.
+
+### What it achieves, at scale
+
+Pippenger's advantage compounds as circuits grow, because the MSM share of prove time grows — and it is already large on production circuits:
+
+- **At ~1.9K constraints:** 1.26× on the FullProvingKey path (your measured number above).
+- **At ~79K constraints (Blake2b-224):** proof assembly MSMs are a major slice of the already-improved post-Impl-5 times, and Pippenger reduces them substantially.
+- **At ~4M constraints (Ed25519):** the `h_query` MSM *alone* consumed ~55% of prove time (~163 s out of ~295 s) — before Implementations 5–7. Pippenger reduces that to O(n/log n) additions instead of O(n) scalar muls, and is the only reason the prover terminates in minutes rather than hours.
+
+The key: as circuits grow, the fraction of prove time spent in MSMs *grows*, and Pippenger's O(n/log n) scales better with n than naive's O(n) — the window width can increase with n to flatten the overhead further.
+
+### What comes next
+
+Implementation 3 attacks only the proof assembly MSMs. The QAP construction is still per-proof on the scalar path, and the constraint matrices are still allocated densely in memory — Implementations 4–7 continue the attack:
+
+| Impl | What it attacks | Relationship to this section |
+|------|-----------------|------------------------------|
+| 4 | Circom adapter | Unlocks real circuits from the command line (builds, not proofs) |
+| 5 | On-the-fly QAP | Drops the per-proof QAP build — MSMs become the *whole* prover, so Pippenger's 1.26× applies to the full proving time |
+| 6 | Sparse matrices | Drops the O(n²) memory of dense constraint matrices — complements the per-proof speedups here |
+| 7 | h-query scalar compression | Collapses the largest MSM (h_query) to a single scalar mul |
+
+The next section tackles Implementation 4: reading `.r1cs` and `.wtns` files from circom, so you can run the whole stack on circuits you wrote yourself.
 
 ---
 
@@ -539,7 +748,7 @@ This document is being written implementation by implementation. The full path t
 | Bottleneck | First-principles fix (Installment 1) | Production fix (this installment) | Status |
 |------------|--------------------------------------|-----------------------------------|--------|
 | Polynomial ops are O(n²) | Dense coefficient vectors | **FFT over roots of unity** | [done] above |
-| Proof assembly is O(n) scalar muls | One-by-one multiplication | Pippenger multi-scalar multiplication | [planned] next |
+| Proof assembly is O(n) scalar muls | One-by-one multiplication | Pippenger multi-scalar multiplication | [done] above |
 | Matrices explode memory | Dense `Vec<Vec<Fr>>` | Native sparse constraint representation | [planned] later |
 | Trusted setup is single-party | Deterministic dev scalars | Multi-party MPC ceremony on PPoT | [next] upcoming |
 | QAP materialises all polynomials | `build_qap()` returns every `u_i(x)` | On-the-fly witness-polynomial accumulation | [planned] later |
