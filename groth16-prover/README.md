@@ -1301,7 +1301,7 @@ Cheaper on-chain verification — O(N) pairing checks → one — essential for 
 |-------|------|--------|------------|------|
 | 1 | (p) Lagrange-basis SRS — complete FFT production path | ⏳ Not started | None | Low |
 | 2 | (m) Prepared verifier + batched pairing verification | ✅ Delivered (Impl 11) | None | Low |
-| 3 | (o) Randomized R1CS test fixtures + parity assertions | ✅ Delivered | None | Low |
+| 3 | (o) Randomized R1CS test fixtures + parity assertions | ⏳ Not started | None | Low |
 | 4 | (q) Proof aggregation (`groth16::aggregate_proofs`) | ⏳ Follow-on | (m) | Medium |
 | 5 | (t) Shielded cross-chain privacy pool (F5) | ⏳ Research | Sparse prover | High |
 
