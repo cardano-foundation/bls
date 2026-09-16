@@ -2,9 +2,13 @@
 
 > **One-line summary:** a Cardano **privacy pool for many users at once** — one shared shielded pool where deposits, spends, and withdrawals hide identity, amounts, and the transaction graph behind a single Merkle root of note commitments, verified by an Aiken Pool validator — demonstrated end-to-end with the **current Groth16 implementation** (one proof per spend). Batched multi-spend verification is the upgrade that follows the demonstration, delivered by the **next Groth16 implementation** (Impl 11: batch verification + proof aggregation).
 
-> **Status:** ⏳ Definition phase — goals, rationale, capabilities (no code yet).
+> **Status:** ✅ Demonstrated + measured on the current implementation — end-to-end multi-user demo and benchmark exist:
 >
-> **Sequence (explicit):** **1)** demonstrate F5 with the *current* Groth16 implementation and the *existing* `aiken/groth16` verifier (single 192-byte proof per spend, ~20% script CPU each); **2)** document the e2e and measure it (proof sizes, script CPU, timings, pool root dynamics), matching the `step3` script style; **3)** *only then* start the next Groth16 implementation — **Implementation 11 (batch verification + proof aggregation)** — which upgrades the pool to batched spends (N proofs → one multi-pairing product). Pool work is not blocked on batching; batching is scheduled after the measured demo.
+> * [`aiken/f5/demo/README.md`](demo/README.md) — reproducible N-user e2e on the current Groth16 stack (Impl 7): 4 users / 4 spends, all proofs VALID, ~31 s, 192-byte proofs, per-phase wall + Max RSS.
+> * [`aiken/f5/bench/README.md`](bench/README.md) — scaling sweep (1 → 16 users at depth 4/6): witness/prove/verify grow linearly, ceremony is constant (~8-10 s once).
+> * [`aiken/f5/pool/`](pool/) — faithful off-chain pool simulation (Merkle-root bookkeeping + nullifier log) validated by 25 unit/golden/property tests.
+>
+> **Sequence (as executed):** **1)** demonstrated F5 with the *current* Groth16 implementation (single 192-byte proof per spend) — done; **2)** documented the e2e and measured it (proof sizes, timings, pool root dynamics) — done; **3)** next: the **next Groth16 implementation — Implementation 11 (batch verification + proof aggregation)** — upgrades the pool to batched spends (N proofs → one multi-pairing product). Pool work was not blocked on batching; batching starts now that the measured demo exists.
 >
 > **Companion docs:** concept and constraint budget → [`groth16-prover/docs/F5_RESEARCH_DIRECTION.md`](../../groth16-prover/docs/F5_RESEARCH_DIRECTION.md); the single-user privacy pool this multiplies → [`aiken/selective-disclosure/README.md`](../selective-disclosure/README.md) (Step 3); the (current and next) prover implementations → [`groth16-prover/README.md`](../../groth16-prover/README.md) **Implementation 7** (current, shipped) and **Implementation 11** (batch verification + proof aggregation, roadmap).
 
@@ -146,3 +150,6 @@ Start condition for that implementation: the F5 demo (above) is **e2e, documente
 2. [`aiken/selective-disclosure/README.md`](../selective-disclosure/README.md) — Step 3 privacy pool (single-user, both proof paths); Step 0 on-chain verifier costs (~20% script CPU).
 3. [`groth16-prover/README.md`](../../groth16-prover/README.md) — **Implementation 7** (current, shipped: the sparse-prover sprint that this pool's demo runs on) and **Implementation 11** (batch verification + proof aggregation; items (m)/(q); roadmap row (t) *shielded cross-chain privacy pool (F5)*).
 4. [`circom/PrivacyPool/README.md`](../../circom/PrivacyPool/README.md) — the reusable 1-in/2-out spend circuit, note commitment, Merkle gadget, and Nova step variant.
+5. [`aiken/f5/pool/`](pool/) — faithful off-chain pool simulation (Poseidon Merkle root bookkeeping + nullifier log), 25 unit/golden/property tests, keyed witness JSONs identical to `gen_privacy_input.py`.
+6. [`aiken/f5/demo/`](demo/) — reproducible N-user end-to-end Groth16 demo (`f5_e2e_groth16.sh`, `gen_multi_input.py`).
+7. [`aiken/f5/bench/`](bench/) — scaling benchmark: users/depth × {witness, ceremony, prove, verify} wall + RSS, `results.tsv` and markdown table.
