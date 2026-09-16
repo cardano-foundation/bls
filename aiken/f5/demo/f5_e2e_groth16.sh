@@ -4,9 +4,9 @@
 #
 # N distinct users each deposit a note into the shared pool, then submit their
 # 1-in / 2-out spend (one Groth16 proof per user) against the pool root at the
-# time of their transaction.  All proofs are verified individually — this is
-# the *current* Groth16 implementation (Impl 7, single-proof verify); later the
-# pool is upgraded to batched/aggregated verification.
+# time of their transaction.  Proofs are verified in two ways for comparison:
+#   (a) individually — current Impl 7, one pairing check per proof
+#   (b) batched      — Impl 11, a single multi-pairing product for all proofs
 #
 # On-chain artifacts per user:  $OUT/user_NNN.proof, user_NNN.pub
 # Shared:                        $OUT/pp_vk.ak (for aiken/groth16)
@@ -23,6 +23,8 @@ DEPTH="${DEPTH:-4}"
 USERS="${USERS:-4}"
 SPENDS="${SPENDS:-$USERS}"
 SEED="${SEED:-42}"
+CIRCUIT="${CIRCUIT:-$PP/privacy_pool.circom}"
+CNAME="$(basename "$CIRCUIT" .circom)"
 
 # 2^DEPTH leaves: deposits + 2 outputs per spend must fit.
 CAPACITY=$(( 2 ** DEPTH ))
@@ -49,66 +51,79 @@ mkdir -p "$OUT"
 echo "== F5 | multi-user Groth16 e2e (privacy pool, depth $DEPTH, $USERS users, $SPENDS spends, seed $SEED) =="
 
 # 0. build the Rust CLIs
-echo "[0/7] building Rust CLIs..."
+echo "[0/8] building Rust CLIs..."
 cargo build --release --manifest-path "$ROOT/clis/trusted-setup/Cargo.toml"
 cargo build --release --manifest-path "$ROOT/clis/groth16/Cargo.toml"
 
-# 1. compile privacy_pool.circom
-echo "[1/7] compiling privacy_pool.circom (BLS12-381)..."
+# 1. compile the circuit
+echo "[1/8] compiling $CNAME.circom (BLS12-381)..."
 cd "$PP"
-circom privacy_pool.circom --r1cs --wasm --sym --prime bls12381 \
+circom "$CIRCUIT" --r1cs --wasm --sym --prime bls12381 \
   -o "$OUT" \
+  -l "$PP" \
   -l ../RangeProof/node_modules/circomlib/circuits \
   -l ./node_modules/circomlib/circuits
 cd "$ROOT"
-CONSTRAINTS="$(snarkjs info -r "$OUT/privacy_pool.r1cs" 2>/dev/null \
+CONSTRAINTS="$(snarkjs info -r "$OUT/$CNAME.r1cs" 2>/dev/null \
   | grep -o '# of Constraints: [0-9]*' | grep -o '[0-9]*')"
 [ -z "$CONSTRAINTS" ] && CONSTRAINTS="?"
 
 # 2. generate the multi-user scenario via the pool simulation
-echo "[2/7] generating multi-user scenario (pool simulation)..."
+echo "[2/8] generating multi-user scenario (pool simulation)..."
 python3 "$SDIR/gen_multi_input.py" \
   --depth "$DEPTH" --users "$USERS" --spends "$SPENDS" --seed "$SEED" --out "$OUT"
 
 # 3. witnesses
-echo "[3/7] computing witnesses (one per user)..."
+echo "[3/8] computing witnesses (one per user)..."
 : > "$OUT/timings.tsv"
 for f in "$OUT"/user_*.json; do
   u="$(basename "$f" .json)"
   rm -f "$OUT/$u.wtns"
   timed witness "$u" snarkjs wtns calculate \
-    "$OUT/privacy_pool_js/privacy_pool.wasm" "$f" "$OUT/$u.wtns"
+    "$OUT/${CNAME}_js/$CNAME.wasm" "$f" "$OUT/$u.wtns"
 done
 
 # 4. dev ceremony (once, shared across all users)
-echo "[4/7] dev ceremony (--sparse)..."
+echo "[4/8] dev ceremony (--sparse)..."
 timed ceremony all "$TS" ceremony-dev --sparse \
-  --circuit "$OUT/privacy_pool.r1cs" \
+  --circuit "$OUT/$CNAME.r1cs" \
   --proving-key "$OUT/pp.pk" --verifying-key "$OUT/pp.vk"
 
 # 5. prove — one proof per user
-echo "[5/7] proving (one proof per user)..."
+echo "[5/8] proving (one proof per user)..."
 for f in "$OUT"/user_*.json; do
   u="$(basename "$f" .json)"
   rm -f "$OUT/$u.proof" "$OUT/$u.pub"
   timed prove "$u" "$G16" prove --sparse \
-    --circuit "$OUT/privacy_pool.r1cs" \
+    --circuit "$OUT/$CNAME.r1cs" \
     --witness "$OUT/$u.wtns" \
     --proving-key "$OUT/pp.pk" --out "$OUT/$u.proof"
 done
 
 # 6. verify all proofs individually (current impl — linear) + export vk
-echo "[6/7] verifying each proof (current impl, N x single verify)..."
+echo "[6/8] verifying each proof (Impl 7, N x single verify)..."
 for f in "$OUT"/user_*.proof; do
   u="$(basename "$f" .proof)"
   timed verify "$u" "$G16" verify \
     --proof "$f" --public "$OUT/$u.pub" --verifying-key "$OUT/pp.vk"
 done
+
+# 7. batch verify — Impl 11: one multi-pairing product for ALL proofs
+echo "[7/8] batch verifying all proofs (Impl 11, one multi-pairing product)..."
+BATCH_ARGS=()
+for f in "$OUT"/user_*.proof; do
+  u="$(basename "$f" .proof)"
+  BATCH_ARGS+=(--proof "$f" --public "$OUT/$u.pub")
+done
+timed batch-verify all "$G16" verify-batch \
+  --verifying-key "$OUT/pp.vk" \
+  "${BATCH_ARGS[@]}"
+
 "$G16" export-vk --verifying-key "$OUT/pp.vk" --out "$OUT/pp_vk.ak"
 
-# 7. summary
+# 8. summary
 echo
-echo "[7/7] summary"
+echo "[8/8] summary"
 PROOF_BYTES="$(wc -c < "$OUT/user_000.proof")"
 echo "  constraints   : $CONSTRAINTS"
 echo "  spend proofs  : $(ls "$OUT"/user_*.proof | wc -l)  ($PROOF_BYTES bytes each)"

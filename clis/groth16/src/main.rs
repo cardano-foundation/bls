@@ -72,8 +72,24 @@ pub enum Command {
     ///
     ///   $ groth16 verify --proof proof.bin --public proof.pub --verifying-key circuit.vk
     ///
-    ///   $ groth16 verify --proof proof.bin --public proof.pub
+/// $ groth16 verify --proof proof.bin --public proof.pub
     Verify(cmd::verify::Args),
+
+    /// Verify many Groth16 proofs with a single multi-pairing product (Impl 11)
+    ///
+    /// Loads a batch of proof/public-input file pairs and checks *all* of
+    /// them together by folding each Groth16 pairing equation into one
+    /// multi-pairing product with fresh random scalars (Schwartz–Zippel
+    /// soundness).  The fixed CRS points of the verifying key are prepared
+    /// once and reused across the whole batch.
+    ///
+    /// Proofs and public inputs pair positionally:
+    ///
+    ///   $ groth16 verify-batch \
+    ///       --verifying-key circuit.vk \
+    ///       --proof user_000.proof --public user_000.pub \
+    ///       --proof user_001.proof --public user_001.pub
+    VerifyBatch(cmd::verify_batch::Args),
 
     /// Export a binary verifying key to Aiken source code
     ///
@@ -111,5 +127,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         Command::ExportVk(args) => cmd::export_vk::run(args),
         Command::Prove(args) => cmd::prove::run(args),
         Command::Verify(args) => cmd::verify::run(args),
+        Command::VerifyBatch(args) => cmd::verify_batch::run(args),
     }
 }

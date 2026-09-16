@@ -34,7 +34,7 @@ echo "configs: $CONFIGS"
 
 RESULTS="$OUT_DIR/results.tsv"
 : > "$RESULTS"
-echo -e "config\tusers\tspends\tdepth\tconstraints\tproof_bytes\twitness_total\twitness_maxrss\tceremony\tceremony_maxrss\tprove_total\tprove_maxrss\tverify_total\tverify_maxrss\ttotal" >> "$RESULTS"
+echo -e "config\tusers\tspends\tdepth\tconstraints\tproof_bytes\twitness_total\twitness_maxrss\tceremony\tceremony_maxrss\tprove_total\tprove_maxrss\tverify_total\tverify_maxrss\tbatchverify_total\tbatchverify_maxrss\ttotal" >> "$RESULTS"
 
 for cfg in $CONFIGS; do
   depth="${cfg%%:*}"
@@ -63,20 +63,27 @@ for cfg in $CONFIGS; do
   prv_r="$(awk '$2=="prove"{if($4>m)m=$4} END{print m}' "$T")"
   vfy_t="$(awk '$2=="verify"{s+=$3} END{printf "%.3f", s}' "$T")"
   vfy_r="$(awk '$2=="verify"{if($4>m)m=$4} END{print m}' "$T")"
+  bv_t="$(awk '$2=="batch-verify"{s+=$3} END{printf "%.3f", s}' "$T")"
+  bv_r="$(awk '$2=="batch-verify"{if($4>m)m=$4} END{print m}' "$T")"
   total="$(awk '{s+=$3} END{printf "%.3f", s}' "$T")"
 
-  echo -e "d${depth}_u${users}\t${users}\t${spends}\t${depth}\t${constraints}\t${proof_bytes}\t${wit_t}\t${wit_r}\t${cer_t}\t${cer_r}\t${prv_t}\t${prv_r}\t${vfy_t}\t${vfy_r}\t${total}" >> "$RESULTS"
+  echo -e "d${depth}_u${users}\t${users}\t${spends}\t${depth}\t${constraints}\t${proof_bytes}\t${wit_t}\t${wit_r}\t${cer_t}\t${cer_r}\t${prv_t}\t${prv_r}\t${vfy_t}\t${vfy_r}\t${bv_t}\t${bv_r}\t${total}" >> "$RESULTS"
   echo "  done d${depth}_u${users}: ${spends} proofs, ${proof_bytes}B each, total ${total}s"
 done
 
 # markdown rendering of the aggregate table
+# columns: 1 config 2 users 3 spends 4 depth 5 constraints 6 proof(B)
+#          7 witness 9 ceremony 11 prove 13 verify 15 batch-verify 17 total
 MD="$OUT_DIR/results.md"
 {
-  echo "| config | users | spends | depth | constraints | proof (B) | witness | ceremony | prove | verify | total |"
-  echo "|---|---|---|---|---|---|---|---|---|---|---|"
+  echo "| config | users | spends | depth | constraints | proof (B) | witness | ceremony | prove | verify | batch-verify | speedup | total |"
+  echo "|---|---|---|---|---|---|---|---|---|---|---|---|---|"
   awk -F'\t' 'NR>1 {
-    printf "| %s | %s | %s | %s | %s | %s | %.1fs | %.1fs | %.1fs | %.1fs | %.1fs |\n",
-      $1, $2, $3, $4, $5, $6, $7, $9, $11, $13, $15
+    slow=$13; fast=$15;
+    sp = (fast > 0) ? slow/fast : "-";
+    sps = (sp != "-") ? sprintf("%.1fx", sp) : "-";
+    printf "| %s | %s | %s | %s | %s | %s | %.1fs | %.1fs | %.1fs | %.1fs | %.1fs | %s | %.1fs |\n",
+      $1, $2, $3, $4, $5, $6, $7, $9, $11, $13, $15, sps, $17
   }' "$RESULTS"
 } > "$MD"
 

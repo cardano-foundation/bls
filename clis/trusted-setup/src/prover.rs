@@ -1,6 +1,9 @@
 use ark_bls12_381::{Bls12_381, Fr, G1Affine, G1Projective, G2Affine, G2Projective};
-use ark_ec::{pairing::Pairing, AffineRepr, Group, VariableBaseMSM};
-use ark_ff::{Field, Zero};
+use ark_ec::{
+    pairing::{prepare_g1, prepare_g2, Pairing},
+    AffineRepr, Group, VariableBaseMSM,
+};
+use ark_ff::{Field, UniformRand, Zero};
 use ark_poly::{univariate::DensePolynomial, EvaluationDomain, GeneralEvaluationDomain, Polynomial};
 use ark_std::vec::Vec;
 use rayon;
@@ -16,6 +19,7 @@ pub struct Proof {
 }
 
 /// A Groth16 public-input commitment.
+#[derive(Clone, Copy, Debug)]
 pub struct PublicInput {
     pub v: G1Affine,
 }
@@ -642,6 +646,202 @@ pub fn verify_proof(
     lhs == rhs
 }
 
+// ------------------------------------------------------------------
+// Implementation 11: prepared verifier + batched pairing verification
+// ------------------------------------------------------------------
+
+/// A verifier-side cache of the four fixed CRS points, prepared for the
+/// Miller loop.
+///
+/// Pairing verification on BLS12-381 does two kinds of work:
+///   1. *Preparation* — precomputing the doubling-and-adding coefficients
+///      (line functions) required by the Miller loop.  For the fixed CRS
+///      points `beta·G2`, `gamma·G2`, `delta·G2` this is the *same*
+///      computation for every proof.
+///   2. *Miller loops + final exponentiation* — once per pairing.
+///
+/// `PreparedVerifyingKey` hoists step 1 for the fixed points: it is done
+/// exactly once per circuit instead of once per proof.  Verifying `N`
+/// proofs individually therefore drops from `N` preparations of the three
+/// G2 points to a single preparation.
+pub struct PreparedVerifyingKey {
+    /// Raw `alpha·G1` (kept for batch linear-combination scaling).
+    pub alpha_g1: G1Affine,
+    /// Prepared `alpha·G1` (used by the single-proof prepared verifier).
+    pub alpha_g1_prepared: <Bls12_381 as Pairing>::G1Prepared,
+    /// Prepared `beta·G2`.
+    pub beta_g2_prepared: <Bls12_381 as Pairing>::G2Prepared,
+    /// Prepared `gamma·G2`.
+    pub gamma_g2_prepared: <Bls12_381 as Pairing>::G2Prepared,
+    /// Prepared `delta·G2`.
+    pub delta_g2_prepared: <Bls12_381 as Pairing>::G2Prepared,
+}
+
+impl PreparedVerifyingKey {
+    /// Build the prepared form of the four fixed CRS points.
+    pub fn new(
+        alpha_g1: &G1Affine,
+        beta_g2: &G2Affine,
+        gamma_g2: &G2Affine,
+        delta_g2: &G2Affine,
+    ) -> Self {
+        Self {
+            alpha_g1: *alpha_g1,
+            alpha_g1_prepared: prepare_g1::<Bls12_381>(*alpha_g1),
+            beta_g2_prepared: prepare_g2::<Bls12_381>(*beta_g2),
+            gamma_g2_prepared: prepare_g2::<Bls12_381>(*gamma_g2),
+            delta_g2_prepared: prepare_g2::<Bls12_381>(*delta_g2),
+        }
+    }
+
+    /// Build the prepared form from a full `ceremony::VerifyingKey`.
+    pub fn from_vk(vk: &crate::ceremony::VerifyingKey) -> Self {
+        Self::new(&vk.alpha_g1, &vk.beta_g2, &vk.gamma_g2, &vk.delta_g2)
+    }
+}
+
+/// Verify a proof using a `PreparedVerifyingKey`.
+///
+/// This is the prepared analog of [`verify_proof`]: all four terms of the
+/// Groth16 pairing product are folded into a single Miller loop with a
+/// shared final exponentiation:
+///
+///   e(A, B) · e(−α·G1, β·G2) · e(−C, δ·G2) · e(−V, γ·G2) == 1
+///
+/// The fixed points (`β`, `γ`, `δ`) need no per-proof preparation here.
+pub fn verify_proof_prepared(
+    proof: &Proof,
+    public_input: &PublicInput,
+    pvk: &PreparedVerifyingKey,
+) -> bool {
+    let g1 = vec![
+        prepare_g1::<Bls12_381>(proof.a),
+        prepare_g1::<Bls12_381>(G1Affine::from(-G1Projective::from(pvk.alpha_g1))),
+        prepare_g1::<Bls12_381>(G1Affine::from(-G1Projective::from(proof.c))),
+        prepare_g1::<Bls12_381>(G1Affine::from(-G1Projective::from(public_input.v))),
+    ];
+    let g2 = vec![
+        prepare_g2::<Bls12_381>(proof.b),
+        pvk.beta_g2_prepared.clone(),
+        pvk.delta_g2_prepared.clone(),
+        pvk.gamma_g2_prepared.clone(),
+    ];
+    Bls12_381::multi_pairing(g1, g2).is_zero()
+}
+
+/// Verify a batch of independent Groth16 proofs with a single multi-pairing
+/// product.
+///
+/// # Idea
+///
+/// Each proof must satisfy the same pairing equation
+///
+///   e(A_i, B_i) == e(α·G1, β·G2) · e(C_i, δ·G2) · e(V_i, γ·G2).
+///
+/// Raising both sides to a random scalar `r_i` and multiplying over all
+/// `N` proofs folds every equation into one product of pairings:
+///
+///   Π_i e(r_i·A_i, B_i) == e((Σ r_i)·α·G1, β·G2)
+///                          · e(Σ r_i·C_i, δ·G2)
+///                          · e(Σ r_i·V_i, γ·G2)
+///
+/// (# math note: multiplication in `GT` is written additively in arkworks, so
+/// "raising to `r_i`" becomes scalar multiplication of a `PairingOutput`, and
+/// "*the product of pairings*" is a sum.  The check `== 1` below is therefore
+/// `PairingOutput::is_zero()`.)
+///
+/// # Soundness
+///
+/// The random scalars make the batch check sound by the Schwartz–Zippel
+/// lemma: if *any* proof is invalid, the two sides of the folded equation
+/// are two distinct rational functions evaluated at random points, so the
+/// equality holds with negligible probability (`~|Fr|⁻¹`).  The `r_i` are
+/// drawn fresh from the OS RNG on every call.  (`verify_batch_with_scalars`
+/// exposes the deterministic core for tests / transcripts.)
+///
+/// # Cost
+///
+/// `N` individual verifications run `4N` pairings.  This batched verifier
+/// runs a single Miller loop over `N + 3` pairs followed by **one** final
+/// exponentiation, and never re-prepares the fixed CRS points.
+pub fn verify_batch(
+    proofs: &[Proof],
+    public_inputs: &[PublicInput],
+    pvk: &PreparedVerifyingKey,
+) -> bool {
+    let mut rng = rand::thread_rng();
+    let scalars: Vec<Fr> = (0..proofs.len())
+        .map(|_| loop {
+            let s = Fr::rand(&mut rng);
+            if !s.is_zero() {
+                break s;
+            }
+        })
+        .collect();
+    verify_batch_with_scalars(proofs, public_inputs, pvk, &scalars)
+}
+
+/// The deterministic core of [`verify_batch`]; `scalars[i]` weights proof `i`.
+///
+/// Supplying the scalars lets tests pin down exact failure cases and lets
+/// transcript-style (Fiat–Shamir) batching reuse the same code path.  The
+/// scalar consistency requirement is that each entry is a sample from a
+/// uniform distribution over `Fr`; the safety argument is the same as for
+/// [`verify_batch`].
+pub fn verify_batch_with_scalars(
+    proofs: &[Proof],
+    public_inputs: &[PublicInput],
+    pvk: &PreparedVerifyingKey,
+    scalars: &[Fr],
+) -> bool {
+    let n = proofs.len();
+    if n == 0 {
+        return true;
+    }
+    assert_eq!(n, public_inputs.len(), "one public input per proof");
+    assert_eq!(n, scalars.len(), "one scalar per proof");
+
+    // Σ r_i — the exponent applied to the α·G1 term.
+    let mut sum_r = Fr::zero();
+    for s in scalars {
+        sum_r += s;
+    }
+
+    // Multi-pairing operands.  g1[i] pairs with g2[i].
+    let mut g1: Vec<<Bls12_381 as Pairing>::G1Prepared> = Vec::with_capacity(n + 3);
+    let mut g2: Vec<<Bls12_381 as Pairing>::G2Prepared> = Vec::with_capacity(n + 3);
+
+    // Σ r_i·C_i and Σ r_i·V_i, accumulated negated so that the folded
+    // equality "LHS == RHS" becomes a single product equal to 1.
+    let mut c_batch = G1Projective::zero();
+    let mut v_batch = G1Projective::zero();
+
+    for i in 0..n {
+        // e(r_i·A_i, B_i) term.
+        let scaled_a = G1Projective::from(proofs[i].a) * scalars[i];
+        g1.push(prepare_g1::<Bls12_381>(G1Affine::from(scaled_a)));
+        g2.push(prepare_g2::<Bls12_381>(proofs[i].b));
+
+        c_batch += G1Projective::from(proofs[i].c) * scalars[i];
+        v_batch += G1Projective::from(public_inputs[i].v) * scalars[i];
+    }
+
+    // −(Σ r_i)·α·G1 against β·G2.
+    let alpha_scaled = G1Projective::from(pvk.alpha_g1) * (-sum_r);
+    g1.push(prepare_g1::<Bls12_381>(G1Affine::from(alpha_scaled)));
+    g2.push(pvk.beta_g2_prepared.clone());
+
+    // −(Σ r_i·C_i) against δ·G2.
+    g1.push(prepare_g1::<Bls12_381>(G1Affine::from(-c_batch)));
+    g2.push(pvk.delta_g2_prepared.clone());
+
+    // −(Σ r_i·V_i) against γ·G2.
+    g1.push(prepare_g1::<Bls12_381>(G1Affine::from(-v_batch)));
+    g2.push(pvk.gamma_g2_prepared.clone());
+
+    Bls12_381::multi_pairing(g1, g2).is_zero()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1123,5 +1323,176 @@ mod tests {
         );
 
         assert_dense_sparse_parity(&circuit, &pk, &vk);
+    }
+
+    // ------------------------------------------------------------------
+    // Implementation 11 tests: prepared verifier + batched verification
+    // ------------------------------------------------------------------
+
+    /// A satisfying witness for the toy multiplier circuit
+    /// (`x1*x2 == x5`, `x3*x4 == x6`, `x5*x6 == a`).  Any choice of
+    /// `x1..x4` is valid, so many *distinct* proofs share one VK.
+    fn multiplier_witness(x1: u64, x2: u64, x3: u64, x4: u64) -> Vec<Fr> {
+        let x5 = x1 * x2;
+        let x6 = x3 * x4;
+        let a = x5 * x6;
+        vec![
+            Fr::from(1u64),
+            Fr::from(a),
+            Fr::from(x1),
+            Fr::from(x2),
+            Fr::from(x3),
+            Fr::from(x4),
+            Fr::from(x5),
+            Fr::from(x6),
+        ]
+    }
+
+    /// Build `n` distinct valid proofs for the toy circuit against one VK.
+    fn batch_fixture(
+        n: usize,
+    ) -> (
+        Vec<Proof>,
+        Vec<PublicInput>,
+        PreparedVerifyingKey,
+        crate::ceremony::VerifyingKey,
+    ) {
+        let engine = FftQapEngine::new();
+        let tw = crate::ceremony::ToxicWaste::deterministic();
+        let (full_pk, vk) = crate::ceremony::single_party_ceremony_full_from_tw(
+            &engine, &L, &R, &O, 2, tw, false,
+        );
+        let prover = PippengerProver::new();
+        let pvk = PreparedVerifyingKey::from_vk(&vk);
+
+        let mut proofs = Vec::with_capacity(n);
+        let mut public_inputs = Vec::with_capacity(n);
+        for i in 0..n {
+            let x = i as u64 + 1;
+            let witness = multiplier_witness(x, x + 1, x + 2, x + 3);
+            let (proof, public_input) = prover.prove_with_full_pk(&engine, &full_pk, &L, &R, &O, &witness);
+            proofs.push(proof);
+            public_inputs.push(public_input);
+        }
+        (proofs, public_inputs, pvk, vk)
+    }
+
+    #[test]
+    fn test_verify_prepared_matches_verify_proof() {
+        let (mut proofs, mut inputs, pvk, vk) = batch_fixture(1);
+        let (proof, public_input) = (proofs.remove(0), inputs.remove(0));
+
+        assert!(
+            verify_proof(&proof, &public_input, &vk.alpha_g1, &vk.beta_g2, &vk.gamma_g2, &vk.delta_g2),
+            "reference verifier must accept the proof"
+        );
+        assert!(
+            verify_proof_prepared(&proof, &public_input, &pvk),
+            "prepared verifier must accept the same proof"
+        );
+    }
+
+    #[test]
+    fn test_verify_batch_many_distinct_proofs() {
+        let (proofs, public_inputs, pvk, _vk) = batch_fixture(5);
+        assert!(
+            verify_batch(&proofs, &public_inputs, &pvk),
+            "a batch of 5 distinct valid proofs must verify as a single multi-pairing product"
+        );
+    }
+
+    #[test]
+    fn test_verify_batch_rejects_tampered_proof() {
+        let (mut proofs, public_inputs, pvk, _vk) = batch_fixture(4);
+
+        // Corrupt C of the second proof by adding the generator to it.
+        let bad_c = G1Affine::from(G1Projective::from(proofs[1].c) + G1Projective::generator());
+        proofs[1].c = bad_c;
+
+        assert!(
+            !verify_batch(&proofs, &public_inputs, &pvk),
+            "a batch containing one tampered proof must be rejected"
+        );
+
+        // Restore and re-verify to prove the tamper was the cause.
+        proofs[1].c = batch_fixture(4).0[1].c;
+        assert!(
+            verify_batch(&proofs, &public_inputs, &pvk),
+            "restoring the proof must make the batch valid again"
+        );
+    }
+
+    #[test]
+    fn test_verify_batch_deterministic_scalars() {
+        let (proofs, public_inputs, pvk, _vk) = batch_fixture(3);
+        let scalars = vec![Fr::from(1u64), Fr::from(2u64), Fr::from(3u64)];
+        assert!(
+            verify_batch_with_scalars(&proofs, &public_inputs, &pvk, &scalars),
+            "all-valid batch must pass with fixed non-zero scalars"
+        );
+
+        // A zero scalar drops that proof out of the check entirely — an all-valid
+        // batch still passes, but a batch whose *only* invalid proof is zero-weighted
+        // would slip through.  The random path rejects zero scalars; here we assert
+        // the degenerate behaviour is at least consistent (still true).
+        let zero_scalars = vec![Fr::from(1u64), Fr::from(0u64), Fr::from(3u64)];
+        assert!(
+            verify_batch_with_scalars(&proofs, &public_inputs, &pvk, &zero_scalars),
+            "zero-weighted proof is ignored, batch remains valid"
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "one public input per proof")]
+    fn test_verify_batch_length_mismatch_panics() {
+        let (proofs, _public_inputs, pvk, _vk) = batch_fixture(2);
+        let scalars = vec![Fr::from(1u64), Fr::from(2u64)];
+        // Only one public input for two proofs.
+        let pub_one = vec![_public_inputs[0]];
+        let _ = verify_batch_with_scalars(&proofs, &pub_one, &pvk, &scalars);
+    }
+
+    #[test]
+    fn test_verify_batch_empty_is_trivial() {
+        let (_, _, pvk, _vk) = batch_fixture(1);
+        let scalars: Vec<Fr> = vec![];
+        assert!(
+            verify_batch_with_scalars(&[], &[], &pvk, &scalars),
+            "an empty batch is trivially valid"
+        );
+    }
+
+    #[test]
+    fn test_verify_batch_parity_with_individual_verify() {
+        let n = 4;
+        let (proofs, public_inputs, pvk, vk) = batch_fixture(n);
+
+        // Every proof passes individually…
+        for i in 0..n {
+            assert!(
+                verify_proof(&proofs[i], &public_inputs[i], &vk.alpha_g1, &vk.beta_g2, &vk.gamma_g2, &vk.delta_g2),
+                "proof {i} must pass individual verification"
+            );
+        }
+
+        // …and the whole set passes as one multi-pairing product.
+        assert!(
+            verify_batch(&proofs, &public_inputs, &pvk),
+            "the individual-verify-valid set must pass as a batch"
+        );
+
+        // A batch of entirely *invalid* proofs must be rejected.
+        let bogus: Vec<Proof> = proofs
+            .iter()
+            .map(|p| Proof {
+                a: G1Affine::from(G1Projective::from(p.a) + G1Projective::generator()),
+                b: p.b,
+                c: G1Affine::from(G1Projective::from(p.c) + G1Projective::generator()),
+            })
+            .collect();
+        assert!(
+            !verify_batch(&bogus, &public_inputs, &pvk),
+            "a batch of invalid proofs must be rejected"
+        );
     }
 }
