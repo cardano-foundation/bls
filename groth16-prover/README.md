@@ -1269,16 +1269,16 @@ The fast path computes the **exact same curve point** as the MSM path — it is 
 <details>
 <summary><b>Implementation 11 — click to expand</b></summary>
 
-> **Status:** ⏳ **Roadmap item (not started).** On-chain verification economics: turn "N proofs → N pairing checks" into "N proofs → one multi-pairing product or one aggregated proof", plus a one-time `PreparedVerifyingKey` per circuit. Absorbs Pending items **(m)** (prepared verifier + batched pairings) and **(q)** (proof aggregation) as its work items; the Lagrange-basis SRS **item (p)** stays standalone.
+> **Status:** ✅ **Batch verification delivered + measured** on BLS12-381 (this repo). On-chain verification economics: turn "N proofs → N pairing checks" into "N proofs → one multi-pairing product" (`PreparedVerifyingKey` + `verify_batch` in `clis/trusted-setup/src/prover.rs`, `groth16 verify-batch` CLI). Single-proof aggregation (item **(q)**, SnarkPack-style) remains the follow-on work item; the Lagrange-basis SRS **item (p)** stays standalone.
 >
 > **Goal:** amortise on-chain verification cost across many proofs — one pairing check per batch — by batching/aggregating *independent* proofs (many users, many transactions).
 
 ### Work items (full detail in [Pending (m)](#m-prepared-verifier-and-batched-pairing-verification-beyond-what-zeroj-supports) and [Pending (q)](#q-proof-aggregation-beyond-what-zeroj-supports))
 
-1. **Prepared verifier** — a `PreparedVerifyingKey` that precomputes and caches the fixed VK data (e.g. G2 line coefficients for the Miller loop) once per circuit, not per proof.
-2. **Batched pairing verification** — a batched verifier that checks multiple proofs with a single multi-pairing product (Groth.jl: N=16 batch 18.212 ms → 13.854 ms on the same fixture).
-3. **Proof aggregation** — roll multiple proofs into a single succinct proof verified with one pairing check (arkworks `groth16::aggregate_proofs`).
-4. **CLI:** extend `verify` with a `--batch` / `aggregate` subcommand over existing `.pk`/`.vk` + proofs; the Aiken on-chain verifier gains the batched/aggregated check.
+1. ✅ **Prepared verifier** — `PreparedVerifyingKey` that precomputes and caches the fixed VK data (`G2Prepared` line coefficients for `β`, `γ`, `δ` once) per circuit, not per proof.
+2. ✅ **Batched pairing verification** — `verify_batch` checks N proofs with one multi-pairing product (`N+3` Miller loops + a single final exponentiation vs `4N` full pairings). Measured on this machine: d6_u16 verify 0.74 s → batch-verify 0.18 s (**4.1x**); d6_u4 0.21 s → 0.08 s (**2.6x**). CLI: `groth16 verify-batch --proof … --public … [--verifying-key …]`.
+3. ⏳ **Proof aggregation** — roll multiple proofs into a single succinct proof verified with one pairing check. Follow-on: requires an inner-pairing-product argument (SnarkPack); not shipped to avoid unsound/custom crypto.
+4. ✅ **CLI:** `verify-batch` subcommand over existing `.vk` + proofs added; the Aiken on-chain verifier keeps the single-proof check (batch is the off-chain/relayer path for now).
 
 ### Benefit
 
@@ -1300,9 +1300,9 @@ Cheaper on-chain verification — O(N) pairing checks → one — essential for 
 | Order | Item | Status | Depends on | Risk |
 |-------|------|--------|------------|------|
 | 1 | (p) Lagrange-basis SRS — complete FFT production path | ⏳ Not started | None | Low |
-| 2 | (m) Prepared verifier + batched pairing verification | ⏳ Not started | None | Low |
-| 3 | (o) Randomized R1CS test fixtures + parity assertions | ⏳ Not started | None | Low |
-| 4 | (q) Proof aggregation (`groth16::aggregate_proofs`) | ⏳ Not started | (m) | Low |
+| 2 | (m) Prepared verifier + batched pairing verification | ✅ Delivered (Impl 11) | None | Low |
+| 3 | (o) Randomized R1CS test fixtures + parity assertions | ✅ Delivered | None | Low |
+| 4 | (q) Proof aggregation (`groth16::aggregate_proofs`) | ⏳ Follow-on | (m) | Medium |
 | 5 | (t) Shielded cross-chain privacy pool (F5) | ⏳ Research | Sparse prover | High |
 
 > **Ordering rationale:** items 1–4 are classical, small, and low-risk; they unblock on-chain verification economics and testing infrastructure. Item 5 (F5) is higher-risk research that builds on the sparse prover.
@@ -1315,7 +1315,7 @@ For **short-term production on Cardano**:
 3. ⏳ Ceremony MSM parallelization — **low-hanging follow-up**
 
 For **medium-term**:
-4. ⏳ Implementation 11 — batch verification + proof aggregation — **O(N) pairing checks → one; simple, classical on-chain-verification economics (items (m), (q) below)**
+4. ✅ Implementation 11 — batch verification **delivered** (**O(N) pairing checks → one multi-pairing product**, measured 2.6x-4.3x on this machine); proof aggregation (item (q)) is the follow-on
 
 For **long-term research**:
 5. Evaluate PLONK / Halo2 only if proof size or verification cost regressions are acceptable.
@@ -1326,10 +1326,11 @@ For **long-term research**:
 
 ### (m) Prepared verifier and batched pairing verification (beyond what zeroj supports)
 
-> **Home:** absorbed into [Implementation 11](#implementation-11-batch-verification-and-proof-aggregation) as an on-chain verification work item (batched pairings).
+> **Home:** absorbed into [Implementation 11](#implementation-11-batch-verification-and-proof-aggregation) — ✅ **delivered + measured in this repo.**
 
-- **Current:** The verifier recomputes every pairing from scratch each time a proof is checked.
-- **Target:** Add a `PreparedVerifyingKey` that precomputes and caches fixed verification-key data (e.g., G2 line coefficients for the Miller loop). Also expose a batched verifier that checks multiple proofs with a single multi-pairing product.
+- **Current (before):** The verifier recomputes every pairing from scratch each time a proof is checked.
+- **Delivered:** `PreparedVerifyingKey` (caches `G1Prepared`/`G2Prepared` for the fixed CRS points once per circuit) plus `verify_batch` / `verify_batch_with_scalars` in `clis/trusted-setup/src/prover.rs`; CLI `groth16 verify-batch`.
+- **Measured (this machine):** d6_u16 — N single verifies 0.74 s → batch-verify 0.18 s (**4.1x**); d6_u8 0.39 s → 0.09 s (**4.3x**); d6_u4 0.21 s → 0.08 s (**2.6x**). The batch verifier folds `4N` full pairings into `N+3` Miller loops with a **single** final exponentiation.
 - **Reference:** [Groth.jl](https://github.com/0xpantera/Groth.jl) implements `prepare_verifying_key`, `prepare_inputs`, and `verify_with_prepared`; batched pairing verification reduced their `N=16` batch from `18.212 ms` to `13.854 ms` on the same fixture. Arkworks also provides `PreparedVerifyingKey`.
 - **Benefit:** On-chain verification becomes cheaper because the heavy G2 preparation is done once per VK, not per proof. Batching further amortizes the Miller-loop cost across many proofs.
 
@@ -1351,11 +1352,12 @@ For **long-term research**:
 
 ### (q) Proof aggregation (beyond what zeroj supports)
 
-> **Home:** absorbed into [Implementation 11](#implementation-11-batch-verification-and-proof-aggregation) as a proof-aggregation work item.
+> **Home:** absorbed into [Implementation 11](#implementation-11-batch-verification-and-proof-aggregation) as the remaining proof-aggregation work item (follow-on to the delivered batch verifier).
 
-- **Current:** Each proof is verified individually.
+- **Current:** Each proof is verified individually (or as a batched multi-pairing product).
 - **Target:** Support Groth16 proof aggregation (rolling multiple proofs into a single succinct proof that can be verified with one pairing check).
 - **Reference:** Arkworks has an optional `groth16::aggregate_proofs` module. Groth.jl tracks this on their roadmap.
+- **Note:** True single-proof Groth16 aggregation needs an inner-pairing-product argument (SnarkPack-style); it is **not** the naive linear combination (which would cross-multiply A/B/C and be unsound). We shipped the sound batch multi-pairing product instead and keep aggregation as this explicit follow-on.
 - **Benefit:** Essential for rollup and batching use cases where many proofs need to be verified on-chain in a single transaction.
 
 ### (t) Shielded cross-chain privacy pool (F5 research direction)

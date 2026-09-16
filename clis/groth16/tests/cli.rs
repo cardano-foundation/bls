@@ -1,7 +1,7 @@
 use assert_cmd::Command;
 use predicates::prelude::*;
 use std::fs;
-use tempfile::NamedTempFile;
+use tempfile::{NamedTempFile, TempDir};
 
 use ark_bls12_381::{Fq, Fr, G1Affine, G2Affine};
 use ark_ec::{AffineRepr, CurveGroup};
@@ -624,13 +624,98 @@ fn verify_missing_proof() {
     ));
 }
 
+// ------------------------------------------------------------------
+// Verify-batch command tests
+// ------------------------------------------------------------------
+
 #[test]
-fn verify_missing_public() {
+fn verify_batch_valid_batch() {
+    let (r1cs, wtns) = create_test_artifacts();
+    let dir = tempfile::TempDir::new().unwrap();
+    let pk = dir.path().join("pp.pk");
+    let vk = dir.path().join("pp.vk");
+    write_ceremony_dev_files(r1cs.path(), &pk, &vk);
+
+    // Produce two proofs from the same witness (identical but separately
+    // generated — enough to exercise the multi-pairing-product code path).
+    let p1 = dir.path().join("u0.bin");
+    let p2 = dir.path().join("u1.bin");
+    for p in [&p1, &p2] {
+        let mut cmd = Command::cargo_bin("groth16").unwrap();
+        cmd.arg("prove")
+            .arg("--circuit")
+            .arg(r1cs.path())
+            .arg("--witness")
+            .arg(wtns.path())
+            .arg("--proving-key")
+            .arg(&pk)
+            .arg("--out")
+            .arg(p);
+        cmd.assert().success();
+    }
+
+    // Batch-verify both proofs together.
     let mut cmd = Command::cargo_bin("groth16").unwrap();
-    cmd.arg("verify").arg("--proof").arg("/tmp/dummy.bin");
-    cmd.assert().failure().stderr(predicate::str::contains(
-        "required arguments were not provided",
-    ));
+    cmd.arg("verify-batch")
+        .arg("--verifying-key")
+        .arg(&vk)
+        .arg("--proof")
+        .arg(&p1)
+        .arg("--public")
+        .arg(p1.with_extension("pub"))
+        .arg("--proof")
+        .arg(&p2)
+        .arg("--public")
+        .arg(p2.with_extension("pub"));
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("VALID (2 proofs"));
+}
+
+#[test]
+fn verify_batch_rejects_tampered_member() {
+    let (r1cs, wtns) = create_test_artifacts();
+    let dir = tempfile::TempDir::new().unwrap();
+    let pk = dir.path().join("pp.pk");
+    let vk = dir.path().join("pp.vk");
+    write_ceremony_dev_files(r1cs.path(), &pk, &vk);
+
+    // Produce two valid proofs.
+    let p1 = dir.path().join("u0.bin");
+    let p2 = dir.path().join("u1.bin");
+    for p in [&p1, &p2] {
+        let mut cmd = Command::cargo_bin("groth16").unwrap();
+        cmd.arg("prove")
+            .arg("--circuit")
+            .arg(r1cs.path())
+            .arg("--witness")
+            .arg(wtns.path())
+            .arg("--proving-key")
+            .arg(&pk)
+            .arg("--out")
+            .arg(p);
+        cmd.assert().success();
+    }
+
+    // Corrupt p2: flip a byte in the C region (offset 144).
+    let mut p2_bytes = fs::read(&p2).unwrap();
+    p2_bytes[144] ^= 0xff;
+    fs::write(&p2, &p2_bytes).unwrap();
+
+    // Batch-verify: must fail.
+    let mut cmd = Command::cargo_bin("groth16").unwrap();
+    cmd.arg("verify-batch")
+        .arg("--verifying-key")
+        .arg(&vk)
+        .arg("--proof")
+        .arg(&p1)
+        .arg("--public")
+        .arg(p1.with_extension("pub"))
+        .arg("--proof")
+        .arg(&p2)
+        .arg("--public")
+        .arg(p2.with_extension("pub"));
+    cmd.assert().failure();
 }
 
 #[test]

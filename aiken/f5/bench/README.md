@@ -1,9 +1,15 @@
-# F5 — benchmarks (current Groth16 impl)
+# F5 — benchmarks (Groth16 proving + Impl 11 batch verification)
 
-`bench_f5_groth16.sh` sweeps the multi-user pool over the *current* Groth16
-pipeline — the one shipped in `groth16-prover` (Impl 7). Every config is driven
-through the exact same e2e script the demo uses, so the numbers below are what
-the F5 pool costs today, unchanged, before we upgrade verification.
+`bench_f5_groth16.sh` sweeps the multi-user pool over the Groth16 pipeline in
+`groth16-prover` (Impl 7 proving; Impl 11 batched verification). Every config is
+driven through the exact same e2e script the demo uses, so the numbers below are
+what the F5 pool costs:
+
+- **witness / ceremony / prove** — unchanged production paths
+- **verify** — the "before": one `groth16 verify` process per proof (4 pairings
+  each)
+- **batch-verify** — the "after": a single `groth16 verify-batch` process that
+  checks all proofs with **one multi-pairing product** (Impl 11)
 
 Configs are `depth:users[:spends]` (defaults `4:1 6:4 6:8 6:16`). Because the
 stock `privacy_pool.circom` hardcodes depth 4, the bench materializes an
@@ -23,31 +29,39 @@ CONFIGS="4:1 6:4 6:8 6:16" OUT_DIR=/tmp/f5_bench bash aiken/f5/bench/bench_f5_gr
 Proof size is constant: **192 bytes** (compressed BLS12-381). Each table shows
 wall-clock totals per phase for that config; Max RSS is recorded per phase in
 `results.tsv` (witness ~63-65 MiB, ceremony ~25-30 MiB, prove ~20-26 MiB,
-verify ~4.5-4.8 MiB).
+verify ~4.5-4.9 MiB).
 
-| config | users | spends | depth | constraints | witness | ceremony | prove | verify | total |
-|---|---|---|---|---|---|---|---|---|---|
-| d4_u1 | 1 | 1 | 4 | 7087 | 1.4s | 7.6s | 3.8s | 0.1s | 12.8s |
-| d6_u4 | 4 | 4 | 6 | 8365 | 5.4s | 10.0s | 22.7s | 0.3s | 38.3s |
-| d6_u8 | 8 | 8 | 6 | 8365 | 9.9s | 9.8s | 45.7s | 0.7s | 66.1s |
-| d6_u16 | 16 | 16 | 6 | 8365 | 21.1s | 10.0s | 90.0s | 1.1s | 122.3s |
+| config | users | spends | depth | constraints | witness | ceremony | prove | verify | batch-verify | speedup | total |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| d4_u1 | 1 | 1 | 4 | 7087 | 1.0s | 6.9s | 3.2s | 0.1s | 0.1s | 1.2x | 11.3s |
+| d6_u4 | 4 | 4 | 6 | 8365 | 3.9s | 8.6s | 17.8s | 0.2s | 0.1s | 2.6x | 30.5s |
+| d6_u8 | 8 | 8 | 6 | 8365 | 6.9s | 8.0s | 34.0s | 0.4s | 0.1s | 4.3x | 49.3s |
+| d6_u16 | 16 | 16 | 6 | 8365 | 12.5s | 7.2s | 63.1s | 0.7s | 0.2s | 4.1x | 83.8s |
 
-(witness/prove/verify are totals across all proofs of the config; ceremony runs
-once per config.)
+(witness/prove/verify/batch-verify are totals across all proofs of the config;
+ceremony runs once per config.)
 
 ## Reading the numbers
 
-* **Ceremony is constant** (~7.6-10 s) regardless of user count — the trusted
+* **Ceremony is constant** (~7.2-8.6 s) regardless of user count — the trusted
   setup is done once for the whole pool and the cost does not grow with users.
 * **Witness, prove, verify scale linearly** in the number of spends
   (16 users ≈ 16x a single user), and prove dominates.
-* **Prove dominates the re-scaling economy**: the pool's hot path on the prover
-  side is proof *generation*, which batching does not reduce — batching (next
-  Groth16 impl) collapses the *verifier* cost: N single verifies
-  (≈ 16 × 0.07 s here) into one batched/aggregated verify.
+* **Prove dominates the pool economy**: proof *generation* is the hot path and
+  batching does not reduce it. Batching collapses the *verifier* cost.
+* **Batch verify on the verifier side (Impl 11):**
+  * N single verifies run `4N` full pairings (each with its own final
+    exponentiation, plus per-process VK load); the batched verifier runs one
+    multi-Miller-loop over `N+3` pairs with a **single** final exponentiation.
+  * Math-only, batch-verify is `4N → N+3` pairings (≈3.8x at N=16) **and** one
+    final exponentiation instead of `4N`.
+  * The measured wall-clock speedup here is **2.6x-4.3x at N=4-16** — the
+    end-to-end numbers also amortize per-proof process startup + verifying-key
+    deserialisation, exactly the real-world relayer/bundler win of checking many
+    spends in one process.
 
-This is the "before" column. After the next Groth16 implementation we re-run
-the **same** sweep and table gains an "aggregated/batched" column.
+This table is the "before/after" capture for the F5 verification upgrade:
+individual verify vs Impl 11 batch verify on the same proofs.
 
 ## Reproducing
 

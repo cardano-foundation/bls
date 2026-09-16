@@ -1,16 +1,16 @@
 # F5 — Multi-User Private Pools (Aiken)
 
-> **One-line summary:** a Cardano **privacy pool for many users at once** — one shared shielded pool where deposits, spends, and withdrawals hide identity, amounts, and the transaction graph behind a single Merkle root of note commitments, verified by an Aiken Pool validator — demonstrated end-to-end with the **current Groth16 implementation** (one proof per spend). Batched multi-spend verification is the upgrade that follows the demonstration, delivered by the **next Groth16 implementation** (Impl 11: batch verification + proof aggregation).
+> **One-line summary:** a Cardano **privacy pool for many users at once** — one shared shielded pool where deposits, spends, and withdrawals hide identity, amounts, and the transaction graph behind a single Merkle root of note commitments, verified by an Aiken Pool validator — demonstrated end-to-end with the **current Groth16 implementation** (one proof per spend) and **batch-verified with Impl 11** (N proofs → one multi-pairing product). Single-proof aggregation (SnarkPack) is the remaining follow-on.
 
-> **Status:** ✅ Demonstrated + measured on the current implementation — end-to-end multi-user demo and benchmark exist:
+> **Status:** ✅ Demonstrated + measured on the current implementation **and upgraded verification delivered** — end-to-end multi-user demo, benchmark, and Impl 11 batched verifier:
 >
-> * [`aiken/f5/demo/README.md`](demo/README.md) — reproducible N-user e2e on the current Groth16 stack (Impl 7): 4 users / 4 spends, all proofs VALID, ~31 s, 192-byte proofs, per-phase wall + Max RSS.
-> * [`aiken/f5/bench/README.md`](bench/README.md) — scaling sweep (1 → 16 users at depth 4/6): witness/prove/verify grow linearly, ceremony is constant (~8-10 s once).
+> * [`aiken/f5/demo/README.md`](demo/README.md) — reproducible N-user e2e: 4 users / 4 spends, all proofs VALID, ~31 s, 192-byte proofs, per-phase wall + Max RSS, plus **Impl 11 batch-verify (0.24 s → 0.08 s, 3x)**.
+> * [`aiken/f5/bench/README.md`](bench/README.md) — scaling sweep (1 → 16 users at depth 4/6): witness/prove/verify grow linearly, ceremony is constant (~7-9 s once); **batch-verify = 2.6x-4.3x faster than N single verifies (measured)**.
 > * [`aiken/f5/pool/`](pool/) — faithful off-chain pool simulation (Merkle-root bookkeeping + nullifier log) validated by 25 unit/golden/property tests.
 >
-> **Sequence (as executed):** **1)** demonstrated F5 with the *current* Groth16 implementation (single 192-byte proof per spend) — done; **2)** documented the e2e and measured it (proof sizes, timings, pool root dynamics) — done; **3)** next: the **next Groth16 implementation — Implementation 11 (batch verification + proof aggregation)** — upgrades the pool to batched spends (N proofs → one multi-pairing product). Pool work was not blocked on batching; batching starts now that the measured demo exists.
+> **Sequence (as executed):** **1)** demonstrated F5 with the *current* Groth16 implementation (single 192-byte proof per spend) — done; **2)** documented the e2e and measured it (proof sizes, timings, pool root dynamics) — done; **3)** **Implementation 11 — batch verification** — upgraded the pool's verifier to **one multi-pairing product** for all N proofs and re-measured the same e2e/bench — done; **4)** proof aggregation (N proofs → one succinct proof) remains the final follow-on.
 >
-> **Companion docs:** concept and constraint budget → [`groth16-prover/docs/F5_RESEARCH_DIRECTION.md`](../../groth16-prover/docs/F5_RESEARCH_DIRECTION.md); the single-user privacy pool this multiplies → [`aiken/selective-disclosure/README.md`](../selective-disclosure/README.md) (Step 3); the (current and next) prover implementations → [`groth16-prover/README.md`](../../groth16-prover/README.md) **Implementation 7** (current, shipped) and **Implementation 11** (batch verification + proof aggregation, roadmap).
+> **Companion docs:** concept and constraint budget → [`groth16-prover/docs/F5_RESEARCH_DIRECTION.md`](../../groth16-prover/docs/F5_RESEARCH_DIRECTION.md); the single-user privacy pool this multiplies → [`aiken/selective-disclosure/README.md`](../selective-disclosure/README.md) (Step 3); the prover implementations → [`groth16-prover/README.md`](../../groth16-prover/README.md) **Implementation 7** (current, shipped) and **Implementation 11** (batch verification delivered; proof aggregation roadmap).
 
 ---
 
@@ -32,7 +32,7 @@ Take the selective-disclosure pipeline's single-user privacy pool (Step 3) and m
 | **One pool, many users** | Every user's note lives in the same Merkle tree | Pool validator keeps a single root; deposits add leaves |
 | **Same privacy per user** | No address, identity, credential, or amount is ever public | Spend = Groth16 proof: Merkle membership + fresh nullifier + range + value conservation |
 | **Demo on the current stack** | Reproducible, measured e2e before any prover work | Current Groth16 impl (Impl 7, shipped) + `aiken/groth16` verifier: **one proof per spend, ~20% script CPU each** |
-| **Batched spends (after the demo)** | N users withdraw/spend in one transaction | **Next** Groth16 impl (Impl 11): N per-user proofs → **one multi-pairing product** (or one aggregated proof) — only once the demo above is e2e, documented, and measured |
+| **Batched spends (delivered)** | N users withdraw/spend in one transaction | **Implementation 11** (delivered): N per-user proofs → **one multi-pairing product**, measured 2.6x-4.3x on this machine; single-proof aggregation is the remaining follow-on |
 | **No new trust** | The pool adds nothing a user must trust beyond the existing `vk` ceremony | Same Groth16 proofs, same `aiken/groth16` verifier, same circom circuits |
 | **Reuse, not rebuild** | Everything that already works stays untouched | `privacy_pool.circom`, the 192-byte proofs, `step3` e2e scripts, both proof-path options |
 
@@ -73,15 +73,15 @@ Steps 4/5 (auditor reveal of amount and recipient) layer oversight *on top of* a
 | **Nullifier integrity** | A spent-nullifier set in the datum guarantees each note is spent at most once, forever, across every user |
 | **Composes with compliance** | Same spend can carry Step 4/5 auditor ciphertexts; the pool treats them as normal public inputs |
 
-### Batched spend (after the next Groth16 implementation)
+### Batched spend (Implementation 11)
 
 | Capability | Description |
 |------------|-------------|
-| **Batched verification** | N spends in one transaction arrive as N proofs verified with **one multi-pairing product** (Impl 11 item (m)) — the bundler case |
-| **Proof aggregation** | N proofs → **one aggregated proof**, one pairing (Impl 11 item (q)) — the large-batch / forwarding case |
+| **Batched verification** | N spends in one transaction arrive as N proofs verified with **one multi-pairing product** — delivered (Impl 11, measured: 2.6x-4.3x vs N single verifies) |
+| **Proof aggregation** | N proofs → **one aggregated proof**, one pairing — follow-on, needs an inner-pairing-product argument (SnarkPack) |
 | **One root transition** | A batch of spends performs one coherent root transition in a single transaction |
 
-These are *post-demonstration* capabilities: they exist to scale the pool once the current-implementation demo has been measured, and they are delivered by the next Groth16 implementation (Impl 11).
+Batched verification is delivered and measured by Impl 11 (`verify-batch` + prepared VK). True single-proof aggregation is the remaining follow-on.
 
 ### Single-user Step 3 vs multi-user F5
 
@@ -116,15 +116,15 @@ graph LR
 
 ### Where the next Groth16 implementation fits
 
-The next Groth16 implementation (`groth16-prover/README.md`, **Implementation 11 — batch verification and proof aggregation**, roadmap items (m)/(q)) is the *upgrade step after the demonstration*, not a precondition. It supplies three capabilities the pool will then be built on:
+Groth16 **Implementation 11 — batch verification** (`groth16-prover/README.md`, roadmap item (m)) is delivered and measured; it supplies two capabilities the pool now builds on:
 
 | Impl 11 capability | Effect for the pool |
 |--------------------|---------------------|
 | **Prepared verifier** | The heavy G2/Miller-loop preparation is done **once per pool `vk`** — not per proof — the pool verifies against the same key forever |
-| **Batched pairing verification** | N per-user proofs → a **single multi-pairing product** (reference data: N=16 `18.212 ms → 13.854 ms`); this is the bundler case |
-| **Proof aggregation** | N proofs → **one aggregated proof**, one pairing — the large-batch / forwarding case |
+| **Batched pairing verification** | N per-user proofs → a **single multi-pairing product** (measured: 2.6x-4.3x vs N single verifies on this machine); this is the bundler case |
+| **Proof aggregation** | N proofs → **one aggregated proof**, one pairing — follow-on (item (q), SnarkPack-style) |
 
-Start condition for that implementation: the F5 demo (above) is **e2e, documented, and measured**. Until then, Groth16 work stays exactly where it is — the shipped Implementation 7 sprint — and the pool is demonstrated on it.
+Start condition for the aggregation follow-on: the batched verifier above is e2e, documented, and measured (it now is).
 
 ---
 
@@ -148,8 +148,8 @@ Start condition for that implementation: the F5 demo (above) is **e2e, documente
 
 1. [`groth16-prover/docs/F5_RESEARCH_DIRECTION.md`](../../groth16-prover/docs/F5_RESEARCH_DIRECTION.md) — shielded cross-chain privacy pool; F5a constraint budget (~65K for 2-in/2-out at depth 20).
 2. [`aiken/selective-disclosure/README.md`](../selective-disclosure/README.md) — Step 3 privacy pool (single-user, both proof paths); Step 0 on-chain verifier costs (~20% script CPU).
-3. [`groth16-prover/README.md`](../../groth16-prover/README.md) — **Implementation 7** (current, shipped: the sparse-prover sprint that this pool's demo runs on) and **Implementation 11** (batch verification + proof aggregation; items (m)/(q); roadmap row (t) *shielded cross-chain privacy pool (F5)*).
+3. [`groth16-prover/README.md`](../../groth16-prover/README.md) — **Implementation 7** (current, shipped: the sparse-prover sprint that this pool's demo runs on) and **Implementation 11** (batch verification delivered + measured; proof aggregation item (q) follow-on; roadmap row (t) *shielded cross-chain privacy pool (F5)*).
 4. [`circom/PrivacyPool/README.md`](../../circom/PrivacyPool/README.md) — the reusable 1-in/2-out spend circuit, note commitment, Merkle gadget, and Nova step variant.
 5. [`aiken/f5/pool/`](pool/) — faithful off-chain pool simulation (Poseidon Merkle root bookkeeping + nullifier log), 25 unit/golden/property tests, keyed witness JSONs identical to `gen_privacy_input.py`.
 6. [`aiken/f5/demo/`](demo/) — reproducible N-user end-to-end Groth16 demo (`f5_e2e_groth16.sh`, `gen_multi_input.py`).
-7. [`aiken/f5/bench/`](bench/) — scaling benchmark: users/depth × {witness, ceremony, prove, verify} wall + RSS, `results.tsv` and markdown table.
+7. [`aiken/f5/bench/`](bench/) — scaling benchmark: users/depth × {witness, ceremony, prove, verify, batch-verify} wall + RSS, `results.tsv` and markdown table.
