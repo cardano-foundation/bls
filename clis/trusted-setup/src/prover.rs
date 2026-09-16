@@ -1326,6 +1326,169 @@ mod tests {
     }
 
     // ------------------------------------------------------------------
+    // Item (o): richer randomized R1CS fixtures + engine parity assertions
+    // ------------------------------------------------------------------
+
+    /// A tiny deterministic RNG (xorshift64) so randomized-fixture tests are
+    /// reproducible: same seed → same circuit, regardless of platform or
+    /// test scheduling.
+    #[derive(Clone)]
+    struct XorShiftRng(u64);
+
+    impl XorShiftRng {
+        fn next(&mut self) -> u64 {
+            let mut x = self.0;
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            self.0 = x;
+            x
+        }
+    }
+
+    impl rand::RngCore for XorShiftRng {
+        fn next_u32(&mut self) -> u32 {
+            self.next() as u32
+        }
+        fn next_u64(&mut self) -> u64 {
+            self.next()
+        }
+        fn fill_bytes(&mut self, dest: &mut [u8]) {
+            for chunk in dest.chunks_mut(8) {
+                let bytes = self.next().to_le_bytes();
+                chunk.copy_from_slice(&bytes[..chunk.len()]);
+            }
+        }
+        fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), rand::Error> {
+            self.fill_bytes(dest);
+            Ok(())
+        }
+    }
+
+    /// Directly re-check every constraint `(L·w)·(R·w) == (O·w)` on the
+    /// generated dense matrices — independent of any QAP engine.
+    fn assert_circuit_satisfied(circuit: &crate::r1cs::Circuit) {
+        for i in 0..circuit.n_constraints() {
+            let dot = |row: &[Fr]| row.iter().zip(&circuit.witness).fold(Fr::zero(), |acc, (&a, &b)| acc + a * b);
+            let dl = dot(&circuit.l[i]);
+            let dr = dot(&circuit.r[i]);
+            let do_ = dot(&circuit.o[i]);
+            assert_eq!(dl * dr, do_, "constraint {} must be satisfied by construction", i);
+        }
+    }
+
+    /// `evaluate_witness_and_quotient` returns `(l(τ), r(τ), o(τ), h(τ), T(τ))`;
+    /// assert the QAP identity `l(τ)r(τ) − o(τ) == h(τ)T(τ)` holds for the given
+    /// engine's *own* basis (Lagrange naturals for dense, roots of unity for FFT).
+    fn assert_quotient_identity<E: QapEngine>(engine: &E, circuit: &crate::r1cs::Circuit) {
+        let tau = Fr::from(23u64);
+        let (l_tau, r_tau, o_tau, h_tau, t_tau) = crate::engine::evaluate_witness_and_quotient(
+            engine, &circuit.l, &circuit.r, &circuit.o, &circuit.witness, tau,
+        );
+        assert_eq!(
+            l_tau * r_tau - o_tau,
+            h_tau * t_tau,
+            "QAP identity must hold in this engine's basis"
+        );
+    }
+
+    /// Build a packed VK carrying a random sparse circuit's full polynomials
+    /// through all proof steps, returning the full PK + VK pair.
+    fn random_sparse_ceremony(
+        engine: &impl QapEngine,
+        circuit: &crate::r1cs::Circuit,
+    ) -> (crate::ceremony::FullProvingKey, crate::ceremony::VerifyingKey) {
+        let tw = crate::ceremony::ToxicWaste::deterministic();
+        crate::ceremony::single_party_ceremony_full_from_tw(
+            engine, &circuit.l, &circuit.r, &circuit.o, circuit.n_public, tw, false,
+        )
+    }
+
+    #[test]
+    fn random_sparse_circuit_all_sizes_and_seeds_prove_verify() {
+        let sizes = [1usize, 6, 14]; // min, non-power-of-2, max
+        for &n in &sizes {
+            for seed in 0..3u64 {
+                let mut rng = XorShiftRng(seed * 1_000_003 + n as u64);
+                let circuit = crate::r1cs::random_sparse_r1cs_circuit(&mut rng, n, 3);
+
+                assert_circuit_satisfied(&circuit);
+
+                let engine = FftQapEngine::new();
+                let (pk, vk) = random_sparse_ceremony(&engine, &circuit);
+                let prover = PippengerProver::new();
+                let (proof, public_input) = prover.prove_with_full_pk(
+                    &engine, &pk, &circuit.l, &circuit.r, &circuit.o, &circuit.witness,
+                );
+
+                assert_quotient_identity(&engine, &circuit);
+                assert!(
+                    verify_proof(&proof, &public_input, &vk.alpha_g1, &vk.beta_g2, &vk.gamma_g2, &vk.delta_g2),
+                    "proof must be valid for random sparse circuit (n={}, seed={})", n, seed
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn random_sparse_circuit_dense_vs_fft_engine_parity() {
+        // The two engines use *different* evaluation bases (Lagrange over the
+        // naturals vs roots of unity), so their QAP polynomials differ — but
+        // both must yield a mathematically valid proof for the SAME relation.
+        // WARNING: DenseQapEngine builds every QAP polynomial by O(n²) Lagrange
+        // interpolation, so keep this parity sweep small. The cheap FFT-only
+        // sweep above already covers n = 14.
+        for &n in &[3usize, 6, 9] {
+            for seed in 0..2u64 {
+                let mut rng = XorShiftRng(seed * 7 + n as u64);
+                let circuit = crate::r1cs::random_sparse_r1cs_circuit(&mut rng, n, 3);
+
+                let prover = PippengerProver::new();
+
+                // DenseQapEngine (pedagogical Lagrange path)
+                let dense = DenseQapEngine::new();
+                let (pk_dense, vk_dense) = random_sparse_ceremony(&dense, &circuit);
+                let (proof_dense, public_dense) = prover.prove_with_full_pk(
+                    &dense, &pk_dense, &circuit.l, &circuit.r, &circuit.o, &circuit.witness,
+                );
+                assert_quotient_identity(&dense, &circuit);
+                assert!(
+                    verify_proof(&proof_dense, &public_dense, &vk_dense.alpha_g1, &vk_dense.beta_g2, &vk_dense.gamma_g2, &vk_dense.delta_g2),
+                    "dense-engine proof must verify (n={}, seed={})", n, seed
+                );
+
+                // FftQapEngine (production path)
+                let fft = FftQapEngine::new();
+                let (pk_fft, vk_fft) = random_sparse_ceremony(&fft, &circuit);
+                let (proof_fft, public_fft) = prover.prove_with_full_pk(
+                    &fft, &pk_fft, &circuit.l, &circuit.r, &circuit.o, &circuit.witness,
+                );
+                assert_quotient_identity(&fft, &circuit);
+                assert!(
+                    verify_proof(&proof_fft, &public_fft, &vk_fft.alpha_g1, &vk_fft.beta_g2, &vk_fft.gamma_g2, &vk_fft.delta_g2),
+                    "fft-engine proof must verify (n={}, seed={})", n, seed
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn random_sparse_circuit_dense_vs_sparse_prover_parity() {
+        // Both prover paths (dense matrices vs sparse encodings) run on the
+        // same FFT engine, so the two proofs must be bit-for-bit identical.
+        for &n in &[2usize, 5, 11] {
+            for seed in 0..3u64 {
+                let mut rng = XorShiftRng(seed * 131 + n as u64);
+                let circuit = crate::r1cs::random_sparse_r1cs_circuit(&mut rng, n, 3);
+
+                let engine = FftQapEngine::new();
+                let (pk, vk) = random_sparse_ceremony(&engine, &circuit);
+                assert_dense_sparse_parity(&circuit, &pk, &vk);
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------
     // Implementation 11 tests: prepared verifier + batched verification
     // ------------------------------------------------------------------
 

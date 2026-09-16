@@ -1301,7 +1301,7 @@ Cheaper on-chain verification — O(N) pairing checks → one — essential for 
 |-------|------|--------|------------|------|
 | 1 | (p) Lagrange-basis SRS — complete FFT production path | ⏳ Not started | None | Low |
 | 2 | (m) Prepared verifier + batched pairing verification | ✅ Delivered (Impl 11) | None | Low |
-| 3 | (o) Randomized R1CS test fixtures + parity assertions | ⏳ Not started | None | Low |
+| 3 | (o) Randomized R1CS test fixtures + parity assertions | ✅ Delivered | None | Low |
 | 4 | (q) Proof aggregation (`groth16::aggregate_proofs`) | ⏳ Follow-on | (m) | Medium |
 | 5 | (t) Shielded cross-chain privacy pool (F5) | ⏳ Research | Sparse prover | High |
 
@@ -1334,14 +1334,19 @@ For **long-term research**:
 - **Reference:** [Groth.jl](https://github.com/0xpantera/Groth.jl) implements `prepare_verifying_key`, `prepare_inputs`, and `verify_with_prepared`; batched pairing verification reduced their `N=16` batch from `18.212 ms` to `13.854 ms` on the same fixture. Arkworks also provides `PreparedVerifyingKey`.
 - **Benefit:** On-chain verification becomes cheaper because the heavy G2 preparation is done once per VK, not per proof. Batching further amortizes the Miller-loop cost across many proofs.
 
-### (o) Randomized R1CS test fixtures and parity assertions 
+### (o) Randomized R1CS test fixtures and parity assertions
 
-- **Current:** Many circuits are covered (toy, Privacy/Spend, PoseidonMerkle, EdDSAJubJub, CardanoKeyOwnership, Blake2b-224, RangeProof, AnonymousAirdrop) with dense-vs-sparse and scalar-vs-FullPK parity tests, but every fixture is fixed — there is no randomized R1CS generation.
-- **Target:**
-  1. Generate randomized R1CS fixtures (random sparse constraints and random witnesses satisfying `A∘B=C`) for property-based testing.
-  2. Keep dense/naive computation paths as **parity assertions** alongside optimized paths (FFT, coset quotient). In debug/test mode, run both and assert identical results.
-- **Reference:** Groth.jl keeps dense quotient computation (`compute_h_polynomial`) as an explicit parity check while the production prover uses the coset-only path. Their test suite covers multiple circuits with randomized seeds.
-- **Benefit:** Catches bugs in the optimized path early by comparing against a slow-but-correct reference on every test run.
+> **Home:** delivered — see `clis/trusted-setup/src/r1cs.rs` and the parity tests in `clis/trusted-setup/src/prover.rs`.
+
+- **Current (before):** many circuits covered (toy, Privacy/Spend, PoseidonMerkle, EdDSAJubJub, CardanoKeyOwnership, Blake2b-224, RangeProof, AnonymousAirdrop) with dense-vs-sparse and scalar-vs-FullPK parity tests, but every fixture was fixed.
+- **Delivered:**
+  1. `random_sparse_r1cs_circuit` — random **sparse, structured** fixtures: constraints share wires and carry random non-zero coefficients; the witness is built witness-first so `A·B = C` holds exactly, and every constraint is re-checked directly in the test (`assert_circuit_satisfied`).
+  2. Parity assertions:
+     - `random_sparse_circuit_all_sizes_and_seeds_prove_verify` — FFT path: prove + verify over sizes {1, 6, 14} × 3 deterministic seeds (xorshift64), plus the QAP identity `l(τ)r(τ)−o(τ) = h(τ)T(τ)`.
+     - `random_sparse_circuit_dense_vs_fft_engine_parity` — pedagogical `DenseQapEngine` vs production `FftQapEngine` both produce verifying proofs for the same relation (each in its own basis).
+     - `random_sparse_circuit_dense_vs_sparse_prover_parity` — dense-matrix vs sparse-encoding prover paths are bit-for-bit identical.
+- **Reference:** Groth.jl keeps dense quotient computation (`compute_h_polynomial`) as an explicit parity check while the production prover uses the coset-only path; their test suite covers multiple circuits with randomized seeds.
+- **Benefit:** catches bugs in the optimized path and in the sparse/serialization encodings early by comparing against a slow-but-correct reference and by stressing both engines with fresh relations on every test run.
 
 ### (p) Finish the Lagrange-basis SRS
 
