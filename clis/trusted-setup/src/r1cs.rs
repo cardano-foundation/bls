@@ -1,5 +1,5 @@
 use ark_bls12_381::Fr;
-use ark_ff::UniformRand;
+use ark_ff::{Field, UniformRand};
 use ark_std::vec::Vec;
 use ark_std::Zero;
 use rand::RngCore;
@@ -89,6 +89,140 @@ fn random_nonzero_fr(rng: &mut impl RngCore) -> Fr {
             return val;
         }
     }
+}
+
+/// Generate a random **sparse, structured** R1CS circuit whose witness is
+/// satisfied by construction.
+///
+/// Contrast with `random_r1cs_circuit` (isolated gates, all coefficients ±1):
+/// here constraints **share wires** and carry **random non-zero coefficients**,
+/// like real Circom output. The witness is built witness-first:
+///
+/// 1. Wire 0 is the constant wire (value 1) and may appear in any row.
+/// 2. Per constraint, random sparse rows are drawn for L and R: each
+///    references `1..=max_terms` wires chosen from the constant wire, earlier
+///    product wires, or freshly-allocated input wires, each with a random
+///    non-zero coefficient.
+/// 3. A single fresh output wire is allocated and its value solved to be
+///    `(L·w)·(R·w) / o_coeff`, so the R1CS check `(L·w)·(R·w) = (O·w)`
+///    holds **exactly** for every constraint.
+///
+/// The generated relation is therefore always satisfiable; the RNG varies the
+/// sparsity pattern, the shared-wire structure, and the coefficient sizes.
+pub fn random_sparse_r1cs_circuit(
+    rng: &mut impl RngCore,
+    n_constraints: usize,
+    max_terms: usize,
+) -> Circuit {
+    assert!(n_constraints >= 1, "need at least one constraint");
+    assert!(max_terms >= 1, "max_terms must be >= 1");
+
+    // Wire 0 = constant 1.
+    let mut witness = vec![Fr::from(1u64)];
+    let mut l = Vec::with_capacity(n_constraints);
+    let mut r = Vec::with_capacity(n_constraints);
+    let mut o = Vec::with_capacity(n_constraints);
+
+    for _c in 0..n_constraints {
+        let l_row = random_sparse_row(rng, max_terms, &mut witness);
+        let r_row = random_sparse_row(rng, max_terms, &mut witness);
+
+        // O row: a single *fresh* output wire with a random non-zero coefficient.
+        let o_coeff = random_nonzero_fr(rng);
+        let o_row = vec![(witness.len(), o_coeff)];
+
+        let dot_l = dot_product(&l_row, &witness);
+        let dot_r = dot_product(&r_row, &witness);
+        // Solve the output value so the constraint holds exactly.
+        let o_value = dot_l * dot_r * o_coeff.inverse().unwrap();
+        witness.push(o_value);
+
+        l.push(l_row);
+        r.push(r_row);
+        o.push(o_row);
+    }
+
+    let n_vars = witness.len();
+    let materialize = |rows: &[Vec<(usize, Fr)>]| -> Vec<Vec<Fr>> {
+        rows.iter()
+            .map(|row| {
+                let mut dense = vec![Fr::from(0u64); n_vars];
+                for &(wire, coeff) in row {
+                    // Accumulate: a wire may legitimately repeat with different
+                    // coefficients; R1CS semantics sum them.
+                    dense[wire] += coeff;
+                }
+                dense
+            })
+            .collect()
+    };
+
+    Circuit {
+        name: "random_sparse",
+        witness,
+        l: materialize(&l),
+        r: materialize(&r),
+        o: materialize(&o),
+        n_public: 1,
+    }
+}
+
+/// Draw one random sparse R1CS row: `1..=max_terms` entries `(wire, coeff)`.
+///
+/// Referenced wires come from three pools:
+/// - the constant wire `0` (value 1),
+/// - a previously-computed wire (a product from an earlier constraint), or
+/// - a freshly-allocated input wire (a new random value is pushed now).
+///
+/// A wire is used **at most once per row** (true sparse encoding), so a row's
+/// dot product against the witness is simply the sum of its entries' products.
+/// Fresh input wires get their value immediately, and previously-computed
+/// wires already hold a value, so a caller can always compute the row's dot
+/// product against the witness.
+fn random_sparse_row(
+    rng: &mut impl RngCore,
+    max_terms: usize,
+    witness_values: &mut Vec<Fr>,
+) -> Vec<(usize, Fr)> {
+    let n_terms = 1 + (rng.next_u64() as usize % max_terms);
+    let mut row = Vec::with_capacity(n_terms);
+    let mut used = Vec::with_capacity(n_terms);
+
+    while row.len() < n_terms {
+        let existing = witness_values.len();
+        // 0 => constant wire, 1 => a prior wire, 2 => a fresh input wire.
+        let wire = match rng.next_u64() % 3 {
+            0 => 0,
+            1 => {
+                if existing > 1 {
+                    1 + (rng.next_u64() as usize % (existing - 1))
+                } else {
+                    0
+                }
+            }
+            _ => {
+                let fresh = witness_values.len();
+                witness_values.push(random_nonzero_fr(rng));
+                fresh
+            }
+        };
+
+        // Guarantee a true sparse row: no wire repeats.
+        if used.contains(&wire) {
+            continue;
+        }
+        used.push(wire);
+        row.push((wire, random_nonzero_fr(rng)));
+    }
+
+    row
+}
+
+/// Dot product of a sparse row `(wire, coeff)` against the witness values.
+fn dot_product(row: &[(usize, Fr)], witness: &[Fr]) -> Fr {
+    row.iter().fold(Fr::zero(), |acc, &(wire, coeff)| {
+        acc + coeff * witness[wire]
+    })
 }
 
 // ─── Multiplier circuit: x1*x2 == x5, x3*x4 == x6, x5*x6 == a ───
