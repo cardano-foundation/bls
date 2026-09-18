@@ -1269,7 +1269,7 @@ The fast path computes the **exact same curve point** as the MSM path — it is 
 <details>
 <summary><b>Implementation 11 — click to expand</b></summary>
 
-> **Status:** ✅ **Batch verification delivered + measured** on BLS12-381 (this repo). On-chain verification economics: turn "N proofs → N pairing checks" into "N proofs → one multi-pairing product" (`PreparedVerifyingKey` + `verify_batch` in `clis/trusted-setup/src/prover.rs`, `groth16 verify-batch` CLI). Single-proof aggregation (item **(q)**, SnarkPack-style) remains the follow-on work item; the Lagrange-basis SRS **item (p)** stays standalone.
+> **Status:** ✅ **Batch verification delivered + measured** on BLS12-381 (this repo). On-chain verification economics: turn "N proofs → N pairing checks" into "N proofs → one multi-pairing product" (`PreparedVerifyingKey` + `verify_batch` in `clis/trusted-setup/src/prover.rs`, `groth16 verify-batch` CLI). Single-proof aggregation (item **(q)**, SnarkPack-style) remains the follow-on work item; the Lagrange-basis SRS **item (p)** is now also delivered.
 >
 > **Goal:** amortise on-chain verification cost across many proofs — one pairing check per batch — by batching/aggregating *independent* proofs (many users, many transactions).
 
@@ -1299,7 +1299,7 @@ Cheaper on-chain verification — O(N) pairing checks → one — essential for 
 
 | Order | Item | Status | Depends on | Risk |
 |-------|------|--------|------------|------|
-| 1 | (p) Lagrange-basis SRS — complete FFT production path | ⏳ Not started | None | Low |
+| 1 | (p) Lagrange-basis SRS — complete FFT production path | ✅ Delivered | None | Low |
 | 2 | (m) Prepared verifier + batched pairing verification | ✅ Delivered (Impl 11) | None | Low |
 | 3 | (o) Randomized R1CS test fixtures + parity assertions | ✅ Delivered | None | Low |
 | 4 | (q) Proof aggregation (`groth16::aggregate_proofs`) | ⏳ Follow-on | (m) | Medium |
@@ -1316,6 +1316,8 @@ For **short-term production on Cardano**:
 
 For **medium-term**:
 4. ✅ Implementation 11 — batch verification **delivered** (**O(N) pairing checks → one multi-pairing product**, measured 2.6x-4.3x on this machine); proof aggregation (item (q)) is the follow-on
+5. ✅ Lagrange-basis h-SRS (item (p)) — **delivered**: the FFT prover path can now fold `h`'s coset values directly, no quotient coefficients
+6. ✅ Randomized R1CS test fixtures + engine parity (item (o)) — **delivered**
 
 For **long-term research**:
 5. Evaluate PLONK / Halo2 only if proof size or verification cost regressions are acceptable.
@@ -1350,10 +1352,14 @@ For **long-term research**:
 
 ### (p) Finish the Lagrange-basis SRS
 
-> **Home:** standalone — the only prover-engine pending item (Lagrange-basis SRS); no natural host until a prover-path implementation picks it up.
+> **Home:** delivered — `clis/trusted-setup/src/lagrange.rs`, with prover integration and parity tests in `clis/trusted-setup/src/prover.rs`.
 
-- **Status:** ⚠️ **Partial.** The `QapEngine` trait, `DenseQapEngine`, and `FftQapEngine` are all implemented in `clis/trusted-setup/src/engine.rs`. The only remaining gap is building the group-element SRS in the Lagrange basis (`L_i(τ)·G1` instead of `τ^i·G1`) so the FFT path can skip monomial conversion and use the most efficient production pattern.
-- **Benefit:** Completes the FFT production path and removes the last monomial fallback.
+- **Status:** ✅ **Delivered.** The h-SRS is now available in the **coset-Lagrange basis**: `Q_j = δ⁻¹·T(τ)·L_j^{(c)}(τ)·G1` for a coset `c·⟨ω⟩` (built from the ceremony scalars in O(N) with one batch inversion). `prove_with_full_pk_sparse_lagrange` folds `h`'s coset values straight into the h-commitment **without ever extracting `h`'s coefficients** — the FFT path skips the monomial conversion (the quotient IFFT/division) and uses the efficient evaluation-fold production pattern:
+  - `P = l·r − o` is evaluated on the coset by 3 FFTs of the `c`-scaled witness polynomials;
+  - `h(c·ω^j) = P(c·ω^j)/(c^N − 1)` (T is constant on the coset);
+  - `h-commitment = MSM(Q, h-values)` = `δ⁻¹·T(τ)·h(τ)·G1` by Lagrange interpolation (`deg h < N`).
+  - SRS size trade: `N` Lagrange points vs the `≤ N` monomial `h_query` — a wash; verified to produce **bit-for-bit identical proofs** to the monomial path (parity tests on the multiplier circuit and random sparse circuits).
+- **Benefit:** Completes the FFT production path — the prover no longer needs the quotient polynomial at all — and removes the last monomial-fallback dependency (the h-commitment is the only place the monomial powers were needed).
 
 ### (q) Proof aggregation (beyond what zeroj supports)
 

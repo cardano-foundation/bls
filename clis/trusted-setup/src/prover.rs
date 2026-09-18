@@ -623,6 +623,85 @@ impl Prover for PippengerProver {
     }
 }
 
+/// Prove using the **Lagrange-basis h-SRS** (item (p)).
+///
+/// Identical to the sparse `full_pk` prover (same `A`, `B`, `C_private`,
+/// `V`, same fixed-base MSMs), with one difference: the `h`-commitment is
+/// folded **directly from `h`'s values on the coset `c·⟨ω⟩`** instead of
+/// extracting its coefficients (the "monomial conversion").
+///
+/// `P = l·r − o` is evaluated on the coset (one FFT per wire polynomial on
+/// the `c`-scaled coefficients), divided pointwise by the constant
+/// `T(c·ω^j) = c^N − 1`, and folded with a single MSM against the
+/// Lagrange-basis SRS points. The quotient polynomial is never materialised,
+/// so its IFFT/division is fully skipped.
+///
+/// The produced element equals `δ⁻¹·T(τ)·h(τ)·G1` — the same group element
+/// the monomial `h_query` path produces — so the resulting proof is
+/// bit-for-bit identical and verifies against the unchanged VerifyingKey.
+pub fn prove_with_full_pk_sparse_lagrange(
+    full_pk: &crate::ceremony::FullProvingKey,
+    n_constraints: usize,
+    sparse_l: &[Vec<(u32, Fr)>],
+    sparse_r: &[Vec<(u32, Fr)>],
+    sparse_o: &[Vec<(u32, Fr)>],
+    witness: &[Fr],
+    lag: &crate::lagrange::LagrangeHQuery,
+) -> (Proof, PublicInput) {
+    use crate::engine::build_witness_polys_sparse;
+    use crate::lagrange::h_commitment_lagrange;
+
+    let n_public = full_pk.vk.n_public;
+    let d_size = lag.n_domain;
+    let domain = GeneralEvaluationDomain::<Fr>::new(d_size)
+        .expect("Failed to create evaluation domain");
+
+    // Sparse witness polynomials (coefficient form); SKIP the quotient.
+    let (l_poly, r_poly, o_poly) = build_witness_polys_sparse(
+        &domain,
+        d_size,
+        n_constraints,
+        sparse_l,
+        sparse_r,
+        sparse_o,
+        witness,
+    );
+
+    let h_c = h_commitment_lagrange(&domain, lag, &l_poly, &r_poly, &o_poly);
+
+    // Parallel proof assembly (same as `PippengerProver`).
+    let (a, (b, c_private)) = rayon::join(
+        || {
+            let a_proj = G1Projective::msm(&full_pk.a_query, witness)
+                .expect("MSM length mismatch");
+            G1Affine::from(a_proj + G1Projective::from(full_pk.vk.alpha_g1))
+        },
+        || rayon::join(
+            || {
+                let b_proj = G2Projective::msm(&full_pk.b_g2_query, witness)
+                    .expect("MSM length mismatch");
+                G2Affine::from(b_proj + G2Projective::from(full_pk.vk.beta_g2))
+            },
+            || {
+                let private_c = &full_pk.c_query[n_public..];
+                let private_w = &witness[n_public..];
+                G1Projective::msm(private_c, private_w)
+                    .expect("MSM length mismatch")
+            },
+        ),
+    );
+
+    let c = G1Affine::from(c_private + h_c);
+
+    let public_w = &witness[..n_public];
+    let v = G1Affine::from(
+        G1Projective::msm(&full_pk.l_query, public_w)
+            .expect("MSM length mismatch"),
+    );
+
+    (Proof { a, b, c }, PublicInput { v })
+}
+
 /// Verify a Groth16 proof.
 ///
 /// Checks the pairing equation:
@@ -1485,6 +1564,77 @@ mod tests {
                 let (pk, vk) = random_sparse_ceremony(&engine, &circuit);
                 assert_dense_sparse_parity(&circuit, &pk, &vk);
             }
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Item (p): Lagrange-basis h-SRS parity tests
+    // ------------------------------------------------------------------
+
+    /// Convert dense constraints to the sparse encoding used by the sparse
+    /// prover paths.
+    fn to_sparse(dense: &[Vec<Fr>]) -> Vec<Vec<(u32, Fr)>> {
+        dense
+            .iter()
+            .map(|row| {
+                row.iter()
+                    .enumerate()
+                    .filter_map(|(i, &v)| if v.is_zero() { None } else { Some((i as u32, v)) })
+                    .collect()
+            })
+            .collect()
+    }
+
+    /// Prove with the monomial `h_query` path and the Lagrange-coset path on
+    /// the same circuit/VK and assert the proofs are bit-for-bit identical.
+    fn assert_lagrange_h_matches_monomial(
+        circuit: &crate::r1cs::Circuit,
+        tw: crate::ceremony::ToxicWaste,
+    ) {
+        let engine = FftQapEngine::new();
+        let d_size = engine.domain_size(circuit.n_constraints());
+
+        // use_h_scalar=false → the PK carries the monomial h_query.
+        let (pk, vk) = crate::ceremony::single_party_ceremony_full_from_tw(
+            &engine, &circuit.l, &circuit.r, &circuit.o, circuit.n_public, tw.clone(), false,
+        );
+
+        let sl = to_sparse(&circuit.l);
+        let sr = to_sparse(&circuit.r);
+        let so = to_sparse(&circuit.o);
+
+        let prover = PippengerProver::new();
+        let (proof_mono, public_mono) = prover.prove_with_full_pk_sparse(
+            &engine, &pk, circuit.n_constraints(), &sl, &sr, &so, &circuit.witness,
+        );
+
+        let lag = crate::lagrange::build_lagrange_h_query(d_size, tw.tau, tw.delta);
+        let (proof_lag, public_lag) = prove_with_full_pk_sparse_lagrange(
+            &pk, circuit.n_constraints(), &sl, &sr, &so, &circuit.witness, &lag,
+        );
+
+        assert_eq!(proof_mono.a, proof_lag.a, "A must match monomial vs Lagrange");
+        assert_eq!(proof_mono.b, proof_lag.b, "B must match monomial vs Lagrange");
+        assert_eq!(proof_mono.c, proof_lag.c, "C (h-commitment) must match monomial vs Lagrange");
+        assert_eq!(public_mono.v, public_lag.v, "V must match monomial vs Lagrange");
+        assert!(
+            verify_proof(&proof_lag, &public_lag, &vk.alpha_g1, &vk.beta_g2, &vk.gamma_g2, &vk.delta_g2),
+            "Lagrange-h proof must verify"
+        );
+    }
+
+    #[test]
+    fn test_lagrange_h_matches_monomial_multiplier() {
+        let circuit = crate::r1cs::multiplier_circuit();
+        assert_lagrange_h_matches_monomial(&circuit, crate::ceremony::ToxicWaste::deterministic());
+    }
+
+    #[test]
+    fn test_lagrange_h_matches_monomial_random_sparse() {
+        let mut rng = XorShiftRng(0xBEEF);
+        for &n in &[1usize, 6, 14] {
+            let circuit = crate::r1cs::random_sparse_r1cs_circuit(&mut rng, n, 3);
+            assert_lagrange_h_matches_monomial(&circuit, crate::ceremony::ToxicWaste::deterministic());
         }
     }
 
