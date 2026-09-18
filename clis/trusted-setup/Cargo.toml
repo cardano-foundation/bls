@@ -17,6 +17,11 @@ path = "src/lib.rs"
 name = "trusted-setup"
 path = "src/main.rs"
 
+[[bin]]
+name = "benchmark_backend"
+path = "src/bin/benchmark_backend.rs"
+required-features = ["native"]
+
 [dependencies]
 ark-bls12-381 = "0.4"
 ark-ff = "0.4"
