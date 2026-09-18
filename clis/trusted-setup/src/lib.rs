@@ -26,5 +26,6 @@ pub mod ptau;
 pub mod phase2;
 pub mod circom_adapter;
 pub mod prover;
+pub mod lagrange;
 
 pub mod cmd;
