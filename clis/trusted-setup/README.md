@@ -196,7 +196,7 @@ The proving/verifying hot paths (MSM and pairings) can run on the **Cpu** backen
 
 ### Choosing the backend at run time (CLI)
 
-The `groth16` CLI (`--backend cpu|native`) and the library (`set_groth16_ref(Backend::Cpu|Native)`) select the backend per invocation; the default is auto-detected (native when built with the feature, otherwise CPU):
+The `groth16` CLI (`--backend cpu|native`, default `cpu`) and the library (`set_groth16_ref(Backend::Cpu|Native)`) select the backend per invocation. The native path is only available when the binary is built with the `native` feature, and it must be requested explicitly:
 
 ```bash
 cd clis/groth16
