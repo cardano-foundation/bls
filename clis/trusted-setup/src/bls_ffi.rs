@@ -108,7 +108,12 @@ unsafe extern "C" {
         ok: *mut c_int,
     ) -> c_int;
 
-    fn bls_ntt_in_place(values: *mut BlsFr, length: usize, inverse: c_int) -> c_int;
+    fn bls_ntt_in_place(
+        values: *mut BlsFr,
+        length: usize,
+        root: *const BlsFr,
+        inverse: c_int,
+    ) -> c_int;
 }
 
 pub fn version() -> u32 {
@@ -184,8 +189,8 @@ pub fn pairing_batch(g1s: &[BlsG1], g2s: &[BlsG2]) -> Result<bool, BackendError>
     }
 }
 
-pub fn ntt_in_place(values: &mut [BlsFr], inverse: bool) -> Result<(), BackendError> {
-    let raw = unsafe { bls_ntt_in_place(values.as_mut_ptr(), values.len(), inverse as c_int) };
+pub fn ntt_in_place(values: &mut [BlsFr], root: &BlsFr, inverse: bool) -> Result<(), BackendError> {
+    let raw = unsafe { bls_ntt_in_place(values.as_mut_ptr(), values.len(), root, inverse as c_int) };
     match BlsStatus::from_raw(raw) {
         BlsStatus::Ok => Ok(()),
         other => Err(err(other)),

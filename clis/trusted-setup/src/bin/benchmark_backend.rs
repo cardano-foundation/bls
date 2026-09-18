@@ -1,8 +1,9 @@
 //! Benchmark the two group-arithmetic backends head-to-head:
 //!
-//!   - **Cpu**: arkworks `VariableBaseMSM` + `multi_pairing`
+//!   - **Cpu**: arkworks `VariableBaseMSM` + `multi_pairing` + radix-2 FFT
 //!   - **Native**: the vendored blst FFI backend (`blst_p1s_mult_pippenger`
-//!     / `blst_p2s_mult_pippenger` / `blst_miller_loop_n` + `blst_final_exp`)
+//!     / `blst_p2s_mult_pippenger` / `blst_miller_loop_n` + `blst_final_exp`
+//!     / `bls_ntt_in_place`)
 //!
 //! For each size the two backends are fed *identical* deterministic fixtures
 //! and the results are asserted equal before the timings are reported, so the
@@ -10,8 +11,9 @@
 //!
 //! The Cpu backend is measured twice: on the default rayon pool (all cores —
 //! this is what `--backend cpu` actually uses) and on a single-threaded pool.
-//! blst's Pippenger MSM is single-threaded, so `native` is only expected to
-//! beat the *single-threaded* Cpu number; the end-to-end prover recovers the
+//! arkworks builds here without its `parallel` feature, so the two columns
+//! are near-identical; blst/MSM and the NTT are single-threaded, so `native`
+//! is the single-threaded contender.  The end-to-end prover recovers the
 //! multithread gap by running the four independent MSMs in parallel.
 //!
 //! Runs min-of-3 timed measurements after a single warm-up.  All numbers
@@ -28,12 +30,15 @@ use ark_bls12_381::{Bls12_381, Fr, G1Affine, G1Projective, G2Affine, G2Projectiv
 use ark_ec::pairing::Pairing;
 use ark_ec::{CurveGroup, VariableBaseMSM};
 use ark_ff::{UniformRand, Zero};
+use ark_poly::{EvaluationDomain, Radix2EvaluationDomain};
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 use rayon::ThreadPool;
 use std::time::Instant;
 
-use trusted_setup::backend::{native_msm_g1, native_msm_g2, native_pairing_batch_check};
+use trusted_setup::backend::{
+    native_msm_g1, native_msm_g2, native_ntt, native_pairing_batch_check,
+};
 
 /// Deterministic RNG so both backends always see the same fixtures.
 struct BenchRng(StdRng);
@@ -242,6 +247,54 @@ fn bench_pairing(sizes: &[usize]) {
     println!();
 }
 
+fn bench_ntt(sizes: &[usize]) {
+    let pool1 = single_thread_pool();
+    println!("── radix-2 NTT (Fr, forward) ──────────────────────────────────────");
+    println!(
+        "{:<12} {:>20} {:>20} {:>20} {:>12} {:>12}",
+        "n", "cpu (Nt)", "cpu (1t)", "native (1t)", "vs cpu Nt", "vs cpu 1t"
+    );
+    for &n in sizes {
+        let mut rng = BenchRng::new(0xB17 + n as u64);
+        let data: Vec<Fr> = (0..n).map(|_| rng.fr()).collect();
+        let domain = Radix2EvaluationDomain::<Fr>::new(n).expect("radix-2 domain");
+
+        let mut ark_v = data.clone();
+        domain.fft_in_place(&mut ark_v);
+        let mut native_v = data.clone();
+        native_ntt(&mut native_v, false).expect("native NTT failed");
+        assert_eq!(ark_v, native_v, "NTT parity check failed for n={n}");
+
+        let runs = 3;
+        let cpu_nt = timed(runs, || {
+            let mut v = data.clone();
+            domain.fft_in_place(&mut v);
+            let _ = std::hint::black_box(v);
+        });
+        let cpu_1t = timed_cpu_1t(&pool1, runs, || {
+            let mut v = data.clone();
+            domain.fft_in_place(&mut v);
+            let _ = std::hint::black_box(v);
+        });
+        let native = timed(runs, || {
+            let mut v = data.clone();
+            native_ntt(&mut v, false).expect("native NTT failed");
+            let _ = std::hint::black_box(v);
+        });
+
+        println!(
+            "{} {:>17.1}ms {:>17.1}ms {:>17.1}ms {:>9} {:>9}",
+            format!("{:?}", n),
+            ms(cpu_nt),
+            ms(cpu_1t),
+            ms(native),
+            ratio(cpu_nt, native),
+            ratio(cpu_1t, native),
+        );
+    }
+    println!();
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let mut max_msm = 16_384usize;
@@ -263,15 +316,19 @@ fn main() {
     let g1_only = args.iter().any(|a| a == "--g1-only");
     let g2_only = args.iter().any(|a| a == "--g2-only");
     let pairing_only = args.iter().any(|a| a == "--pairing-only");
+    let ntt_only = args.iter().any(|a| a == "--ntt-only");
 
-    if !g2_only && !pairing_only {
+    if !g2_only && !pairing_only && !ntt_only {
         bench_g1_msm(&sizes);
     }
-    if !g1_only && !pairing_only {
+    if !g1_only && !pairing_only && !ntt_only {
         bench_g2_msm(&sizes);
     }
-    if !g1_only && !g2_only {
+    if !g1_only && !g2_only && !ntt_only {
         bench_pairing(&[1usize, 4, 16, 64, 256, 1024]);
+    }
+    if !g1_only && !g2_only && !pairing_only {
+        bench_ntt(&[1_024usize, 16_384, 131_072]);
     }
 }
 

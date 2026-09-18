@@ -84,6 +84,21 @@ inline bool decode_scalar(const bls_backend_fr_t *in, blst_scalar *out) {
     return blst_scalar_fr_check(out);
 }
 
+/* Fr bytes (LE canonical) -> blst_fr (Montgomery form).  blst_fr_from_scalar
+ * reduces mod p and enters the Montgomery domain. */
+inline void decode_fr(const bls_backend_fr_t *in, blst_fr *out) {
+    blst_scalar s;
+    std::memcpy(s.b, in->b, 32);
+    blst_fr_from_scalar(out, &s);
+}
+
+/* blst_fr (Montgomery form) -> Fr bytes (LE canonical). */
+inline void encode_fr(const blst_fr *in, bls_backend_fr_t *out) {
+    blst_scalar s;
+    blst_scalar_from_fr(&s, in);
+    std::memcpy(out->b, s.b, 32);
+}
+
 inline bool is_scalar_zero(const blst_scalar *s) {
     for (int i = 0; i < 32; i++) {
         if (s->b[i] != 0) return false;
@@ -317,12 +332,79 @@ bls_backend_status bls_pairing_batch_check(const bls_backend_g1_t *g1s,
     return BLS_BACKEND_OK;
 }
 
-/* Number-theoretic transform: wired in by the NTT milestone (commit 2). */
-bls_backend_status bls_ntt_in_place(bls_backend_fr_t *values, size_t length, int inverse) {
-    (void)values;
-    (void)length;
-    (void)inverse;
-    return BLS_BACKEND_INTERNAL_ERROR;
+/* In-place radix-2 DIT NTT over Fr (Cooley-Tukey).  Matches ark-poly's
+ * Radix2EvaluationDomain convention: forward is X_k = sum_j x_j * root^(j*k)
+ * in natural order, inverse uses root^-1 and scales by 1/length. */
+bls_backend_status bls_ntt_in_place(bls_backend_fr_t *values, size_t length,
+                                    const bls_backend_fr_t *root, int inverse) {
+    if (values == nullptr || root == nullptr) {
+        return BLS_BACKEND_INVALID_ARGUMENT;
+    }
+    if (length == 0 || (length & (length - 1)) != 0) {
+        return BLS_BACKEND_INVALID_ARGUMENT;
+    }
+
+    std::vector<blst_fr> a(length);
+    for (size_t i = 0; i < length; i++) {
+        decode_fr(&values[i], &a[i]);
+    }
+
+    blst_fr w; /* transform root, order `length` */
+    decode_fr(root, &w);
+    if (inverse) {
+        blst_fr_inverse(&w, &w);
+    }
+
+    /* twiddle table w^0 .. w^(length/2 - 1) */
+    blst_fr one;
+    uint64_t one_limbs[4] = {1, 0, 0, 0};
+    blst_fr_from_uint64(&one, one_limbs);
+    std::vector<blst_fr> roots(length / 2 + 1);
+    roots[0] = one;
+    for (size_t i = 1; i < roots.size(); i++) {
+        blst_fr_mul(&roots[i], &roots[i - 1], &w);
+    }
+
+    /* bit-reversal permutation */
+    unsigned log_len = 0;
+    while ((size_t(1) << log_len) < length) {
+        log_len++;
+    }
+    for (size_t i = 0; i < length; i++) {
+        size_t rev = 0;
+        for (unsigned b = 0; b < log_len; b++) {
+            rev = (rev << 1) | ((i >> b) & 1);
+        }
+        if (i < rev) {
+            std::swap(a[i], a[rev]);
+        }
+    }
+
+    /* Cooley-Tukey stages, ascending block sizes.  Stage `len` uses
+     * twiddles roots[j * (length / len)]. */
+    for (size_t len = 2; len <= length; len <<= 1) {
+        const size_t stride = length / len;
+        for (size_t i = 0; i < length; i += len) {
+            for (size_t j = 0; j < len / 2; j++) {
+                blst_fr_ct_bfly(&a[i + j], &a[i + j + len / 2], &roots[j * stride]);
+            }
+        }
+    }
+
+    if (inverse) {
+        blst_fr n_inv;
+        uint64_t len_limbs[4] = {uint64_t(length), 0, 0, 0};
+        blst_fr_from_uint64(&n_inv, len_limbs);
+        blst_fr_inverse(&n_inv, &n_inv);
+        for (size_t i = 0; i < length; i++) {
+            blst_fr_mul(&a[i], &a[i], &n_inv);
+        }
+    }
+
+    for (size_t i = 0; i < length; i++) {
+        encode_fr(&a[i], &values[i]);
+    }
+    return BLS_BACKEND_OK;
 }
 
 } // extern "C"

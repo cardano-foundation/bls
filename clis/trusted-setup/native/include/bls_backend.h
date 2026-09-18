@@ -85,12 +85,19 @@ bls_backend_status bls_pairing_batch_check(const bls_backend_g1_t *g1s,
 
 /*
  * Radix-2 in-place number-theoretic transform over BLS12-381's scalar field
- * Fr.  `length` must be a power of two >= 2.  `inverse == 0` selects the
- * forward transform, `inverse != 0` the inverse (with 1/length scaling).
- * Values are 32-byte little-endian canonical Fr.
+ * Fr (DIT Cooley-Tukey, blst_fr_ct_bfly butterflies).
+ *
+ * `length` must be a power of two >= 1.  `root` is the primitive
+ * `length`-th root of unity in Fr, 32-byte little-endian canonical bytes
+ * (pass the same root for forward and inverse; the kernel uses its inverse
+ * internally).  `inverse == 0` selects the forward transform
+ * (X_k = sum_j x_j root^(j*k)), `inverse != 0` the inverse (root^-1,
+ * with the usual 1/length scaling).  Values are 32-byte little-endian
+ * canonical Fr, transformed in place.
  */
 bls_backend_status bls_ntt_in_place(bls_backend_fr_t *values,
                                     size_t length,
+                                    const bls_backend_fr_t *root,
                                     int inverse);
 
 #ifdef __cplusplus
