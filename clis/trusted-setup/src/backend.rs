@@ -129,7 +129,7 @@ fn g2_from_bytes(bytes: &BlsG2) -> Result<G2Affine, BackendError> {
 // ---------------------------------------------------------------- wrappers --
 
 /// Pippenger MSM on G1 via the native backend.
-pub(crate) fn native_msm_g1(
+pub fn native_msm_g1(
     bases: &[G1Affine],
     scalars: &[Fr],
 ) -> Result<G1Affine, BackendError> {
@@ -140,7 +140,7 @@ pub(crate) fn native_msm_g1(
 }
 
 /// Pippenger MSM on G2 via the native backend.
-pub(crate) fn native_msm_g2(
+pub fn native_msm_g2(
     bases: &[G2Affine],
     scalars: &[Fr],
 ) -> Result<G2Affine, BackendError> {
@@ -152,7 +152,7 @@ pub(crate) fn native_msm_g2(
 
 /// Multi-pairing product check via the native backend:
 /// `Ok(true)` when `prod_i e(g2_i, g1_i)` is the identity.
-pub(crate) fn native_pairing_batch_check(
+pub fn native_pairing_batch_check(
     g1: &[G1Affine],
     g2: &[G2Affine],
 ) -> Result<bool, BackendError> {
@@ -166,11 +166,11 @@ pub(crate) fn native_ntt(_values: &mut [Fr], _inverse: bool) -> Result<(), Backe
     Err(err(BlsStatus::InternalError))
 }
 
-pub(crate) fn native_version() -> u32 {
+pub fn native_version() -> u32 {
     bls_ffi::version()
 }
 
-pub(crate) fn native_flavor() -> String {
+pub fn native_flavor() -> String {
     bls_ffi::flavor()
 }
 

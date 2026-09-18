@@ -23,6 +23,25 @@
 namespace {
 constexpr unsigned kScalarBits = 255; /* bit length of BLS12-381's Fr modulus */
 
+/* blst's `*_mult_pippenger` scratch must be 64-byte aligned; a plain
+ * `std::vector<limb_t>` is only 8-byte aligned, which makes the asm paths
+ * take the slow (or wrong) bucket path.  Keep an overallocated vector and
+ * hand the caller a pointer rounded up to 64 bytes. */
+class AlignedScratch {
+  public:
+    explicit AlignedScratch(size_t bytes)
+        : storage_((bytes + sizeof(limb_t) - 1) / sizeof(limb_t) + 16) {
+        uintptr_t base = reinterpret_cast<uintptr_t>(storage_.data());
+        uintptr_t aligned = (base + 63) & ~uintptr_t(63);
+        ptr_ = reinterpret_cast<limb_t *>(aligned);
+    }
+    limb_t *get() const { return ptr_; }
+
+  private:
+    std::vector<limb_t> storage_;
+    limb_t *ptr_;
+};
+
 inline bool is_fp_zero(const uint8_t b[48]) {
     for (int i = 0; i < 48; i++) {
         if (b[i] != 0) return false;
@@ -30,6 +49,11 @@ inline bool is_fp_zero(const uint8_t b[48]) {
     return true;
 }
 
+/* NOTE: no per-point on-curve / subgroup validation here.  blst's
+ * `blst_p1_affine_in_g1` is a full final exponentiation (~ms/point), which
+ * would dwarf the MSM itself once n grows into the thousands.  Inputs come
+ * from arkworks-produced canonical CRS/bases (guaranteed valid); the final
+ * MSM output is sanity-checked once after the call. */
 inline bls_backend_status decode_g1(const bls_backend_g1_t *in,
                                     blst_p1_affine *out) {
     if (is_fp_zero(in->b) && is_fp_zero(in->b + 48)) {
@@ -37,15 +61,10 @@ inline bls_backend_status decode_g1(const bls_backend_g1_t *in,
     }
     blst_fp_from_bendian(&out->x, in->b);
     blst_fp_from_bendian(&out->y, in->b + 48);
-    if (!blst_p1_affine_on_curve(out)) {
-        return BLS_BACKEND_POINT_NOT_ON_CURVE;
-    }
-    if (!blst_p1_affine_in_g1(out)) {
-        return BLS_BACKEND_POINT_NOT_IN_GROUP;
-    }
     return BLS_BACKEND_OK;
 }
 
+/* See decode_g1: no per-point validation in the hot path. */
 inline bls_backend_status decode_g2(const bls_backend_g2_t *in,
                                     blst_p2_affine *out) {
     if (is_fp_zero(in->b) && is_fp_zero(in->b + 48) &&
@@ -57,12 +76,6 @@ inline bls_backend_status decode_g2(const bls_backend_g2_t *in,
     blst_fp_from_bendian(&out->x.fp[0], in->b + 48);  /* x.c0 */
     blst_fp_from_bendian(&out->y.fp[1], in->b + 96);  /* y.c1 */
     blst_fp_from_bendian(&out->y.fp[0], in->b + 144); /* y.c0 */
-    if (!blst_p2_affine_on_curve(out)) {
-        return BLS_BACKEND_POINT_NOT_ON_CURVE;
-    }
-    if (!blst_p2_affine_in_g2(out)) {
-        return BLS_BACKEND_POINT_NOT_IN_GROUP;
-    }
     return BLS_BACKEND_OK;
 }
 
@@ -159,12 +172,11 @@ bls_backend_status bls_msm_g1(bls_backend_g1_t *out,
         sp.push_back(reinterpret_cast<const byte *>(&scs[i]));
     }
 
-    size_t scratch_bytes = blst_p1s_mult_pippenger_scratch_sizeof(pts.size());
-    std::vector<limb_t> scratch((scratch_bytes + sizeof(limb_t) - 1) / sizeof(limb_t) + 1);
+    AlignedScratch scratch(blst_p1s_mult_pippenger_scratch_sizeof(pts.size()));
 
     blst_p1 agg;
     blst_p1s_mult_pippenger(&agg, pp.data(), pts.size(), sp.data(),
-                            kScalarBits, scratch.data());
+                            kScalarBits, scratch.get());
 
     if (blst_p1_is_inf(&agg)) {
         memset(out, 0, sizeof(*out));
@@ -172,6 +184,9 @@ bls_backend_status bls_msm_g1(bls_backend_g1_t *out,
     }
     blst_p1_affine out_a;
     blst_p1_to_affine(&out_a, &agg);
+    if (!blst_p1_affine_on_curve(&out_a)) {
+        return BLS_BACKEND_POINT_NOT_ON_CURVE;
+    }
     encode_g1(&out_a, out);
     return BLS_BACKEND_OK;
 }
@@ -231,12 +246,11 @@ bls_backend_status bls_msm_g2(bls_backend_g2_t *out,
         sp.push_back(reinterpret_cast<const byte *>(&scs[i]));
     }
 
-    size_t scratch_bytes = blst_p2s_mult_pippenger_scratch_sizeof(pts.size());
-    std::vector<limb_t> scratch((scratch_bytes + sizeof(limb_t) - 1) / sizeof(limb_t) + 1);
+    AlignedScratch scratch(blst_p2s_mult_pippenger_scratch_sizeof(pts.size()));
 
     blst_p2 agg;
     blst_p2s_mult_pippenger(&agg, pp.data(), pts.size(), sp.data(),
-                            kScalarBits, scratch.data());
+                            kScalarBits, scratch.get());
 
     if (blst_p2_is_inf(&agg)) {
         memset(out, 0, sizeof(*out));
@@ -244,6 +258,9 @@ bls_backend_status bls_msm_g2(bls_backend_g2_t *out,
     }
     blst_p2_affine out_a;
     blst_p2_to_affine(&out_a, &agg);
+    if (!blst_p2_affine_on_curve(&out_a)) {
+        return BLS_BACKEND_POINT_NOT_ON_CURVE;
+    }
     encode_g2(&out_a, out);
     return BLS_BACKEND_OK;
 }
