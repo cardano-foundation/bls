@@ -11,19 +11,24 @@
 use std::ffi::c_char;
 use std::os::raw::c_int;
 
+use trusted_setup_macros::ByteLayout;
+
 /// 32-byte little-endian canonical Fr scalar.
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, ByteLayout)]
+#[byte_layout(c_name = "bls_backend_fr_t", serde)]
 pub struct BlsFr(pub [u8; 32]);
 
 /// 96-byte affine G1 point: x (48B BE) || y (48B BE).
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, ByteLayout)]
+#[byte_layout(c_name = "bls_backend_g1_t", serde)]
 pub struct BlsG1(pub [u8; 96]);
 
 /// 192-byte affine G2 point: x.c1 || x.c0 || y.c1 || y.c0 (48B BE each).
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, ByteLayout)]
+#[byte_layout(c_name = "bls_backend_g2_t", serde)]
 pub struct BlsG2(pub [u8; 192]);
 
 #[repr(i32)]
@@ -194,5 +199,66 @@ pub fn ntt_in_place(values: &mut [BlsFr], root: &BlsFr, inverse: bool) -> Result
     match BlsStatus::from_raw(raw) {
         BlsStatus::Ok => Ok(()),
         other => Err(err(other)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The committed C ABI header, read verbatim so the check runs in CI.
+    const HEADER: &str =
+        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/native/include/bls_backend.h"));
+
+    fn normalize(s: &str) -> String {
+        s.split_whitespace().collect::<Vec<_>>().join(" ")
+    }
+
+    /// Every generated `C_TYPEDEF` must exist, byte-for-byte, in the committed
+    /// `bls_backend.h`.  Renaming a type, changing a byte length, or editing
+    /// the header without touching the derive fails here.
+    #[test]
+    fn c_typedefs_match_committed_header() {
+        let expected: Vec<String> = [BlsFr::C_TYPEDEF, BlsG1::C_TYPEDEF, BlsG2::C_TYPEDEF]
+            .into_iter()
+            .map(|t| normalize(t.trim()))
+            .collect();
+        let actual: Vec<String> = HEADER
+            .lines()
+            .map(str::trim)
+            .filter(|l| l.starts_with("typedef struct"))
+            .map(normalize)
+            .collect();
+        assert_eq!(
+            actual, expected,
+            "bls_backend.h typedefs drifted from the ByteLayout metadata"
+        );
+    }
+
+    #[test]
+    fn byte_accessors_and_conversions() {
+        let fr = BlsFr([0xAB; 32]);
+        assert_eq!(BlsFr::BYTE_LEN, 32);
+        assert_eq!(BlsG1::BYTE_LEN, 96);
+        assert_eq!(BlsG2::BYTE_LEN, 192);
+        assert_eq!(fr.as_bytes(), &[0xAB; 32]);
+        let fr2 = BlsFr::from_bytes([0xAB; 32]);
+        assert_eq!(fr2.as_bytes(), fr.as_bytes());
+        let back: [u8; 32] = fr2.into();
+        assert_eq!(back, [0xAB; 32]);
+        assert!(BlsG1::zero().as_bytes().iter().all(|&b| b == 0));
+    }
+
+    #[test]
+    fn serde_roundtrip_json() {
+        let fr = BlsFr([0x11; 32]);
+        let encoded = serde_json::to_vec(&fr).unwrap();
+        let decoded: BlsFr = serde_json::from_slice(&encoded).unwrap();
+        assert_eq!(decoded.as_bytes(), fr.as_bytes());
+
+        let g2 = BlsG2([0x22; 192]);
+        let encoded = serde_json::to_vec(&g2).unwrap();
+        let decoded: BlsG2 = serde_json::from_slice(&encoded).unwrap();
+        assert_eq!(decoded.as_bytes(), g2.as_bytes());
     }
 }
