@@ -72,6 +72,7 @@ Loads a circuit from `.r1cs` and a witness from `.wtns`, then produces a proof. 
 | `--proving-key FILE` | — | — | Proving key from ceremony (optional, dev fallback) |
 | `--engine ENGINE` | `dense`, `fft` | `fft` | QAP construction engine |
 | `--prover PROVER` | `naive`, `pippenger` | `pippenger` | MSM strategy for proof assembly |
+| `--backend BACKEND` | `cpu`, `native` | set by build mode | Group-arithmetic backend. Which values are accepted is fixed at *compile time* by `BLS_BACKEND` (see [Backend selection](#backend-selection)) |
 | `--qap-on-fly` | — | *default* | Use the group-element-only path with on-the-fly QAP construction (Implementation 5) |
 | `--qap-not-on-fly` | — | — | Use the legacy scalar-based QAP path (Implementation 4) |
 | `--sparse` | — | — | Use sparse constraint representation (Implementation 6). Implies `--qap-on-fly` |
@@ -106,6 +107,14 @@ groth16 prove \
   --witness witness.wtns \
   --engine fft \
   --prover pippenger \
+  --proving-key circuit.pk \
+  --out proof.bin
+
+# Native blst backend (build with `BLS_BACKEND=native` / `both` + `--features native`)
+groth16 prove \
+  --backend native \
+  --circuit circuit.r1cs \
+  --witness witness.wtns \
   --proving-key circuit.pk \
   --out proof.bin
 
@@ -154,6 +163,7 @@ Loads a proof file (192 bytes) and a public-input file (48 bytes), then checks t
 | `--proof FILE` | — | *required* | Path to proof file (192 bytes) |
 | `--public FILE` | — | *required* | Path to public-input file (48 bytes) |
 | `--verifying-key FILE` | — | — | Verifying key from ceremony (optional, dev fallback) |
+| `--backend BACKEND` | `cpu`, `native` | set by build mode | Pairing backend. Which values are accepted is fixed at *compile time* by `BLS_BACKEND` (see [Backend selection](#backend-selection)) |
 
 **Examples:**
 
@@ -370,6 +380,34 @@ cargo build --release
 ```
 
 The binary will be at `target/release/groth16`.
+
+### Backend selection
+
+The group-arithmetic backend (MSM + pairing hot paths) is decided *at compile time* by the `BLS_BACKEND` environment variable, read by `build.rs`:
+
+| Mode | `BLS_BACKEND` | Requires | `--backend` accepts | Default | Artifact |
+|------|---------------|----------|---------------------|---------|----------|
+| Pure Rust | `cpu` | — | `cpu` only | `cpu` | arkworks only; the CLI's blst FFI dispatch path is not compiled in |
+| FFI only | `native` | `--features native` | `native` only | `native` | vendored blst FFI only; the CLI's arkworks MSM/pairing dispatch path is not compiled in |
+| Both (default) | `both` / unset | `native` optional | `cpu` and `native` | `cpu` | both implementations, run-time selectable |
+
+```bash
+# Pure-Rust artifact: `--backend native` becomes a parser error
+BLS_BACKEND=cpu cargo build --release
+
+# FFI-only artifact: `--backend cpu` becomes a parser error
+BLS_BACKEND=native cargo build --release --features native
+
+# Both backends, selectable per invocation (the default)
+cargo build --release --features native
+```
+
+Notes:
+
+- The `native` backend is an optional feature so the pure-Rust path stays buildable on any toolchain. Enabling it requires a C/C++ toolchain, CMake, `make`, and `nasm` on the host (Debian/Ubuntu: `build-essential cmake nasm`). The blst sources are **vendored in-tree** and auto-compiled by the build script — nothing is downloaded and no separate blst/C++ installation is needed.
+- `BLS_BACKEND=native` without `--features native` aborts the build with a clear error message.
+- Without `--features native`, a `both`-mode binary compiles both backends but returns a clear runtime error when `--backend native` is requested — rebuild with `--features native` to use it.
+- Changing `BLS_BACKEND` triggers a rebuild of the CLI crate (the variable is tracked in `build.rs`); the library and ceremony crates are unaffected.
 
 The `trusted-setup` binary (ceremony commands) builds separately:
 

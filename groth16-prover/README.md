@@ -1271,7 +1271,7 @@ The fast path computes the **exact same curve point** as the MSM path — it is 
 
 > **Status:** ✅ **Done.**
 >
-> **What it does:** Switches the two most expensive operations in prove/verify — the Pippenger MSMs and the final pairings — from arkworks to the vendored [blst](https://github.com/supranational/blst) `libblst.a` via a thin C shim and an FFI layer, selectable per invocation.
+> **What it does:** Switches the two most expensive operations in prove/verify — the Pippenger MSMs and the final pairings — from arkworks to the vendored [blst](https://github.com/supranational/blst) `libblst.a` via a thin C shim and an FFI layer. In the library the backend is selectable per invocation; the CLI artifact pins it at compile time (`BLS_BACKEND`).
 
 ### The problem
 
@@ -1281,7 +1281,7 @@ At large circuit sizes (Ed25519-style, millions of constraints) the Groth16 MSMs
 
 | Concern | Before (Impl 7) | After (Impl 8) | Impact |
 |---------|----------------|----------------|--------|
-| Backend selection | arkworks always | `Backend::Cpu` (arkworks) or `Backend::Native` (blst), picked per invocation | Both stay in the tree, cross-checked |
+| Backend selection | arkworks always | Library: `Backend::Cpu` or `Backend::Native`, picked per invocation; CLI: fixed at compile time (`BLS_BACKEND`) | Both stay in the tree, cross-checked |
 | G1/G2 MSM | `ark_ec::VariableBaseMSM::msm` | `blst_p1s_mult_pippenger` / `blst_p2s_mult_pippenger` | **1.7–2.2×** for the typical range |
 | Batch pairing | `multi_pairing` | `blst_miller_loop_n` + `blst_final_exp` | **1.4–2.8×** |
 | Radix-2 NTT (Fr) | `Radix2EvaluationDomain` FFT | `bls_ntt_in_place` (Cooley-Tukey, DIT) cross-validated against ark | ~parity (boundary-A/B conversion dominated) |
@@ -1290,18 +1290,20 @@ At large circuit sizes (Ed25519-style, millions of constraints) the Groth16 MSMs
 
 - The FFI ABI (`bls_backend.h`) passes fixed-width byte types: G1 48 B, G2 96 B, Fr 32 B, all little-endian canonical coordinates. No allocation crosses the boundary.
 - Points are validated on-curve and in-subgroup once per batch output; per-point validation is skipped inside the hot loops (a final exponentiation per point dwarfed the MSM).
-- Correctness pins: element-for-element `assert_eq!` cross-validation tests against arkworks (MSM, pairing batch, NTT), an independent C++ unit test suite with an NTT oracle, and CLI-level parity tests asserting bit-identical proof artifacts from `--backend cpu` and `--backend native`.
+- Correctness pins: element-for-element `assert_eq!` cross-validation tests against arkworks (MSM, pairing batch, NTT), an independent C++ unit test suite with an NTT oracle, and the `prover.rs` parity tests (`native_prover_matches_cpu_fixed_multiplier`, `native_prover_matches_cpu_random_sparse_circuits`) asserting bit-identical proof artifacts between the Cpu and Native backends.
 
 ### How to use it
 
+The CLI artifact selects its backend **at compile time** via `BLS_BACKEND` (`cpu` | `native` | `both`, default `both`) — see `clis/groth16/README.md`. To use the native backend:
+
 ```bash
 cd clis/groth16
-cargo run --release --features native -- prove  --backend native --circuit ... --witness ... --out ...
-cargo run --release --features native -- verify --backend native --proof ... --public ... --verifying-key ...
-cargo run --release --features native -- verify-batch --backend native ...
+BLS_BACKEND=native cargo run --release --features native -- prove --backend native --circuit ... --witness ... --out ...
+BLS_BACKEND=native cargo run --release --features native -- verify --backend native --proof ... --public ... --verifying-key ...
+BLS_BACKEND=native cargo run --release --features native -- verify-batch --backend native ...
 ```
 
-The library API offers the same switch (`set_groth16_ref(Backend::Cpu|Native)`). Without the `native` feature the CLI defaults to the Cpu backend, so the pure-Rust path builds everywhere.
+The library API keeps the run-time switch (`set_groth16_ref(Backend::Cpu|Native)`). Without the `native` feature the CLI's `--backend native` is unavailable (parser error in an FFI-only artifact, runtime error in a `both`-mode artifact), so the pure-Rust path builds everywhere.
 
 Measured Cpu-vs-Native numbers and the reproducible benchmark harness live in [`clis/trusted-setup/README.md`](../clis/trusted-setup/README.md) (all numbers measured on an i7-7500U laptop; ratios representative).
 
