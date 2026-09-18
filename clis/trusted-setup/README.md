@@ -190,6 +190,80 @@ The `.pk` / `.vk` files produced by any of these ceremonies are consumed by the 
 
 The crate also exposes the ceremony core as a library (`trusted_setup`) with modules `r1cs`, `qap`, `engine`, `ceremony`, `phase2`, `ptau`, `circom_adapter`, `prover`, and `cmd`. The `groth16-prover` library re-exports these modules, so `groth16_prover::ceremony` and friends keep working for existing callers.
 
+## Native (blst) backend
+
+The proving/verifying hot paths (MSM and pairings) can run on the **Cpu** backend — pure Rust [arkworks](https://arkworks.rs/) — or on the **Native** backend — the vendored [blst](https://github.com/supranational/blst) `libblst.a`, called through a C shim and an `unsafe` FFI layer. The choice is a compile-time feature plus a run-time `Backend` selection, so both implementations stay in the tree and are cross-checked against each other.
+
+### Choosing the backend at run time (CLI)
+
+The `groth16` CLI (`--backend cpu|native`) and the library (`set_groth16_ref(Backend::Cpu|Native)`) select the backend per invocation; the default is auto-detected (native when built with the feature, otherwise CPU):
+
+```bash
+cd clis/groth16
+cargo run --release --features native -- prove \
+  --backend native ...
+cargo run --release --features native -- verify \
+  --backend native ...
+```
+
+### Building with the native feature
+
+The native backend is an optional feature so the pure-Rust path stays buildable on any toolchain. Enabling it requires a C toolchain plus make/nasm as needed by blst's build script:
+
+```bash
+cd clis/trusted-setup
+cargo build --release --features native
+```
+
+Feature chain: `clis/groth16` (`native`) → `groth16-prover` (`native`) → `trusted-setup` (`native`). Building the crate without the feature compiles the C shim but keeps every backend call on the Cpu path.
+
+### How it works
+
+- `native/` holds the vendored blst source and the thin C shim `bls_backend.cpp` + `bls_backend.h`. The FFI defines fixed-width byte types (`bls_backend_g1_t` 48 bytes, `bls_backend_g2_t` 96 bytes, `bls_backend_fr_t` 32 bytes, all **little-endian** canonical field coordinates — the blst convention), so there is no heap allocation or `Arc` crossing the boundary.
+- `backend.rs` exposes `native_msm_g1`, `native_msm_g2`, `native_pairing_batch_check`, and `native_ntt`, and either owns the blst types or converts arkworks elements to the byte ABI at the boundary.
+- blst's Pippenger MSM and the pairing checks are single-threaded; the arkworks `Cpu` numbers below are therefore shown both on the default rayon pool and on a 1-thread pool. arkworks is built here **without** its `parallel` feature, so the two Cpu columns are near-identical; the end-to-end prover recovers the multithread gap by running the four independent proof MSMs in parallel.
+- Correctness is enforced four ways: per-call parity checks on the *inputs* (`backend.rs`), arkworks `assert_eq!` cross-validation tests (`native_g1_matches_ark_msm`, `native_g2_matches_ark_msm`, `native_pairing_matches_ark_multi`, `native_ntt_matches_ark_ifft`), an independent C++ unit test (`native/tests/test_bls_backend.cpp`, including an NTT oracle), and the CLI parity tests that assert `--backend cpu` and `--backend native` produce identical proof artifacts.
+- Every decoded point is still validated: on-curve and subgroup checks run once on each batch's *output*; per-point validation is skipped inside the hot loops (a full final exponentiation per point would otherwise dwarf the MSM).
+
+### Measured numbers
+
+The benchmark can be regenerated on any machine (release build, native feature) with:
+
+```bash
+cd clis/trusted-setup
+cargo run --release --features native --bin benchmark_backend
+# larger MSMs: --max-msm 4194304; isolate a section: --g1-only --g2-only --pairing-only --ntt-only
+```
+
+Every row is a min-of-3 timing, and both backends are fed identical deterministic fixtures and asserted equal before timing, so the ratio column is for provably-equal output. All numbers below were **measured on this machine** (Intel i7-7500U, aggressively throttled, ~4-thread rayon pool); absolute numbers are machine-specific, the ratios are representative.
+
+| G1 MSM (`n`) | cpu (Nt) | cpu (1t) | native (1t) | vs cpu Nt | vs cpu 1t |
+|---:|---:|---:|---:|:---:|:---:|
+| 1 000 | 157.3 ms | 161.8 ms | 91.1 ms | 1.73× | 1.78× |
+| 16 384 | 2388.9 ms | 2479.7 ms | 1174.0 ms | 2.03× | 2.11× |
+
+| G2 MSM (`n`) | cpu (Nt) | cpu (1t) | native (1t) | vs cpu Nt | vs cpu 1t |
+|---:|---:|---:|---:|:---:|:---:|
+| 1 000 | 620.2 ms | 625.2 ms | 325.2 ms | 1.91× | 1.92× |
+| 16 384 | 5891.3 ms | 5783.3 ms | 2743.4 ms | 2.15× | 2.11× |
+
+| Pairing batch (`n`) | cpu (Nt) | cpu (1t) | native (1t) | vs cpu Nt | vs cpu 1t |
+|---:|---:|---:|---:|:---:|:---:|
+| 1 | 9.6 ms | 5.1 ms | 3.5 ms | 2.75× | 1.45× |
+| 4 | 14.5 ms | 16.8 ms | 6.5 ms | 2.23× | 2.59× |
+| 16 | 42.1 ms | 29.2 ms | 18.1 ms | 2.32× | 1.61× |
+| 64 | 149.7 ms | 148.3 ms | 63.7 ms | 2.35× | 2.33× |
+| 256 | 702.6 ms | 657.4 ms | 248.1 ms | 2.83× | 2.65× |
+| 1 024 | 2697.0 ms | 3495.2 ms | 1412.4 ms | 1.91× | 2.47× |
+
+| Radix-2 NTT (Fr, forward) | cpu (Nt) | cpu (1t) | native (1t) | vs cpu Nt | vs cpu 1t |
+|---:|---:|---:|---:|:---:|:---:|
+| 1 024 | 1.4 ms | 1.5 ms | 1.9 ms | 0.71× | 0.79× |
+| 16 384 | 26.3 ms | 38.9 ms | 32.8 ms | 0.80× | 1.19× |
+| 131 072 | 340.4 ms | 301.0 ms | 373.7 ms | 0.91× | 0.81× |
+
+At 1M+ scale the G1 MSM speedup is larger on more representative hardware; on this throttled laptop a 2²⁰ G1 MSM (~2.05×) takes several minutes and a 2²² run is only reachable via `--max-msm 4194304`. The NTT kernel sits at parity with arkworks' radix-2 FFT (its cost is dominated by the byte↔Montgomery ABI round trip at the boundary); the decisive wins are the MSMs (1.7–2.2×) and pairings (1.4–2.8×), which are 90%+ of prove/verify time.
+
 ## Tests
 
 ```bash
@@ -197,4 +271,4 @@ cd clis/trusted-setup
 cargo test
 ```
 
-Unit tests cover the ceremony/prove/verify roundtrips, the `.ptau` parser, and the Phase-2 accumulator; integration tests in `tests/cli.rs` exercise the full CLI (`ceremony`, `ceremony-dev`, `phase2 new/contribute/verify/finalize`) via `assert_cmd`.
+Unit tests cover the ceremony/prove/verify roundtrips, the `.ptau` parser, and the Phase-2 accumulator; integration tests in `tests/cli.rs` exercise the full CLI (`ceremony`, `ceremony-dev`, `phase2 new/contribute/verify/finalize`) via `assert_cmd`. The native cross-validation and parity tests run under `cargo test --features native`.
