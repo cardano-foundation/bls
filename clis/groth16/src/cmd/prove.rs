@@ -7,8 +7,12 @@ use groth16_prover::ceremony::{
     FullProvingKey, ProvingKey, ToxicWaste,
 };
 use groth16_prover::circom_adapter::{CircomCircuit, SparseCircomCircuit};
-use groth16_prover::engine::{DenseQapEngine, FftQapEngine, QapEngine};
-use groth16_prover::prover::{NaiveProver, PippengerProver, Proof, Prover, PublicInput};
+use groth16_prover::engine::{DenseQapEngine, FftQapEngine};
+#[cfg(backend_cpu)]
+use groth16_prover::engine::QapEngine;
+use groth16_prover::prover::{Proof, PublicInput};
+#[cfg(backend_cpu)]
+use groth16_prover::prover::{NaiveProver, PippengerProver, Prover};
 use std::error::Error;
 use std::fs;
 use std::path::PathBuf;
@@ -33,12 +37,20 @@ pub enum ProverArg {
     Pippenger,
 }
 
-/// Group-arithmetic backend selection
+/// Group-arithmetic backend selection.
+///
+/// Which variants exist is decided *at compile time* by the `BLS_BACKEND`
+/// environment variable (see `build.rs`): `both` (the default) emits both
+/// `backend_cpu` and `backend_native` cfgs, so both variants are compiled and
+/// `--backend` picks at run time; `cpu` emits only `backend_cpu` (arkworks-only
+/// binary); `native` emits only `backend_native` (FFI-only binary).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum BackendArg {
     /// arkworks reference arithmetic (MSM via Pippenger, pairing via ark)
+    #[cfg(backend_cpu)]
     Cpu,
     /// Vendored blst FFI backend (C++ MSM + multi-pairing)
+    #[cfg(backend_native)]
     Native,
 }
 
@@ -67,8 +79,9 @@ pub struct Args {
     prover: ProverArg,
 
     /// Group-arithmetic backend: cpu (arkworks) or native (vendored blst FFI).
-    /// `native` requires building the CLI with `--features native`.
-    #[arg(long, value_enum, default_value = "cpu")]
+    /// Which values are accepted is fixed at build time by `BLS_BACKEND`.
+    #[cfg_attr(backend_cpu, arg(long, value_enum, default_value = "cpu"))]
+    #[cfg_attr(not(backend_cpu), arg(long, value_enum, default_value = "native"))]
     backend: BackendArg,
 
     /// Build the witness polynomials on-the-fly using the group-element-only
@@ -143,6 +156,9 @@ pub fn run(args: Args) -> Result<(), Box<dyn Error>> {
         Fr::from(0u64),
         Fr::from(0u64),
     );
+    // `scalars` (legacy tau/alpha/beta/gamma/delta) is only consumed by the
+    // cpu backend path, so a native-only build does not need it.
+    #[cfg_attr(not(backend_cpu), allow(unused_variables))]
     let (full_pk_opt, scalars) = if use_on_fly {
         let full_pk = if let Some(pk_path) = &args.proving_key {
             let full_pk = load_full_pk(pk_path).map_err(|e| {
@@ -212,34 +228,43 @@ If your proving key is a FullProvingKey, use --qap-on-fly (or omit the flag)."
     // ------------------------------------------------------------------
     // 3. Select engine and prover, then generate proof
     // ------------------------------------------------------------------
-    if args.backend == BackendArg::Native {
-        let full_pk = if use_on_fly {
-            full_pk_opt.as_ref().expect("native backend requires the on-the-fly path")
-        } else {
-            return Err("--backend native requires the on-the-fly FullProvingKey path \
+    // The backend variants present are fixed at compile time (BLS_BACKEND, see
+    // build.rs); each arm below is compiled only when its backend is actually
+    // part of the artifact.
+    let (proof, public_input) = match args.backend {
+        #[cfg(backend_native)]
+        BackendArg::Native => {
+            let full_pk = if use_on_fly {
+                full_pk_opt.as_ref().expect("native backend requires the on-the-fly path")
+            } else {
+                return Err("--backend native requires the on-the-fly FullProvingKey path \
 (omit --qap-not-on-fly)".into());
-        };
-        let (proof, public_input) = native_prove(full_pk, args.engine, &circuit.l, &circuit.r, &circuit.o, witness_fr)?;
-        eprintln!("Proof generated successfully (native backend).");
-        return output_proof(&proof, &public_input, args.out.as_ref());
-    }
-
-    let (proof, public_input) = match args.engine {
-        EngineArg::Dense => {
-            prove_dense_or_fft(&DenseQapEngine::new(), args.prover, full_pk_opt, &circuit.l, &circuit.r, &circuit.o, witness_fr, scalars)
+            };
+            let (proof, public_input) = native_prove(full_pk, args.engine, &circuit.l, &circuit.r, &circuit.o, witness_fr)?;
+            eprintln!("Proof generated successfully (native backend).");
+            (proof, public_input)
         }
-        EngineArg::Fft => {
-            prove_dense_or_fft(&FftQapEngine::new(), args.prover, full_pk_opt, &circuit.l, &circuit.r, &circuit.o, witness_fr, scalars)
-        }
+        #[cfg(backend_cpu)]
+        BackendArg::Cpu => match args.engine {
+            EngineArg::Dense => {
+                prove_dense_or_fft(&DenseQapEngine::new(), args.prover, full_pk_opt, &circuit.l, &circuit.r, &circuit.o, witness_fr, scalars)
+            }
+            EngineArg::Fft => {
+                prove_dense_or_fft(&FftQapEngine::new(), args.prover, full_pk_opt, &circuit.l, &circuit.r, &circuit.o, witness_fr, scalars)
+            }
+        },
     };
 
     eprintln!("Proof generated successfully.");
     output_proof(&proof, &public_input, args.out.as_ref())
 }
 
-/// Prove via the native blst backend.  Compile-time gated on the `native`
-/// feature; without it we return a clear error telling the operator to
-/// rebuild with `--features native`.
+/// Prove via the native blst backend.  Only compiled when the native backend
+/// is part of the build (`BLS_BACKEND` = `native` or `both`); the runtime
+/// behaviour additionally requires the `native` feature to be on — without it
+/// we return a clear error telling the operator to rebuild with
+/// `--features native`.
+#[cfg(backend_native)]
 fn native_prove(
     full_pk: &FullProvingKey,
     engine: EngineArg,
@@ -279,6 +304,7 @@ fn native_prove(
 
 /// Generic helper: given an engine, prover strategy, and proving artifact,
 /// dispatch to the correct `Prover` trait method.
+#[cfg(backend_cpu)]
 fn prove_dense_or_fft<E: QapEngine, T: Copy + Into<Fr>, L: AsRef<[T]>, R: AsRef<[T]>, O: AsRef<[T]>>(
     engine: &E,
     prover_arg: ProverArg,
@@ -380,35 +406,39 @@ fn run_sparse(args: Args) -> Result<(), Box<dyn Error>> {
     let witness_fr = &circuit.witness;
     let n_constraints = circuit.n_constraints as usize;
 
-    if args.backend == BackendArg::Native {
-        #[cfg(not(feature = "native"))]
-        return Err(
-            "--backend native requires building the CLI with `--features native`".into(),
-        );
-        #[cfg(feature = "native")]
-        {
-            use groth16_prover::prover::native_backend;
-            let (proof, public_input) = native_backend::prove_with_full_pk_sparse(
-                &engine, &full_pk, n_constraints, &circuit.l, &circuit.r, &circuit.o, witness_fr,
-            )?;
-            eprintln!("Proof generated successfully (sparse, native backend).");
+    match args.backend {
+        #[cfg(backend_native)]
+        BackendArg::Native => {
+            #[cfg(not(feature = "native"))]
+            return Err(
+                "--backend native requires building the CLI with `--features native`".into(),
+            );
+            #[cfg(feature = "native")]
+            {
+                use groth16_prover::prover::native_backend;
+                let (proof, public_input) = native_backend::prove_with_full_pk_sparse(
+                    &engine, &full_pk, n_constraints, &circuit.l, &circuit.r, &circuit.o, witness_fr,
+                )?;
+                eprintln!("Proof generated successfully (sparse, native backend).");
+                return output_proof(&proof, &public_input, args.out.as_ref());
+            }
+        }
+        #[cfg(backend_cpu)]
+        BackendArg::Cpu => {
+            let t4 = Instant::now();
+            let (proof, public_input) = match args.prover {
+                ProverArg::Naive => NaiveProver::new().prove_with_full_pk_sparse(
+                    &engine, &full_pk, n_constraints, &circuit.l, &circuit.r, &circuit.o, witness_fr,
+                ),
+                ProverArg::Pippenger => PippengerProver::new().prove_with_full_pk_sparse(
+                    &engine, &full_pk, n_constraints, &circuit.l, &circuit.r, &circuit.o, witness_fr,
+                ),
+            };
+            eprintln!("Proof generation (sparse) took {:?}", t4.elapsed());
+            eprintln!("Proof generated successfully (sparse path).");
             return output_proof(&proof, &public_input, args.out.as_ref());
         }
     }
-
-    let t4 = Instant::now();
-    let (proof, public_input) = match args.prover {
-        ProverArg::Naive => NaiveProver::new().prove_with_full_pk_sparse(
-            &engine, &full_pk, n_constraints, &circuit.l, &circuit.r, &circuit.o, witness_fr,
-        ),
-        ProverArg::Pippenger => PippengerProver::new().prove_with_full_pk_sparse(
-            &engine, &full_pk, n_constraints, &circuit.l, &circuit.r, &circuit.o, witness_fr,
-        ),
-    };
-    eprintln!("Proof generation (sparse) took {:?}", t4.elapsed());
-    eprintln!("Proof generated successfully (sparse path).");
-
-    output_proof(&proof, &public_input, args.out.as_ref())
 }
 
 /// Serialize a proof + public input and write to disk or print hex.

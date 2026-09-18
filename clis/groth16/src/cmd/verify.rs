@@ -4,7 +4,9 @@ use ark_bls12_381::{G1Affine, G2Affine};
 use ark_serialize::CanonicalDeserialize;
 use clap::{Parser, ValueEnum};
 use groth16_prover::ceremony::VerifyingKey;
-use groth16_prover::prover::{Proof, PublicInput, verify_proof};
+use groth16_prover::prover::{Proof, PublicInput};
+#[cfg(backend_cpu)]
+use groth16_prover::prover::verify_proof;
 #[cfg(feature = "native")]
 use groth16_prover::prover::PreparedVerifyingKey;
 use std::error::Error;
@@ -13,12 +15,20 @@ use std::path::PathBuf;
 
 use crate::util::load_vk;
 
-/// Group-arithmetic backend selection
+/// Group-arithmetic backend selection.
+///
+/// Which variants exist is decided *at compile time* by the `BLS_BACKEND`
+/// environment variable (see `build.rs`): `both` (the default) emits both
+/// `backend_cpu` and `backend_native` cfgs, so both variants are compiled and
+/// `--backend` picks at run time; `cpu` emits only `backend_cpu` (arkworks-only
+/// binary); `native` emits only `backend_native` (FFI-only binary).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum BackendArg {
     /// arkworks reference pairing
+    #[cfg(backend_cpu)]
     Cpu,
     /// Vendored blst FFI backend (native multi-pairing)
+    #[cfg(backend_native)]
     Native,
 }
 
@@ -39,8 +49,9 @@ pub struct Args {
     verifying_key: Option<PathBuf>,
 
     /// Group-arithmetic backend: cpu (arkworks) or native (vendored blst FFI).
-    /// `native` requires building the CLI with `--features native`.
-    #[arg(long, value_enum, default_value = "cpu")]
+    /// Which values are accepted is fixed at build time by `BLS_BACKEND`.
+    #[cfg_attr(backend_cpu, arg(long, value_enum, default_value = "cpu"))]
+    #[cfg_attr(not(backend_cpu), arg(long, value_enum, default_value = "native"))]
     backend: BackendArg,
 }
 
@@ -119,9 +130,11 @@ pub fn run(args: Args) -> Result<(), Box<dyn Error>> {
     // 4. Pairing check
     // ------------------------------------------------------------------
     let valid = match args.backend {
+        #[cfg(backend_cpu)]
         BackendArg::Cpu => {
             verify_proof(&proof, &public_input, &vk.alpha_g1, &vk.beta_g2, &vk.gamma_g2, &vk.delta_g2)
         }
+        #[cfg(backend_native)]
         BackendArg::Native => {
             #[cfg(not(feature = "native"))]
             {

@@ -5,17 +5,27 @@ use ark_bls12_381::{G1Affine, G2Affine};
 use ark_serialize::CanonicalDeserialize;
 use clap::{Parser, ValueEnum};
 use groth16_prover::ceremony::VerifyingKey;
-use groth16_prover::prover::{PreparedVerifyingKey, Proof, PublicInput, verify_batch};
+use groth16_prover::prover::{PreparedVerifyingKey, Proof, PublicInput};
+#[cfg(backend_cpu)]
+use groth16_prover::prover::verify_batch;
 use std::error::Error;
 use std::fs;
 use std::path::PathBuf;
 
-/// Group-arithmetic backend selection
+/// Group-arithmetic backend selection.
+///
+/// Which variants exist is decided *at compile time* by the `BLS_BACKEND`
+/// environment variable (see `build.rs`): `both` (the default) emits both
+/// `backend_cpu` and `backend_native` cfgs, so both variants are compiled and
+/// `--backend` picks at run time; `cpu` emits only `backend_cpu` (arkworks-only
+/// binary); `native` emits only `backend_native` (FFI-only binary).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum BackendArg {
     /// arkworks reference pairing
+    #[cfg(backend_cpu)]
     Cpu,
     /// Vendored blst FFI backend (native multi-pairing)
+    #[cfg(backend_native)]
     Native,
 }
 
@@ -40,8 +50,9 @@ pub struct Args {
     verifying_key: Option<PathBuf>,
 
     /// Group-arithmetic backend: cpu (arkworks) or native (vendored blst FFI).
-    /// `native` requires building the CLI with `--features native`.
-    #[arg(long, value_enum, default_value = "cpu")]
+    /// Which values are accepted is fixed at build time by `BLS_BACKEND`.
+    #[cfg_attr(backend_cpu, arg(long, value_enum, default_value = "cpu"))]
+    #[cfg_attr(not(backend_cpu), arg(long, value_enum, default_value = "native"))]
     backend: BackendArg,
 }
 
@@ -132,7 +143,9 @@ pub fn run(args: Args) -> Result<(), Box<dyn Error>> {
     // 3. Single multi-pairing product for the whole batch
     // ------------------------------------------------------------------
     let valid = match args.backend {
+        #[cfg(backend_cpu)]
         BackendArg::Cpu => verify_batch(&proofs, &public_inputs, &pvk),
+        #[cfg(backend_native)]
         BackendArg::Native => {
             #[cfg(not(feature = "native"))]
             {

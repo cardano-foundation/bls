@@ -192,37 +192,43 @@ The crate also exposes the ceremony core as a library (`trusted_setup`) with mod
 
 ## Native (blst) backend
 
-The proving/verifying hot paths (MSM and pairings) can run on the **Cpu** backend — pure Rust [arkworks](https://arkworks.rs/) — or on the **Native** backend — the vendored [blst](https://github.com/supranational/blst) `libblst.a`, called through a C shim and an `unsafe` FFI layer. The choice is a compile-time feature plus a run-time `Backend` selection, so both implementations stay in the tree and are cross-checked against each other.
+The proving/verifying hot paths (MSM and pairings) can run on the **Cpu** backend — pure Rust [arkworks](https://arkworks.rs/) — or on the **Native** backend — the vendored [blst](https://github.com/supranational/blst) `libblst.a`, called through a C shim and an `unsafe` FFI layer. The **library** keeps a run-time `Backend` selection (`set_groth16_ref(Backend::Cpu|Native)`), so both implementations stay in the tree and are cross-checked against each other. The **CLI artifact**, by contrast, bakes the choice in at compile time via the `BLS_BACKEND` environment variable, so a given binary provably contains exactly one path.
 
-### Choosing the backend at run time (CLI)
+### Choosing the backend at compile time (CLI)
 
-The `groth16` CLI (`--backend cpu|native`, default `cpu`) and the library (`set_groth16_ref(Backend::Cpu|Native)`) select the backend per invocation. The native path is only available when the binary is built with the `native` feature, and it must be requested explicitly:
+`build.rs` in `clis/groth16` reads `BLS_BACKEND` while the `groth16` CLI is being compiled:
+
+- `BLS_BACKEND=cpu` — arkworks-only binary; `--backend native` is rejected by the parser and the CLI's blst FFI dispatch path is not compiled in.
+- `BLS_BACKEND=native` — FFI-only binary; `--backend cpu` is rejected and the CLI's arkworks MSM/pairing dispatch path is not compiled in. Requires `--features native`.
+- `BLS_BACKEND=both` (default) — both implementations compiled, `--backend` selects at run time (default `cpu`); the mode used by the parity tests and the benchmark.
 
 ```bash
 cd clis/groth16
-cargo run --release --features native -- prove \
-  --backend native ...
-cargo run --release --features native -- verify \
-  --backend native ...
+# Pure-Rust artifact
+BLS_BACKEND=cpu cargo run --release -- prove ...
+# FFI-only artifact
+BLS_BACKEND=native cargo run --release --features native -- prove --backend native ...
+# Both backends, run-time selectable (default)
+cargo run --release --features native -- prove --backend native ...
 ```
 
 ### Building with the native feature
 
-The native backend is an optional feature so the pure-Rust path stays buildable on any toolchain. Enabling it requires a C toolchain plus make/nasm as needed by blst's build script:
+The native backend is an optional feature so the pure-Rust path stays buildable on any toolchain. Enabling it requires a C/C++ toolchain, **CMake, `make`, and `nasm`** on the host (Debian/Ubuntu: `build-essential cmake nasm`). The blst sources are **vendored in-tree** (`native/vendored/blst`, pinned Apache-2.0 checkout) and are compiled automatically by `build.rs` → CMake → blst's own `build.sh` into a static `libblst.a`; nothing is downloaded and no blst installation is needed:
 
 ```bash
 cd clis/trusted-setup
 cargo build --release --features native
 ```
 
-Feature chain: `clis/groth16` (`native`) → `groth16-prover` (`native`) → `trusted-setup` (`native`). Building the crate without the feature compiles the C shim but keeps every backend call on the Cpu path.
+Feature chain: `clis/groth16` (`native`) → `groth16-prover` (`native`) → `trusted-setup` (`native`). Building the crate without the feature compiles the C shim but keeps every backend call on the Cpu path. `BLS_BACKEND=native` without `--features native` aborts the build with a clear message (the FFI code must be compiled in for an FFI-only artifact).
 
 ### How it works
 
 - `native/` holds the vendored blst source and the thin C shim `bls_backend.cpp` + `bls_backend.h`. The FFI defines fixed-width byte types (`bls_backend_g1_t` 48 bytes, `bls_backend_g2_t` 96 bytes, `bls_backend_fr_t` 32 bytes, all **little-endian** canonical field coordinates — the blst convention), so there is no heap allocation or `Arc` crossing the boundary.
 - `backend.rs` exposes `native_msm_g1`, `native_msm_g2`, `native_pairing_batch_check`, and `native_ntt`, and either owns the blst types or converts arkworks elements to the byte ABI at the boundary.
 - blst's Pippenger MSM and the pairing checks are single-threaded; the arkworks `Cpu` numbers below are therefore shown both on the default rayon pool and on a 1-thread pool. arkworks is built here **without** its `parallel` feature, so the two Cpu columns are near-identical; the end-to-end prover recovers the multithread gap by running the four independent proof MSMs in parallel.
-- Correctness is enforced four ways: per-call parity checks on the *inputs* (`backend.rs`), arkworks `assert_eq!` cross-validation tests (`native_g1_matches_ark_msm`, `native_g2_matches_ark_msm`, `native_pairing_matches_ark_multi`, `native_ntt_matches_ark_ifft`), an independent C++ unit test (`native/tests/test_bls_backend.cpp`, including an NTT oracle), and the CLI parity tests that assert `--backend cpu` and `--backend native` produce identical proof artifacts.
+- Correctness is enforced four ways: per-call parity checks on the *inputs* (`backend.rs`), arkworks `assert_eq!` cross-validation tests (`native_g1_matches_ark_msm`, `native_g2_matches_ark_msm`, `native_pairing_matches_ark_multi`, `native_ntt_matches_ark_ifft`), an independent C++ unit test (`native/tests/test_bls_backend.cpp`, including an NTT oracle), and the `prover.rs` parity tests (`native_prover_matches_cpu_fixed_multiplier`, `native_prover_matches_cpu_random_sparse_circuits`) that assert the Cpu and Native backends produce bit-for-bit identical proof artifacts.
 - Every decoded point is still validated: on-curve and subgroup checks run once on each batch's *output*; per-point validation is skipped inside the hot loops (a full final exponentiation per point would otherwise dwarf the MSM).
 
 ### Measured numbers
