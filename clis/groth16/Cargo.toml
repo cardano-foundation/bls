@@ -5,6 +5,10 @@ edition = "2024"
 license = "Apache-2.0"
 description = "Groth16 CLI over BLS12-381 using arkworks"
 
+[features]
+
+native = ["groth16-prover/native"]
+
 [lib]
 name = "groth16"
 path = "src/lib.rs"

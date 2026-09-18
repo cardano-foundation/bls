@@ -9,6 +9,7 @@ description = "Groth16 prover over BLS12-381 using arkworks"
 default = []
 bins = ["trusted-setup/bins"]
 privacy = ["dep:smt"]
+native = ["trusted-setup/native"]
 
 [dependencies]
 ark-bls12-381 = "0.4"
