@@ -7,18 +7,19 @@
 //!
 //!   - [`native_msm_g1`] / [`native_msm_g2`] — Pippenger MSM via blst
 //!   - [`native_pairing_batch_check`] — multi-pairing product check via blst
-//!   - [`native_ntt`] — radix-2 NTT (landing with the NTT milestone)
+//!   - [`native_ntt`] — radix-2 NTT (DIT Cooley-Tukey) over Fr via blst's
+//!     field arithmetic and `blst_fr_ct_bfly`
 //!
 //! Encoding reference (`native/include/bls_backend.h`):
 //!   - Fr    : 32-byte little-endian canonical scalar
 //!   - G1    : x (48B BE) || y (48B BE)
 //!   - G2    : x.c1 || x.c0 || y.c1 || y.c0 (48B BE each)
 //!   - infinity is all-zero bytes
-#![allow(dead_code)] // wired into the prover/verifier in the backend-selection milestone
+#![allow(dead_code)] // some primitives are consumed by CLIs, tests and the benchmark bin
 
 use ark_bls12_381::{Fr, G1Affine, G2Affine};
 use ark_ec::AffineRepr;
-use ark_ff::{BigInt, BigInteger, PrimeField};
+use ark_ff::{BigInt, BigInteger, FftField, PrimeField};
 
 use crate::bls_ffi::{self, BackendError, BlsFr, BlsG1, BlsG2, BlsStatus};
 
@@ -161,9 +162,25 @@ pub fn native_pairing_batch_check(
     bls_ffi::pairing_batch(&bls_g1, &bls_g2)
 }
 
-/// Radix-2 NTT via the native backend (implemented in the NTT milestone).
-pub(crate) fn native_ntt(_values: &mut [Fr], _inverse: bool) -> Result<(), BackendError> {
-    Err(err(BlsStatus::InternalError))
+/// Radix-2 NTT over Fr via the native backend (DIT Cooley-Tukey inside the
+/// C++ kernel).  `values.len()` must be a power of two.  The kernel is fed the
+/// same principal root of unity ark-poly uses (`Fr::get_root_of_unity`), so
+/// `native_ntt(&mut v, false)` reproduces
+/// `Radix2EvaluationDomain::new(n).fft_in_place(&mut v)` exactly, and
+/// `native_ntt(&mut v, true)` its inverse.
+pub fn native_ntt(values: &mut [Fr], inverse: bool) -> Result<(), BackendError> {
+    let n = values.len();
+    if n == 0 || !n.is_power_of_two() {
+        return Err(err(BlsStatus::InvalidArgument));
+    }
+    let root = Fr::get_root_of_unity(n as u64).ok_or_else(|| err(BlsStatus::InvalidArgument))?;
+    let root = fr_to_bls(&root);
+    let mut bls_values: Vec<BlsFr> = values.iter().map(fr_to_bls).collect();
+    bls_ffi::ntt_in_place(&mut bls_values, &root, inverse)?;
+    for (out, in_bls) in values.iter_mut().zip(bls_values.iter()) {
+        *out = fr_from_bls(in_bls)?;
+    }
+    Ok(())
 }
 
 pub fn native_version() -> u32 {
@@ -337,5 +354,40 @@ mod tests {
     #[test]
     fn pairing_batch_empty_product_is_identity() {
         assert!(native_pairing_batch_check(&[], &[]).unwrap());
+    }
+
+    #[test]
+    fn ntt_cross_validates_against_ark_radix2_fft() {
+        use ark_poly::{EvaluationDomain, Radix2EvaluationDomain};
+        let mut rng = thread_rng();
+        for n in [1usize, 2, 4, 16, 256, 1024, 4096] {
+            let orig: Vec<Fr> = (0..n).map(|_| Fr::rand(&mut rng)).collect();
+            let domain = Radix2EvaluationDomain::<Fr>::new(n).unwrap();
+
+            let mut ark_fwd = orig.clone();
+            domain.fft_in_place(&mut ark_fwd);
+            let mut native_fwd = orig.clone();
+            native_ntt(&mut native_fwd, false).unwrap();
+            assert_eq!(ark_fwd, native_fwd, "forward NTT mismatch for n={n}");
+
+            let mut ark_back = ark_fwd.clone();
+            domain.ifft_in_place(&mut ark_back);
+            assert_eq!(ark_back, orig, "ark radix-2 ifft must invert its fft for n={n}");
+
+            let mut native_back = native_fwd.clone();
+            native_ntt(&mut native_back, true).unwrap();
+            assert_eq!(
+                ark_back, native_back,
+                "inverse NTT mismatch for n={n}"
+            );
+            assert_eq!(native_back, orig, "native NTT round-trip mismatch for n={n}");
+        }
+    }
+
+    #[test]
+    fn ntt_rejects_non_power_of_two() {
+        let mut vals = vec![Fr::one(); 3];
+        assert!(native_ntt(&mut vals, false).is_err());
+        assert!(native_ntt(&mut [], false).is_err());
     }
 }

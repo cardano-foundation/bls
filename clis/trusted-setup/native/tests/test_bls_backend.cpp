@@ -35,6 +35,12 @@ void scalar_from_u64(bls_backend_fr_t *out, uint64_t v) {
     }
 }
 
+bool scalar_eq_u64(const bls_backend_fr_t &a, uint64_t v) {
+    bls_backend_fr_t b;
+    scalar_from_u64(&b, v);
+    return std::memcmp(a.b, b.b, 32) == 0;
+}
+
 void g1_generator(bls_backend_g1_t *out) {
     const blst_p1_affine *g = blst_p1_affine_generator();
     blst_bendian_from_fp(out->b, &g->x);
@@ -96,10 +102,53 @@ void test_version_and_errors() {
     std::memset(bad.b, 0xff, sizeof(bad.b));
     CHECK(bls_msm_g1(&out, &bad, &s, 1) == BLS_BACKEND_POINT_NOT_ON_CURVE);
 
-    /* NTT lands in the dedicated milestone */
-    bls_backend_fr_t v;
+    /* NTT: length-1 transform is the identity (any root) */
+    bls_backend_fr_t root, v;
+    scalar_from_u64(&root, 1);
     scalar_from_u64(&v, 3);
-    CHECK(bls_ntt_in_place(&v, 1, 0) == BLS_BACKEND_INTERNAL_ERROR);
+    CHECK(bls_ntt_in_place(&v, 1, &root, 0) == BLS_BACKEND_OK);
+    CHECK(scalar_eq_u64(v, 3));
+
+    /* non-power-of-two length and null root are rejected */
+    scalar_from_u64(&v, 3);
+    CHECK(bls_ntt_in_place(&v, 3, &root, 0) == BLS_BACKEND_INVALID_ARGUMENT);
+    CHECK(bls_ntt_in_place(&v, 2, nullptr, 0) == BLS_BACKEND_INVALID_ARGUMENT);
+
+    /* n = 2 oracle.  The order-2 root is -1; the forward transform with it
+     * is [x0+x1, x0-x1], computed below with blst Fr arithmetic as an
+     * independent known-truth. */
+    bls_backend_fr_t neg_one, x0, x1;
+    {
+        blst_fr a_m, b_m, one_m, neg_m, sum_m, diff_m;
+        uint64_t lv[4] = {5, 0, 0, 0};
+        blst_fr_from_uint64(&a_m, lv);
+        lv[0] = 7;
+        blst_fr_from_uint64(&b_m, lv);
+        lv[0] = 1;
+        blst_fr_from_uint64(&one_m, lv);
+        blst_fr_cneg(&neg_m, &one_m, 1); /* -1 = p - 1 */
+        blst_fr_add(&sum_m, &a_m, &b_m);
+        blst_fr_sub(&diff_m, &a_m, &b_m);
+
+        blst_scalar s;
+        blst_scalar_from_fr(&s, &neg_m);
+        std::memcpy(neg_one.b, s.b, 32);
+        blst_scalar_from_fr(&s, &sum_m);
+        std::memcpy(x0.b, s.b, 32);
+        blst_scalar_from_fr(&s, &diff_m);
+        std::memcpy(x1.b, s.b, 32);
+    }
+    bls_backend_fr_t two[2], two_orig[2];
+    scalar_from_u64(&two[0], 5);
+    scalar_from_u64(&two[1], 7);
+    two_orig[0] = two[0];
+    two_orig[1] = two[1];
+    CHECK(bls_ntt_in_place(two, 2, &neg_one, 0) == BLS_BACKEND_OK);
+    CHECK(std::memcmp(two[0].b, x0.b, 32) == 0); /* x0 + x1 */
+    CHECK(std::memcmp(two[1].b, x1.b, 32) == 0); /* x0 - x1 */
+    CHECK(bls_ntt_in_place(two, 2, &neg_one, 1) == BLS_BACKEND_OK);
+    CHECK(std::memcmp(two[0].b, two_orig[0].b, 32) == 0);
+    CHECK(std::memcmp(two[1].b, two_orig[1].b, 32) == 0);
 }
 
 void test_msm_g1() {
