@@ -3,12 +3,21 @@
 
 use ark_bls12_381::{G1Affine, G2Affine};
 use ark_serialize::CanonicalDeserialize;
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use groth16_prover::ceremony::VerifyingKey;
 use groth16_prover::prover::{PreparedVerifyingKey, Proof, PublicInput, verify_batch};
 use std::error::Error;
 use std::fs;
 use std::path::PathBuf;
+
+/// Group-arithmetic backend selection
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum BackendArg {
+    /// arkworks reference pairing
+    Cpu,
+    /// Vendored blst FFI backend (native multi-pairing)
+    Native,
+}
 
 /// Arguments for the `verify-batch` subcommand.
 ///
@@ -29,6 +38,11 @@ pub struct Args {
     /// If omitted, the deterministic test values are used (dev only).
     #[arg(long, value_name = "FILE")]
     verifying_key: Option<PathBuf>,
+
+    /// Group-arithmetic backend: cpu (arkworks) or native (vendored blst FFI).
+    /// `native` requires building the CLI with `--features native`.
+    #[arg(long, value_enum, default_value = "cpu")]
+    backend: BackendArg,
 }
 
 /// Run the verify-batch command.
@@ -117,7 +131,23 @@ pub fn run(args: Args) -> Result<(), Box<dyn Error>> {
     // ------------------------------------------------------------------
     // 3. Single multi-pairing product for the whole batch
     // ------------------------------------------------------------------
-    let valid = verify_batch(&proofs, &public_inputs, &pvk);
+    let valid = match args.backend {
+        BackendArg::Cpu => verify_batch(&proofs, &public_inputs, &pvk),
+        BackendArg::Native => {
+            #[cfg(not(feature = "native"))]
+            {
+                let _ = (&proofs, &public_inputs, &pvk);
+                return Err(
+                    "--backend native requires building the CLI with `--features native`".into(),
+                );
+            }
+            #[cfg(feature = "native")]
+            {
+                use groth16_prover::prover::native_backend;
+                native_backend::verify_batch(&proofs, &public_inputs, &pvk)?
+            }
+        }
+    };
 
     if valid {
         println!("Verification result: VALID ({} proofs, one multi-pairing product)", proofs.len());

@@ -33,6 +33,15 @@ pub enum ProverArg {
     Pippenger,
 }
 
+/// Group-arithmetic backend selection
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum BackendArg {
+    /// arkworks reference arithmetic (MSM via Pippenger, pairing via ark)
+    Cpu,
+    /// Vendored blst FFI backend (C++ MSM + multi-pairing)
+    Native,
+}
+
 /// Arguments for the `prove` subcommand
 #[derive(Debug, Parser)]
 pub struct Args {
@@ -56,6 +65,11 @@ pub struct Args {
     /// Prover strategy: naive (scalar-by-scalar) or pippenger (batched MSM)
     #[arg(long, value_enum, default_value = "pippenger")]
     prover: ProverArg,
+
+    /// Group-arithmetic backend: cpu (arkworks) or native (vendored blst FFI).
+    /// `native` requires building the CLI with `--features native`.
+    #[arg(long, value_enum, default_value = "cpu")]
+    backend: BackendArg,
 
     /// Build the witness polynomials on-the-fly using the group-element-only
     /// FullProvingKey path (Implementation 5). This avoids materialising the
@@ -198,6 +212,18 @@ If your proving key is a FullProvingKey, use --qap-on-fly (or omit the flag)."
     // ------------------------------------------------------------------
     // 3. Select engine and prover, then generate proof
     // ------------------------------------------------------------------
+    if args.backend == BackendArg::Native {
+        let full_pk = if use_on_fly {
+            full_pk_opt.as_ref().expect("native backend requires the on-the-fly path")
+        } else {
+            return Err("--backend native requires the on-the-fly FullProvingKey path \
+(omit --qap-not-on-fly)".into());
+        };
+        let (proof, public_input) = native_prove(full_pk, args.engine, &circuit.l, &circuit.r, &circuit.o, witness_fr)?;
+        eprintln!("Proof generated successfully (native backend).");
+        return output_proof(&proof, &public_input, args.out.as_ref());
+    }
+
     let (proof, public_input) = match args.engine {
         EngineArg::Dense => {
             prove_dense_or_fft(&DenseQapEngine::new(), args.prover, full_pk_opt, &circuit.l, &circuit.r, &circuit.o, witness_fr, scalars)
@@ -209,6 +235,46 @@ If your proving key is a FullProvingKey, use --qap-on-fly (or omit the flag)."
 
     eprintln!("Proof generated successfully.");
     output_proof(&proof, &public_input, args.out.as_ref())
+}
+
+/// Prove via the native blst backend.  Compile-time gated on the `native`
+/// feature; without it we return a clear error telling the operator to
+/// rebuild with `--features native`.
+fn native_prove(
+    full_pk: &FullProvingKey,
+    engine: EngineArg,
+    l: &[Vec<Fr>],
+    r: &[Vec<Fr>],
+    o: &[Vec<Fr>],
+    witness: &[Fr],
+) -> Result<(Proof, PublicInput), Box<dyn Error>> {
+    #[cfg(not(feature = "native"))]
+    {
+        let _ = (full_pk, engine, l, r, o, witness);
+        return Err(
+            "--backend native requires building the CLI with `--features native`".into(),
+        );
+    }
+    #[cfg(feature = "native")]
+    {
+        use groth16_prover::prover::native_backend;
+        match engine {
+            EngineArg::Dense => {
+                let (proof, public_input) = native_backend::prove_with_full_pk(
+                    &DenseQapEngine::new(),
+                    full_pk, l, r, o, witness,
+                )?;
+                Ok((proof, public_input))
+            }
+            EngineArg::Fft => {
+                let (proof, public_input) = native_backend::prove_with_full_pk(
+                    &FftQapEngine::new(),
+                    full_pk, l, r, o, witness,
+                )?;
+                Ok((proof, public_input))
+            }
+        }
+    }
 }
 
 /// Generic helper: given an engine, prover strategy, and proving artifact,
@@ -313,6 +379,22 @@ fn run_sparse(args: Args) -> Result<(), Box<dyn Error>> {
 
     let witness_fr = &circuit.witness;
     let n_constraints = circuit.n_constraints as usize;
+
+    if args.backend == BackendArg::Native {
+        #[cfg(not(feature = "native"))]
+        return Err(
+            "--backend native requires building the CLI with `--features native`".into(),
+        );
+        #[cfg(feature = "native")]
+        {
+            use groth16_prover::prover::native_backend;
+            let (proof, public_input) = native_backend::prove_with_full_pk_sparse(
+                &engine, &full_pk, n_constraints, &circuit.l, &circuit.r, &circuit.o, witness_fr,
+            )?;
+            eprintln!("Proof generated successfully (sparse, native backend).");
+            return output_proof(&proof, &public_input, args.out.as_ref());
+        }
+    }
 
     let t4 = Instant::now();
     let (proof, public_input) = match args.prover {

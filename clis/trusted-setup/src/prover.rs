@@ -746,6 +746,12 @@ pub fn verify_proof(
 pub struct PreparedVerifyingKey {
     /// Raw `alpha·G1` (kept for batch linear-combination scaling).
     pub alpha_g1: G1Affine,
+    /// Raw `beta·G2` (needed by the native pairing backend).
+    pub beta_g2: G2Affine,
+    /// Raw `gamma·G2` (needed by the native pairing backend).
+    pub gamma_g2: G2Affine,
+    /// Raw `delta·G2` (needed by the native pairing backend).
+    pub delta_g2: G2Affine,
     /// Prepared `alpha·G1` (used by the single-proof prepared verifier).
     pub alpha_g1_prepared: <Bls12_381 as Pairing>::G1Prepared,
     /// Prepared `beta·G2`.
@@ -766,6 +772,9 @@ impl PreparedVerifyingKey {
     ) -> Self {
         Self {
             alpha_g1: *alpha_g1,
+            beta_g2: *beta_g2,
+            gamma_g2: *gamma_g2,
+            delta_g2: *delta_g2,
             alpha_g1_prepared: prepare_g1::<Bls12_381>(*alpha_g1),
             beta_g2_prepared: prepare_g2::<Bls12_381>(*beta_g2),
             gamma_g2_prepared: prepare_g2::<Bls12_381>(*gamma_g2),
@@ -919,6 +928,226 @@ pub fn verify_batch_with_scalars(
     g2.push(pvk.gamma_g2_prepared.clone());
 
     Bls12_381::multi_pairing(g1, g2).is_zero()
+}
+
+// ------------------------------------------------------------------
+// Native backend: the same prover/verifier primitives driven by the
+// vendored C++ backend (blst Pippenger MSM + multi-pairing) instead of
+// arkworks.  Compiled only with `--features native`.
+// ------------------------------------------------------------------
+
+/// Backend selector for proof generation and batch verification.
+///
+/// - [`Backend::Cpu`]: arkworks' `VariableBaseMSM` / `multi_pairing` — the
+///   reference implementation; `Backend::Cpu` on the prove side *is* the
+///   plain `PippengerProver`.
+/// - [`Backend::Native`]: the vendored blst FFI backend.
+#[cfg(feature = "native")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Backend {
+    /// arkworks reference arithmetic.
+    Cpu,
+    /// vendored blst FFI backend.
+    Native,
+}
+
+/// `Backend::Native` proof generation and batch verification.
+///
+/// The native backend replaces only the *group arithmetic* of the reference
+/// prover: witness-poly construction, the FFT quotient, and the `h`-scalar
+/// fast path stay in arkworks (identical, deterministic), while every
+/// multi-scalar multiplication is routed to blst's Pippenger implementation.
+/// The four MSMs `A`, `B`, `C_private`, `V` are independent — each is one
+/// `blst_p1s(p2s)_mult_pippenger` call — and the `h`-commitment either reuses
+/// the `h_scalar` fast path (a single generator multiply) or a fifth G1 MSM.
+///
+/// Because MSM output is the batch-sum of the same base points it is *the
+/// same group element* the CPU path computes, so `Backend::Native` produces
+/// proofs that are bit-for-bit identical to `Backend::Cpu`'s.
+#[cfg(feature = "native")]
+pub mod native_backend {
+    use super::*;
+    use crate::backend::{native_msm_g1, native_msm_g2, native_pairing_batch_check};
+    #[allow(unused_imports)]
+    use crate::bls_ffi::BackendError;
+
+    fn g1_msm(bases: &[G1Affine], scalars: &[Fr]) -> Result<G1Affine, BackendError> {
+        native_msm_g1(bases, scalars)
+    }
+
+    fn g2_msm(bases: &[G2Affine], scalars: &[Fr]) -> Result<G2Affine, BackendError> {
+        native_msm_g2(bases, scalars)
+    }
+
+    /// `h`-commitment for a built quotient polynomial, mirroring
+    /// `PippengerProver`: `h_scalar * h(tau) * G1` when the fast path is
+    /// available, else an MSM against `h_query`.
+    fn h_commitment(
+        full_pk: &crate::ceremony::FullProvingKey,
+        h: &DensePolynomial<Fr>,
+    ) -> Result<G1Projective, BackendError> {
+        if let (Some(h_scalar), Some(tau)) = (full_pk.h_scalar, full_pk.h_scalar_tau) {
+            let h_tau = h.evaluate(&tau);
+            Ok(G1Projective::from(G1Affine::generator()) * (h_scalar * h_tau))
+        } else {
+            let h_len = h.coeffs.len().min(full_pk.h_query.len());
+            if h_len > 0 {
+                g1_msm(&full_pk.h_query[..h_len], &h.coeffs[..h_len]).map(G1Projective::from)
+            } else {
+                Ok(G1Projective::zero())
+            }
+        }
+    }
+
+    /// Prove `(A, B, C, V)` using the native backend for every MSM.
+    pub fn prove_with_full_pk<E>(
+        engine: &E,
+        full_pk: &crate::ceremony::FullProvingKey,
+        l: &[Vec<Fr>],
+        r: &[Vec<Fr>],
+        o: &[Vec<Fr>],
+        witness: &[Fr],
+    ) -> Result<(Proof, PublicInput), BackendError>
+    where
+        E: QapEngine,
+    {
+        let n_public = full_pk.vk.n_public;
+        let (_l_poly, _r_poly, _o_poly, h) =
+            build_witness_polys_and_quotient_dense(engine, l, r, o, witness);
+
+        let h_c = h_commitment(full_pk, &h)?;
+
+        let a_proj: G1Projective = g1_msm(&full_pk.a_query, witness)?.into();
+        let a: G1Affine = (a_proj + G1Projective::from(full_pk.vk.alpha_g1)).into();
+
+        let b_proj: G2Projective = g2_msm(&full_pk.b_g2_query, witness)?.into();
+        let b: G2Affine = (b_proj + G2Projective::from(full_pk.vk.beta_g2)).into();
+
+        let private_c = &full_pk.c_query[n_public..];
+        let private_w = &witness[n_public..];
+        let c_private: G1Projective = if private_c.is_empty() {
+            G1Projective::zero()
+        } else {
+            g1_msm(private_c, private_w)?.into()
+        };
+        let c: G1Affine = (c_private + h_c).into();
+
+        let public_w = &witness[..n_public];
+        let v: G1Affine = g1_msm(&full_pk.l_query, public_w)?.into();
+
+        Ok((Proof { a, b, c }, PublicInput { v }))
+    }
+
+    /// Sparse-wire analog of [`prove_with_full_pk`].
+    pub fn prove_with_full_pk_sparse<E>(
+        engine: &E,
+        full_pk: &crate::ceremony::FullProvingKey,
+        n_constraints: usize,
+        sparse_l: &[Vec<(u32, Fr)>],
+        sparse_r: &[Vec<(u32, Fr)>],
+        sparse_o: &[Vec<(u32, Fr)>],
+        witness: &[Fr],
+    ) -> Result<(Proof, PublicInput), BackendError>
+    where
+        E: QapEngine,
+    {
+        let n_public = full_pk.vk.n_public;
+        let (_l_poly, _r_poly, _o_poly, h) =
+            build_witness_polys_and_quotient_sparse(engine, n_constraints, sparse_l, sparse_r, sparse_o, witness);
+
+        let h_c = h_commitment(full_pk, &h)?;
+
+        let a_proj: G1Projective = g1_msm(&full_pk.a_query, witness)?.into();
+        let a: G1Affine = (a_proj + G1Projective::from(full_pk.vk.alpha_g1)).into();
+
+        let b_proj: G2Projective = g2_msm(&full_pk.b_g2_query, witness)?.into();
+        let b: G2Affine = (b_proj + G2Projective::from(full_pk.vk.beta_g2)).into();
+
+        let private_c = &full_pk.c_query[n_public..];
+        let private_w = &witness[n_public..];
+        let c_private: G1Projective = if private_c.is_empty() {
+            G1Projective::zero()
+        } else {
+            g1_msm(private_c, private_w)?.into()
+        };
+        let c: G1Affine = (c_private + h_c).into();
+
+        let public_w = &witness[..n_public];
+        let v: G1Affine = g1_msm(&full_pk.l_query, public_w)?.into();
+
+        Ok((Proof { a, b, c }, PublicInput { v }))
+    }
+
+    /// Batch verification of `N` proofs with `N+3` native pairings; the
+    /// random-scalar folding is byte-for-byte the reference `verify_batch`,
+    /// only the final multi-pairing product is evaluated by blst.
+    pub fn verify_batch(
+        proofs: &[Proof],
+        public_inputs: &[PublicInput],
+        pvk: &PreparedVerifyingKey,
+    ) -> Result<bool, BackendError> {
+        let mut rng = rand::thread_rng();
+        let scalars: Vec<Fr> = (0..proofs.len())
+            .map(|_| loop {
+                let s = Fr::rand(&mut rng);
+                if !s.is_zero() {
+                    break s;
+                }
+            })
+            .collect();
+        verify_batch_with_scalars(proofs, public_inputs, pvk, &scalars)
+    }
+
+    /// Deterministic core of [`verify_batch`]: same fold as the reference
+    /// `verify_batch_with_scalars`, with the `N+3` pairings evaluated by
+    /// `blst_miller_loop_n` + `blst_final_exp` in a single call.
+    pub fn verify_batch_with_scalars(
+        proofs: &[Proof],
+        public_inputs: &[PublicInput],
+        pvk: &PreparedVerifyingKey,
+        scalars: &[Fr],
+    ) -> Result<bool, BackendError> {
+        let n = proofs.len();
+        if n == 0 {
+            return Ok(true);
+        }
+        assert_eq!(n, public_inputs.len(), "one public input per proof");
+        assert_eq!(n, scalars.len(), "one scalar per proof");
+
+        let mut sum_r = Fr::zero();
+        for s in scalars {
+            sum_r += s;
+        }
+
+        let mut g1: Vec<G1Affine> = Vec::with_capacity(n + 3);
+        let mut g2: Vec<G2Affine> = Vec::with_capacity(n + 3);
+
+        let mut c_batch = G1Projective::zero();
+        let mut v_batch = G1Projective::zero();
+
+        for i in 0..n {
+            let scaled_a: G1Affine = (G1Projective::from(proofs[i].a) * scalars[i]).into();
+            g1.push(scaled_a);
+            g2.push(proofs[i].b);
+
+            c_batch += G1Projective::from(proofs[i].c) * scalars[i];
+            v_batch += G1Projective::from(public_inputs[i].v) * scalars[i];
+        }
+
+        let alpha_scaled: G1Affine = (G1Projective::from(pvk.alpha_g1) * (-sum_r)).into();
+        g1.push(alpha_scaled);
+        g2.push(pvk.beta_g2);
+
+        let neg_c_batch: G1Affine = (-c_batch).into();
+        g1.push(neg_c_batch);
+        g2.push(pvk.delta_g2);
+
+        let neg_v_batch: G1Affine = (-v_batch).into();
+        g1.push(neg_v_batch);
+        g2.push(pvk.gamma_g2);
+
+        native_pairing_batch_check(&g1, &g2)
+    }
 }
 
 #[cfg(test)]
@@ -1807,5 +2036,150 @@ mod tests {
             !verify_batch(&bogus, &public_inputs, &pvk),
             "a batch of invalid proofs must be rejected"
         );
+    }
+
+    // ------------------------------------------------------------------
+    // Native backend parity tests (compiled only with --features native)
+    // ------------------------------------------------------------------
+
+    /// Assert the native prover reproduces the reference pippenger proof
+    /// bit-for-bit and that both verify.
+    #[cfg(feature = "native")]
+    fn assert_native_proof_parity(
+        engine: &impl QapEngine,
+        full_pk: &crate::ceremony::FullProvingKey,
+        dense_l: &[Vec<Fr>],
+        dense_r: &[Vec<Fr>],
+        dense_o: &[Vec<Fr>],
+        sparse_l: &[Vec<(u32, Fr)>],
+        sparse_r: &[Vec<(u32, Fr)>],
+        sparse_o: &[Vec<(u32, Fr)>],
+        witness: &[Fr],
+    ) {
+        use native_backend::{prove_with_full_pk, prove_with_full_pk_sparse};
+
+        let pippenger = PippengerProver::new();
+
+        let (proof_cpu, public_cpu) = pippenger.prove_with_full_pk(
+            engine, full_pk, dense_l, dense_r, dense_o, witness,
+        );
+        let (proof_native, public_native) = prove_with_full_pk(
+            engine, full_pk, dense_l, dense_r, dense_o, witness,
+        )
+        .expect("native dense prover must succeed");
+
+        assert_eq!(proof_cpu.a, proof_native.a, "A must match CPU vs native");
+        assert_eq!(proof_cpu.b, proof_native.b, "B must match CPU vs native");
+        assert_eq!(proof_cpu.c, proof_native.c, "C must match CPU vs native");
+        assert_eq!(public_cpu.v, public_native.v, "V must match CPU vs native");
+
+        let vk = &full_pk.vk;
+        assert!(
+            verify_proof(&proof_cpu, &public_cpu, &vk.alpha_g1, &vk.beta_g2, &vk.gamma_g2, &vk.delta_g2) &&
+                verify_proof(&proof_native, &public_native, &vk.alpha_g1, &vk.beta_g2, &vk.gamma_g2, &vk.delta_g2),
+            "both CPU and native proofs must verify"
+        );
+
+        let n_constraints = dense_l.len();
+        let (proof_native_sparse, public_native_sparse) = prove_with_full_pk_sparse(
+            engine, full_pk, n_constraints, sparse_l, sparse_r, sparse_o, witness,
+        )
+        .expect("native sparse prover must succeed");
+        assert_eq!(proof_native.a, proof_native_sparse.a, "A must match native dense vs sparse");
+        assert_eq!(proof_native.b, proof_native_sparse.b, "B must match native dense vs sparse");
+        assert_eq!(proof_native.c, proof_native_sparse.c, "C must match native dense vs sparse");
+        assert_eq!(public_native.v, public_native_sparse.v, "V must match native dense vs sparse");
+    }
+
+    #[test]
+    #[cfg(feature = "native")]
+    fn native_prover_matches_cpu_fixed_multiplier() {
+        let engine = FftQapEngine::new();
+        let tw = crate::ceremony::ToxicWaste::deterministic();
+        let (full_pk, _vk) = crate::ceremony::single_party_ceremony_full_from_tw(
+            &engine, &L, &R, &O, 2, tw, false,
+        );
+        let witness = witness();
+        let dense_l: Vec<Vec<Fr>> = L.iter().map(|row| row.iter().map(|&v| Fr::from(v)).collect()).collect();
+        let dense_r: Vec<Vec<Fr>> = R.iter().map(|row| row.iter().map(|&v| Fr::from(v)).collect()).collect();
+        let dense_o: Vec<Vec<Fr>> = O.iter().map(|row| row.iter().map(|&v| Fr::from(v)).collect()).collect();
+        let sl = to_sparse(&dense_l);
+        let sr = to_sparse(&dense_r);
+        let so = to_sparse(&dense_o);
+        assert_native_proof_parity(&engine, &full_pk, &dense_l, &dense_r, &dense_o, &sl, &sr, &so, &witness);
+    }
+
+    #[test]
+    #[cfg(feature = "native")]
+    fn native_prover_matches_cpu_random_sparse_circuits() {
+        let mut rng = XorShiftRng(0xCAFE);
+        for &n in &[1usize, 5, 14] {
+            let circuit = crate::r1cs::random_sparse_r1cs_circuit(&mut rng, n, 3);
+            let engine = FftQapEngine::new();
+            let (full_pk, _vk) = random_sparse_ceremony(&engine, &circuit);
+
+            let sl = to_sparse(&circuit.l);
+            let sr = to_sparse(&circuit.r);
+            let so = to_sparse(&circuit.o);
+            assert_native_proof_parity(
+                &engine, &full_pk,
+                &circuit.l, &circuit.r, &circuit.o,
+                &sl, &sr, &so, &circuit.witness,
+            );
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "native")]
+    fn native_prover_matches_cpu_with_h_scalar_fast_path() {
+        let engine = FftQapEngine::new();
+        let tw = crate::ceremony::ToxicWaste::deterministic();
+        let (full_pk, _vk) = crate::ceremony::single_party_ceremony_full_from_tw(
+            &engine, &L, &R, &O, 2, tw, true, // use h_scalar fast path
+        );
+        let witness = witness();
+        let dense_l: Vec<Vec<Fr>> = L.iter().map(|row| row.iter().map(|&v| Fr::from(v)).collect()).collect();
+        let dense_r: Vec<Vec<Fr>> = R.iter().map(|row| row.iter().map(|&v| Fr::from(v)).collect()).collect();
+        let dense_o: Vec<Vec<Fr>> = O.iter().map(|row| row.iter().map(|&v| Fr::from(v)).collect()).collect();
+        let sl = to_sparse(&dense_l);
+        let sr = to_sparse(&dense_r);
+        let so = to_sparse(&dense_o);
+        assert_native_proof_parity(&engine, &full_pk, &dense_l, &dense_r, &dense_o, &sl, &sr, &so, &witness);
+    }
+
+    #[test]
+    #[cfg(feature = "native")]
+    fn native_batch_verify_matches_cpu() {
+        use native_backend::verify_batch as verify_batch_native;
+
+        let (proofs, public_inputs, pvk, _vk) = batch_fixture(5);
+
+        assert!(verify_batch(&proofs, &public_inputs, &pvk), "CPU batch must accept");
+
+        let valid_native = verify_batch_native(&proofs, &public_inputs, &pvk)
+            .expect("native batch verify must not error");
+        assert!(valid_native, "native batch must accept a valid batch");
+
+        // A known-invalid batch must be rejected by both.
+        let bogus: Vec<Proof> = proofs
+            .iter()
+            .map(|p| Proof {
+                a: G1Affine::from(G1Projective::from(p.a) + G1Projective::generator()),
+                b: p.b,
+                c: p.c,
+            })
+            .collect();
+        assert!(!verify_batch(&bogus, &public_inputs, &pvk), "CPU must reject the tampered batch");
+        assert!(
+            !verify_batch_native(&bogus, &public_inputs, &pvk).expect("native verify must not error"),
+            "native must reject the tampered batch"
+        );
+
+        // Fixed deterministicscalars: native result must equal CPU result.
+        let scalars = vec![Fr::from(1u64), Fr::from(2u64), Fr::from(3u64), Fr::from(4u64), Fr::from(5u64)];
+        let cpu = verify_batch_with_scalars(&proofs, &public_inputs, &pvk, &scalars);
+        let native = native_backend::verify_batch_with_scalars(&proofs, &public_inputs, &pvk, &scalars)
+            .expect("native verify must not error");
+        assert_eq!(cpu, native, "CPU and native must agree on fixed-scalar batches");
     }
 }

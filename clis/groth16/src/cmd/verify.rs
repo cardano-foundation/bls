@@ -2,14 +2,25 @@
 
 use ark_bls12_381::{G1Affine, G2Affine};
 use ark_serialize::CanonicalDeserialize;
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use groth16_prover::ceremony::VerifyingKey;
 use groth16_prover::prover::{Proof, PublicInput, verify_proof};
+#[cfg(feature = "native")]
+use groth16_prover::prover::PreparedVerifyingKey;
 use std::error::Error;
 use std::fs;
 use std::path::PathBuf;
 
 use crate::util::load_vk;
+
+/// Group-arithmetic backend selection
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum BackendArg {
+    /// arkworks reference pairing
+    Cpu,
+    /// Vendored blst FFI backend (native multi-pairing)
+    Native,
+}
 
 /// Arguments for the `verify` subcommand
 #[derive(Debug, Parser)]
@@ -26,6 +37,11 @@ pub struct Args {
     /// If omitted, the deterministic test values are used (dev only).
     #[arg(long, value_name = "FILE")]
     verifying_key: Option<PathBuf>,
+
+    /// Group-arithmetic backend: cpu (arkworks) or native (vendored blst FFI).
+    /// `native` requires building the CLI with `--features native`.
+    #[arg(long, value_enum, default_value = "cpu")]
+    backend: BackendArg,
 }
 
 /// Run the verify command
@@ -102,7 +118,26 @@ pub fn run(args: Args) -> Result<(), Box<dyn Error>> {
     // ------------------------------------------------------------------
     // 4. Pairing check
     // ------------------------------------------------------------------
-    let valid = verify_proof(&proof, &public_input, &vk.alpha_g1, &vk.beta_g2, &vk.gamma_g2, &vk.delta_g2);
+    let valid = match args.backend {
+        BackendArg::Cpu => {
+            verify_proof(&proof, &public_input, &vk.alpha_g1, &vk.beta_g2, &vk.gamma_g2, &vk.delta_g2)
+        }
+        BackendArg::Native => {
+            #[cfg(not(feature = "native"))]
+            {
+                let _ = (&proof, &public_input, &vk);
+                return Err(
+                    "--backend native requires building the CLI with `--features native`".into(),
+                );
+            }
+            #[cfg(feature = "native")]
+            {
+                use groth16_prover::prover::native_backend;
+                let pvk = PreparedVerifyingKey::from_vk(&vk);
+                native_backend::verify_batch(std::slice::from_ref(&proof), std::slice::from_ref(&public_input), &pvk)?
+            }
+        }
+    };
 
     if valid {
         println!("Verification result: VALID");
