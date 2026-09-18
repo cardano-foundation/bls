@@ -13,6 +13,10 @@ Cargo.lock
 target/
 */target/
 
+# CMake build scratch (the native backend builds in-repo in debug)
+clis/trusted-setup/native/build/
+clis/trusted-setup/native/CMakeFiles/
+
 # IDE
 .idea/
 .vscode/
