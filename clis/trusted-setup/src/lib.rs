@@ -28,4 +28,9 @@ pub mod circom_adapter;
 pub mod prover;
 pub mod lagrange;
 
+#[cfg(feature = "native")]
+pub mod bls_ffi;
+#[cfg(feature = "native")]
+pub mod backend;
+
 pub mod cmd;

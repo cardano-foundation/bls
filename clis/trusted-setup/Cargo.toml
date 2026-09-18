@@ -7,6 +7,7 @@ description = "Groth16 trusted-setup core and CLI over BLS12-381 using arkworks"
 
 [features]
 bins = []
+native = []
 
 [lib]
 name = "trusted_setup"
@@ -34,3 +35,6 @@ assert_cmd = "2.0"
 predicates = "3.1"
 proptest = "1.4"
 tempfile = "3"
+
+[build-dependencies]
+cmake = "0.1"
