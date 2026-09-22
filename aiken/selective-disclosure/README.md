@@ -1040,7 +1040,7 @@ See [`step6/README.md`](step6/README.md) for the full comparison table and on-ch
 <details>
 <summary><b>Expand</b></summary>
 
-Every step has a `step{N}/` directory of runnable scripts (`aiken/selective-disclosure/step{N}/`) that reproduce the e2e from scratch, covering **both** proof paths. Steps 1–8 were run to completion and verified (`VALID` / `state chain OK`). Step 9 is a documented research direction.
+Every step has a `step{N}/` directory of runnable scripts (`aiken/selective-disclosure/step{N}/`) that reproduce the e2e from scratch. Steps 1–8 were run to completion and verified (`VALID` / `state chain OK`). Step 9 has a working e2e script and a scaffold circuit; the embedded pairing arithmetic is TODO.
 
 ```text
 aiken/selective-disclosure/
@@ -1052,7 +1052,7 @@ aiken/selective-disclosure/
 ├── step6/  groth16_e2e.sh   novaslim_e2e.sh   README.md   (Multi-User Batch + Audit)
 ├── step7/  groth16_e2e.sh   novaslim_e2e.sh   README.md   (Revocable Predicate)
 ├── step8/  groth16_e2e.sh   novaslim_e2e.sh   README.md   (Anonymous Delegation)
-└── step9/  README.md                                    (Recursive Aggregation — research)
+└── step9/  groth16_nova_meta_e2e.sh   README.md          (Recursive Aggregation — scaffold)
 ```
 
 Run from the repo root (or anywhere; repo root is auto-detected):
@@ -1216,17 +1216,19 @@ See [`step8/README.md`](step8/README.md) for future extensions (threshold delega
 <details>
 <summary><b>Expand</b></summary>
 
-> **Research direction.** Wrap Groth16 batch verifications (Step 6) inside Nova IVC steps, so that many epoch-sized batches fold into one transparent proof. A three-tier hierarchy: individual spend → batch check → recursive batch proof.
+> **Research scaffold.** Wrap Groth16 batch verifications (Step 6) inside Nova IVC steps, so that many epoch-sized batches fold into one transparent proof. A three-tier hierarchy: individual spend → batch check → recursive batch proof.
+>
+> ⚠️ **Honest status:** The MetaBatchStep circuit is a **scaffold**. The embedded Groth16 batch pairing check (Miller loop + final exponentiation on BLS12-381 in R1CS) is marked **TODO** — it requires ~500K–2M constraints and is not yet implemented. The circuit **does** implement the state transition (Merkle root update, nullifier accumulator, batch commitment hashing) and compiles cleanly.
 
 ### The problem
 
-Step 6 verifies N spends in one transaction. Step 9 answers: "what if I have 10,000 spends per day?" You cannot put 10,000 proofs in one batch — the redeemer exceeds Cardano's tx size limit. But you can **fold batch proofs across epochs**:
+Step 6 verifies N spends in one transaction. Step 9 answers: "what if I have 10,000 spends per day?" You cannot put 10,000 proofs in one batch — the redeemer would exceed Cardano's tx size limit. But you can **fold batch proofs across epochs**:
 
 | Tier | What it does | Proof size | Ceremony? |
 |------|-------------|------------|-----------|
 | **Tier 1** — Individual spend | Groth16 proof per user | 192 B | per-circuit |
 | **Tier 2** — Epoch batch | Groth16 `verify_batch` (N+3 pairings) | implicit | same vk |
-| **Tier 9** — Meta-batch | Nova fold over K epoch batches | ~318 KiB (sumcheck) | **none** |
+| **Tier 9** — Meta-batch | Nova fold over K epoch batches | ~0.4–1.5 KiB (sumcheck) | **none** |
 
 ### Architecture
 
@@ -1239,7 +1241,7 @@ graph TB
         EKB["Groth16 batch verify → valid"]
     end
     subgraph NovaFold["Nova Folding Layer (nova-slim)"]
-        F0["U_0 = initial accumulator"]
+        F0["U_0 = (root_0, nullifier_0, vk_hash)"]
         F1["fold(U_0, epoch_1) → U_1"]
         FK["fold(U_{K-1}, epoch_K) → U_K"]
     end
@@ -1253,24 +1255,19 @@ graph TB
     FK --> C --> V
 ```
 
-### Why nova-slim (not nova-prover)
+### What is implemented (scaffold)
 
-| Aspect | `nova-prover` | `nova-slim` |
-|--------|--------------|-------------|
-| **Proof size** | ~500 B IVC + 192 B compression | **~318 KiB** slim proof |
-| **Verifier** | Pairing check + IVC accumulator | **Sumcheck + hash-PC** (pairing-free) |
-| **On-chain cost** | ~20% CPU (pairing) | **Native field arithmetic** |
-| **Trusted setup** | Tiny compression SNARK ceremony | **None** |
+- ✅ **MetaBatchStep circuit** (`circom/MetaBatch/groth16_batch_verifier_nova.circom`) — correct interface, state transition, batch commitment hashing
+- ✅ **Witness generator** (`circom/MetaBatch/gen_meta_batch_input.py`) — consumes Step 6 epoch outputs
+- ✅ **e2e script** (`step9/groth16_nova_meta_e2e.sh`) — full pipeline: Step 6 → witness → compile → fold → compress → verify
+- ✅ **nova-slim integration** — reuses existing `fold`/`compress`/`verify` CLI
 
-`nova-slim` is the production target because it eliminates the final pairing check — the most expensive Plutus operation — and replaces it with native field arithmetic.
+### What remains (TODO)
 
-### What remains to be built
+- ⏳ **Embedded pairing arithmetic** — Miller loop + final exponentiation in R1CS (~500K–2M constraints)
+- ⏳ **Full batch verifier in R1CS** — verify all N Groth16 proofs inside the step circuit
 
-- A Circom **step circuit** that verifies a Groth16 batch proof internally (~50–100K constraints using embedded pairing arithmetic)
-- A small **state machine** tying epoch roots and nullifier accumulators
-- The `nova-slim` CLI integration (reusing existing `nova-slim fold` machinery)
-
-See [`step9/README.md`](step9/README.md) for the full architecture, estimated constraint budget, and comparison with earlier steps.
+See [`step9/README.md`](step9/README.md) for the full architecture, estimated constraint budget, and roadmap to completion.
 
 </details>
 
