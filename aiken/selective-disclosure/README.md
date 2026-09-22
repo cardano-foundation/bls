@@ -16,11 +16,12 @@
 8. [Step 4: Compliant Shielded Transfer (Viewing-Key Auditor Reveal)](#step-4-compliant-shielded-transfer-viewing-key-auditor-reveal)
  9. [Step 5: Full Auditor Reveal (Amount + Recipient Address)](#step-5-full-auditor-reveal-amount--recipient-address)
  10. [Step 6: Multi-User Batch Pool with Full Auditor Reveal](#step-6-multi-user-batch-pool-with-full-auditor-reveal)
- 11. [Runnable e2e Scripts & Timing](#runnable-e2e-scripts--timing)
-11. [Comparison with CIP proposal: Native Confidential Transfers](#comparison-with-cip-proposal-native-confidential-transfers)
-12. [Compliance & Auditability](#compliance--auditability)
-13. [Threat Model & Deployment](#threat-model--deployment)
-14. [References](#references)
+ 11. [Step 7: Revocable Predicate Proofs (Expiry + Revocation)](#step-7-revocable-predicate-proofs-expiry--revocation)
+ 12. [Runnable e2e Scripts & Timing](#runnable-e2e-scripts--timing)
+ 13. [Comparison with CIP proposal: Native Confidential Transfers](#comparison-with-cip-proposal-native-confidential-transfers)
+ 14. [Compliance & Auditability](#compliance--auditability)
+ 15. [Threat Model & Deployment](#threat-model--deployment)
+ 16. [References](#references)
 
 ---
 
@@ -1046,7 +1047,8 @@ aiken/selective-disclosure/
 ├── step3/  groth16_e2e.sh   novaslim_e2e.sh   README.md   (Privacy Pool)
 ├── step4/  groth16_e2e.sh   novaslim_e2e.sh   README.md   (Compliant Shielded Transfer)
 ├── step5/  groth16_e2e.sh   novaslim_e2e.sh   README.md   (Full Auditor Reveal)
-└── step6/  groth16_e2e.sh   novaslim_e2e.sh   README.md   (Multi-User Batch + Audit)
+├── step6/  groth16_e2e.sh   novaslim_e2e.sh   README.md   (Multi-User Batch + Audit)
+└── step7/  groth16_e2e.sh   novaslim_e2e.sh   README.md   (Revocable Predicate)
 ```
 
 Run from the repo root (or anywhere; repo root is auto-detected):
@@ -1072,6 +1074,7 @@ in a table:
 - [`step4/README.md`](step4/README.md) — Compliant Shielded Transfer (viewing-key auditor reveal)
 - [`step5/README.md`](step5/README.md) — Full Auditor Reveal (amount + recipient address)
 - [`step6/README.md`](step6/README.md) — Multi-User Batch Pool with Full Auditor Reveal
+- [`step7/README.md`](step7/README.md) — Revocable Predicate Proofs (expiry + revocation)
 
 See those READMEs for the measured numbers rather than repeating them here.
 
@@ -1097,6 +1100,54 @@ WITH_AUDITOR=1 ./aiken/selective-disclosure/f5_pipeline_e2e.sh   # also run Step
 ```
 
 The script demonstrates how credential eligibility (Step 1) and confidential amounts (Step 2) feed into a shared multi-user pool whose batch spends are verified with the `groth16/batch` batched verifier (`aiken/groth16/lib/groth16/batch.ak`).
+
+</details>
+
+---
+
+## Step 7: Revocable Predicate Proofs (Expiry + Revocation)
+
+<details>
+<summary><b>Expand</b></summary>
+
+> **One-line summary:** Credentials now have an **expiry** and can be **revoked** by the issuer. The holder proves both that the credential is still valid (not expired) and that it is **not** in the issuer's revocation tree.
+
+Step 1 proved credential eligibility once. Step 7 makes credentials **live**: they expire after a set date and can be revoked by the issuer at any time.
+
+| | Step 1 (Predicate) | **Step 7 (Revocable)** |
+|---|---|---|
+| **Expiry** | ❌ none | **✅** `expiry_year >= current_year` |
+| **Revocation** | ❌ none | **✅** Sparse-Merkle-Tree non-membership |
+| **On-chain check** | predicate only | predicate + expiry + revocation |
+
+### Sparse Merkle Tree non-membership
+
+The issuer maintains an SMT where revoked credentials are inserted at position `claims_msg % 2^depth` with leaf value `Poseidon(claims_msg, 0)`. The holder proves non-revocation by showing the path from the default empty leaf (`0`) at their position to the published `revocation_root`.
+
+```mermaid
+graph LR
+    I["Issuer maintains revocation SMT"] --> R["Publish revocation_root on-chain"]
+    H["Holder computes claims_msg"] --> P["Generate SMT non-membership proof"]
+    R --> G["Gate Script verifies root"]
+    P --> G
+```
+
+### Circuit additions
+
+- `expiry_year` (public) — checked with `GreaterEqThan`
+- `revocation_root` (public) — root of issuer's revocation SMT
+- `revocation_sibling[depth]`, `revocation_direction[depth]` (private) — Merkle path proving leaf = 0
+
+### CLI
+
+```bash
+./aiken/selective-disclosure/step7/groth16_e2e.sh
+./aiken/selective-disclosure/step7/novaslim_e2e.sh
+```
+
+Both paths compile `predicate_revocable_depth2.circom` / `predicate_revocable_nova.circom` and verify the proof as `VALID` / `state chain OK`.
+
+See [`step7/README.md`](step7/README.md) for the full comparison and security notes.
 
 </details>
 

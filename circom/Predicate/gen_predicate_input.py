@@ -84,33 +84,26 @@ def merkle_proof(leaves, index, depth):
     return siblings, directions
 
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--depth', type=int, default=2)
-    parser.add_argument('--output', type=str, default='input.json')
-    parser.add_argument('--seed', type=int, default=None)
-    parser.add_argument('--dob-year', type=int, default=1990)
-    parser.add_argument('--country', type=int, default=276)
-    args = parser.parse_args()
-
-    rng = random.Random(args.seed) if args.seed is not None else random
+def generate_predicate_input(depth: int = 2, seed: int = 1):
+    """Generate a predicate witness input dict.  Returns (input_dict, meta_dict)."""
+    rng = random.Random(seed)
 
     # ---- Issuer keypair ----
     issuer_sk = rng.randint(1, L - 1)
     issuer_pk = ed_mul(issuer_sk, SUBGROUP_GENERATOR[0], SUBGROUP_GENERATOR[1])
 
     # ---- Credential fields ----
-    dob_year = args.dob_year
-    country = args.country
-    current_year = 2026    # age = current_year - dob_year
+    dob_year = 1990
+    country = 276
+    current_year = 2026
 
-    # ---- Approved countries set (leaf = poseidon(country, 0)) ----
-    approved = [276, 250, 756, 40]  # DEU, FRA, CHE, AT
+    # ---- Approved countries set ----
+    approved = [276, 250, 756, 40]
     assert country in approved
-    assert len(approved) <= (1 << args.depth)
-    country_root, leaves = build_merkle_tree(approved, args.depth)
+    assert len(approved) <= (1 << depth)
+    country_root, leaves = build_merkle_tree(approved, depth)
     country_index = approved.index(country)
-    siblings, directions = merkle_proof(leaves, country_index, args.depth)
+    siblings, directions = merkle_proof(leaves, country_index, depth)
 
     # ---- Issuer signs claims_msg ----
     claims_msg = poseidon_hash(dob_year, country)
@@ -120,13 +113,11 @@ def main():
     eligible = 1
 
     inp = {
-        # public
         "pku": str(issuer_pk[0]),
         "pkv": str(issuer_pk[1]),
         "current_year": str(current_year),
         "country_root": str(country_root),
         "eligible": str(eligible),
-        # private
         "dob_year": str(dob_year),
         "country": str(country),
         "Ru": str(R[0]),
@@ -136,12 +127,68 @@ def main():
         "direction": [str(d) for d in directions],
     }
 
+    meta = {
+        "issuer_sk": issuer_sk,
+        "issuer_pk": issuer_pk,
+        "claims_msg": claims_msg,
+        "R": R,
+        "S": S,
+        "country_root": country_root,
+    }
+    return inp, meta
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--depth', type=int, default=2)
+    parser.add_argument('--output', type=str, default='input.json')
+    parser.add_argument('--seed', type=int, default=None)
+    parser.add_argument('--dob-year', type=int, default=1990)
+    parser.add_argument('--country', type=int, default=276)
+    args = parser.parse_args()
+
+    # For backward compatibility, use explicit args when seed is not given
+    if args.seed is None:
+        rng = random
+        issuer_sk = rng.randint(1, L - 1)
+        issuer_pk = ed_mul(issuer_sk, SUBGROUP_GENERATOR[0], SUBGROUP_GENERATOR[1])
+        dob_year = args.dob_year
+        country = args.country
+        current_year = 2026
+        approved = [276, 250, 756, 40]
+        assert country in approved
+        country_root, leaves = build_merkle_tree(approved, args.depth)
+        country_index = approved.index(country)
+        siblings, directions = merkle_proof(leaves, country_index, args.depth)
+        claims_msg = poseidon_hash(dob_year, country)
+        pk, R, S, r, k, r_raw, k_raw = eddsa_sign(issuer_sk, claims_msg)
+        eligible = 1
+        inp = {
+            "pku": str(issuer_pk[0]), "pkv": str(issuer_pk[1]),
+            "current_year": str(current_year), "country_root": str(country_root),
+            "eligible": str(eligible), "dob_year": str(dob_year),
+            "country": str(country), "Ru": str(R[0]), "Rv": str(R[1]),
+            "S": str(S), "sibling": [str(s) for s in siblings],
+            "direction": [str(d) for d in directions],
+        }
+    else:
+        inp, meta = generate_predicate_input(args.depth, args.seed)
+        issuer_sk = meta["issuer_sk"]
+        issuer_pk = meta["issuer_pk"]
+        claims_msg = meta["claims_msg"]
+        R = meta["R"]
+        S = meta["S"]
+        country_root = meta["country_root"]
+        siblings = [int(x) for x in inp["sibling"]]
+        directions = [int(x) for x in inp["direction"]]
+        eligible = int(inp["eligible"])
+
     with open(args.output, 'w') as f:
         json.dump(inp, f, indent=2)
 
     print(f"issuer_sk    = {issuer_sk}")
     print(f"issuer_pk    = ({issuer_pk[0]}, {issuer_pk[1]})")
-    print(f"claims_msg   = poseidon({dob_year}, {country}) = {claims_msg}")
+    print(f"claims_msg   = {claims_msg}")
     print(f"R            = ({R[0]}, {R[1]})")
     print(f"S            = {S}")
     print(f"country_root = {country_root}")
