@@ -12,13 +12,14 @@
 4. [Step 1: Predicate Proofs with Aiken](#step-1-predicate-proofs-with-aiken)
 5. [Step 2: Twisted ElGamal Extension](#step-2-twisted-elgamal-extension)
 6. [Step 3: Privacy Pools & Shielded Transactions](#step-3-privacy-pools--shielded-transactions)
-7. [Step 4: Compliant Shielded Transfer (Viewing-Key Auditor Reveal)](#step-4-compliant-shielded-transfer-viewing-key-auditor-reveal)
-8. [Step 5: Full Auditor Reveal (Amount + Recipient Address)](#step-5-full-auditor-reveal-amount--recipient-address)
-9. [Runnable e2e Scripts & Timing](#runnable-e2e-scripts--timing)
-10. [Comparison with CIP proposal: Native Confidential Transfers](#comparison-with-cip-proposal-native-confidential-transfers)
-11. [Compliance & Auditability](#compliance--auditability)
-12. [Threat Model & Deployment](#threat-model--deployment)
-13. [References](#references)
+7. [Step 3+ — F5: Scaling to Multi-User with Batch Verification](#step-3--f5-scaling-to-multi-user-with-batch-verification)
+8. [Step 4: Compliant Shielded Transfer (Viewing-Key Auditor Reveal)](#step-4-compliant-shielded-transfer-viewing-key-auditor-reveal)
+9. [Step 5: Full Auditor Reveal (Amount + Recipient Address)](#step-5-full-auditor-reveal-amount--recipient-address)
+10. [Runnable e2e Scripts & Timing](#runnable-e2e-scripts--timing)
+11. [Comparison with CIP proposal: Native Confidential Transfers](#comparison-with-cip-proposal-native-confidential-transfers)
+12. [Compliance & Auditability](#compliance--auditability)
+13. [Threat Model & Deployment](#threat-model--deployment)
+14. [References](#references)
 
 ---
 
@@ -666,6 +667,107 @@ $NOVA verify --curve bls12-381 --ivc pp.ivc.cbor --slim-proof pp_slim.proof.cbor
 ```
 
 The folded chain provably transforms the input note's commitment into the Merkle root; in a production pool a terminal constraint additionally asserts the range-conservation and non-nullifier checks of the spend before the pool updates its new root.
+
+</details>
+
+---
+
+## Step 3+ — F5: Scaling to Multi-User with Batch Verification
+
+<details>
+<summary><b>Expand</b></summary>
+
+Step 3 demonstrates a **single-user** privacy pool: one holder, one proof, one spend. **F5** ("Five") is the multi-user scaling layer: many holders share the same Merkle tree, submit independent proofs, and a bundler/relayer verifies them all in **one on-chain transaction** via batch verification.
+
+```mermaid
+graph LR
+    subgraph SingleUser["Step 3 — Single User"]
+        S1["User 1: deposit → spend<br/>1 proof → 1 tx<br/>~20% script CPU"]
+    end
+
+    subgraph MultiUser["F5 — Multi-User Batch"]
+        M1["User 1: spend → proof₁"]
+        M2["User 2: spend → proof₂"]
+        M3["User N: spend → proof_N"]
+        B["Bundler / Relayer"]
+        V["On-chain validator<br/>verify_batch(proofs)<br/>N+3 pairings → 1 check"]
+        M1 --> B
+        M2 --> B
+        M3 --> B
+        B -->|"1 tx with N proofs"| V
+    end
+
+    S1 -->|"scale up"| MultiUser
+```
+
+### What changes from Step 3 to F5
+
+| Aspect | Step 3 (single-user) | F5 (multi-user batch) |
+|--------|---------------------|----------------------|
+| Users per pool | 1 | **Many** |
+| Spends per transaction | 1 | **N** |
+| Proofs verified on-chain | 1 Groth16 (~20% CPU) | **1 batch check** (N+3 pairings) |
+| Anonymity set | Just the depositor | **All users who ever deposited** |
+| Transaction graph | Visible per-tx | **Hidden across the whole batch** |
+| Pool state | Single root | **Shared root + nullifier log** |
+
+### The prover evolution that makes F5 possible
+
+Five successive Groth16 implementations turned a memory-bound, single-user demo into a scalable multi-user system:
+
+| Implementation | What changed | Impact on F5 |
+|---------------|-------------|--------------|
+| **Impl 6 — Sparse** | Native sparse `.r1cs` parsing | **60× less RAM**, **4× faster prove** |
+| **Impl 7 — h_scalar** | Collapse `h_query` MSM to one scalar | **2× smaller PK**, eliminates 55% prove bottleneck |
+| **Impl 7 — Parallel** | Rayon parallel MSM assembly | **1.5–2×** faster on multi-core |
+| **Impl 8 — Native blst** | C/ASM Pippenger MSM + pairing | **1.7–2.8×** faster hot paths |
+| **Impl 11 — Batch verify** | N proofs → one multi-pairing product | **4.3×** faster at N=8, makes N-spends feasible in one tx |
+
+### Measured on `privacy_pool.circom` (depth 4, ~7.1K constraints)
+
+| Phase | Dense (old) | Sparse + h_scalar (current) | Speedup |
+|-------|------------|----------------------------|---------|
+| Ceremony | ~45 s, ~1.5 GiB | ~6.7 s, ~25 MiB | **6.7×** faster, **60×** less RAM |
+| Prove | ~12 s, ~1.5 GiB | ~2.5 s, ~20 MiB | **4.8×** faster, **75×** less RAM |
+| Verify (single) | ~60 ms | ~60 ms | Same |
+| Verify (batch, N=4) | 4 × ~60 ms = ~240 ms | ~80 ms | **3.0×** |
+| Verify (batch, N=8) | 8 × ~60 ms = ~480 ms | ~90 ms | **4.3×** |
+
+### Architecture
+
+```mermaid
+graph LR
+    subgraph OffChain["Off-Chain"]
+        F1["Phase 1: Dev ceremony<br/>--sparse --h-scalar → .pk + .vk"]
+        F2["Phase 2: Deposits<br/>N users commit notes → shared Merkle tree"]
+        F5["Phase 5: Proof generation<br/>Each user: note → Groth16 proof (192 B)"]
+    end
+    subgraph OnChain["On-Chain (Cardano)"]
+        F3["Phase 3: Deploy pool<br/>Aiken validator (vk) + root datum"]
+        F4["Phase 4: Deposit txs<br/>Add commitments, update root"]
+        F6["Phase 6: Batch spend tx<br/>verify_batch(proofs) → update root + nullifiers"]
+    end
+    F1 -->|"vk parameter"| F3
+    F2 -->|"Merkle root"| F4
+    F3 -->|"pool UTxO"| F4
+    F5 -->|"bundler submits N proofs"| F6
+    F4 -->|"new root"| F6
+```
+
+### How to run the F5 pipeline
+
+```bash
+# Full multi-user demo (4 users, depth 4, batch verify)
+bash aiken/f5/demo/f5_e2e_groth16.sh
+
+# Scaling sweep (1 → 16 users)
+CONFIGS="4:1 6:4 6:8 6:16" bash aiken/f5/bench/bench_f5_groth16.sh
+
+# Selective-disclosure pipeline (Steps 1 → 2 → 3 batch)
+bash aiken/selective-disclosure/f5_pipeline_e2e.sh
+```
+
+For the complete implementation-by-implementation comparison, measured numbers, and CLI reproduction commands, see [`F5_GROTH16_EVOLUTION.md`](F5_GROTH16_EVOLUTION.md).
 
 </details>
 
