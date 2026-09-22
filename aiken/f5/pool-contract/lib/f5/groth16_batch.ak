@@ -1,9 +1,12 @@
-/// Vendored Groth16 verifier for the F5 pool contract.
+/// Vendored Groth16 batch verifier for the F5 pool contract.
 ///
-/// This is the on-chain twin of `aiken/groth16/lib/groth16/verifier.ak`
-/// (identical types and single-proof `verify`), extended with a *batched*
-/// verifier `verify_batch` that checks `N` proofs in a single multi-pairing
-/// product:
+/// ⚠️  This is a **vendored copy** of `aiken/groth16/lib/groth16/batch.ak`.
+///     The canonical implementation lives in the `cardano-foundation/groth16`
+///     package (`aiken/groth16`).  Keep this file in sync with upstream.
+///
+/// Identical types and single-proof `verify` (from `verifier.ak`), extended
+/// with a *batched* verifier `verify_batch` that checks `N` proofs in a single
+/// multi-pairing product:
 ///
 /// ```text
 ///   Π_i e(r_i·A_i, B_i)  ==  e((Σ r_i)·α, β) · e(Σ r_i·C_i, δ) · e(Σ r_i·V_i, γ)
