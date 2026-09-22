@@ -17,11 +17,12 @@
  9. [Step 5: Full Auditor Reveal (Amount + Recipient Address)](#step-5-full-auditor-reveal-amount--recipient-address)
  10. [Step 6: Multi-User Batch Pool with Full Auditor Reveal](#step-6-multi-user-batch-pool-with-full-auditor-reveal)
  11. [Step 7: Revocable Predicate Proofs (Expiry + Revocation)](#step-7-revocable-predicate-proofs-expiry--revocation)
- 12. [Runnable e2e Scripts & Timing](#runnable-e2e-scripts--timing)
- 13. [Comparison with CIP proposal: Native Confidential Transfers](#comparison-with-cip-proposal-native-confidential-transfers)
- 14. [Compliance & Auditability](#compliance--auditability)
- 15. [Threat Model & Deployment](#threat-model--deployment)
- 16. [References](#references)
+ 12. [Step 8: Anonymous Delegation & Proxy Re-Encryption](#step-8-anonymous-delegation--proxy-re-encryption)
+ 13. [Runnable e2e Scripts & Timing](#runnable-e2e-scripts--timing)
+ 14. [Comparison with CIP proposal: Native Confidential Transfers](#comparison-with-cip-proposal-native-confidential-transfers)
+ 15. [Compliance & Auditability](#compliance--auditability)
+ 16. [Threat Model & Deployment](#threat-model--deployment)
+ 17. [References](#references)
 
 ---
 
@@ -1048,7 +1049,8 @@ aiken/selective-disclosure/
 ├── step4/  groth16_e2e.sh   novaslim_e2e.sh   README.md   (Compliant Shielded Transfer)
 ├── step5/  groth16_e2e.sh   novaslim_e2e.sh   README.md   (Full Auditor Reveal)
 ├── step6/  groth16_e2e.sh   novaslim_e2e.sh   README.md   (Multi-User Batch + Audit)
-└── step7/  groth16_e2e.sh   novaslim_e2e.sh   README.md   (Revocable Predicate)
+├── step7/  groth16_e2e.sh   novaslim_e2e.sh   README.md   (Revocable Predicate)
+└── step8/  groth16_e2e.sh   novaslim_e2e.sh   README.md   (Anonymous Delegation)
 ```
 
 Run from the repo root (or anywhere; repo root is auto-detected):
@@ -1075,6 +1077,7 @@ in a table:
 - [`step5/README.md`](step5/README.md) — Full Auditor Reveal (amount + recipient address)
 - [`step6/README.md`](step6/README.md) — Multi-User Batch Pool with Full Auditor Reveal
 - [`step7/README.md`](step7/README.md) — Revocable Predicate Proofs (expiry + revocation)
+- [`step8/README.md`](step8/README.md) — Anonymous Delegation & Proxy Re-Encryption
 
 See those READMEs for the measured numbers rather than repeating them here.
 
@@ -1148,6 +1151,58 @@ graph LR
 Both paths compile `predicate_revocable_depth2.circom` / `predicate_revocable_nova.circom` and verify the proof as `VALID` / `state chain OK`.
 
 See [`step7/README.md`](step7/README.md) for the full comparison and security notes.
+
+</details>
+
+---
+
+## Step 8: Anonymous Delegation & Proxy Re-Encryption
+
+<details>
+<summary><b>Expand</b></summary>
+
+> **One-line summary:** A holder delegates proof-generation rights to a **proxy** (relayer, wallet service) without revealing the credential witness. The proxy generates ZK proofs on behalf of the holder but cannot forge proofs for other holders or circuits.
+
+Step 1 required the holder to generate the proof themselves. Step 8 enables **delegation**: the holder signs a time-bounded delegation token authorizing a specific proxy to generate proofs for their credential.
+
+| | Step 1 (Predicate) | **Step 8 (Delegatable)** |
+|---|---|---|
+| **Delegation** | ❌ none | **✅** proxy can generate proofs |
+| **Proxy binding** | ❌ none | **✅** signature binds proxy to credential |
+| **Expiry** | ❌ none | **✅** delegation has time limit |
+
+### Delegation token
+
+The holder signs:
+
+```
+delegation_msg = PoseidonT6(proxy_pku, proxy_pkv, delegation_expiry, 0, 0, 0)
+delegation_sig  = EdDSA_Sign(holder_sk, delegation_msg)
+```
+
+The circuit verifies:
+1. Credential predicate (as before)
+2. `holder_pk = holder_sk * G`
+3. `EdDSA_Verify(holder_pk, delegation_sig, delegation_msg)`
+4. `delegation_expiry >= current_year`
+
+### Security properties
+
+| Property | Guarantee |
+|----------|-----------|
+| Proxy cannot forge | Without `holder_sk`, no valid delegation token |
+| Proxy cannot replay | Token bound to `proxy_pk` and `expiry` |
+| Proxy cannot sub-delegate | No re-delegation mechanism in circuit |
+| Expiry limits exposure | Token invalid after `delegation_expiry` |
+
+### CLI
+
+```bash
+./aiken/selective-disclosure/step8/groth16_e2e.sh
+./aiken/selective-disclosure/step8/novaslim_e2e.sh
+```
+
+See [`step8/README.md`](step8/README.md) for future extensions (threshold delegation, hierarchical delegation, revocable delegation).
 
 </details>
 
