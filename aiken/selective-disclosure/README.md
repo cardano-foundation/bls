@@ -18,11 +18,12 @@
  10. [Step 6: Multi-User Batch Pool with Full Auditor Reveal](#step-6-multi-user-batch-pool-with-full-auditor-reveal)
  11. [Step 7: Revocable Predicate Proofs (Expiry + Revocation)](#step-7-revocable-predicate-proofs-expiry--revocation)
  12. [Step 8: Anonymous Delegation & Proxy Re-Encryption](#step-8-anonymous-delegation--proxy-re-encryption)
- 13. [Runnable e2e Scripts & Timing](#runnable-e2e-scripts--timing)
- 14. [Comparison with CIP proposal: Native Confidential Transfers](#comparison-with-cip-proposal-native-confidential-transfers)
- 15. [Compliance & Auditability](#compliance--auditability)
- 16. [Threat Model & Deployment](#threat-model--deployment)
- 17. [References](#references)
+ 13. [Step 9: Recursive Proof Aggregation (Nova-Folded Batches)](#step-9-recursive-proof-aggregation-nova-folded-batches)
+ 14. [Runnable e2e Scripts & Timing](#runnable-e2e-scripts--timing)
+ 15. [Comparison with CIP proposal: Native Confidential Transfers](#comparison-with-cip-proposal-native-confidential-transfers)
+ 16. [Compliance & Auditability](#compliance--auditability)
+ 17. [Threat Model & Deployment](#threat-model--deployment)
+ 18. [References](#references)
 
 ---
 
@@ -1039,7 +1040,7 @@ See [`step6/README.md`](step6/README.md) for the full comparison table and on-ch
 <details>
 <summary><b>Expand</b></summary>
 
-Every step has a `step{N}/` directory of runnable scripts (`aiken/selective-disclosure/step{N}/`) that reproduce the e2e from scratch, covering **both** proof paths. All twelve were run to completion and verified (`VALID` / `state chain OK`).
+Every step has a `step{N}/` directory of runnable scripts (`aiken/selective-disclosure/step{N}/`) that reproduce the e2e from scratch, covering **both** proof paths. Steps 1–8 were run to completion and verified (`VALID` / `state chain OK`). Step 9 is a documented research direction.
 
 ```text
 aiken/selective-disclosure/
@@ -1050,7 +1051,8 @@ aiken/selective-disclosure/
 ├── step5/  groth16_e2e.sh   novaslim_e2e.sh   README.md   (Full Auditor Reveal)
 ├── step6/  groth16_e2e.sh   novaslim_e2e.sh   README.md   (Multi-User Batch + Audit)
 ├── step7/  groth16_e2e.sh   novaslim_e2e.sh   README.md   (Revocable Predicate)
-└── step8/  groth16_e2e.sh   novaslim_e2e.sh   README.md   (Anonymous Delegation)
+├── step8/  groth16_e2e.sh   novaslim_e2e.sh   README.md   (Anonymous Delegation)
+└── step9/  README.md                                    (Recursive Aggregation — research)
 ```
 
 Run from the repo root (or anywhere; repo root is auto-detected):
@@ -1078,6 +1080,7 @@ in a table:
 - [`step6/README.md`](step6/README.md) — Multi-User Batch Pool with Full Auditor Reveal
 - [`step7/README.md`](step7/README.md) — Revocable Predicate Proofs (expiry + revocation)
 - [`step8/README.md`](step8/README.md) — Anonymous Delegation & Proxy Re-Encryption
+- [`step9/README.md`](step9/README.md) — Recursive Proof Aggregation (Nova-folded batches — research)
 
 See those READMEs for the measured numbers rather than repeating them here.
 
@@ -1203,6 +1206,71 @@ The circuit verifies:
 ```
 
 See [`step8/README.md`](step8/README.md) for future extensions (threshold delegation, hierarchical delegation, revocable delegation).
+
+</details>
+
+---
+
+## Step 9: Recursive Proof Aggregation (Nova-Folded Batches)
+
+<details>
+<summary><b>Expand</b></summary>
+
+> **Research direction.** Wrap Groth16 batch verifications (Step 6) inside Nova IVC steps, so that many epoch-sized batches fold into one transparent proof. A three-tier hierarchy: individual spend → batch check → recursive batch proof.
+
+### The problem
+
+Step 6 verifies N spends in one transaction. Step 9 answers: "what if I have 10,000 spends per day?" You cannot put 10,000 proofs in one batch — the redeemer exceeds Cardano's tx size limit. But you can **fold batch proofs across epochs**:
+
+| Tier | What it does | Proof size | Ceremony? |
+|------|-------------|------------|-----------|
+| **Tier 1** — Individual spend | Groth16 proof per user | 192 B | per-circuit |
+| **Tier 2** — Epoch batch | Groth16 `verify_batch` (N+3 pairings) | implicit | same vk |
+| **Tier 9** — Meta-batch | Nova fold over K epoch batches | ~318 KiB (sumcheck) | **none** |
+
+### Architecture
+
+```mermaid
+graph TB
+    subgraph Epoch1["Epoch 1 (e.g., 8 spends)"]
+        E1B["Groth16 batch verify → valid"]
+    end
+    subgraph EpochK["Epoch K"]
+        EKB["Groth16 batch verify → valid"]
+    end
+    subgraph NovaFold["Nova Folding Layer (nova-slim)"]
+        F0["U_0 = initial accumulator"]
+        F1["fold(U_0, epoch_1) → U_1"]
+        FK["fold(U_{K-1}, epoch_K) → U_K"]
+    end
+    subgraph Final["Final Verification"]
+        C["compress(U_K) → slim proof"]
+        V["verify(sumcheck) — ONE check"]
+    end
+    E1B --> F1
+    EKB --> FK
+    F0 --> F1 --> FK
+    FK --> C --> V
+```
+
+### Why nova-slim (not nova-prover)
+
+| Aspect | `nova-prover` | `nova-slim` |
+|--------|--------------|-------------|
+| **Proof size** | ~500 B IVC + 192 B compression | **~318 KiB** slim proof |
+| **Verifier** | Pairing check + IVC accumulator | **Sumcheck + hash-PC** (pairing-free) |
+| **On-chain cost** | ~20% CPU (pairing) | **Native field arithmetic** |
+| **Trusted setup** | Tiny compression SNARK ceremony | **None** |
+
+`nova-slim` is the production target because it eliminates the final pairing check — the most expensive Plutus operation — and replaces it with native field arithmetic.
+
+### What remains to be built
+
+- A Circom **step circuit** that verifies a Groth16 batch proof internally (~50–100K constraints using embedded pairing arithmetic)
+- A small **state machine** tying epoch roots and nullifier accumulators
+- The `nova-slim` CLI integration (reusing existing `nova-slim fold` machinery)
+
+See [`step9/README.md`](step9/README.md) for the full architecture, estimated constraint budget, and comparison with earlier steps.
 
 </details>
 
