@@ -873,6 +873,29 @@ in a table:
 
 See those READMEs for the measured numbers rather than repeating them here.
 
+### F5 multi-user batch pipeline (Step 3 scaled)
+
+The standalone F5 demo (`aiken/f5/demo/`) shows a multi-user privacy pool with **batch verification** (N proofs → one multi-pairing product). A pipeline script connects it to the selective-disclosure steps:
+
+```bash
+./aiken/selective-disclosure/f5_pipeline_e2e.sh
+```
+
+This runs Step 1 (predicate), Step 2 (ElGamal), and Step 3 (F5 batch pool) in sequence, placing artifacts under `/tmp/sd_pipeline/`:
+
+- `step1/` — predicate proof + Aiken vk
+- `step2/` — ElGamal transfer proof + Aiken vk
+- `step3/` — F5 batch proofs + scenario + timings (batch speedup printed)
+
+Options:
+
+```bash
+USERS=8 DEPTH=6 ./aiken/selective-disclosure/f5_pipeline_e2e.sh
+WITH_AUDITOR=1 ./aiken/selective-disclosure/f5_pipeline_e2e.sh   # also run Step 4
+```
+
+The script demonstrates how credential eligibility (Step 1) and confidential amounts (Step 2) feed into a shared multi-user pool whose batch spends are verified with the `groth16/batch` batched verifier (`aiken/groth16/lib/groth16/batch.ak`).
+
 </details>
 
 ## Comparison with CIP proposal: Native Confidential Transfers
