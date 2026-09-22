@@ -15,6 +15,16 @@
  *                          y.c1 (48 BE) || y.c0 (48 BE),
  *              where an Fp2 element is c0 + c1*u.
  *   - G1/G2 point at infinity : all coordinate bytes set to zero.
+ *
+ * TRUST MODEL / SECURITY NOTE:
+ *   The MSM and pairing functions below do *not* perform per-point on-curve
+ *   or prime-subgroup validation in their hot loops.  blst's
+ *   `blst_p1_affine_in_g1` is a full final exponentiation (~ms/point), which
+ *   would dwarf the MSM itself at large N.  Callers must ensure all points
+ *   are valid before passing them across the ABI.  In the current Groth16
+ *   pipeline this is guaranteed because every point originates from an
+ *   arkworks-generated CRS or trusted-setup ceremony (already validated).
+ *   The *output* of each operation is still checked (on-curve + not-inf).
  */
 #ifndef BLS_BACKEND_H
 #define BLS_BACKEND_H
