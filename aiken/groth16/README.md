@@ -154,6 +154,25 @@ validator my_zk_app(vk: groth16.VerificationKey) {
 
 ---
 
+## Batch verification API
+
+For verifying many proofs cheaply, use `groth16/batch.verify_batch`:
+
+```aiken
+use groth16/batch as groth16_batch
+use groth16/verifier.{Proof, VerificationKey}
+
+let proofs: List<Proof> = [proof_1, proof_2, ...]
+let publics: List<List<Int>> = [public_inputs_1, public_inputs_2, ...]
+let vk: VerificationKey = ...
+
+groth16_batch.verify_batch(proofs, publics, vk)
+```
+
+This runs a single multi-pairing product (`N+3` Miller loops + one final exponentiation) instead of `N` individual pairing checks (`4N` Miller loops + `N` final exponentiations). Scalars are derived deterministically on-chain via `blake2b-256(proofs ‖ vk) mod Fr`, so the check is sound without an external RNG.
+
+---
+
 ## Circom pipeline (end-to-end)
 
 The verifier is designed to consume proofs produced by the Rust `groth16` CLI (`clis/groth16`) from Circom circuits. The full pipeline is:
@@ -292,7 +311,8 @@ aiken/groth16/
 ├── aiken.toml
 ├── lib/
 │   └── groth16/
-│       └── verifier.ak    # Core verifier logic + VerificationKey type
+│       ├── verifier.ak    # Core verifier logic + VerificationKey type
+│       └── batch.ak       # Batched multi-pairing verifier (N proofs → 1 check)
 └── validators/
     └── placeholder.ak       # Tests: parameterized proof + VK
 ```
@@ -340,6 +360,7 @@ The hard-coded compressed points in `lib/groth16/verifier.ak` were generated wit
 
 1. **Parameterized VK** — `verify` accepts a `VerificationKey` record containing `alpha_g1`, `beta_g2`, `gamma_g2`, `delta_g2`, and the `ic` list. The hard-coded VK is still available via `hardcoded_verification_key()` for backward compatibility.
 2. **Dynamic public inputs** — `compute_public_input_commitment` now performs a genuine multi-scalar multiplication (MSM) over the first `vk.n_public` entries of `vk.ic` and the supplied public-input list. It works for any number of public inputs, not just two.
+3. **Batch verification** — `groth16/batch.verify_batch` checks `N` proofs in a single multi-pairing product (`N+3` Miller loops + one final exponentiation). Scalars are Fiat–Shamir derived on-chain (`r = blake2b-256(proofs ‖ vk) mod Fr`). This is the on-chain twin of the Rust `verify_batch` in `clis/trusted-setup/src/prover.rs` (Implementation 11).
 
 ## Remaining next steps
 
