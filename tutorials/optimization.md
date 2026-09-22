@@ -1259,7 +1259,7 @@ h_scalar: None,     // the prover must use the full h_query MSM
 h_scalar_tau: None, // tau was never retained by any participant
 ```
 
-No participant in the MPC ever knew the accumulated τ; it cannot be written into the key. So the production prover falls back to the `h_query` MSM — the same MSM that Implementation 6 already made fast enough, and that parallel assembly (also in Impl 7) runs on multi-core. The dev fast path is a performance shortcut for testing, not a security model.
+No participant in the MPC ever knew the accumulated τ; it cannot be written into the key. So the production prover falls back to the `h_query` MSM — the same MSM that Implementation 6 left untouched (it fixed memory, not the h-commitment), and that parallel assembly (also in Impl 7) runs on multi-core. The dev fast path is a performance shortcut for testing, not a security model.
 
 ### The code change
 
@@ -1458,7 +1458,7 @@ All five scalars must be unknown to every party after the ceremony — the prove
 | `γ` (gamma) | 11  | Denominator for **public-input** CRS elements — separates the public-input commitment `V` from the private-input part of `C` | Public and private input commitments collapse; attacker can forge proofs by manipulating the public-input split |
 | `δ` (delta) | 13  | Denominator for **private-input** CRS elements — ensures the prover cannot tamper with the private-input commitment in `C` without `δ`'s knowledge | Attacker can fabricate the private-input part of `C`, forging proofs without a valid witness |
 
-Note the *dev* values in the table are deterministic and public — that is exactly why the dev ceremony is unsafe for production. In production the same five roles are filled by large random field elements. For the 5-constraint `SumOfProducts` circuit, `τ = 6` is required because the constraint points are `{0, 1, 2, 3, 4}` — using `τ = 3` or `τ = 4` would make `T(τ) = 0` and break the proof.
+Note the *dev* values in the table are deterministic and public — that is exactly why the dev ceremony is unsafe for production. In production the same five roles are filled by large random field elements. For the 5-constraint `SumOfProducts` circuit, `τ = 6` is chosen because the constraint points are `{0, 1, 2, 3, 4}` — using `τ = 3` or `τ = 4` would make `T(τ) = 0` and break the proof. Any value outside the constraint points would work; 6 is simply small and printable.
 
 > **The CRS vs. the SRS.** The SRS is the *power table* (`τ^i·G1`, `τ^i·G2`) — it lets the prover evaluate arbitrary polynomials at `τ`. The CRS *fixed points* are the *anchor points* (`α·G1`, `β·G2`, `γ·G2`, `δ·G2`) — they encode the mixed scalars that tie the proof to the specific circuit. In a production trusted setup, the SRS is universal (can be reused for many circuits), while the CRS fixed points are circuit-specific because they depend on `α`, `β`, `γ`, `δ`.
 
