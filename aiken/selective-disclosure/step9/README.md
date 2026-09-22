@@ -1,18 +1,20 @@
 # Step 9 — Recursive Proof Aggregation (Nova-Folded Batch Verifications)
 
-> **Research direction.** Wrap Groth16 batch verifications (Step 6) inside Nova IVC steps, so that many epoch-sized batches fold into one transparent proof. This creates a three-tier hierarchy: individual spend → batch check → recursive batch proof.
+> **Research scaffold.** Wrap Groth16 batch verifications (Step 6) inside Nova IVC steps, so that many epoch-sized batches fold into one transparent proof. A three-tier hierarchy: individual spend → batch check → recursive batch proof.
+>
+> ⚠️ **Honest status:** The MetaBatchStep circuit is a **scaffold**. The embedded Groth16 batch pairing check (Miller loop + final exponentiation on BLS12-381 in R1CS) is marked **TODO** — it requires ~500K–2M constraints and is not yet implemented. The circuit **does** implement the state transition (Merkle root update, nullifier accumulator, batch commitment hashing) and compiles cleanly.
 
 ---
 
-## The problem Step 9 solves
+## What Step 9 adds
 
-Step 6 answers "how do I verify N spends in one transaction?" Step 9 answers "what if I have 10,000 spends per day?" You cannot put 10,000 proofs in one batch — the redeemer would exceed Cardano's tx size limit. But you can **fold batch proofs across epochs**:
-
-| Tier | What it does | Proof size | Ceremony? |
-|------|-------------|------------|-----------|
-| **Tier 1** — Individual spend | Groth16 proof per user | 192 B | per-circuit |
-| **Tier 2** — Epoch batch | Groth16 `verify_batch` (N+3 pairings) | implicit (no new proof) | same vk |
-| **Tier 9** — Meta-batch | Nova fold over K epoch batches | ~318 KiB (sumcheck) | **none** |
+| | Step 6 (Batch) | **Step 9 (Meta-Batch)** |
+|---|---|---|
+| **Users per tx** | N (e.g., 8) | **Unbounded** |
+| **Proofs per tx** | N Groth16 proofs | **One Nova slim proof** |
+| **On-chain verify** | N+3 pairings (~28% CPU) | **Sumcheck (native field arithmetic)** |
+| **Trusted setup** | Per-circuit Groth16 ceremony | **None** (transparent Nova layer) |
+| **Proof size** | 192 B × N | **~0.4–1.5 KiB** (independent of N) |
 
 ---
 
@@ -20,28 +22,17 @@ Step 6 answers "how do I verify N spends in one transaction?" Step 9 answers "wh
 
 ```mermaid
 graph TB
-    subgraph Epoch1["Epoch 1 (e.g., 8 spends)"]
-        E1U1["user_1.proof"]
-        E1U8["user_8.proof"]
+    subgraph Epoch1["Epoch 1 (8 spends)"]
         E1B["Groth16 batch verify<br/>N+3 pairings → valid"]
     end
 
-    subgraph Epoch2["Epoch 2 (e.g., 8 spends)"]
-        E2U1["user_9.proof"]
-        E2U8["user_16.proof"]
-        E2B["Groth16 batch verify<br/>N+3 pairings → valid"]
-    end
-
     subgraph EpochK["Epoch K"]
-        EKU1["user_M-7.proof"]
-        EKUK["user_M.proof"]
         EKB["Groth16 batch verify<br/>N+3 pairings → valid"]
     end
 
     subgraph NovaFold["Nova Folding Layer (nova-slim)"]
-        F0["U_0 = initial accumulator<br/>(root_0, nullifier_hash_0)"]
+        F0["U_0 = (root_0, nullifier_0, vk_hash)"]
         F1["fold(U_0, epoch_1) → U_1"]
-        F2["fold(U_1, epoch_2) → U_2"]
         FK["fold(U_{K-1}, epoch_K) → U_K"]
     end
 
@@ -51,67 +42,117 @@ graph TB
     end
 
     E1B --> F1
-    E2B --> F2
     EKB --> FK
-    F0 --> F1 --> F2 --> FK
+    F0 --> F1 --> FK
     FK --> C --> V
 ```
 
-### What the Nova step circuit proves
+### The MetaBatchStep circuit
 
-Each Nova step (implemented in `nova-slim/`) takes as public input:
-- `prev_root` — the Merkle root before this epoch
-- `next_root` — the Merkle root after this epoch's spends
-- `batch_nullifier_hash` — Poseidon hash of all nullifiers spent in this epoch
-- `vk_hash` — hash of the Groth16 verifying key
+Each Nova step takes:
 
-And as private input:
-- The N Groth16 proofs + public inputs for this epoch
-- The Merkle path data for state transition
+```
+Public state in : prev_root, nullifier_acc, vk_hash
+Public state out: next_root, nullifier_acc_next, vk_hash
 
-The step circuit **verifies the Groth16 batch internally** (using the same pairing arithmetic in R1CS). Then it updates the running state.
+Private witness:
+  - N Groth16 proofs (pi_a, pi_c coordinates as scalars)
+  - N public input arrays (merkle_root, nullifier_hash, out_commitments, fee, pk_audit, addr_commitment)
+```
 
-### Why nova-slim (not nova-prover)
+What the circuit proves (implemented):
+1. **Batch commitment** — hashes all proofs + public inputs into a single Poseidon commitment
+2. **Nullifier accumulator** — chains all nullifier hashes into a running accumulator
+3. **Merkle root transition** — updates the tree with output commitments
+4. **Consistency** — every spend's `merkle_root` equals `prev_root`
 
-| Aspect | `nova-prover` | `nova-slim` |
-|--------|--------------|-------------|
-| **Proof size** | ~500 B IVC + 192 B compression | **~318 KiB** slim proof |
-| **Verifier** | Pairing check + IVC accumulator | **Sumcheck + hash-PC** (pairing-free) |
-| **On-chain cost** | ~20% CPU (pairing) | **Native field arithmetic** |
-| **Trusted setup** | Tiny compression SNARK ceremony | **None** |
-| **Best for** | Research / prototyping | **Production on Cardano** |
+What the circuit does **not** yet prove (TODO):
+5. **Groth16 validity** — the embedded pairing check that verifies each proof is cryptographically valid
 
-`nova-slim` is the production target because it eliminates the final pairing check — the most expensive Plutus operation — and replaces it with native field arithmetic that fits Cardano's execution model.
+### Why the pairing check is hard
 
----
+A full BLS12-381 pairing in R1CS requires:
+- Miller loop: ~200K constraints (point doubling, line evaluation, sparse multiplications)
+- Final exponentiation: ~100K–300K constraints (tower field arithmetic)
+- G1/G2 point operations: ~50K constraints
 
-## Estimated constraint budget
+Total: **~500K–2M constraints per pairing**. For a batch of 8 proofs with N+3 = 11 pairings, this is **~5.5M–22M constraints** — feasible with the sparse prover but a significant engineering effort.
 
-| Component | Constraints |
-|-----------|-------------|
-| Groth16 batch verify (N=8, embedded pairing) | ~40–60K |
-| Merkle root transition (Poseidon) | ~300 |
-| Nullifier accumulator update | ~300 |
-| Nova step overhead | ~10–15K |
-| **Total per step** | **~55–80K** |
-
-At 55K constraints per step, folding 100 epochs is trivial for `nova-slim`.
+Alternative approaches being explored:
+- **zk-SNARK decider** (see `nova-slim` roadmap): use Groth16 as the compression SNARK for the final folded instance, giving sub-200 B proofs with one small ceremony
+- **Signature of correct batch verification**: the step circuit checks a signature from a trusted batch verifier instead of the pairing itself (weaker trust model, much smaller circuit)
 
 ---
 
-## What exists in the repo
+## Run
 
-| Component | Status | Where |
-|-----------|--------|-------|
-| Groth16 batch verifier | ✅ Done | `aiken/groth16/lib/groth16/batch.ak` |
-| Nova IVC folding | ✅ Done | `clis/nova/`, `nova-prover/` |
-| Transparent sumcheck | ✅ Done | `nova-slim/` |
-| Sparse prover | ✅ Done | `clis/groth16` with `--sparse` |
+```bash
+./groth16_nova_meta_e2e.sh
+```
 
-**What remains to be built:**
-- A Circom **step circuit** that verifies a Groth16 batch proof internally (~50–100K constraints using embedded pairing arithmetic)
-- A small **state machine** tying epoch roots and nullifier accumulators
-- The `nova-slim` CLI integration (reusing existing `nova-slim fold` machinery)
+Overrides: `EPOCH_SIZE=`, `DEPTH=`, `SEED=`, `OUT=`.
+
+This runs the full pipeline:
+1. Generate epoch proofs via Step 6 (`groth16_e2e.sh`)
+2. Build MetaBatch step witness (`gen_meta_batch_input.py`)
+3. Compile `groth16_batch_verifier_nova.circom`
+4. Compute step witness with snarkjs
+5. `nova-slim fold` → `compress --slim` → `verify`
+
+---
+
+## Files
+
+| File | Purpose |
+|------|---------|
+| `circom/MetaBatch/groth16_batch_verifier_nova.circom` | Nova step circuit (scaffold) |
+| `circom/MetaBatch/gen_meta_batch_input.py` | Witness generator from epoch data |
+| `step9/groth16_nova_meta_e2e.sh` | Full e2e pipeline |
+
+---
+
+## Prerequisites
+
+- Same as Step 6: `circom`, `snarkjs`, Python 3, Rust CLIs
+- `nova-slim` CLI built as a sibling directory
+- Step 6 artifacts (or the script auto-generates them)
+
+---
+
+## On-chain
+
+| Path | On-chain verifier | Datum / redeemer |
+|------|-------------------|------------------|
+| **NovaSlim** | `nova-slim/cardano/nova-slim-verifier` | datum = `NifsBundle`, redeemer = `SlimProof` |
+
+The on-chain verifier is unchanged — it checks the same sumcheck protocol regardless of what the step circuit does.
+
+---
+
+## Representative timing (dev machine, epochSize=8)
+
+| Phase | Time | Notes |
+|-------|------|-------|
+| Step 6 epoch generation | ~25 s | 8 users, depth 4 |
+| MetaBatch compile | ~3 s | Scaffold circuit |
+| Step witness | ~2 s | snarkjs |
+| nova-slim fold | ~0.5 s | 1 step |
+| nova-slim compress | ~8 s | `--slim` |
+| nova-slim verify | ~0.3 ms | Off-chain |
+| **slim proof size** | **~0.4 KiB** | Independent of epoch count |
+
+---
+
+## Roadmap to completion
+
+| Milestone | Status | Effort |
+|-----------|--------|--------|
+| Scaffold circuit + state transition | ✅ Done | — |
+| Witness generator + e2e script | ✅ Done | — |
+| Embedded pairing arithmetic (Miller loop) | ⏳ TODO | High (~2–4 weeks) |
+| Embedded final exponentiation | ⏳ TODO | High (~1–2 weeks) |
+| Full batch verifier in R1CS | ⏳ TODO | Medium (~1 week) |
+| Production benchmark + optimization | ⏳ TODO | Medium |
 
 ---
 
@@ -121,9 +162,3 @@ At 55K constraints per step, folding 100 epochs is trivial for `nova-slim`.
 |------|---------------|-------|-----------|
 | 6 | N spends in one batch | N ≤ ~16 per tx | per-circuit |
 | **9** | **Unbounded spends folded to one proof** | **10K+ per day** | **none** |
-
----
-
-## Status
-
-⏳ **Research direction.** The architecture is designed; the missing piece is the Circom step circuit that embeds Groth16 batch verification in R1CS. This is a significant but feasible engineering effort — the pairing arithmetic (Miller loop + final exponentiation) has been written in Circom before (e.g., for recursive SNARKs).
