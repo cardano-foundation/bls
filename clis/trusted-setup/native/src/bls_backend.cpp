@@ -296,37 +296,36 @@ bls_backend_status bls_pairing_batch_check(const bls_backend_g1_t *g1s,
         return BLS_BACKEND_INVALID_ARGUMENT;
     }
 
-    std::vector<blst_p1_affine> p1;
-    std::vector<blst_p2_affine> p2;
-    p1.reserve(npairs);
-    p2.reserve(npairs);
+    /* Single scratch allocation for decoded points + pointer arrays.
+     * Layout: [p1 affines][p2 affines][p1 pointers][p2 pointers]
+     * This avoids 4 separate std::vector heap allocations. */
+    const size_t p1_bytes   = npairs * sizeof(blst_p1_affine);
+    const size_t p2_bytes   = npairs * sizeof(blst_p2_affine);
+    const size_t p1p_bytes  = npairs * sizeof(const blst_p1_affine *);
+    const size_t p2p_bytes  = npairs * sizeof(const blst_p2_affine *);
+    const size_t scratch_sz = p1_bytes + p2_bytes + p1p_bytes + p2p_bytes;
+
+    std::vector<uint8_t> scratch(scratch_sz);
+    blst_p1_affine *p1       = reinterpret_cast<blst_p1_affine *>(scratch.data());
+    blst_p2_affine *p2       = reinterpret_cast<blst_p2_affine *>(scratch.data() + p1_bytes);
+    const blst_p1_affine **p1p = reinterpret_cast<const blst_p1_affine **>(scratch.data() + p1_bytes + p2_bytes);
+    const blst_p2_affine **p2p = reinterpret_cast<const blst_p2_affine **>(scratch.data() + p1_bytes + p2_bytes + p1p_bytes);
 
     for (size_t i = 0; i < npairs; i++) {
-        blst_p1_affine a;
-        bls_backend_status st = decode_g1(&g1s[i], &a);
+        bls_backend_status st = decode_g1(&g1s[i], &p1[i]);
         if (st != BLS_BACKEND_OK) {
             return st;
         }
-        p1.push_back(a);
-        blst_p2_affine b;
-        st = decode_g2(&g2s[i], &b);
+        st = decode_g2(&g2s[i], &p2[i]);
         if (st != BLS_BACKEND_OK) {
             return st;
         }
-        p2.push_back(b);
-    }
-
-    std::vector<const blst_p1_affine *> p1p;
-    std::vector<const blst_p2_affine *> p2p;
-    p1p.reserve(npairs);
-    p2p.reserve(npairs);
-    for (size_t i = 0; i < npairs; i++) {
-        p1p.push_back(&p1[i]);
-        p2p.push_back(&p2[i]);
+        p1p[i] = &p1[i];
+        p2p[i] = &p2[i];
     }
 
     blst_fp12 f;
-    blst_miller_loop_n(&f, p2p.data(), p1p.data(), npairs);
+    blst_miller_loop_n(&f, p2p, p1p, npairs);
     blst_final_exp(&f, &f);
     *ok = blst_fp12_is_one(&f) ? 1 : 0;
     return BLS_BACKEND_OK;
