@@ -147,7 +147,8 @@ def build_scenario(depth: int, users: int, spends: int, seed: int) -> tuple:
         # unique recipient address per spend (32-bit)
         recipient_addr = rng.randint(1, 0xFFFFFFFF)
         # unique ephemeral randomness per spend
-        r = rng.randint(1, _P - 1)
+        # must fit in scalarBits=253 (the bit-width of TwistedElGamalEncrypt)
+        r = rng.randint(1, (1 << 253) - 1)
 
         pool_witness = pool.apply_spend(src, out1, out2, fee)
 

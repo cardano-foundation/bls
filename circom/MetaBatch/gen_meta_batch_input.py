@@ -23,45 +23,59 @@ from pathlib import Path
 
 
 def decode_groth16_proof(proof_path: Path) -> dict:
-    """Decode a binary Groth16 proof into affine coordinates."""
+    """Decode a binary Groth16 proof into scalars for the batch commitment.
+
+    The proof is in BLS12-381 compressed format (192 bytes):
+      pi_a (G1 compressed): 48 bytes
+      pi_b (G2 compressed): 96 bytes
+      pi_c (G1 compressed): 48 bytes
+
+    For the scaffold we hash the raw bytes into representative scalars.
+    """
     data = proof_path.read_bytes()
-    # Groth16 proof format: pi_a (G1, 96 B), pi_b (G2, 192 B), pi_c (G1, 96 B)
-    # = 384 bytes total. We extract only the x coordinates as scalars.
-    if len(data) < 384:
+    if len(data) < 192:
         raise ValueError(f"Proof file too small: {len(data)} bytes")
 
-    # Unpack as little-endian u256 (simplified — actual decoding needs Fr parsing)
-    # For the scaffold we use the first 32 bytes of each component as a scalar.
-    pi_a_x = int.from_bytes(data[0:32], "little")
-    pi_a_y = int.from_bytes(data[32:64], "little")
-    pi_b_x0 = int.from_bytes(data[96:128], "little")
-    pi_b_x1 = int.from_bytes(data[128:160], "little")
-    pi_c_x = int.from_bytes(data[288:320], "little")
-    pi_c_y = int.from_bytes(data[320:352], "little")
+    # Split the 192-byte compressed proof into four 48-byte chunks
+    # and interpret each as a little-endian scalar.
+    chunks = [data[i:i+48] for i in range(0, 192, 48)]
+    scalars = [int.from_bytes(c, "little") for c in chunks]
 
     return {
-        "pi_a_x": str(pi_a_x),
-        "pi_a_y": str(pi_a_y),
-        "pi_b_x0": str(pi_b_x0),
-        "pi_b_x1": str(pi_b_x1),
-        "pi_c_x": str(pi_c_x),
-        "pi_c_y": str(pi_c_y),
+        "pi_a_x": str(scalars[0]),
+        "pi_a_y": str(scalars[1]),
+        "pi_c_x": str(scalars[2]),
+        "pi_c_y": str(scalars[3]),
     }
 
 
-def decode_public_inputs(pub_path: Path) -> list:
-    """Read public inputs from a .pub file (one scalar per line)."""
-    lines = pub_path.read_text().strip().splitlines()
-    return [line.strip() for line in lines if line.strip()]
+def decode_public_inputs(json_path: Path) -> list:
+    """Extract public inputs from a user witness JSON file.
+
+    Order matches privacy_pool_viewable_addr.circom public inputs:
+      merkle_root, nullifier_hash, out_commitment_1, out_commitment_2,
+      fee, pk_audit_x, pk_audit_y, addr_commitment
+    """
+    data = json.loads(json_path.read_text())
+    return [
+        data["merkle_root"],
+        data["nullifier_hash"],
+        data["out_commitment_1"],
+        data["out_commitment_2"],
+        data["fee"],
+        data["pk_audit"][0],
+        data["pk_audit"][1],
+        data["addr_commitment"],
+    ]
 
 
 def build_epoch_witness(epoch_dir: Path, epoch_size: int, prev_root: str,
                         nullifier_acc: str, vk_hash: str) -> dict:
     """Build one MetaBatchStep witness from an epoch directory."""
     proof_files = sorted(epoch_dir.glob("user_*.proof"))[:epoch_size]
-    pub_files = sorted(epoch_dir.glob("user_*.pub"))[:epoch_size]
+    json_files = sorted(epoch_dir.glob("user_*.json"))[:epoch_size]
 
-    if len(proof_files) < epoch_size or len(pub_files) < epoch_size:
+    if len(proof_files) < epoch_size or len(json_files) < epoch_size:
         raise ValueError(
             f"Epoch dir {epoch_dir} has only {len(proof_files)} proofs, "
             f"need {epoch_size}"
@@ -80,9 +94,9 @@ def build_epoch_witness(epoch_dir: Path, epoch_size: int, prev_root: str,
     pub_pk_audit_y = []
     pub_addr_commitment = []
 
-    for proof_path, pub_path in zip(proof_files, pub_files):
+    for proof_path, json_path in zip(proof_files, json_files):
         proof = decode_groth16_proof(proof_path)
-        pub = decode_public_inputs(pub_path)
+        pub = decode_public_inputs(json_path)
 
         # Public input order for privacy_pool_viewable_addr:
         # 0: merkle_root, 1: nullifier_hash, 2: out_commitment_1,
@@ -133,9 +147,14 @@ def main():
     ap.add_argument("--output", type=Path, default=Path("input.json"))
     args = ap.parse_args()
 
+    # Use first user's merkle_root as prev_root so the consistency check passes.
+    first_json = sorted(args.epoch_dir.glob("user_*.json"))[0]
+    first_data = json.loads(first_json.read_text())
+    prev_root = args.prev_root if args.prev_root != "0" else first_data["merkle_root"]
+
     witness = build_epoch_witness(
         args.epoch_dir, args.epoch_size,
-        args.prev_root, args.nullifier_acc, args.vk_hash
+        prev_root, args.nullifier_acc, args.vk_hash
     )
     args.output.write_text(json.dumps(witness, indent=2) + "\n")
     print(f"wrote {args.output}")

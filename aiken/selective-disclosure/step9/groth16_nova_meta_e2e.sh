@@ -21,7 +21,10 @@ MB="$ROOT/circom/MetaBatch"
 NOVA_DIR="$ROOT/../nova-slim"
 NOVA="$NOVA_DIR/cli/target/release/nova-slim"
 OUT="${OUT:-/tmp/sd_step9_novaslim}"
-EPOCH_SIZE="${EPOCH_SIZE:-8}"
+# NOTE: Step 6's privacy_pool_viewable_addr.circom hardcodes depth=4.
+# Tree capacity = 16.  We need USERS + 2*SPENDS ≤ 16.
+# With SPENDS=USERS, max USERS = 5 (5+10=15).  Default to 4 for safety.
+EPOCH_SIZE="${EPOCH_SIZE:-4}"
 DEPTH="${DEPTH:-4}"
 SEED="${SEED:-42}"
 
@@ -40,15 +43,16 @@ echo "   epoch size: $EPOCH_SIZE  |  depth: $DEPTH  |  seed: $SEED"
 echo "[1/6] generating epoch proofs (Step 6 pipeline)..."
 EPOCH_OUT="$OUT/epoch"
 mkdir -p "$EPOCH_OUT"
-"$ROOT/aiken/selective-disclosure/step6/groth16_e2e.sh" \
-  OUT="$EPOCH_OUT" USERS="$EPOCH_SIZE" DEPTH="$DEPTH" SEED="$SEED" \
+OUT="$EPOCH_OUT" USERS="$EPOCH_SIZE" DEPTH="$DEPTH" SEED="$SEED" \
+  bash "$ROOT/aiken/selective-disclosure/step6/groth16_e2e.sh" \
   >/dev/null 2>&1 || {
   echo "   Step 6 epoch generation failed — check $EPOCH_OUT"
   exit 1
 }
 
 # Derive vk_hash from the proving key (simplified: hash the first 32 bytes)
-VK_HASH=$(xxd -l 32 -p "$EPOCH_OUT/pp.pk" | head -c 64)
+VK_HASH_HEX=$(xxd -l 32 -p "$EPOCH_OUT/pp.pk" | tr -d '\n')
+VK_HASH=$(python3 -c "print(int('$VK_HASH_HEX', 16))")
 echo "   vk_hash (from pk): ${VK_HASH:0:16}..."
 
 # ---------------------------------------------------------------------------
