@@ -14,8 +14,9 @@
 6. [Step 3: Privacy Pools & Shielded Transactions](#step-3-privacy-pools--shielded-transactions)
 7. [Step 3+ — F5: Scaling to Multi-User with Batch Verification](#step-3--f5-scaling-to-multi-user-with-batch-verification)
 8. [Step 4: Compliant Shielded Transfer (Viewing-Key Auditor Reveal)](#step-4-compliant-shielded-transfer-viewing-key-auditor-reveal)
-9. [Step 5: Full Auditor Reveal (Amount + Recipient Address)](#step-5-full-auditor-reveal-amount--recipient-address)
-10. [Runnable e2e Scripts & Timing](#runnable-e2e-scripts--timing)
+ 9. [Step 5: Full Auditor Reveal (Amount + Recipient Address)](#step-5-full-auditor-reveal-amount--recipient-address)
+ 10. [Step 6: Multi-User Batch Pool with Full Auditor Reveal](#step-6-multi-user-batch-pool-with-full-auditor-reveal)
+ 11. [Runnable e2e Scripts & Timing](#runnable-e2e-scripts--timing)
 11. [Comparison with CIP proposal: Native Confidential Transfers](#comparison-with-cip-proposal-native-confidential-transfers)
 12. [Compliance & Auditability](#compliance--auditability)
 13. [Threat Model & Deployment](#threat-model--deployment)
@@ -934,12 +935,109 @@ auditor revealing `in_amount = 100` and `recipient_addr = 0x1234`;
 
 ---
 
+## Step 6: Multi-User Batch Pool with Full Auditor Reveal
+
+<details>
+<summary><b>Expand</b></summary>
+
+> **One-line summary:** N users shielded-spend from a shared pool; each spend encrypts amount + recipient address to a designated auditor; all N proofs are verified in **one on-chain batch check** (N+3 pairings). The auditor decrypts every amount and address off-chain.
+
+Step 6 is the **capstone**: it marries F5 (multi-user batch verification) with Step 5 (full auditor reveal). A production deployment gets both privacy *and* oversight at scale.
+
+```mermaid
+graph LR
+    subgraph OffChain["Off-Chain"]
+        S1["Phase 1: Dev ceremony<br/>privacy_pool_viewable_addr.circom → .pk + .vk"]
+        S2["Phase 2: Deposits<br/>N users commit notes → shared Merkle tree"]
+        S5["Phase 5: Proof generation<br/>Each user: shielded spend + encrypt amount + addr to pk_audit"]
+        S7["Phase 7: Auditor reveal<br/>sk_audit decrypts all amounts + addresses from public ciphertexts"]
+    end
+    subgraph OnChain["On-Chain (Cardano)"]
+        S3["Phase 3: Deploy pool<br/>Aiken validator (vk) + whitelisted pk_audit"]
+        S4["Phase 4: Deposit txs<br/>Add commitments, update root"]
+        S6["Phase 6: Batch spend tx<br/>verify_batch(proofs) → update root + nullifiers"]
+    end
+    S1 -->|"vk parameter"| S3
+    S2 -->|"Merkle root"| S4
+    S3 -->|"pool UTxO"| S4
+    S5 -->|"bundler submits N proofs"| S6
+    S4 -->|"new root"| S6
+    S6 -->|"public E/C/C_a0/C_a1 per user"| S7
+```
+
+### Per-user flow
+
+Each user's spend is a `privacy_pool_viewable_addr.circom` proof:
+
+```
+Public inputs  : merkle_root, nullifier_hash, out_commitment_1,
+                 out_commitment_2, fee, pk_audit[2], addr_commitment
+Public outputs : E[2], C[2], C_a0[2], C_a1[2]
+
+E     = r * G
+C     = in_amount   * H + r * pk_audit
+C_a0  = addr_limb0  * H + r * pk_audit
+C_a1  = addr_limb1  * H + r * pk_audit
+```
+
+The auditor holding `sk_audit` recovers:
+
+```
+amount     = dlog( C  - sk_audit * E )
+addr_limb0 = dlog( C_a0 - sk_audit * E )
+addr_limb1 = dlog( C_a1 - sk_audit * E )
+recipient_addr = addr_limb0 + 2^16 * addr_limb1
+```
+
+Because the ciphertexts are **public outputs** of the circuit, they appear on-chain. The auditor scans the chain and runs the decrypt off-chain. No one else can do this without `sk_audit`.
+
+### What changes from Step 5 to Step 6
+
+| Aspect | Step 5 (single-user) | **Step 6 (multi-user batch)** |
+|--------|---------------------|------------------------------|
+| Users per pool | 1 | **N** |
+| Spends per transaction | 1 | **N** |
+| Proofs verified on-chain | 1 Groth16 (~20% CPU) | **1 batch check** (N+3 pairings) |
+| Amount audit | per-tx decrypt | **per-batch decrypt** |
+| Address audit | per-tx decrypt | **per-batch decrypt** |
+| Anonymity set | Just the depositor | **All users who ever deposited** |
+
+### Measured on `privacy_pool_viewable_addr.circom` (depth 4)
+
+| Phase | Single verify × N | Batch verify (Impl 11) | Speedup |
+|-------|-------------------|------------------------|---------|
+| N = 4 | 0.24 s | 0.08 s | **3.0×** |
+| N = 8 | 0.39 s | 0.09 s | **4.3×** |
+
+For N=8, single verify would need **~160%** of script budget (impossible in one tx). Batch verify needs **~28%** — well within budget.
+
+### CLI
+
+```bash
+# Groth16 batch path (default: 4 users, depth 4)
+./aiken/selective-disclosure/step6/groth16_e2e.sh
+
+# Scale up
+USERS=8 DEPTH=6 ./aiken/selective-disclosure/step6/groth16_e2e.sh
+
+# NovaSlim path (per-user verify, no batch yet)
+./aiken/selective-disclosure/step6/novaslim_e2e.sh
+```
+
+The Groth16 script emits per-user `.proof`/`.pub` files, a shared `pp_vk.ak`, and `auditor_meta.json` containing the decrypt data for every user. The NovaSlim script emits per-user `.ivc.cbor` + `_slim.proof.cbor` files.
+
+See [`step6/README.md`](step6/README.md) for the full comparison table and on-chain integration notes.
+
+</details>
+
+---
+
 ## Runnable e2e Scripts & Timing
 
 <details>
 <summary><b>Expand</b></summary>
 
-Every step has a `step{N}/` directory of runnable scripts (`aiken/selective-disclosure/step{N}/`) that reproduce the e2e from scratch, covering **both** proof paths. All ten were run to completion and verified (`VALID` / `state chain OK`).
+Every step has a `step{N}/` directory of runnable scripts (`aiken/selective-disclosure/step{N}/`) that reproduce the e2e from scratch, covering **both** proof paths. All twelve were run to completion and verified (`VALID` / `state chain OK`).
 
 ```text
 aiken/selective-disclosure/
@@ -947,7 +1045,8 @@ aiken/selective-disclosure/
 ├── step2/  groth16_e2e.sh   novaslim_e2e.sh   README.md   (Twisted ElGamal)
 ├── step3/  groth16_e2e.sh   novaslim_e2e.sh   README.md   (Privacy Pool)
 ├── step4/  groth16_e2e.sh   novaslim_e2e.sh   README.md   (Compliant Shielded Transfer)
-└── step5/  groth16_e2e.sh   novaslim_e2e.sh   README.md   (Full Auditor Reveal)
+├── step5/  groth16_e2e.sh   novaslim_e2e.sh   README.md   (Full Auditor Reveal)
+└── step6/  groth16_e2e.sh   novaslim_e2e.sh   README.md   (Multi-User Batch + Audit)
 ```
 
 Run from the repo root (or anywhere; repo root is auto-detected):
@@ -972,6 +1071,7 @@ in a table:
 - [`step3/README.md`](step3/README.md) — Privacy Pool
 - [`step4/README.md`](step4/README.md) — Compliant Shielded Transfer (viewing-key auditor reveal)
 - [`step5/README.md`](step5/README.md) — Full Auditor Reveal (amount + recipient address)
+- [`step6/README.md`](step6/README.md) — Multi-User Batch Pool with Full Auditor Reveal
 
 See those READMEs for the measured numbers rather than repeating them here.
 
