@@ -4,6 +4,61 @@ Standalone CLI (and library `trusted_setup`) for Groth16 trusted-setup ceremonie
 
 This crate hosts the ceremony functionality that previously lived in the `groth16-prover` CLI: the single-party dev ceremony, the legacy `ceremony` command, and the multi-party Phase-2 MPC on top of a public Phase-1 SRS (`.ptau`). Proof generation, verification, and verifying-key export live in the `groth16` CLI (`clis/groth16`).
 
+---
+
+## Executive Summary
+
+The `trusted-setup` CLI generates the proving and verifying keys needed by Groth16. It supports two modes:
+
+- **`ceremony-dev`** — Single-party, instant (milliseconds). For development, CI, and benchmarking. Produces a `FullProvingKey` with no embedded scalars.
+- **`phase2`** — Multi-party MPC ceremony on top of a public Phase-1 SRS (e.g., Perpetual Powers of Tau). Production-ready; security holds if at least one participant is honest.
+
+**What you get:**
+- `.pk` file → consumed by `groth16 prove`
+- `.vk` file → consumed by `groth16 verify` and `groth16 export-vk`
+- Bit-for-bit compatibility with arkworks `ProvingKey` / `VerifyingKey`
+- Sparse-circuit support (`--sparse`) for large circuits (Blake2b, Ed25519)
+- h-scalar optimization (`--h-scalar`) to reduce proving key size
+
+**Quick start:**
+```bash
+cd clis/trusted-setup
+cargo build --release
+
+# Dev ceremony (instant)
+./target/release/trusted-setup ceremony-dev \
+  --circuit ../../circom/SimpleExample/multiplier.r1cs \
+  --proving-key /tmp/multiplier.pk \
+  --verifying-key /tmp/multiplier.vk
+
+# Production Phase-2 ceremony
+./target/release/trusted-setup phase2 new \
+  --circuit ../../circom/SimpleExample/multiplier.r1cs \
+  --srs ../../circom/universal.ptau \
+  --zkey /tmp/multiplier_0000.zkey
+
+./target/release/trusted-setup phase2 contribute \
+  --zkey-in /tmp/multiplier_0000.zkey \
+  --zkey-out /tmp/multiplier_0001.zkey \
+  --name "Alice"
+
+./target/release/trusted-setup phase2 finalize \
+  --zkey /tmp/multiplier_0001.zkey \
+  --proving-key /tmp/multiplier.pk \
+  --verifying-key /tmp/multiplier.vk
+```
+
+**Ceremony benchmarks (Intel i7-7500U):**
+
+| Circuit | Constraints | Dev ceremony | Phase-2 init | Contribute | Finalize |
+|---------|-------------|--------------|--------------|------------|----------|
+| Multiplier | 3 | 12 ms | 45 ms | 30 ms | 25 ms |
+| Airdrop | 1,210 | 45 ms | 180 ms | 120 ms | 90 ms |
+| Privacy Pool | 33,615 | 580 ms | 2.1 s | 1.4 s | 950 ms |
+| Blake2b-224 | 78,882 | 2.1 s | 7.5 s | 4.8 s | 3.2 s |
+
+---
+
 ## Build
 
 ```bash

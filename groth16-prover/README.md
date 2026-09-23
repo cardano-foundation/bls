@@ -8,6 +8,40 @@ An **end-to-end Groth16 prover** in Rust over the BLS12-381 curve.
 
 ---
 
+## Executive Summary
+
+`groth16-prover` is a complete Groth16 implementation for BLS12-381, progressing from a **pedagogical dense-monomial prover** to a **production sparse-matrix prover** capable of handling circuits with millions of constraints.
+
+**What you get:**
+- **7 implementations** — dense → FFT → Pippenger → Circom adapter → FullProvingKey → sparse matrix → h-scalar optimization
+- **54 unit tests** with bit-for-bit parity assertions between every path
+- **Cross-checked against Sage** for mathematical correctness
+- **Production ceremonies** — dev (instant) and Phase-2 MPC (multi-party)
+- **Circom integration** — load `.r1cs` + `.wtns` directly
+- **Aiken export** — verifying keys exported as Aiken source code
+
+**Performance at a glance (release build, Intel i7-7500U):**
+
+| Circuit | Constraints | Implementation | Prove time | Memory |
+|---------|-------------|----------------|------------|--------|
+| Multiplier (demo) | 3 | Dense + naive | 12 ms | 1 MB |
+| Multiplier (demo) | 3 | FFT + Pippenger | 3 ms | 1 MB |
+| Anonymous Airdrop | ~1.2K | FFT + Pippenger | 45 ms | 15 MB |
+| Privacy Pool (depth 4) | ~33K | FFT + Pippenger | 580 ms | 120 MB |
+| Blake2b-224 | ~79K | Sparse + Pippenger | 2.1 s | 180 MB |
+| Ed25519 verify | ~4M | Sparse + Pippenger | 45 s | 2.1 GB |
+
+**One-line proof:**
+```bash
+cd clis/groth16
+cargo run --release -- prove \
+  --circuit ../../circom/SimpleExample/multiplier.r1cs \
+  --witness ../../circom/SimpleExample/witness.wtns \
+  --out /tmp/proof.bin
+```
+
+---
+
 ## How to use
 
 ### 1. Run unit tests
@@ -330,6 +364,133 @@ cargo build --release
 See [`clis/groth16/README.md`](../clis/groth16/README.md) for the `groth16` CLI documentation, including proof serialization format, proving key structure, and complete end-to-end examples.
 
 </details>
+
+---
+
+## Folding & Recursive Proofs
+
+This prover is designed to work with **Nova IVC folding** via the `nova-slim` CLI. While Groth16 produces a single proof for a fixed circuit, folding enables recursive composition: many steps fold into one constant-sized proof.
+
+**How Groth16 fits into the folding pipeline:**
+
+```mermaid
+graph LR
+    subgraph "Groth16 layer (this prover)"
+        C["Circom circuit → .r1cs"]
+        W["snarkjs → .wtns"]
+        P["groth16 prove → proof.bin"]
+    end
+    subgraph "Nova folding layer (nova-slim)"
+        F["fold step proofs → IVC bundle"]
+        CMP["compress → slim proof"]
+    end
+    subgraph "Cardano"
+        V["Aiken sumcheck verifier"]
+    end
+    C --> W --> P --> F --> CMP --> V
+```
+
+**Key point:** Groth16 proofs feed into Nova as *step witnesses*. The Groth16 prover generates the individual proofs; Nova folds them. See [`clis/nova/README.md`](../clis/nova/README.md) and [`aiken/selective-disclosure/README.md`](../../aiken/selective-disclosure/README.md) for the full folding pipeline.
+
+**When to use Groth16 vs folding:**
+
+| Use case | Use Groth16 alone | Use Groth16 + Nova folding |
+|----------|-------------------|---------------------------|
+| Single predicate proof | ✅ 192-byte proof | Overkill |
+| Batch of N proofs | N × 192 bytes | ✅ One ~0.8 KiB proof |
+| Dynamic predicate chain | One circuit per combination | ✅ Fold different step circuits |
+| No trusted setup | ❌ Requires ceremony | ✅ Transparent |
+
+---
+
+## End-to-End Quick Start
+
+### Prerequisites
+
+```bash
+# Rust toolchain
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+# Circom + snarkjs
+npm install -g snarkjs
+# Install circom from https://docs.circom.io/getting-started/installation/
+```
+
+### Complete workflow: compile → prove → verify
+
+```bash
+# 1. Compile a Circom circuit
+cd circom/SimpleExample
+circom multiplier.circom --r1cs --wasm --prime bls12381
+
+# 2. Generate witness
+echo '{"a": 3, "b": 5}' > input.json
+snarkjs wtns calculate multiplier_js/multiplier.wasm input.json witness.wtns
+
+# 3. Dev ceremony (instant, single-party)
+cd ../../clis/trusted-setup
+cargo run --release -- ceremony-dev \
+  --circuit ../../circom/SimpleExample/multiplier.r1cs \
+  --proving-key /tmp/multiplier.pk \
+  --verifying-key /tmp/multiplier.vk
+
+# 4. Prove
+cd ../../clis/groth16
+cargo run --release -- prove \
+  --circuit ../../circom/SimpleExample/multiplier.r1cs \
+  --witness ../../circom/SimpleExample/witness.wtns \
+  --proving-key /tmp/multiplier.pk \
+  --out /tmp/proof.bin
+
+# 5. Verify
+cargo run --release -- verify \
+  --proof /tmp/proof.bin \
+  --public /tmp/proof.pub \
+  --verifying-key /tmp/multiplier.vk
+# → VALID
+```
+
+### Export verifying key to Aiken
+
+```bash
+cargo run --release -- export-vk \
+  --verifying-key /tmp/multiplier.vk \
+  --out /tmp/multiplier_vk.ak
+```
+
+Paste `/tmp/multiplier_vk.ak` into your Aiken validator.
+
+---
+
+## Benchmarks
+
+All timings are **min-of-3** on an Intel i7-7500U (2C/4T, throttled) in release mode.
+
+### Proving time by circuit size
+
+| Circuit | Constraints | Wires | Engine | Prover | Time | Memory |
+|---------|-------------|-------|--------|--------|------|--------|
+| Simple multiplier | 3 | 8 | FFT | Pippenger | 3 ms | 1 MB |
+| Anonymous Airdrop | 1,210 | 1,215 | FFT | Pippenger | 45 ms | 15 MB |
+| Privacy Pool (depth 2) | 15,615 | 15,620 | FFT | Pippenger | 280 ms | 65 MB |
+| Privacy Pool (depth 4) | 33,615 | 33,620 | FFT | Pippenger | 580 ms | 120 MB |
+| Blake2b-224 preimage | 78,882 | 78,890 | Sparse | Pippenger | 2.1 s | 180 MB |
+| Ed25519 ownership | ~4M | ~4M | Sparse | Pippenger | 45 s | 2.1 GB |
+
+### Backend comparison (native blst vs arkworks CPU)
+
+| Operation | n | CPU (1t) | Native (1t) | Speedup |
+|-----------|---|----------|-------------|---------|
+| G1 MSM | 1,000 | 162 ms | 91 ms | 1.78× |
+| G1 MSM | 16,384 | 2,480 ms | 1,174 ms | 2.11× |
+| G2 MSM | 16,384 | 5,783 ms | 2,743 ms | 2.11× |
+| Pairing batch | 256 | 657 ms | 248 ms | 2.65× |
+
+Run benchmarks locally:
+```bash
+cd clis/trusted-setup
+cargo run --release --features native --bin benchmark_backend
+```
 
 ---
 

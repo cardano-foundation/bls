@@ -4,6 +4,39 @@
 
 ---
 
+## Executive Summary
+
+This repository demonstrates a complete, production-oriented **selective-disclosure** system for Cardano. It lets a credential holder prove they satisfy complex predicates (age gates, role checks, residency sets) without revealing any underlying data — not their name, not their address, not their credential fields.
+
+**What you get:**
+- **9 progressive steps** from simple predicate proofs to recursive batch aggregation
+- **Two proof paths:** Groth16 (192-byte proofs, trusted setup) and Nova IVC (transparent folding, ~0.4–2.5 KiB proofs)
+- **End-to-end scripts** for every step — run `step{N}/groth16_e2e.sh` or `step{N}/novaslim_e2e.sh`
+- **On-chain verifiers** in Aiken for both proof systems
+- **Full auditability** via Twisted ElGamal viewing-key encryption
+
+**Key results (measured on reference hardware):**
+
+| Step | What it proves | Constraints | Groth16 proof | Nova slim proof | On-chain verify |
+|------|---------------|-------------|---------------|-----------------|-----------------|
+| 1 — Predicate | `age ≥ 21` | ~5K | 192 B | ~0.4 KiB | ✅ Working e2e |
+| 3 — Privacy Pool | Spend from Merkle tree | ~15K | 192 B | ~0.8 KiB | ✅ Working e2e |
+| 5 — Full Audit | Amount + address encrypted | ~33K | 192 B | ~1.2 KiB | ✅ Working e2e |
+| 6 — Batch Pool | N spends in one tx | ~33K × N | 192 B × N | ~1.2 KiB | ✅ Working e2e |
+| 9 — Recursive | Unbounded spends folded | 8.7K / step | — | ~0.8 KiB | ✅ Scaffold e2e |
+
+**Quick start:**
+```bash
+# Step 1 — predicate proof (simplest)
+./aiken/selective-disclosure/step1/groth16_e2e.sh
+./aiken/selective-disclosure/step1/novaslim_e2e.sh
+
+# Step 9 — recursive batch aggregation
+./aiken/selective-disclosure/step9/groth16_nova_meta_e2e.sh
+```
+
+---
+
 ## Table of Contents
 
 1. [Overview](#overview)
@@ -167,6 +200,105 @@ See [`aiken/groth16/README.md`](../../aiken/groth16/README.md) and [`circom/READ
 5. **On-chain** — the slim proof is submitted as a redeemer; the Aiken sumcheck verifier checks it
 
 See [`nova-slim/README.md`](../../../nova-slim/README.md) and [`nova-slim/cardano/`](../../../nova-slim/cardano/) for details.
+
+</details>
+
+---
+
+## Folding & Recursive Proofs
+
+<details>
+<summary><b>Expand</b></summary>
+
+### What is folding?
+
+**Folding** is a cryptographic technique that recursively compresses many proof steps into a single, constant-sized proof. Instead of verifying N proofs independently (costing N × verification time), a *folding scheme* like Nova IVC builds a chain where each step "folds" the previous step's state into the current one. After N steps, you have one *accumulated instance* that represents the entire computation. A final compression step turns this into a compact proof.
+
+```mermaid
+graph LR
+    subgraph "Folding chain"
+        S0["State 0<br/>(initial)"] --> S1["State 1<br/>fold(step 1)"]
+        S1 --> S2["State 2<br/>fold(step 2)"]
+        S2 --> S3["State N<br/>fold(step N)"]
+    end
+    S3 --> C["Compress → slim proof<br/>~0.4–2.5 KiB"]
+    C --> V["Verify (1 sumcheck)"]
+```
+
+### Why folding matters for selective disclosure
+
+| Without folding | With folding (Nova) |
+|-----------------|---------------------|
+| One proof per predicate | One proof for N composed predicates |
+| Fixed circuit per use case | Step circuits combined dynamically |
+| Proof size grows with complexity | Proof size stays constant |
+| Per-circuit trusted setup | **No trusted setup** |
+
+### How it works in this repo
+
+Every Step 1–9 circuit can be expressed as a **step circuit** — a single R1CS constraint system with:
+- **Public inputs:** current state (e.g., Merkle root, nullifier accumulator)
+- **Public outputs:** next state
+- **Private witnesses:** the actual data (credential fields, Merkle paths, proofs)
+
+The `nova-slim` CLI folds these steps:
+
+```bash
+# 1. Generate step witnesses (one JSON per step)
+python3 gen_step_witnesses.py --steps 10 --out steps/
+
+# 2. Fold all steps into one accumulated instance
+nova-slim fold --nifs --circuit step.r1cs --steps steps/ --out folded.ivc.cbor
+
+# 3. Compress to a slim proof (~0.4–2.5 KiB)
+nova-slim compress --slim --circuit step.r1cs --steps steps/ --out slim.proof.cbor
+
+# 4. Verify (off-chain or on-chain)
+nova-slim verify --ivc folded.ivc.cbor --slim-proof slim.proof.cbor
+```
+
+### Folding in practice: Step 9
+
+Step 9 (Recursive Proof Aggregation) is the culmination of the folding approach. Instead of verifying N Groth16 batch proofs on-chain, we fold them:
+
+```mermaid
+graph TB
+    subgraph Epoch["One epoch = 4 spends"]
+        B["Groth16 batch verify<br/>(off-chain)"]
+    end
+    subgraph Fold["Nova Folding"]
+        F0["U_0 = initial state"]
+        F1["fold(U_0, epoch_1) → U_1"]
+        FK["fold(U_{K-1}, epoch_K) → U_K"]
+    end
+    B --> F1
+    F0 --> F1 --> FK
+    FK --> C["compress → slim proof"]
+```
+
+**Measured performance (Step 9, 3 epochs):**
+
+| Phase | Time | Output size |
+|-------|------|-------------|
+| Epoch generation (4 spends) | ~25 s | 4 × 192 B proofs |
+| Fold 3 epochs | ~0.5 s | 570 B IVC bundle |
+| Compress (--slim) | ~8 s | **795 B** slim proof |
+| Verify | ~0.3 ms | — |
+
+The 795-byte proof is **independent** of the number of epochs folded.
+
+### Comparison: Groth16 vs Nova folding
+
+| Property | Groth16 (Path A) | Nova IVC (Path B) |
+|----------|-----------------|-------------------|
+| Proof size | 192 B | ~0.4–2.5 KiB (slim) |
+| Trusted setup | Per-circuit Phase-2 | **None** |
+| On-chain verifier | Pairing check (BLS12-381) | Sumcheck (native field ops) |
+| On-chain cost | ~20% script CPU | ~25% script CPU |
+| Predicate composition | One circuit per combination | Fold step circuits freely |
+| Best for | Fixed predicates, minimal size | Dynamic composition, no ceremony |
+
+Both paths are implemented end-to-end. Choose Groth16 for minimal on-chain footprint; choose Nova for flexibility and no trusted setup.
 
 </details>
 
