@@ -4,6 +4,72 @@ Command-line interface for Sparse Merkle Tree (SMT) operations on BLS12-381, plu
 
 Backed by MiMC(x⁷) hashing, the CLI builds insert-only SMTs, derives CardanoKeyOwnershipSMT witness data from Ed25519 payment keys, and produces the Circom witness inputs for the Spend(depth) and CardanoKeyOwnershipSMT circuits. This functionality previously lived inside `groth16-prover-cli` under the `smt` subcommand.
 
+---
+
+## Executive Summary
+
+The `smt` CLI manages Sparse Merkle Trees (SMTs) using MiMC(x⁷) hashing over BLS12-381. It generates the private Merkle-path witnesses needed by Circom privacy-pool circuits.
+
+**What you get:**
+- `insert` — Build a tree and persist state
+- `digest` — Get the Merkle root
+- `path` / `verify` — Generate and verify authentication paths
+- `export` / `compute-inputs` — Generate Circom witness JSON for Spend circuits
+- `key` / `cardano-input` — Derive Ed25519 key witness data for CardanoKeyOwnershipSMT
+
+**Quick start:**
+```bash
+cd clis/smt
+cargo build --release
+
+# Build a tree
+./target/release/smt insert \
+  --depth 4 \
+  --items "1 100,2 200,3 300" \
+  --state /tmp/smt.json
+
+# Get the root
+./target/release/smt digest --state /tmp/smt.json
+
+# Verify a path
+./target/release/smt verify --state /tmp/smt.json --leaf "<commitment>"
+
+# Export witness for Circom
+./target/release/smt export \
+  --state /tmp/smt.json \
+  --nullifier 1 \
+  --out /tmp/input.json
+```
+
+**End-to-end: SMT → Circom witness → Groth16 proof**
+```bash
+# 1. Build tree and export witness
+smt insert --depth 2 --items "1 100,2 200" --state /tmp/smt.json
+smt export --state /tmp/smt.json --nullifier 1 --out /tmp/input.json
+
+# 2. Generate Circom witness
+snarkjs wtns calculate spend_depth2.wasm /tmp/input.json /tmp/witness.wtns
+
+# 3. Prove
+cd ../groth16
+./target/release/groth16 prove \
+  --circuit ../../circom/Privacy/spend_depth2.r1cs \
+  --witness /tmp/witness.wtns \
+  --proving-key /tmp/spend.pk \
+  --out /tmp/spend_proof.bin
+```
+
+**Benchmarks (Intel i7-7500U):**
+
+| Operation | Depth | Items | Time |
+|-----------|-------|-------|------|
+| Insert | 4 | 3 | ~2 ms |
+| Path generation | 4 | 1 | ~1 ms |
+| Path verification | 4 | 1 | ~1 ms |
+| Full witness export | 4 | 1 | ~3 ms |
+
+---
+
 ## Quick reference
 
 Run any command with `--help` for full flag details:

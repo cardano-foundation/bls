@@ -22,6 +22,60 @@ Design, benchmarks, and implementation history are in [`nova-prover/README.md`](
 
 ---
 
+## Executive Summary
+
+The `nova` CLI implements **Nova IVC folding** — a recursive proof technique that compresses N step-circuit executions into a single constant-sized proof. No trusted setup required.
+
+**What you get:**
+- `fold` — Fold N step witnesses into one accumulated instance (NIFS)
+- `compress --slim` — Compress to an on-chain proof (~0.4–2.5 KiB)
+- `verify` — Verify off-chain or via Aiken sumcheck validator
+- Transparent operation — no `.pk`, no `.vk`, no ceremony
+
+**Quick start (10 steps):**
+```bash
+cd clis/nova
+cargo build --release
+
+# 1. Fold
+./target/release/nova fold --nifs \
+  --circuit ../../circom/CardanoKeyOwnership/cardano_ed25519_ownership_nova.r1cs \
+  --steps ./step_witnesses/ \
+  --out bundle.ivc.cbor
+
+# 2. Compress to slim proof
+./target/release/nova compress --slim \
+  --circuit ../../circom/CardanoKeyOwnership/cardano_ed25519_ownership_nova.r1cs \
+  --steps ./step_witnesses/ \
+  --out slim.proof.cbor
+
+# 3. Verify
+./target/release/nova verify \
+  --ivc bundle.ivc.cbor \
+  --slim-proof slim.proof.cbor
+# → Verified N steps: slim sumcheck proof OK
+```
+
+**Benchmarks (Intel i7-7500U, 255 Ed25519 steps × 7,724 constraints):**
+
+| Phase | Time | Output size |
+|-------|------|-------------|
+| Fold 255 steps | ~185 ms/step | 47 KiB × N (growing) |
+| Compress (full sumcheck) | ~7.9 s | ~472 KiB |
+| Compress (--slim) | ~8 s | **~1.5 KiB** |
+| Verify (slim) | ~0.3 ms | — |
+
+**Comparison with Groth16:**
+
+| Property | Groth16 | Nova IVC (slim) |
+|----------|---------|-----------------|
+| Proof size | 192 B | ~0.4–2.5 KiB |
+| Trusted setup | Per-circuit | **None** |
+| On-chain verify | Pairing check | Sumcheck (field ops) |
+| Predicate composition | Fixed circuit | Fold step circuits freely |
+
+---
+
 ## Quick start — recommended path (no ceremony)
 
 ```bash

@@ -4,6 +4,56 @@ Command-line interface for the Lova post-quantum folding scheme. This binary wra
 
 > **Status:** 🔬 Research / evaluation — part of the post-quantum proof system track.
 
+---
+
+## Executive Summary
+
+The `lattice` CLI implements **Lova** — a post-quantum folding scheme based on lattice cryptography (Ajtai commitments over Z_{2^64}). Unlike elliptic-curve folding (Nova), Lova is conjectured to resist quantum attacks.
+
+**What you get:**
+- `fold` — Fold N step witnesses into one accumulated instance
+- `verify` — Verify the folded instance
+- `params` — Display parameter settings for given dimensions
+- R1CS-to-Lova adapter — fold real Circom circuits via 4-limb BLS12-381 decomposition
+- RNS mode — alternative decomposition for evaluation
+
+**Quick start:**
+```bash
+cd clis/lattice
+cargo build --release
+
+# Display parameters
+./target/release/lattice --lova params --m 256 --n 128
+
+# Fold synthetic steps
+./target/release/lattice --lova fold --steps 32 --m 256 --n 128
+
+# Fold real Circom circuit steps
+./target/release/lattice --lova fold \
+  --steps-dir /tmp/eddsa_steps \
+  --m 256 --n 128
+```
+
+**Benchmarks (Intel i7-7500U, release mode):**
+
+| Parameters | Steps | Fold/step | Verify/step | Proof size |
+|------------|-------|-----------|-------------|------------|
+| toy (m=16, n=8) | 256 | 0.06 ms | 0.00 ms | 4.4 KiB |
+| default (m=256, n=128) | 32 | 1.43 ms | 0.28 ms | 70.0 KiB |
+| EdDSA (15 signals) | 63 | 0.45 ms | 0.03 ms | 31.9 KiB |
+| Airdrop (1,210 signals) | 4 | 1,204 ms | 282 ms | 2,571 KiB |
+
+**Comparison with Nova:**
+
+| Metric | Nova NIFS | Lova (EdDSA) |
+|--------|-----------|--------------|
+| Fold/step | 185 ms | **0.45 ms** |
+| Verify/step | 7.87 s | **0.03 ms** |
+| Proof size | 472.8 KiB | **31.9 KiB** |
+| Post-quantum | No | **Yes** |
+
+---
+
 ## Prerequisites
 
 Requires Rust nightly toolchain `nightly-2025-05-01` (or compatible). The `lattice-prover` crate depends on `lattirust-arithmetic` which needs nightly features.
