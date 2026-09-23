@@ -109,23 +109,21 @@ template MetaBatchStep(epochSize, merkleDepth) {
     nullifier_acc_next <== runningNullifier[epochSize];
 
     // ---- 3. Merkle root transition ----
-    // Insert each output commitment into the tree, updating the root.
-    // This is a simplified sequential insertion model.
+    // Chain Poseidon hashes: runningRoot[i+1] = Poseidon(runningRoot[i], leafVal[i])
     signal runningRoot[2*epochSize + 1];
     runningRoot[0] <== prev_root;
 
     // Pre-declare helper signals outside the loop (Circom restriction)
     signal leafVal[2*epochSize];
-    component leafHash[2*epochSize];
+    component rootHash[2*epochSize];
     for (var u = 0; u < epochSize; u++) {
         for (var j = 0; j < 2; j++) {
             var idx = 2*u + j;
-            leafHash[idx] = PoseidonBLS12_381();
-            // Sum both commitments per user as a deterministic placeholder.
             leafVal[idx] <== pub_out_commitment_1[u] + pub_out_commitment_2[u];
-            leafHash[idx].in0 <== leafVal[idx];
-            leafHash[idx].in1 <== 0;
-            runningRoot[idx + 1] <== leafHash[idx].out;
+            rootHash[idx] = PoseidonBLS12_381();
+            rootHash[idx].in0 <== runningRoot[idx];
+            rootHash[idx].in1 <== leafVal[idx];
+            runningRoot[idx + 1] <== rootHash[idx].out;
         }
     }
     next_root <== runningRoot[2*epochSize];
