@@ -34,3 +34,6 @@ pub mod bls_ffi;
 pub mod backend;
 
 pub mod cmd;
+
+#[cfg(feature = "verus")]
+pub mod verus_smoke;
