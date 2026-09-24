@@ -84,6 +84,12 @@
                          "$bin" || true
               fi
             done
+
+            # Symlink the main binaries into $out/bin so nix adds them to PATH.
+            mkdir -p $out/bin
+            ln -s $out/verus $out/bin/verus
+            ln -s $out/cargo-verus $out/bin/cargo-verus
+            ln -s $out/z3 $out/bin/z3
           '';
         };
       in
