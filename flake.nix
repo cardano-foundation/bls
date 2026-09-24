@@ -113,17 +113,16 @@
           ];
 
           shellHook = ''
-            export VERUS_Z3_PATH="${z3_4_16}/bin/z3"
             echo "=== groth16-prover dev shell ==="
             echo "Verus: $(verus --version 2>/dev/null || echo 'not in PATH')"
             echo "Z3:    $(z3 --version 2>/dev/null || echo 'not in PATH')"
             echo "Rust:  $(rustc --version)"
             echo ""
             echo "To run Verus on a file:"
-            echo "  verus clis/trusted-setup/src/verus_smoke.rs --crate-type=lib --features verus"
+            echo "  verus clis/trusted-setup/src/verus_smoke.rs --crate-type=lib"
             echo ""
             echo "To verify the whole crate:"
-            echo "  cd clis/trusted-setup && verus src/lib.rs --crate-type=lib --features verus"
+            echo "  cd clis/trusted-setup && verus src/lib.rs --crate-type=lib"
             echo ""
             echo "Normal cargo build (no Verus overhead):"
             echo "  cargo check && cargo test"
