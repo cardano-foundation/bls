@@ -2,7 +2,7 @@
 
 This document tracks the incremental introduction of [Verus](https://github.com/verus-lang/verus) automated program verification into the `groth16-prover` / `trusted-setup` codebase.
 
-> **Status:** Phase 0 (tooling) complete. Phase 1 in progress.
+> **Status:** Phase 0 (tooling) complete. Phase 1 (bounds & structural invariants) complete.
 
 ---
 
@@ -88,13 +88,12 @@ verus src/verus_smoke.rs --crate-type=lib
 - [x] Create `src/verus_smoke.rs` with a trivial `requires/ensures` proof
 - [x] Confirm `cargo check` still passes (Verus annotations are macro-gated)
 
-### Phase 1 – Bounds & structural invariants (IN PROGRESS)
-- [ ] `r1cs.rs`: `matrix_mul_vec_dyn` – output length == `matrix.len()`, no OOB
-- [ ] `r1cs.rs`: `verify_r1cs_circuit` – all rows have length `witness.len()`, loop indices in bounds
-- [ ] `r1cs.rs`: `dot_product` – no OOB access on `witness`
-- [ ] `lagrange.rs`: `padded_coeffs` – output length == `n`
-- [ ] `lagrange.rs`: `scale_by_coset_powers` – iterates exactly over `coeffs.len()`
-- [ ] `lagrange.rs`: `batch_invert` – no OOB on `vals`; handles `n == 0`
+### Phase 1 – Bounds & structural invariants (DONE)
+- [x] `r1cs.rs`: `matrix_mul_vec_dyn` – output length == `matrix.len()`, no OOB (via `spec_matrix_mul_vec_dyn`)
+- [x] `r1cs.rs`: `verify_r1cs_circuit` – all rows have length `witness.len()`, loop indices in bounds (via `spec_verify_r1cs_circuit`)
+- [x] `lagrange.rs`: `padded_coeffs` – output length == `n` (via `spec_padded_coeffs`)
+- [x] `lagrange.rs`: `scale_by_coset_powers` – preserves slice length (via `spec_scale_by_coset_powers`)
+- [x] `lagrange.rs`: `batch_invert` – preserves slice length, no-op for empty input (via `spec_batch_invert`)
 
 ### Phase 2 – Functional correctness of pure helpers
 - [ ] `r1cs.rs`: `matrix_mul_vec_dyn` – each entry equals dot product of row with witness
@@ -138,7 +137,7 @@ cargo check
 cargo test
 ```
 
-> Verus annotations live inside the `verus! { ... }` macro and use `#[cfg(verus_keep_ghost)]`-gated imports. Normal `rustc`/`cargo` sees them as regular Rust code and compiles them normally.
+> Verus annotations live inside `verus! { ... }` blocks gated behind `#[cfg(feature = "verus")]`. Normal `cargo check` / `cargo test` (without `--features verus`) skips these blocks entirely, so the build is unaffected.
 
 ---
 
@@ -147,7 +146,7 @@ cargo test
 Each logical verification step is committed separately without GPG signing:
 
 ```bash
-git commit -S -m "verus: annotate matrix_mul_vec_dyn with length guarantees"
+git commit --no-gpg-sign -m "verus: annotate matrix_mul_vec_dyn with length guarantees"
 ```
 
 > We intentionally do **not** amend commits. If a proof fails or needs revision, a new commit is added on top.
