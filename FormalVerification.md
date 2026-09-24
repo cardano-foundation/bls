@@ -2,7 +2,6 @@
 
 This document tracks the incremental introduction of [Verus](https://github.com/verus-lang/verus) automated program verification into the `groth16-prover` / `trusted-setup` codebase.
 
-> **Status:** Phase 0 (tooling) complete. Phase 1 (bounds & structural invariants) complete.
 
 ---
 
@@ -80,7 +79,7 @@ verus --version
 | **Functional specs on pure helpers** | `matrix_mul_vec_dyn` returns a vector of length `n_constraints`; `dot_product` accumulates correctly | `r1cs.rs` |
 | **Parser invariants** | Parsed witness length equals wire count; section sizes are within bounds | `circom_adapter.rs` |
 
-### Out of scope (requires axiomatizing external crates)
+### Out of scope (would require axiomatizing external crates)
 
 | Category | Why | Future work |
 |----------|-----|-------------|
@@ -157,18 +156,6 @@ cargo test
 - `external_body` wrappers have no executable body and are never called by production code
 
 Running `cargo build --release` produces the exact same binary as before Verus was introduced.
-
----
-
-## Commit discipline
-
-Each logical verification step is committed separately without GPG signing:
-
-```bash
-git commit --no-gpg-sign -m "verus: annotate matrix_mul_vec_dyn with length guarantees"
-```
-
-> We intentionally do **not** amend commits. If a proof fails or needs revision, a new commit is added on top.
 
 ---
 
