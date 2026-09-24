@@ -21,7 +21,7 @@
 
           src = pkgs.fetchurl {
             url = "https://github.com/Z3Prover/z3/releases/download/z3-${version}/z3-${version}-x64-glibc-2.39.zip";
-            sha256 = "1y90gmg057925jqpyiay2ghj85dwy7b1ch5v8i20h9wqdmzicr3c";
+            sha256 = "sha256-cojEmlvW26/XsLDR9llWuRZy2iSwjwkkKRmvFZvjQY4=";
           };
 
           nativeBuildInputs = [ pkgs.unzip pkgs.patchelf ];
@@ -60,7 +60,7 @@
 
           src = pkgs.fetchurl {
             url = "https://github.com/verus-lang/verus/releases/download/release/${version}/verus-${version}-x86-linux.zip";
-            sha256 = "0yp996cwznji7cp4zv3z7hvj09665ia6lm7pk2sndj047i2r82a2";
+            sha256 = "sha256-e4cPoSvFiQFcL6tgqLPZ8Hx7Gts0ROsPrf/L9/BEezM=";
           };
 
           nativeBuildInputs = [ pkgs.unzip pkgs.patchelf ];
@@ -77,7 +77,7 @@
             rmdir $out/verus-x86-linux || true
 
             # Patch every ELF executable so it links against Nix libraries.
-            for bin in $out/verus $out/cargo-verus $out/air $out/verusdoc $out/deps/verus-*; do
+            for bin in $out/verus $out/cargo-verus $out/air $out/verusdoc $out/deps/verus-* $out/z3; do
               if [ -f "$bin" ] && [ -x "$bin" ]; then
                 patchelf --set-interpreter "${pkgs.glibc}/lib/ld-linux-x86-64.so.2" \
                          --set-rpath "${pkgs.glibc}/lib:${pkgs.gcc.cc.lib}/lib" \
