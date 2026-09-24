@@ -6,8 +6,10 @@ license = "Apache-2.0"
 description = "Groth16 trusted-setup core and CLI over BLS12-381 using arkworks"
 
 [features]
+default = []
 bins = []
 native = []
+verus = ["dep:vstd", "dep:verus_builtin", "dep:verus_builtin_macros"]
 
 [lib]
 name = "trusted_setup"
@@ -35,6 +37,9 @@ rand = "0.8"
 rayon = "1.7"
 serde = { version = "1", features = ["derive"] }
 trusted-setup-macros = { path = "macros" }
+vstd = { version = "0.0.0-2026-09-20-0158", optional = true }
+verus_builtin = { version = "0.0.0-2026-09-16-0054", optional = true }
+verus_builtin_macros = { version = "0.0.0-2026-09-20-0158", optional = true }
 
 [dev-dependencies]
 ark-std = { version = "0.4", features = ["std"] }
