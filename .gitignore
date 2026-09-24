@@ -42,6 +42,10 @@ node_modules/
 # Python
 __pycache__/
 
+# Nix build output symlink
+result
+result-*
+
 # Circom witness inputs
 input.json
 *_input.json
