@@ -21,7 +21,25 @@ Verus allows us to write machine-checked proofs of these properties directly in 
 
 ## Installation
 
-### 1. Install Verus
+### Option A: Nix flake (recommended)
+
+This repository includes a `flake.nix` that provides a complete dev shell with Verus, Z3 4.16.0, and the correct Rust toolchain — all pre-configured and patched for your system.
+
+```bash
+# Enter the dev shell
+nix develop
+
+# Verify a standalone file
+RUSTUP_TOOLCHAIN=1.98.1-x86_64-unknown-linux-gnu verus /tmp/test.rs --crate-type=lib
+
+# Or verify a crate
+cd clis/trusted-setup
+RUSTUP_TOOLCHAIN=1.98.1-x86_64-unknown-linux-gnu verus src/lib.rs --crate-type=lib
+```
+
+> **Why Nix?** The prebuilt Verus binaries require glibc 2.39+ and Z3 4.16.0. The Nix flake downloads both, patches their ELF interpreters/RPATHs to use Nix's glibc, and symlinks everything into `$PATH` automatically.
+
+### Option B: Manual install
 
 Follow the [official install guide](https://github.com/verus-lang/verus/blob/main/INSTALL.md).
 
@@ -43,17 +61,10 @@ export PATH="$PWD/verus-x86-linux:$PATH"
 
 > **Note:** Verus requires Z3 4.16.0. If the bundled Z3 does not run on your system (glibc version mismatch), install it via `pip install z3-solver==4.16.0.0` and point Verus to it with `VERUS_Z3_PATH`.
 
-### 2. Verify the toolchain
+### Verify the toolchain
 
 ```bash
 verus --version
-```
-
-### 3. Verify a file in this project
-
-```bash
-cd clis/trusted-setup
-verus src/verus_smoke.rs --crate-type=lib
 ```
 
 ---
@@ -115,18 +126,17 @@ verus src/verus_smoke.rs --crate-type=lib
 
 ## How to run verification
 
-### Verify a single file
+### Inside the Nix dev shell
 
 ```bash
-cd clis/trusted-setup
-verus src/r1cs.rs --crate-type=lib
-```
+nix develop
 
-### Verify the whole crate
+# Verify a single file
+RUSTUP_TOOLCHAIN=1.98.1-x86_64-unknown-linux-gnu verus src/r1cs.rs --crate-type=lib
 
-```bash
+# Verify the whole crate
 cd clis/trusted-setup
-verus src/lib.rs --crate-type=lib
+RUSTUP_TOOLCHAIN=1.98.1-x86_64-unknown-linux-gnu verus src/lib.rs --crate-type=lib
 ```
 
 ### Normal cargo build (ignores Verus annotations)
@@ -138,6 +148,15 @@ cargo test
 ```
 
 > Verus annotations live inside `verus! { ... }` blocks gated behind `#[cfg(feature = "verus")]`. Normal `cargo check` / `cargo test` (without `--features verus`) skips these blocks entirely, so the build is unaffected.
+
+## Performance impact
+
+**Zero runtime impact.** All Verus code is:
+- Feature-gated behind `verus` (default disabled)
+- Written inside `verus! { ... }` macros that erase ghost code at compile time
+- `external_body` wrappers have no executable body and are never called by production code
+
+Running `cargo build --release` produces the exact same binary as before Verus was introduced.
 
 ---
 
