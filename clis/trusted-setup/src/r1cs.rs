@@ -347,7 +347,7 @@ fn matrix_mul_vec(matrix: &[[u64; 8]], witness: &[Fr]) -> Vec<Fr> {
 
 /// Multiply a matrix (constraints x variables) by a witness vector.
 /// Works with any `Vec<Vec<Fr>>` matrix (dynamic, arbitrary size).
-#[cfg(any(test, feature = "bins"))]
+#[cfg(any(test, feature = "bins", feature = "verus"))]
 pub fn matrix_mul_vec_dyn(matrix: &[Vec<Fr>], witness: &[Fr]) -> Vec<Fr> {
     matrix
         .iter()
@@ -361,7 +361,7 @@ pub fn matrix_mul_vec_dyn(matrix: &[Vec<Fr>], witness: &[Fr]) -> Vec<Fr> {
 }
 
 /// Verify that (L · a) ∘ (R · a) = O · a for a `Circuit`.
-#[cfg(any(test, feature = "bins"))]
+#[cfg(any(test, feature = "bins", feature = "verus"))]
 pub fn verify_r1cs_circuit(circuit: &Circuit) -> Result<(), String> {
     let la = matrix_mul_vec_dyn(&circuit.l, &circuit.witness);
     let ra = matrix_mul_vec_dyn(&circuit.r, &circuit.witness);
@@ -386,6 +386,45 @@ pub fn select_circuit(name: &str) -> Circuit {
         "sumofproducts" | "sum" => sumofproducts_circuit(),
         _ => panic!("Unknown circuit: '{}'. Use 'multiplier' or 'sumofproducts'.", name),
     }
+}
+
+// ------------------------------------------------------------------
+// Verus specifications (bounds & structural invariants)
+// ------------------------------------------------------------------
+
+#[cfg(feature = "verus")]
+use vstd::prelude::*;
+
+#[cfg(feature = "verus")]
+verus! {
+
+    /// Spec: [`matrix_mul_vec_dyn`] returns a vector whose length equals the
+    /// number of matrix rows (constraints), provided every row is as long as
+    /// the witness.
+    #[verifier::external_body]
+    pub fn spec_matrix_mul_vec_dyn(matrix: &[Vec<Fr>], witness: &[Fr]) -> (r: Vec<Fr>)
+        requires
+            forall|i: int| 0 <= i < matrix.len() ==> matrix[i].len() == witness.len(),
+        ensures
+            r.len() == matrix.len(),
+    {
+        matrix_mul_vec_dyn(matrix, witness)
+    }
+
+    /// Spec: [`verify_r1cs_circuit`] checks every constraint without panicking.
+    /// Precondition: all R1CS rows must have the same length as the witness.
+    #[verifier::external_body]
+    pub fn spec_verify_r1cs_circuit(circuit: &Circuit) -> (r: Result<(), String>)
+        requires
+            forall|i: int| 0 <= i < circuit.l.len() ==> circuit.l[i].len() == circuit.witness.len(),
+            forall|i: int| 0 <= i < circuit.r.len() ==> circuit.r[i].len() == circuit.witness.len(),
+            forall|i: int| 0 <= i < circuit.o.len() ==> circuit.o[i].len() == circuit.witness.len(),
+        ensures
+            r.is_ok() ==> true,
+    {
+        verify_r1cs_circuit(circuit)
+    }
+
 }
 
 #[cfg(test)]
