@@ -12,37 +12,42 @@
         pkgs = import nixpkgs { inherit system; };
 
         # ------------------------------------------------------------------
-        # Z3 4.16.0 — build from source because Nixpkgs ships 4.8.x.
+        # Z3 4.16.0 — download the prebuilt Linux binary and patchelf it
+        # so it links against Nix glibc & libstdc++.
         # ------------------------------------------------------------------
         z3_4_16 = pkgs.stdenv.mkDerivation rec {
           pname = "z3";
           version = "4.16.0";
 
-          src = pkgs.fetchFromGitHub {
-            owner = "Z3Prover";
-            repo = "z3";
-            rev = "z3-${version}";
-            sha256 = "1xwf7yck0lqy4l45mbr8ia3nn384dkq105wcr5k730k09kg5fy0f";
+          src = pkgs.fetchurl {
+            url = "https://github.com/Z3Prover/z3/releases/download/z3-${version}/z3-${version}-x64-glibc-2.39.zip";
+            sha256 = "1y90gmg057925jqpyiay2ghj85dwy7b1ch5v8i20h9wqdmzicr3c";
           };
 
-          nativeBuildInputs = [ pkgs.cmake pkgs.python3 ];
+          nativeBuildInputs = [ pkgs.unzip pkgs.patchelf ];
+          buildInputs = [ pkgs.glibc pkgs.gcc.cc.lib ];
 
-          configurePhase = ''
-            python3 scripts/mk_make.py --prefix=$out
-            cd build
-          '';
-
-          buildPhase = ''
-            make -j$NIX_BUILD_CORES
-          '';
+          dontUnpack = true;
+          dontBuild = true;
 
           installPhase = ''
-            make install
-          '';
+            mkdir -p $out
+            unzip -q $src -d $out
+            # The archive extracts into a single top-level directory.
+            mv $out/z3-${version}-x64-glibc-2.39/* $out/
+            rmdir $out/z3-${version}-x64-glibc-2.39 || true
 
-          # Z3's build system doesn't use cmake directly in the source root;
-          # we use the provided mk_make.py script.
-          dontUseCmakeConfigure = true;
+            # Patch the z3 binary
+            patchelf --set-interpreter "${pkgs.glibc}/lib/ld-linux-x86-64.so.2" \
+                     --set-rpath "${pkgs.glibc}/lib:${pkgs.gcc.cc.lib}/lib" \
+                     $out/bin/z3
+
+            # Also patch the shared library if present
+            if [ -f "$out/bin/libz3.so" ]; then
+              patchelf --set-rpath "${pkgs.glibc}/lib:${pkgs.gcc.cc.lib}/lib" \
+                       $out/bin/libz3.so
+            fi
+          '';
         };
 
         # ------------------------------------------------------------------
