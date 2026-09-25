@@ -2,6 +2,7 @@
 
 This document tracks the incremental introduction of [Verus](https://github.com/verus-lang/verus) automated program verification into the `groth16-prover` / `trusted-setup` codebase.
 
+> **Status:** Phases 0–5 complete. All high-value, feasible targets have been annotated.
 
 ---
 
@@ -115,11 +116,22 @@ verus --version
 - [x] `circom_adapter.rs`: `CircomCircuit::from_bytes` – dense matrices have shape `n_constraints × n_wires` (via `spec_circom_from_bytes`)
 - [x] `circom_adapter.rs`: `load_witness_from_bytes` – `witness.len() == n_wires` or returns `Err` (via `spec_load_witness`)
 
-### Phase 4 – QAP engine invariants (stretch / future work)
-- [ ] `QapEngine::domain_size` – power of two for FFT, equals `n_constraints` for dense
-- [ ] `QapEngine::build_qap` – returns exactly `n_vars` polynomials
-- [ ] `compute_quotient` – remainder is zero precondition / postcondition
+### Phase 4 – QAP engine invariants (DONE)
+- [x] `QapEngine::domain_size` – power of two for FFT, equals `n_constraints` for dense (via `spec_fft_domain_size`, `spec_dense_domain_size`)
+- [x] `QapEngine::build_qap` – returns exactly `n_vars` polynomials in each output vector (via `spec_build_qap_dense`)
+- [x] `compute_quotient` – documented remainder-zero precondition (via `spec_compute_quotient_dense`)
+
+### Phase 5 – FFI & parser safety (DONE)
+- [x] `backend.rs`: `native_msm_g1` / `native_msm_g2` – length-matching precondition (via `spec_native_msm_g1`, `spec_native_msm_g2`)
+- [x] `backend.rs`: `native_pairing_batch_check` – `g1.len() == g2.len()` precondition (via `spec_native_pairing_batch_check`)
+- [x] `ptau.rs`: `read_tau_g1` / `read_tau_g2` – result length equals requested count on success (via `spec_read_tau_g1`, `spec_read_tau_g2`)
+
+### Future work (requires deeper axiomatization)
 - [ ] Replace `external_body` wrappers with fully verified implementations for loop-based helpers (requires axiomatizing `Fr` or replacing with abstract numeric types)
+- [ ] `phase2.rs`: Contribution ratio-proof verification invariants
+- [ ] `prover.rs`: Proof element assembly length checks (A, B, C point construction)
+- [ ] `ceremony.rs`: Key-generation output size invariants (`a_query`, `b_query`, etc.)
+- [ ] `circom_adapter.rs`: Wire-id bounds in `parse_r1cs_raw` (wire < n_wires for every constraint)
 
 ---
 
