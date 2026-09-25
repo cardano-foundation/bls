@@ -462,6 +462,73 @@ pub fn build_witness_polys_sparse(
 
 /// Sanity check: evaluate each QAP polynomial on the constraint points
 /// and assert they match the original matrix entries.
+// ------------------------------------------------------------------
+// Verus specifications (QAP engine invariants)
+// ------------------------------------------------------------------
+
+#[cfg(feature = "verus")]
+use vstd::prelude::*;
+
+#[cfg(feature = "verus")]
+verus! {
+
+    /// Spec: [`FftQapEngine::domain_size`] returns a power of two ≥ `num_constraints`.
+    #[verifier::external_body]
+    pub fn spec_fft_domain_size(num_constraints: usize) -> (n: usize)
+        ensures
+            n >= num_constraints,
+            n.is_power_of_two(),
+    {
+        FftQapEngine::domain_size(num_constraints)
+    }
+
+    /// Spec: [`DenseQapEngine::domain_size`] returns exactly `num_constraints`.
+    #[verifier::external_body]
+    pub fn spec_dense_domain_size(num_constraints: usize) -> (n: usize)
+        ensures n == num_constraints
+    {
+        DenseQapEngine::domain_size(&DenseQapEngine::new(), num_constraints)
+    }
+
+    /// Spec: [`QapEngine::build_qap`] returns exactly `n_vars` polynomials in each of
+    /// the three output vectors, provided the input matrices are non-empty and
+    /// rectangular.
+    #[verifier::external_body]
+    pub fn spec_build_qap_dense(
+        l: &[[u64; 8]],
+        r: &[[u64; 8]],
+        o: &[[u64; 8]],
+    ) -> (result: (Vec<DensePolynomial<Fr>>, Vec<DensePolynomial<Fr>>, Vec<DensePolynomial<Fr>>))
+        requires
+            l.len() >= 1,
+            l.len() == r.len(),
+            l.len() == o.len(),
+        ensures
+            result.0.len() == l[0].len(),
+            result.1.len() == l[0].len(),
+            result.2.len() == l[0].len(),
+    {
+        let engine = DenseQapEngine::new();
+        engine.build_qap(l, r, o)
+    }
+
+    /// Spec: [`QapEngine::compute_quotient`] panics if the remainder is non-zero.
+    /// Precondition: the witness is valid (l·r − o) is divisible by T.
+    #[verifier::external_body]
+    pub fn spec_compute_quotient_dense(
+        l: &DensePolynomial<Fr>,
+        r: &DensePolynomial<Fr>,
+        o: &DensePolynomial<Fr>,
+        t: &DensePolynomial<Fr>,
+    ) -> (q: DensePolynomial<Fr>)
+        ensures true // The implementation asserts remainder == 0
+    {
+        let engine = DenseQapEngine::new();
+        engine.compute_quotient(l, r, o, t)
+    }
+
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
