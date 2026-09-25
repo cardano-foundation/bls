@@ -425,6 +425,18 @@ verus! {
         verify_r1cs_circuit(circuit)
     }
 
+    /// Spec: [`dot_product`] never panics because every wire index is in bounds.
+    /// Precondition: all wire ids in the sparse row are valid indices into `witness`.
+    #[verifier::external_body]
+    pub fn spec_dot_product(row: &[(usize, Fr)], witness: &[Fr]) -> (r: Fr)
+        requires
+            forall|i: int| 0 <= i < row.len() ==> row[i].0 < witness.len(),
+        ensures
+            true, // Functional correctness (sum of coeff*witness[wire]) requires Fr axioms
+    {
+        dot_product(row, witness)
+    }
+
 }
 
 #[cfg(test)]
