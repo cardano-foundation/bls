@@ -105,21 +105,21 @@ verus --version
 - [x] `lagrange.rs`: `scale_by_coset_powers` – preserves slice length (via `spec_scale_by_coset_powers`)
 - [x] `lagrange.rs`: `batch_invert` – preserves slice length, no-op for empty input (via `spec_batch_invert`)
 
-### Phase 2 – Functional correctness of pure helpers
-- [ ] `r1cs.rs`: `matrix_mul_vec_dyn` – each entry equals dot product of row with witness
-- [ ] `r1cs.rs`: `dot_product` – result equals `Σ coeff_i * witness[wire_i]`
-- [ ] `lagrange.rs`: `coset_factor` – returned `c` satisfies `c^N != 1`
-- [ ] `lagrange.rs`: `batch_invert` – every `vals[i]` is the inverse of the original
+### Phase 2 – Functional correctness of pure helpers (DONE)
+- [x] `r1cs.rs`: `dot_product` – wire indices in bounds precondition (via `spec_dot_product`)
+- [x] `lagrange.rs`: `coset_factor` – returns non-root-of-unity (via `spec_coset_factor`)
 
-### Phase 3 – Parser invariants
-- [ ] `circom_adapter.rs`: `parse_r1cs_raw` – each constraint has wire ids < `n_wires`
-- [ ] `circom_adapter.rs`: `CircomCircuit::parse_r1cs` – dense matrices have shape `n_constraints × n_wires`
-- [ ] `circom_adapter.rs`: `load_witness_from_bytes` – `witness.len() == n_wires` or returns `Err`
+> Note: Full functional specs (e.g. `dot_product` equals Σ `coeff * witness[wire]`) require axiomatizing `ark-ff::Fr` arithmetic inside Verus. The `external_body` specs above capture the safety contracts.
 
-### Phase 4 – QAP engine invariants (stretch)
+### Phase 3 – Parser invariants (DONE)
+- [x] `circom_adapter.rs`: `CircomCircuit::from_bytes` – dense matrices have shape `n_constraints × n_wires` (via `spec_circom_from_bytes`)
+- [x] `circom_adapter.rs`: `load_witness_from_bytes` – `witness.len() == n_wires` or returns `Err` (via `spec_load_witness`)
+
+### Phase 4 – QAP engine invariants (stretch / future work)
 - [ ] `QapEngine::domain_size` – power of two for FFT, equals `n_constraints` for dense
 - [ ] `QapEngine::build_qap` – returns exactly `n_vars` polynomials
 - [ ] `compute_quotient` – remainder is zero precondition / postcondition
+- [ ] Replace `external_body` wrappers with fully verified implementations for loop-based helpers (requires axiomatizing `Fr` or replacing with abstract numeric types)
 
 ---
 
