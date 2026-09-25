@@ -358,6 +358,46 @@ fn parse_wtns(
 }
 
 // ------------------------------------------------------------------
+// Verus specifications (parser invariants)
+// ------------------------------------------------------------------
+
+#[cfg(feature = "verus")]
+use vstd::prelude::*;
+
+#[cfg(feature = "verus")]
+verus! {
+
+    /// Spec: [`CircomCircuit::from_bytes`] returns a circuit whose dense matrices
+    /// have shape `n_constraints × n_wires`.
+    #[verifier::external_body]
+    pub fn spec_circom_from_bytes(data: &[u8]) -> (r: Result<CircomCircuit, String>)
+        ensures
+            r.is_ok() ==> {
+                let c = r.unwrap();
+                c.l.len() == c.n_constraints as int
+                    && c.r.len() == c.n_constraints as int
+                    && c.o.len() == c.n_constraints as int
+                    && forall|i: int| 0 <= i < c.l.len() ==> c.l[i].len() == c.n_wires as int
+                    && forall|i: int| 0 <= i < c.r.len() ==> c.r[i].len() == c.n_wires as int
+                    && forall|i: int| 0 <= i < c.o.len() ==> c.o[i].len() == c.n_wires as int
+            },
+    {
+        CircomCircuit::from_bytes(data)
+    }
+
+    /// Spec: [`CircomCircuit::load_witness_from_bytes`] either returns `Err`
+    /// or sets `witness.len() == n_wires`.
+    #[verifier::external_body]
+    pub fn spec_load_witness(circuit: &mut CircomCircuit, data: &[u8], field_size: usize) -> (r: Result<(), String>)
+        ensures
+            r.is_ok() ==> circuit.witness.len() == circuit.n_wires as int,
+    {
+        circuit.load_witness_from_bytes(data, field_size)
+    }
+
+}
+
+// ------------------------------------------------------------------
 // Tests
 // ------------------------------------------------------------------
 
