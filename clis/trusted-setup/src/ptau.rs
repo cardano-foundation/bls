@@ -367,6 +367,38 @@ fn fq_from_lem_bytes(bytes: &[u8; N8_FQ]) -> Fq {
     Fp::<MontBackend<FqConfig, 6>, 6>(bigint, PhantomData)
 }
 
+// ------------------------------------------------------------------
+// Verus specifications (ptau parser invariants)
+// ------------------------------------------------------------------
+
+#[cfg(feature = "verus")]
+use vstd::prelude::*;
+
+#[cfg(feature = "verus")]
+verus! {
+
+    /// Spec: [`PtauFile::read_tau_g1`] returns `Ok` only when `count` does not
+    /// exceed the available points, and the result length equals `count`.
+    #[verifier::external_body]
+    pub fn spec_read_tau_g1(ptau: &mut PtauFile, count: usize) -> (r: Result<Vec<G1Affine>, Error>)
+        ensures
+            r.is_ok() ==> r.unwrap().len() == count,
+    {
+        ptau.read_tau_g1(count)
+    }
+
+    /// Spec: [`PtauFile::read_tau_g2`] returns `Ok` only when `count` does not
+    /// exceed the available points, and the result length equals `count`.
+    #[verifier::external_body]
+    pub fn spec_read_tau_g2(ptau: &mut PtauFile, count: usize) -> (r: Result<Vec<G2Affine>, Error>)
+        ensures
+            r.is_ok() ==> r.unwrap().len() == count,
+    {
+        ptau.read_tau_g2(count)
+    }
+
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
