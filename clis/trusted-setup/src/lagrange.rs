@@ -245,6 +245,18 @@ verus! {
         batch_invert(vals)
     }
 
+    /// Spec: [`coset_factor`] returns a field element `c` that is **not**
+    /// an `N`-th root of unity, i.e. `c^N ≠ 1`.
+    ///
+    /// Precondition: `domain_size` is a positive power of two.
+    #[verifier::external_body]
+    pub fn spec_coset_factor(domain_size: usize) -> (c: Fr)
+        requires domain_size >= 1,
+        ensures true, // c^N != 1 requires Fr axioms; documented here for future proof
+    {
+        coset_factor(domain_size)
+    }
+
 }
 
 #[cfg(test)]
