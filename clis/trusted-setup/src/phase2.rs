@@ -489,17 +489,366 @@ fn random_nonzero_fr(rng: &mut impl RngCore) -> Fr {
 
 /// Compute the next power of two >= n.
 fn next_power_of_two(n: usize) -> usize {
-    let mut p = 1usize;
+    next_power_of_two_u64(n as u64) as usize
+}
+
+/// Integer log2 (n must be a power of two).
+fn log2(n: usize) -> usize {
+    log2_u64(n as u64) as usize
+}
+
+// ------------------------------------------------------------------
+// Verified core for `next_power_of_two` / `log2`
+//
+// Verus models `usize` as 32-bit, while the arithmetic here is only
+// meaningful for 64-bit circuit sizes, so the proofs are carried out over
+// `u64` and the `usize` wrappers above are plain casts.  Under the
+// `verus` feature the wrappers below *are* the bodies that get verified.
+// ------------------------------------------------------------------
+
+#[cfg(not(feature = "verus"))]
+fn next_power_of_two_u64(n: u64) -> u64 {
+    let mut p = 1u64;
     while p < n {
         p <<= 1;
     }
     p
 }
 
-/// Integer log2 (n must be a power of two).
-fn log2(n: usize) -> usize {
-    n.trailing_zeros() as usize
+#[cfg(not(feature = "verus"))]
+fn log2_u64(n: u64) -> u64 {
+    n.trailing_zeros() as u64
 }
+
+#[cfg(feature = "verus")]
+mod verus_core {
+    use vstd::prelude::*;
+    use vstd::arithmetic::power2::{
+        pow2, is_pow2, is_pow2_equiv, is_pow2_exists, lemma_pow2, lemma_pow2_pos,
+        lemma_pow2_unfold, lemma_pow2_strictly_increases, lemma_pow2_adds, lemma2_to64,
+    };
+    use vstd::arithmetic::power::{pow, lemma_pow_strictly_increases_converse};
+    use vstd::std_specs::bits::{u64_trailing_zeros, axiom_u64_trailing_zeros};
+
+    verus! {
+
+    // ---------------------------------------------------------------
+    // small power-of-two lemmas
+    // ---------------------------------------------------------------
+
+    proof fn lemma_pow2_zero()
+        ensures
+            pow2(0) == 1,
+    {
+        reveal(pow2);
+        reveal(pow);
+    }
+
+    proof fn lemma_pow2_is_pow2(e: nat)
+        ensures
+            is_pow2(pow2(e) as int),
+    {
+        lemma_pow2(e);
+        is_pow2_equiv(pow2(e) as int);
+        assert(exists|i: nat| pow(2, i) == pow2(e) as int) by {
+            reveal(is_pow2_exists);
+            assert(pow(2, e) == pow2(e) as int);
+        }
+    }
+
+    // pow2(f) < pow2(g)  ==>  f < g
+    proof fn lemma_pow2_lt_inv(f: nat, g: nat)
+        requires
+            pow2(f) < pow2(g),
+        ensures
+            f < g,
+    {
+        lemma_pow2(f);
+        lemma_pow2(g);
+        lemma_pow_strictly_increases_converse(2, f, g);
+    }
+
+    proof fn lemma_pow2_mono_le(f: nat, g: nat)
+        requires
+            f <= g,
+        ensures
+            pow2(f) <= pow2(g),
+        decreases g,
+    {
+        lemma_pow2_pos(g);
+        if f < g {
+            lemma_pow2_strictly_increases(f, g);
+        }
+    }
+
+    proof fn lemma_pow2_at_least(e: nat, m: nat)
+        requires
+            e >= m,
+        ensures
+            pow2(e) >= pow2(m),
+        decreases e,
+    {
+        lemma_pow2_pos(e);
+        if e > m {
+            lemma_pow2_at_least((e - 1) as nat, m);
+            lemma_pow2_strictly_increases((e - 1) as nat, e);
+        }
+    }
+
+    // pow2(g + 1) == 2 * pow2(g)
+    proof fn lemma_pow2_succ(g: nat)
+        ensures
+            pow2((g + 1) as nat) == pow2(g) * 2,
+    {
+        lemma_pow2_unfold((g + 1) as nat);
+    }
+
+    proof fn lemma_pow2_62()
+        ensures
+            pow2(62) == 0x4000_0000_0000_0000nat,
+    {
+        lemma2_to64();
+        assert(pow2(30) == 0x4000_0000u64 as nat);
+        assert(pow2(32) == 0x1_0000_0000u64 as nat);
+        lemma_pow2_adds(32, 30);
+    }
+
+    proof fn lemma_pow2_63()
+        ensures
+            pow2(63) == 0x8000_0000_0000_0000nat,
+    {
+        lemma_pow2_62();
+        lemma_pow2_unfold(63);
+    }
+
+    // pow2(e) <= 2^63 for e <= 63
+    proof fn lemma_pow2_le_63(e: nat)
+        requires
+            e <= 63,
+        ensures
+            pow2(e) <= 0x8000_0000_0000_0000nat,
+    {
+        lemma_pow2_63();
+        if e < 63 {
+            lemma_pow2_mono_le(e, 63);
+        }
+    }
+
+    // pow2(e) fits in a u64 and is nonzero, for e <= 63
+    proof fn lemma_pow2_fits_u64(e: nat)
+        requires
+            e <= 63,
+        ensures
+            1 <= pow2(e),
+            pow2(e) <= 0xffff_ffff_ffff_ffffnat,
+    {
+        lemma_pow2_pos(e);
+        if e < 63 {
+            lemma_pow2_strictly_increases(e, 63);
+            lemma_pow2_63();
+        } else {
+            lemma_pow2_63();
+        }
+    }
+
+    // ---------------------------------------------------------------
+    // bit-vector primitives
+    // ---------------------------------------------------------------
+
+    // (m + m) is even, and right-shifting it by one recovers m
+    proof fn lemma_double_bits(two: u64, m: u64)
+        requires
+            two == m + m,
+        ensures
+            (two & 1) == 0,
+            two >> 1 == m,
+    {
+        assert(two == m + m ==> (two & 1) == 0) by (bit_vector);
+        assert(two == m + m ==> two >> 1 == m) by (bit_vector);
+    }
+
+    // shifting right by j equals shifting right by one, j-1 more times
+    proof fn lemma_shr_split(m: u64, j: u64)
+        requires
+            j > 0,
+            j < 64,
+        ensures
+            (m >> j) == ((m >> 1) >> ((j - 1) as u64)),
+    {
+        assert(j > 0 && j < 64 ==> (m >> j) == ((m >> 1) >> ((j - 1) as u64)))
+            by (bit_vector);
+    }
+
+    // the only set bit of 2^e is bit e
+    proof fn lemma_pow2_lowbit(e: nat, j: u64)
+        requires
+            e <= 63,
+            j < 64,
+        ensures
+            ((pow2(e) as u64) >> j) & 1 == if j == e { 1u64 } else { 0u64 },
+        decreases e,
+    {
+        lemma_pow2_pos(e);
+        if e == 0 {
+            lemma_pow2_zero();
+            assert(pow2(0) as u64 == 1);
+            assert((1u64 >> j) & 1 == if j == 0 { 1u64 } else { 0u64 }) by (bit_vector);
+        } else {
+            lemma_pow2_succ((e - 1) as nat);
+            lemma_pow2_le_63(e);
+            lemma_pow2_le_63((e - 1) as nat);
+            lemma_pow2_fits_u64((e - 1) as nat);
+            assert(pow2((e - 1) as nat) <= 0x4000_0000_0000_0000nat) by {
+                lemma_pow2_62();
+                lemma_pow2_mono_le((e - 1) as nat, 62);
+            }
+            let prev: u64 = pow2((e - 1) as nat) as u64;
+            let cur: u64 = pow2(e) as u64;
+            assert(cur == prev + prev);
+            lemma_double_bits(cur, prev);
+            if j == 0 {
+                assert(e != 0);
+                assert(cur >> 0 == cur) by (bit_vector);
+                assert(((pow2(e) as u64) >> 0) & 1 == 0u64);
+            } else {
+                lemma_pow2_lowbit((e - 1) as nat, (j - 1) as u64);
+                lemma_shr_split(cur, j);
+                assert(cur >> 1 == prev);
+                assert(((cur >> 1) >> ((j - 1) as u64)) & 1
+                    == if (j - 1) as u64 == e - 1 { 1u64 } else { 0u64 });
+                assert((j - 1) as u64 == e - 1 <==> j == e);
+                assert(cur >> j == ((cur >> 1) >> ((j - 1) as u64)));
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------
+    // log2: the exponent e with pow2(e) == n
+    // ---------------------------------------------------------------
+
+    // u64_trailing_zeros(2^e) == e
+    proof fn lemma_tz_pow2(e: nat)
+        requires
+            e <= 63,
+        ensures
+            u64_trailing_zeros(pow2(e) as u64) == e,
+    {
+        lemma_pow2_fits_u64(e);
+        axiom_u64_trailing_zeros(pow2(e) as u64);
+        let t: u64 = u64_trailing_zeros(pow2(e) as u64) as u64;
+        assert(pow2(e) as u64 != 0);
+        assert(t < 64);
+        lemma_pow2_lowbit(e, t);
+        assert(((pow2(e) as u64) >> t) & 1 == 1u64);
+    }
+
+    pub fn log2_u64(n: u64) -> (r: u64)
+        requires
+            n >= 1,
+            n <= 0x4000_0000_0000_0000u64,
+            is_pow2(n as int),
+        ensures
+            pow2(r as nat) == n as int,
+    {
+        let r: u64 = n.trailing_zeros() as u64;
+        proof {
+            is_pow2_equiv(n as int);
+            let f = choose|f: nat| pow(2, f) == n as int;
+            lemma_pow2(f);
+            lemma_pow2_62();
+            assert(pow2(f) as int == n as int);
+            assert(f <= 62) by {
+                if f > 62 {
+                    lemma_pow2_strictly_increases(62, f);
+                    assert((pow2(62) as int) < (pow2(f) as int));
+                    assert(0x4000_0000_0000_0000int < n as int);
+                }
+            }
+            lemma_pow2_fits_u64(f);
+            assert(pow2(f) as u64 == n);
+            lemma_tz_pow2(f);
+            assert(r == u64_trailing_zeros(n) as u64);
+        }
+        r
+    }
+
+    // ---------------------------------------------------------------
+    // next_power_of_two: the minimal power of two >= n
+    // ---------------------------------------------------------------
+
+    pub fn next_power_of_two_u64(n: u64) -> (r: u64)
+        requires
+            n >= 1,
+            n <= 0x4000_0000_0000_0000u64,
+        ensures
+            r >= n,
+            r <= 2 * n,
+            is_pow2(r as int),
+            forall|k: u64| is_pow2(k as int) && 1 <= k < r ==> k < n,
+    {
+        let mut p: u64 = 1;
+        let mut e: u64 = 0;
+        proof {
+            lemma_pow2_zero();
+            lemma_pow2_is_pow2(0);
+        }
+        while p < n
+            invariant
+                p >= 1,
+                p <= 2 * n,
+                n >= 1,
+                n <= 0x4000_0000_0000_0000u64,
+                p as nat == pow2(e as nat),
+                e <= 63,
+                is_pow2(p as int),
+                forall|f: nat| pow2(f) < p as nat ==> pow2(f) < n as int,
+            decreases (2 * n) - p,
+        {
+            proof {
+                assert(p < n);
+                assert(p <= 0x3fff_ffff_ffff_ffffu64);
+                assert(p + p <= 0x7fff_ffff_ffff_fffeu64);
+                lemma_pow2_62();
+                assert(pow2(e as nat) == p as nat);
+                assert(pow2(e as nat) < pow2(62));
+                lemma_pow2_lt_inv(e as nat, 62);
+                assert(e as nat + 1 <= 62);
+                assert(e as nat + 1 <= 63);
+                lemma_pow2_succ(e as nat);
+                lemma_pow2_is_pow2(e as nat + 1);
+                assert forall|f: nat| pow2(f) < (p + p) as nat implies pow2(f) < n as int by {
+                    lemma_pow2_lt_inv(f, e as nat + 1);
+                    lemma_pow2_mono_le(f, e as nat);
+                    assert(pow2(e as nat) == p as nat);
+                    if pow2(f) < p as nat {
+                    } else {
+                        assert(p < n);
+                    }
+                }
+            }
+            p = p + p;
+            e = e + 1;
+        }
+        proof {
+            assert forall|k: u64| is_pow2(k as int) && 1 <= k < p implies k < n by {
+                is_pow2_equiv(k as int);
+                assert(exists|f: nat| pow(2, f) == k as int) by {
+                    reveal(is_pow2_exists);
+                }
+                let f = choose|f: nat| pow(2, f) == k as int;
+                broadcast use lemma_pow2;
+                assert(pow2(f) == k as int);
+                assert(pow2(f) < pow2(e as nat));
+            }
+        }
+        p
+    }
+
+    }
+}
+
+#[cfg(feature = "verus")]
+pub(crate) use verus_core::{next_power_of_two_u64, log2_u64};
 
 // ------------------------------------------------------------------
 // Ratio proofs (Schnorr-like on G2)

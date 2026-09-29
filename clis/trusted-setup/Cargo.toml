@@ -15,6 +15,12 @@ verus = ["dep:vstd", "dep:verus_builtin", "dep:verus_builtin_macros"]
 name = "trusted_setup"
 path = "src/lib.rs"
 
+# Without this, `cargo verus verify` only *compiles* the crate and never runs
+# the verification engine (no `__VERUS_DRIVER_VERIFY_*` is exported for the
+# primary package), so a false assertion slips through silently.
+[package.metadata.verus]
+verify = true
+
 [[bin]]
 name = "trusted-setup"
 path = "src/main.rs"

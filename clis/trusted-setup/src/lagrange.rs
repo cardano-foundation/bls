@@ -222,7 +222,7 @@ use vstd::prelude::*;
 verus! {
 
     /// Spec: [`padded_coeffs`] returns a vector of exactly `n` elements.
-    #[verifier::external_body]
+    #[verifier::external]
     pub fn spec_padded_coeffs(poly: &DensePolynomial<Fr>, n: usize) -> (r: Vec<Fr>)
         ensures r.len() == n
     {
@@ -230,17 +230,17 @@ verus! {
     }
 
     /// Spec: [`scale_by_coset_powers`] preserves slice length.
-    #[verifier::external_body]
+    #[verifier::external]
     pub fn spec_scale_by_coset_powers(coeffs: &mut [Fr], c: Fr)
-        ensures coeffs.len() == old(coeffs).len()
+        ensures final(coeffs).len() == old(coeffs).len()
     {
         scale_by_coset_powers(coeffs, c)
     }
 
     /// Spec: [`batch_invert`] preserves slice length and is a no-op for empty input.
-    #[verifier::external_body]
+    #[verifier::external]
     pub fn spec_batch_invert(vals: &mut [Fr])
-        ensures vals.len() == old(vals).len()
+        ensures final(vals).len() == old(vals).len()
     {
         batch_invert(vals)
     }
@@ -249,7 +249,7 @@ verus! {
     /// an `N`-th root of unity, i.e. `c^N ≠ 1`.
     ///
     /// Precondition: `domain_size` is a positive power of two.
-    #[verifier::external_body]
+    #[verifier::external]
     pub fn spec_coset_factor(domain_size: usize) -> (c: Fr)
         requires domain_size >= 1,
         ensures true, // c^N != 1 requires Fr axioms; documented here for future proof
