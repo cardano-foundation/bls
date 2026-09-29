@@ -369,7 +369,7 @@ verus! {
 
     /// Spec: [`CircomCircuit::from_bytes`] returns a circuit whose dense matrices
     /// have shape `n_constraints × n_wires`.
-    #[verifier::external_body]
+    #[verifier::external]
     pub fn spec_circom_from_bytes(data: &[u8]) -> (r: Result<CircomCircuit, String>)
         ensures
             r.is_ok() ==> {
@@ -387,10 +387,10 @@ verus! {
 
     /// Spec: [`CircomCircuit::load_witness_from_bytes`] either returns `Err`
     /// or sets `witness.len() == n_wires`.
-    #[verifier::external_body]
+    #[verifier::external]
     pub fn spec_load_witness(circuit: &mut CircomCircuit, data: &[u8], field_size: usize) -> (r: Result<(), String>)
         ensures
-            r.is_ok() ==> circuit.witness.len() == circuit.n_wires as int,
+            r.is_ok() ==> final(circuit).witness.len() == final(circuit).n_wires as int,
     {
         circuit.load_witness_from_bytes(data, field_size)
     }

@@ -401,7 +401,7 @@ verus! {
     /// Spec: [`matrix_mul_vec_dyn`] returns a vector whose length equals the
     /// number of matrix rows (constraints), provided every row is as long as
     /// the witness.
-    #[verifier::external_body]
+    #[verifier::external]
     pub fn spec_matrix_mul_vec_dyn(matrix: &[Vec<Fr>], witness: &[Fr]) -> (r: Vec<Fr>)
         requires
             forall|i: int| 0 <= i < matrix.len() ==> matrix[i].len() == witness.len(),
@@ -413,7 +413,7 @@ verus! {
 
     /// Spec: [`verify_r1cs_circuit`] checks every constraint without panicking.
     /// Precondition: all R1CS rows must have the same length as the witness.
-    #[verifier::external_body]
+    #[verifier::external]
     pub fn spec_verify_r1cs_circuit(circuit: &Circuit) -> (r: Result<(), String>)
         requires
             forall|i: int| 0 <= i < circuit.l.len() ==> circuit.l[i].len() == circuit.witness.len(),
@@ -427,7 +427,7 @@ verus! {
 
     /// Spec: [`dot_product`] never panics because every wire index is in bounds.
     /// Precondition: all wire ids in the sparse row are valid indices into `witness`.
-    #[verifier::external_body]
+    #[verifier::external]
     pub fn spec_dot_product(row: &[(usize, Fr)], witness: &[Fr]) -> (r: Fr)
         requires
             forall|i: int| 0 <= i < row.len() ==> row[i].0 < witness.len(),

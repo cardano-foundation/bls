@@ -379,7 +379,7 @@ verus! {
 
     /// Spec: [`PtauFile::read_tau_g1`] returns `Ok` only when `count` does not
     /// exceed the available points, and the result length equals `count`.
-    #[verifier::external_body]
+    #[verifier::external]
     pub fn spec_read_tau_g1(ptau: &mut PtauFile, count: usize) -> (r: Result<Vec<G1Affine>, Error>)
         ensures
             r.is_ok() ==> r.unwrap().len() == count,
@@ -389,7 +389,7 @@ verus! {
 
     /// Spec: [`PtauFile::read_tau_g2`] returns `Ok` only when `count` does not
     /// exceed the available points, and the result length equals `count`.
-    #[verifier::external_body]
+    #[verifier::external]
     pub fn spec_read_tau_g2(ptau: &mut PtauFile, count: usize) -> (r: Result<Vec<G2Affine>, Error>)
         ensures
             r.is_ok() ==> r.unwrap().len() == count,

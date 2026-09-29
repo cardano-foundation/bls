@@ -473,7 +473,7 @@ use vstd::prelude::*;
 verus! {
 
     /// Spec: [`FftQapEngine::domain_size`] returns a power of two ≥ `num_constraints`.
-    #[verifier::external_body]
+    #[verifier::external]
     pub fn spec_fft_domain_size(num_constraints: usize) -> (n: usize)
         ensures
             n >= num_constraints,
@@ -483,7 +483,7 @@ verus! {
     }
 
     /// Spec: [`DenseQapEngine::domain_size`] returns exactly `num_constraints`.
-    #[verifier::external_body]
+    #[verifier::external]
     pub fn spec_dense_domain_size(num_constraints: usize) -> (n: usize)
         ensures n == num_constraints
     {
@@ -493,7 +493,7 @@ verus! {
     /// Spec: [`QapEngine::build_qap`] returns exactly `n_vars` polynomials in each of
     /// the three output vectors, provided the input matrices are non-empty and
     /// rectangular.
-    #[verifier::external_body]
+    #[verifier::external]
     pub fn spec_build_qap_dense(
         l: &[[u64; 8]],
         r: &[[u64; 8]],
@@ -514,7 +514,7 @@ verus! {
 
     /// Spec: [`QapEngine::compute_quotient`] panics if the remainder is non-zero.
     /// Precondition: the witness is valid (l·r − o) is divisible by T.
-    #[verifier::external_body]
+    #[verifier::external]
     pub fn spec_compute_quotient_dense(
         l: &DensePolynomial<Fr>,
         r: &DensePolynomial<Fr>,
