@@ -531,6 +531,10 @@ See [`groth16-prover/docs/MPC_Ceremony_Research.md`](../../groth16-prover/docs/M
 
 ---
 
+## Formal verification
+
+The underlying `trusted-setup` library is covered by a [Verus](https://github.com/verus-lang/verus) formal-verification layer: machine-checked specs for bounds safety, R1CS dimension invariants, parser wire-id bounds, FFI wrapper contracts, and the Phase-2 MPC delta-chain. All specs are feature-gated and do not affect this CLI's runtime behavior. See the [formal-verification plan](../../FormalVerification.md) and the [`trusted-setup` README](../trusted-setup/README.md#formal-verification) for details.
+
 ## CLI test suite
 
 The integration tests in `tests/cli.rs` exercise every command via `assert_cmd`. They use synthetic `.r1cs` and `.wtns` artifacts so no external Circom compilation is needed. Two end-to-end tests use real Circom artifacts from `circom/AnonymousAirdrop` (compiled with `snarkjs`) when the `.r1cs` / `.wtns` files are present.
