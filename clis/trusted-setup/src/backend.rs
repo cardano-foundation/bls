@@ -403,7 +403,7 @@ use vstd::prelude::*;
 verus! {
 
     /// Spec: [`native_msm_g1`] requires `bases.len() == scalars.len()`.
-    #[verifier::external_body]
+    #[verifier::external]
     pub fn spec_native_msm_g1(bases: &[G1Affine], scalars: &[Fr]) -> (r: Result<G1Affine, BackendError>)
         requires bases.len() == scalars.len(),
         ensures true,
@@ -412,7 +412,7 @@ verus! {
     }
 
     /// Spec: [`native_msm_g2`] requires `bases.len() == scalars.len()`.
-    #[verifier::external_body]
+    #[verifier::external]
     pub fn spec_native_msm_g2(bases: &[G2Affine], scalars: &[Fr]) -> (r: Result<G2Affine, BackendError>)
         requires bases.len() == scalars.len(),
         ensures true,
@@ -421,7 +421,7 @@ verus! {
     }
 
     /// Spec: [`native_pairing_batch_check`] requires `g1.len() == g2.len()`.
-    #[verifier::external_body]
+    #[verifier::external]
     pub fn spec_native_pairing_batch_check(g1: &[G1Affine], g2: &[G2Affine]) -> (r: Result<bool, BackendError>)
         requires g1.len() == g2.len(),
         ensures true,

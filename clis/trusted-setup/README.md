@@ -283,7 +283,7 @@ Feature chain: `clis/groth16` (`native`) → `groth16-prover` (`native`) → `tr
 - `native/` holds the vendored blst source and the thin C shim `bls_backend.cpp` + `bls_backend.h`. The FFI defines fixed-width byte types (`bls_backend_g1_t` 48 bytes, `bls_backend_g2_t` 96 bytes, `bls_backend_fr_t` 32 bytes, all **little-endian** canonical field coordinates — the blst convention), so there is no heap allocation or `Arc` crossing the boundary.
 - `backend.rs` exposes `native_msm_g1`, `native_msm_g2`, `native_pairing_batch_check`, and `native_ntt`, and either owns the blst types or converts arkworks elements to the byte ABI at the boundary.
 - blst's Pippenger MSM and the pairing checks are single-threaded; the arkworks `Cpu` numbers below are therefore shown both on the default rayon pool and on a 1-thread pool. arkworks is built here **without** its `parallel` feature, so the two Cpu columns are near-identical; the end-to-end prover recovers the multithread gap by running the four independent proof MSMs in parallel.
-- Correctness is enforced five ways: per-call parity checks on the *inputs* (`backend.rs`), arkworks `assert_eq!` cross-validation tests (`native_g1_matches_ark_msm`, `native_g2_matches_ark_msm`, `native_pairing_matches_ark_multi`, `native_ntt_matches_ark_ifft`), an independent C++ unit test (`native/tests/test_bls_backend.cpp`, including an NTT oracle), the `prover.rs` parity tests (`native_prover_matches_cpu_fixed_multiplier`, `native_prover_matches_cpu_random_sparse_circuits`) that assert the Cpu and Native backends produce bit-for-bit identical proof artifacts, and the Verus formal-verification layer (see [Formal verification](#formal-verification)).
+- Correctness is enforced four ways: per-call parity checks on the *inputs* (`backend.rs`), arkworks `assert_eq!` cross-validation tests (`native_g1_matches_ark_msm`, `native_g2_matches_ark_msm`, `native_pairing_matches_ark_multi`, `native_ntt_matches_ark_ifft`), an independent C++ unit test (`native/tests/test_bls_backend.cpp`, including an NTT oracle), and the `prover.rs` parity tests (`native_prover_matches_cpu_fixed_multiplier`, `native_prover_matches_cpu_random_sparse_circuits`) that assert the Cpu and Native backends produce bit-for-bit identical proof artifacts. The [Verus layer](#formal-verification) does **not** contribute here — it contains no verified specs over the MSM/pairing code paths.
 - Every decoded point is still validated: on-curve and subgroup checks run once on each batch's *output*; per-point validation is skipped inside the hot loops (a full final exponentiation per point would otherwise dwarf the MSM).
 
 ### Measured numbers
@@ -327,15 +327,13 @@ At 1M+ scale the G1 MSM speedup is larger on more representative hardware; on th
 
 ## Formal verification
 
-The library carries a [Verus](https://github.com/verus-lang/verus) formal-verification layer in addition to its test suite. Machine-checked specifications cover:
+The library carries a [Verus](https://github.com/verus-lang/verus) formal-verification layer in addition to its test suite. **The verified surface is small and specific:**
 
-- **Bounds safety** — no out-of-bounds indexing in matrix/vector and parser code (`r1cs.rs`, `lagrange.rs`, `circom_adapter.rs`, `ptau.rs`).
-- **Structural invariants** — R1CS matrix/witness dimensions match, FFT domain sizes are powers of two, wire ids stay below `n_wires` (`r1cs.rs`, `engine.rs`, `circom_adapter.rs`, `phase2.rs`).
-- **Functional specs on pure helpers** — `matrix_mul_vec_dyn`, `dot_product`, and the Phase-2 helpers `next_power_of_two` / `log2` (`r1cs.rs`, `phase2.rs`).
-- **FFI wrapper contracts** — length-matching preconditions for the native MSM/pairing boundary (`backend.rs`), plus a PPoT parser length contract (`ptau.rs`).
-- **MPC state-machine invariants** — the Phase-2 delta-chain: every `contribute()` appends exactly one contribution and each contribution's `delta_*_before` chains to the previous `delta_*_after` (`phase2.rs`).
+- **Proved** — the Phase-2 arithmetic helpers `next_power_of_two_u64` and `log2_u64` in `phase2.rs`, whose loop bodies are discharged by the SMT solver. `log2` is proved on powers of two, which is the only case callers use it for. The production `usize` entry points are cast wrappers around these.
+- **Asserted, not proved** — eighteen `spec_*` functions across `r1cs.rs`, `lagrange.rs`, `engine.rs`, `circom_adapter.rs`, `ptau.rs` and `backend.rs` are marked `#[verifier::external]`. Their contracts are type-checked but the bodies are trusted, because Verus has no model for the ark field/curve types they mention. Seven of them carry a vacuous `ensures true`. They document intent; they are not evidence.
+- **Not covered** — the `.r1cs` / `.wtns` / `.ptau` parsers have no verification, and the Phase-2 MPC delta-chain invariants are prose only.
 
-The specs live in `verus! { ... }` blocks behind the `verus` cargo feature, so normal `cargo build`/`cargo test` are unaffected. See the [formal-verification plan](../../FormalVerification.md) for the full status, the spec inventory, and how to run the verifier (the FFI specs additionally require the `native` feature).
+The specs live in `verus! { ... }` blocks behind the `verus` cargo feature, so normal `cargo build`/`cargo test` are unaffected. Note that verification only actually runs because `Cargo.toml` sets `[package.metadata.verus] verify = true`; without it `cargo-verus verify` silently compiles without checking anything. See the [formal-verification document](../../FormalVerification.md) for the full status, the per-spec inventory, the known gaps, and how to run the verifier (the FFI specs additionally require the `native` feature).
 
 ## Tests
 
