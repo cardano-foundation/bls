@@ -533,7 +533,7 @@ See [`groth16-prover/docs/MPC_Ceremony_Research.md`](../../groth16-prover/docs/M
 
 ## Formal verification
 
-The underlying `trusted-setup` library is covered by a [Verus](https://github.com/verus-lang/verus) formal-verification layer: machine-checked specs for bounds safety, R1CS dimension invariants, parser wire-id bounds, FFI wrapper contracts, and the Phase-2 MPC delta-chain. All specs are feature-gated and do not affect this CLI's runtime behavior. See the [formal-verification plan](../../FormalVerification.md) and the [`trusted-setup` README](../trusted-setup/README.md#formal-verification) for details.
+The underlying `trusted-setup` library carries a [Verus](https://github.com/verus-lang/verus) formal-verification layer, but its verified surface is narrow: the Phase-2 helpers `next_power_of_two_u64` and `log2_u64` are proved, while eighteen `spec_*` contracts over ark-typed code are asserted rather than proved, and the parsers are not covered at all. All specs are feature-gated and do not affect this CLI's runtime behavior. See the [formal-verification document](../../FormalVerification.md) and the [`trusted-setup` README](../trusted-setup/README.md#formal-verification) for details.
 
 ## CLI test suite
 
