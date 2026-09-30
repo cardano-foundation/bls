@@ -408,6 +408,8 @@ fn parse_wtns(
 
 #[cfg(feature = "verus")]
 use vstd::prelude::*;
+#[cfg(feature = "verus")]
+use vstd::arithmetic::div_mod::*;
 
 #[cfg(feature = "verus")]
 verus! {
@@ -438,6 +440,79 @@ verus! {
             r.is_ok() ==> final(circuit).witness.len() == final(circuit).n_wires as int,
     {
         circuit.load_witness_from_bytes(data, field_size)
+    }
+
+    // ------------------------------------------------------------------
+    // Sparse-vector stride accounting
+    // ------------------------------------------------------------------
+
+    /// A sparse-vector term occupies exactly 36 bytes: a 4-byte little-endian
+    /// wire id followed by a 32-byte field element.
+    pub const TERM_WIRE_BYTES: usize = 4;
+    pub const TERM_FIELD_BYTES: usize = 32;
+    pub const TERM_STRIDE: usize = TERM_WIRE_BYTES + TERM_FIELD_BYTES;
+    pub open spec const TERM_STRIDE_I: int = 36;
+
+    /// Most terms a buffer of `rest_len` bytes can hold.
+    pub open spec fn max_terms(rest_len: usize) -> (m: usize) { rest_len / 36 }
+
+    /// Verified model of the term loop in [`parse_sparse_vector`], with the
+    /// field-element decode abstracted away and `rest` replaced by a length.
+    ///
+    /// Each iteration consumes `TERM_STRIDE` bytes, and the loop reports
+    /// failure as soon as fewer than that remain — which is what `nom`'s
+    /// `le_u32` + `take` do on a short buffer.
+    pub fn term_loop_model(rest_len: usize, n_terms: u32) -> (ok: bool)
+        ensures
+            ok ==> n_terms as int * TERM_STRIDE_I <= rest_len as int,
+    {
+        let mut rest = rest_len;
+        let mut k: usize = 0;
+        while k < n_terms as usize
+            invariant
+                k <= n_terms as usize,
+                // unbounded int arithmetic: k*36 can exceed the usize range
+                rest as int + k as int * TERM_STRIDE_I == rest_len as int,
+            decreases n_terms as usize - k,
+        {
+            if rest < TERM_STRIDE { return false; }
+            rest = rest - TERM_STRIDE;
+            k = k + 1;
+        }
+        true
+    }
+
+    /// The allocation guard in [`parse_sparse_vector`] is sound: if the loop
+    /// really does push `n_terms` terms, then `n_terms <= rest_len / 36`, so
+    /// `Vec::with_capacity(min(n_terms, rest_len / 36))` never reserves less
+    /// than the loop will use — and never reserves the attacker's raw
+    /// `n_terms` either.
+    pub fn sparse_capacity_is_sound(rest_len: usize, n_terms: u32)
+    {
+        let ok = term_loop_model(rest_len, n_terms);
+        if ok {
+            let ghost n = n_terms as int;
+            let ghost rl = rest_len as int;
+            let ghost m = max_terms(rest_len) as int;
+            let ghost need = n * TERM_STRIDE_I;
+            proof {
+                assert(need <= rl);
+                // Suppose n > m = rl/36. Then rl < (m+1)*36 <= n*36, which
+                // contradicts `need <= rl`. `lemma_small_div_converse` is what
+                // turns "quotient is 0" into "smaller than the divisor"; the
+                // general case is the definition of Euclidean division.
+                if n > m {
+                    lemma_small_div_converse(rl, TERM_STRIDE_I);
+                    let ghost m1 = m + 1;
+                    let ghost lo = m1 * TERM_STRIDE_I;
+                    assert(rl < lo);
+                    assert(n >= m1);
+                    assert(need >= lo);
+                    assert(need > rl);
+                }
+                assert(n <= m);
+            }
+        }
     }
 
 }
