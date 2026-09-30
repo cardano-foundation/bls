@@ -234,11 +234,31 @@ missing macro, and asserts each is detected. Without it the table above could
 quietly degrade into tests that always pass — which is exactly what the
 verification layer did before it was enabled.
 
-Not covered on this boundary: the `extern "C"` *signatures* (a mismatch in
-argument order or count would be a link-time or silent-corruption bug), and the
-C++ encode/decode routines themselves. The C++ guards against null, zero, and
-non-power-of-two lengths are present and reviewed, but nothing ties the Rust
-slice lengths to what the C++ loop then indexes.
+The `extern "C"` *signatures* are also pinned, though not by Verus. Two
+independent mechanisms in `bls_ffi.rs` close that gap: each `extern` item is
+coerced at compile time to a separately written `unsafe extern "C" fn` type
+(`extern_items_coerce_to_expected_signatures`), so a declaration that drifts
+from the intended signature is a type error; and the committed header is parsed
+and compared against the same expected table, per function and per parameter
+(`extern_signatures_match_committed_header`), so argument order, arity,
+pointer-ness and `const`ness are checked against the real C declaration.
+Because parameter names are compared as well as types, even a swap between two
+parameters of identical type is detected (as a rename). What these mechanisms
+cannot see is a *C++ implementation* that internally uses its arguments in a
+different order than the header declares — the declarations agree with each
+other, the behaviour does not.
+
+This is machine-checked but it is a test, not a proof: the guarantee holds only
+for signatures the table enumerates, and it says nothing about the C++
+implementation's behaviour. Note also that the C++ compiler already ties
+`bls_backend.h` to `bls_backend.cpp`, so header-vs-implementation drift is a
+build error; the gap these tests close is specifically Rust-vs-header.
+
+Not covered on this boundary: the C++ encode/decode routines themselves. The
+C++ guards against null, zero, and non-power-of-two lengths are present and
+reviewed, but nothing ties the Rust slice lengths to what the C++ loop then
+indexes, and the hard-coded 48/96/144-byte offsets are not checked against the
+`BLS_BACKEND_*_BYTES` macros.
 
 One genuine limitation to note: `spec_native_ntt` states only the empty-slice
 half of the guard, because `usize::is_power_of_two` has no Verus model. The
