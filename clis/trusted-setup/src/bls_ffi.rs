@@ -214,6 +214,183 @@ mod tests {
         s.split_whitespace().collect::<Vec<_>>().join(" ")
     }
 
+    /// Parse `#define NAME <int>` out of a C header.
+    fn header_macro(header: &str, name: &str) -> Option<i64> {
+        let needle = format!("#define {name} ");
+        header
+            .lines()
+            .map(str::trim)
+            .find(|l| l.starts_with(&needle))
+            .and_then(|l| l[needle.len()..].trim().split_whitespace().next())
+            .and_then(|v| v.parse::<i64>().ok())
+    }
+
+    /// Parse the `bls_backend_status` enum body as `(name, value)` pairs,
+    /// skipping comment lines.  Values are what cross the boundary as `c_int`.
+    fn header_status_codes(header: &str) -> Vec<(String, i32)> {
+        let mut lines = header
+            .lines()
+            .skip_while(|l| !l.contains("typedef enum"));
+        let body: Vec<&str> = lines
+            .by_ref()
+            .take_while(|l| !l.contains("bls_backend_status"))
+            .collect();
+        body.iter()
+            .map(|l| l.trim())
+            .filter(|l| !l.starts_with("/*") && !l.starts_with('*'))
+            .filter(|l| l.contains('='))
+            .filter_map(|l| {
+                let mut parts = l.splitn(2, '=');
+                let name = parts.next()?.trim().to_string();
+                let val = parts.next()?.trim().trim_end_matches(',');
+                Some((name, val.parse::<i32>().ok()?))
+            })
+            .collect()
+    }
+
+    /// The `BLS_BACKEND_*_BYTES` macros are part of the published ABI contract
+    /// and the C++ decode routines hard-code the same 48-byte Fp stride, but
+    /// they are `#define`s — not `typedef struct` lines — so the test above
+    /// cannot see them.
+    #[test]
+    fn byte_count_macros_match_rust_layouts() {
+        let fp = header_macro(HEADER, "BLS_BACKEND_FP_BYTES")
+            .expect("BLS_BACKEND_FP_BYTES missing from bls_backend.h");
+        assert_eq!(
+            header_macro(HEADER, "BLS_BACKEND_FR_BYTES"),
+            Some(BlsFr::BYTE_LEN as i64),
+            "FR byte count drifted from BlsFr::BYTE_LEN"
+        );
+        assert_eq!(
+            header_macro(HEADER, "BLS_BACKEND_G1_AFFINE_BYTES"),
+            Some(BlsG1::BYTE_LEN as i64),
+            "G1 byte count drifted from BlsG1::BYTE_LEN"
+        );
+        assert_eq!(
+            header_macro(HEADER, "BLS_BACKEND_G2_AFFINE_BYTES"),
+            Some(BlsG2::BYTE_LEN as i64),
+            "G2 byte count drifted from BlsG2::BYTE_LEN"
+        );
+        // Fp is a coordinate, not a top-level type: 48 bytes, so a G1 is two
+        // and a G2 is four, matching the documented c1/c0 layout.
+        assert_eq!(fp, 48, "Fp coordinate stride changed");
+        assert_eq!(BlsG1::BYTE_LEN, 2 * fp as usize);
+        assert_eq!(BlsG2::BYTE_LEN, 4 * fp as usize);
+    }
+
+    /// Status codes cross the boundary as raw `c_int`.  If a value is
+    /// renumbered on either side, every error is silently reinterpreted — e.g.
+    /// an `InfinityOutput` surfacing as `MsmMismatch`.  Nothing in the type
+    /// system relates the two enums, so pin them by name and value.
+    #[test]
+    fn status_codes_match_committed_header() {
+        let expected: Vec<(String, i32)> = vec![
+            ("BLS_BACKEND_OK".into(), BlsStatus::Ok as i32),
+            (
+                "BLS_BACKEND_INVALID_ARGUMENT".into(),
+                BlsStatus::InvalidArgument as i32,
+            ),
+            (
+                "BLS_BACKEND_POINT_NOT_ON_CURVE".into(),
+                BlsStatus::PointNotOnCurve as i32,
+            ),
+            (
+                "BLS_BACKEND_POINT_NOT_IN_GROUP".into(),
+                BlsStatus::PointNotInGroup as i32,
+            ),
+            (
+                "BLS_BACKEND_INFINITY_OUTPUT".into(),
+                BlsStatus::InfinityOutput as i32,
+            ),
+            (
+                "BLS_BACKEND_MSM_MISMATCH".into(),
+                BlsStatus::MsmMismatch as i32,
+            ),
+            (
+                "BLS_BACKEND_PAIRING_FAILED".into(),
+                BlsStatus::PairingFailed as i32,
+            ),
+            (
+                "BLS_BACKEND_INTERNAL_ERROR".into(),
+                BlsStatus::InternalError as i32,
+            ),
+        ];
+        assert_eq!(
+            header_status_codes(HEADER),
+            expected,
+            "bls_backend_status drifted from BlsStatus; errors would be misreported"
+        );
+    }
+
+    /// Negative controls: the drift checks must actually be able to fail.
+    /// A consistency test that cannot detect inconsistency is worthless, so
+    /// each parser is fed a deliberately corrupted header.
+    #[test]
+    fn drift_detectors_actually_reject_drift() {
+        let codes = header_status_codes(HEADER);
+        assert_eq!(codes.len(), 8, "parser found the wrong number of statuses");
+
+        // (a) renumbering a status in the middle must change the parsed table.
+        let renumbered = HEADER.replace(
+            "BLS_BACKEND_MSM_MISMATCH          = 5,",
+            "BLS_BACKEND_MSM_MISMATCH          = 6,",
+        );
+        assert_ne!(
+            header_status_codes(&renumbered),
+            codes,
+            "renumbering a status went undetected"
+        );
+
+        // (b) a comment line must not be mistaken for an enumerator.
+        let with_comment = HEADER.replace(
+            "BLS_BACKEND_OK                    = 0,",
+            "/* retired: BLS_BACKEND_OLD = 3, */\n    BLS_BACKEND_OK = 0,",
+        );
+        assert_eq!(
+            header_status_codes(&with_comment),
+            codes,
+            "a commented-out enumerator leaked into the table"
+        );
+
+        // (c) a changed byte count must be visible to the macro parser.
+        let resized = HEADER.replace("#define BLS_BACKEND_G1_AFFINE_BYTES 96", "#define BLS_BACKEND_G1_AFFINE_BYTES 128");
+        assert_eq!(header_macro(&resized, "BLS_BACKEND_G1_AFFINE_BYTES"), Some(128));
+        assert_ne!(
+            header_macro(&resized, "BLS_BACKEND_G1_AFFINE_BYTES"),
+            header_macro(HEADER, "BLS_BACKEND_G1_AFFINE_BYTES"),
+            "a resized G1 went undetected"
+        );
+
+        // (d) a missing macro must read as None, not as a silent 0.
+        assert_eq!(header_macro(HEADER, "BLS_BACKEND_NO_SUCH_MACRO"), None);
+    }
+
+    /// `from_raw` maps unknown codes to `InternalError`.  A value outside
+    /// 0..=7 must therefore never decode to a *specific* diagnosis, or a future
+    /// header addition would be reported as a real error kind.
+    #[test]
+    fn unknown_status_codes_degrade_to_internal_error() {
+        for raw in [-1, 8, 99, i32::MIN, i32::MAX] {
+            assert_eq!(
+                BlsStatus::from_raw(raw),
+                BlsStatus::InternalError,
+                "raw code {raw} decoded to a specific status"
+            );
+        }
+        for status in [
+            BlsStatus::Ok,
+            BlsStatus::InvalidArgument,
+            BlsStatus::PointNotOnCurve,
+            BlsStatus::PointNotInGroup,
+            BlsStatus::InfinityOutput,
+            BlsStatus::MsmMismatch,
+            BlsStatus::PairingFailed,
+            BlsStatus::InternalError,
+        ] {
+            assert_eq!(BlsStatus::from_raw(status as c_int), status);
+        }
+    }
+
     /// Every generated `C_TYPEDEF` must exist, byte-for-byte, in the committed
     /// `bls_backend.h`.  Renaming a type, changing a byte length, or editing
     /// the header without touching the derive fails here.
