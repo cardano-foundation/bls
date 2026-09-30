@@ -214,6 +214,32 @@ and a restructured FFI layer, all of which must be kept in sync with the ABI.
 The assertion-plus-test combination conveys the same information at a fraction
 of the maintenance cost.
 
+### What *is* checked at the C++ boundary
+
+The ABI contract in `native/include/bls_backend.h` is cross-checked against the
+Rust bindings by tests in `bls_ffi.rs`. This is a different mechanism from
+Verus — the header is `include_str!`'d and parsed, so these are ordinary
+assertions that CI enforces, not SMT-checked proofs.
+
+| Check | Catches |
+|-------|---------|
+| `c_typedefs_match_committed_header` | a renamed type or changed struct byte length |
+| `byte_count_macros_match_rust_layouts` | a `BLS_BACKEND_*_BYTES` value drifting from `BlsFr/G1/G2::BYTE_LEN`; also pins the 48-byte Fp stride that the C++ decode routines assume |
+| `status_codes_match_committed_header` | a renumbered `bls_backend_status` enumerator |
+| `unknown_status_codes_degrade_to_internal_error` | a raw code outside `0..=7` decoding to a specific diagnosis instead of `InternalError` |
+
+`drift_detectors_actually_reject_drift` is a negative control: it feeds the
+parsers a renumbered status, a commented-out enumerator, a resized G1, and a
+missing macro, and asserts each is detected. Without it the table above could
+quietly degrade into tests that always pass — which is exactly what the
+verification layer did before it was enabled.
+
+Not covered on this boundary: the `extern "C"` *signatures* (a mismatch in
+argument order or count would be a link-time or silent-corruption bug), and the
+C++ encode/decode routines themselves. The C++ guards against null, zero, and
+non-power-of-two lengths are present and reviewed, but nothing ties the Rust
+slice lengths to what the C++ loop then indexes.
+
 One genuine limitation to note: `spec_native_ntt` states only the empty-slice
 half of the guard, because `usize::is_power_of_two` has no Verus model. The
 power-of-two half is covered by `ntt_rejects_non_power_of_two`.
