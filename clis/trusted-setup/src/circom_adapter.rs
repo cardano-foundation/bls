@@ -62,7 +62,7 @@ pub struct SparseCircomCircuit {
 impl CircomCircuit {
     /// Load a circuit from raw `.r1cs` bytes.
     pub fn from_bytes(data: &[u8]) -> Result<Self, String> {
-        Self::parse_r1cs(data).map_err(|e| format!("Parse error: {:?}", e))
+        Self::parse_r1cs(data)
     }
 
     /// Load a circuit from a `.r1cs` file path.
@@ -96,8 +96,13 @@ impl CircomCircuit {
         self.load_witness_from_bytes(&data, self.field_size as usize)
     }
 
-    fn parse_r1cs(data: &[u8]) -> Result<CircomCircuit, nom::Err<nom::error::Error<&[u8]>>> {
-        let (header, constraints) = parse_r1cs_raw(data)?;
+    fn parse_r1cs(data: &[u8]) -> Result<CircomCircuit, String> {
+        let (header, constraints) =
+            parse_r1cs_raw(data).map_err(|e| format!("Parse error: {:?}", e))?;
+
+        // Wire ids come straight from the file and are used as row indices
+        // below, so they must be in range before we densify.
+        validate_wire_ids(header.n_wires, &constraints)?;
 
         let n_constraints = header.n_constraints as usize;
         let n_wires = header.n_wires as usize;
@@ -138,7 +143,7 @@ impl CircomCircuit {
 impl SparseCircomCircuit {
     /// Load a sparse circuit from raw `.r1cs` bytes.
     pub fn from_bytes(data: &[u8]) -> Result<Self, String> {
-        Self::parse_r1cs(data).map_err(|e| format!("Parse error: {:?}", e))
+        Self::parse_r1cs(data)
     }
 
     /// Load a sparse circuit from a `.r1cs` file path.
@@ -172,8 +177,14 @@ impl SparseCircomCircuit {
         self.load_witness_from_bytes(&data, self.field_size as usize)
     }
 
-    fn parse_r1cs(data: &[u8]) -> Result<SparseCircomCircuit, nom::Err<nom::error::Error<&[u8]>>> {
-        let (header, constraints) = parse_r1cs_raw(data)?;
+    fn parse_r1cs(data: &[u8]) -> Result<SparseCircomCircuit, String> {
+        let (header, constraints) =
+            parse_r1cs_raw(data).map_err(|e| format!("Parse error: {:?}", e))?;
+
+        // The sparse representation is not indexed here, but every consumer
+        // (`evaluate_qap_at_tau_sparse`, the witness product) indexes by wire
+        // id, so out-of-range ids are rejected at the same boundary.
+        validate_wire_ids(header.n_wires, &constraints)?;
 
         Ok(SparseCircomCircuit {
             field_size: header.field_size,
@@ -242,6 +253,34 @@ fn parse_header_section(input: &[u8]) -> IResult<&[u8], R1csHeader> {
 /// One constraint is three sparse vectors (A, B, C).
 type Constraint = (Vec<(u32, Fr)>, Vec<(u32, Fr)>, Vec<(u32, Fr)>);
 
+/// Reject a circuit whose constraints reference a wire the header never declared.
+///
+/// Wire ids are attacker-controlled `u32`s read from the file, and every
+/// consumer treats them as indices into a `n_wires`-wide row — the dense
+/// matrices built in `CircomCircuit::parse_r1cs`, and `us_tau[wire_id]` in
+/// `evaluate_qap_at_tau_sparse`. Without this check a malformed `.r1cs` is a
+/// panic (denial of service) rather than a parse error.
+///
+/// This runs after `parse_r1cs_raw` rather than inside `parse_sparse_vector`
+/// because `n_wires` only becomes known once the header section has been seen,
+/// and the section loop does not require the header to come first.
+fn validate_wire_ids(n_wires: u32, constraints: &[Constraint]) -> Result<(), String> {
+    let n_wires = n_wires as usize;
+    for (i, (a, b, c)) in constraints.iter().enumerate() {
+        for (name, terms) in [("A", a), ("B", b), ("C", c)] {
+            for &(wire, _) in terms {
+                if wire as usize >= n_wires {
+                    return Err(format!(
+                        "constraint {i} (matrix {name}) references wire {wire}, \
+                         but the header declares n_wires = {n_wires}"
+                    ));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Parse raw `.r1cs` bytes into header + sparse constraints.
 /// Shared by both `CircomCircuit` (dense) and `SparseCircomCircuit` (sparse).
 fn parse_r1cs_raw(data: &[u8]) -> Result<(R1csHeader, Vec<Constraint>), nom::Err<nom::error::Error<&[u8]>>> {
@@ -298,11 +337,17 @@ fn parse_constraints_section(input: &[u8]) -> IResult<&[u8], Vec<Constraint>> {
 fn parse_sparse_vector(input: &[u8]) -> IResult<&[u8], Vec<(u32, Fr)>> {
     let (input, n_terms) = le_u32(input)?;
     let mut rest = input;
-    let mut terms = Vec::with_capacity(n_terms as usize);
+    // `n_terms` is attacker-controlled and each term needs at least
+    // `WIRE_BYTES + field_size` bytes, so reserve against what the buffer can
+    // actually hold. Allocating `n_terms` directly lets a tiny file request a
+    // multi-gigabyte allocation, which aborts rather than unwinding.
+    const WIRE_BYTES: usize = 4;
+    let field_size = 32usize;
+    let max_terms = rest.len() / (WIRE_BYTES + field_size);
+    let mut terms = Vec::with_capacity(std::cmp::min(n_terms as usize, max_terms));
     for _ in 0..n_terms {
         let (r, wire) = le_u32(rest)?;
         // In Circom .r1cs, values are stored as 32-byte field elements (BLS12-381).
-        let field_size = 32usize;
         let (r, val_bytes) = take(field_size)(r)?;
         let val = parse_field_element(val_bytes);
         rest = r;
@@ -475,6 +520,96 @@ mod tests {
         out.extend_from_slice(&constraints);
 
         out
+    }
+
+    /// A `.r1cs` whose header declares `n_wires = 1` but whose first
+    /// constraint references wire 9999. Before `validate_wire_ids` existed this
+    /// reached `l[i][wire as usize]` and panicked.
+    fn build_malformed_r1cs() -> Vec<u8> {
+        let mut out = Vec::new();
+        out.extend_from_slice(b"r1cs");
+        out.extend_from_slice(&1u32.to_le_bytes()); // version
+        out.extend_from_slice(&2u32.to_le_bytes()); // n_sections
+
+        let field_size = 32u32;
+        let n_wires = 1u32; // deliberately far too small
+        let mut header = Vec::new();
+        header.extend_from_slice(&field_size.to_le_bytes());
+        header.extend_from_slice(&[0u8; 32]);
+        header.extend_from_slice(&n_wires.to_le_bytes());
+        header.extend_from_slice(&0u32.to_le_bytes()); // n_pub_out
+        header.extend_from_slice(&0u32.to_le_bytes()); // n_pub_in
+        header.extend_from_slice(&0u32.to_le_bytes()); // n_prv_in
+        header.extend_from_slice(&0u64.to_le_bytes()); // n_labels
+        header.extend_from_slice(&1u32.to_le_bytes()); // n_constraints
+
+        out.extend_from_slice(&1u32.to_le_bytes());
+        out.extend_from_slice(&(header.len() as u64).to_le_bytes());
+        out.extend_from_slice(&header);
+
+        let mut constraints = Vec::new();
+        // One constraint: A has a single term on wire 9999, B and C are empty.
+        constraints.extend_from_slice(&1u32.to_le_bytes());
+        constraints.extend_from_slice(&9999u32.to_le_bytes());
+        constraints.push(1u8);
+        constraints.extend_from_slice(&[0u8; 31]);
+        constraints.extend_from_slice(&0u32.to_le_bytes()); // B: 0 terms
+        constraints.extend_from_slice(&0u32.to_le_bytes()); // C: 0 terms
+
+        out.extend_from_slice(&2u32.to_le_bytes());
+        out.extend_from_slice(&(constraints.len() as u64).to_le_bytes());
+        out.extend_from_slice(&constraints);
+
+        out
+    }
+
+    /// Regression: an out-of-range wire id must be a parse error, not a panic.
+    /// The dense path indexed `l[i][wire]` directly; the sparse path never
+    /// indexes here but `evaluate_qap_at_tau_sparse` does.
+    #[test]
+    fn malformed_wire_id_is_rejected_not_panicked() {
+        let bytes = build_malformed_r1cs();
+
+        let dense = CircomCircuit::from_bytes(&bytes);
+        assert!(
+            dense.is_err(),
+            "dense parse must reject wire 9999 against n_wires = 1"
+        );
+        let msg = dense.unwrap_err();
+        assert!(
+            msg.contains("9999") && msg.contains("n_wires"),
+            "error should name the offending wire and the declared count, got: {msg}"
+        );
+
+        let sparse = SparseCircomCircuit::from_bytes(&bytes);
+        assert!(
+            sparse.is_err(),
+            "sparse parse must reject wire 9999 against n_wires = 1"
+        );
+    }
+
+    /// A sparse vector claiming more terms than the buffer can hold must not
+    /// pre-allocate from the attacker-controlled count.
+    #[test]
+    fn huge_term_count_does_not_over_allocate() {
+        const FIELD_SIZE: usize = 32;
+        let mut section = Vec::new();
+        section.extend_from_slice(&u32::MAX.to_le_bytes()); // n_terms
+        section.extend_from_slice(&0u32.to_le_bytes()); // one real term
+        section.push(0u8);
+        section.extend_from_slice(&[0u8; FIELD_SIZE - 1]);
+
+        // Parsing stops when the buffer runs out; the point is that it returns
+        // an error rather than aborting on a ~200 GB reservation.
+        assert!(parse_sparse_vector(&section).is_err());
+    }
+
+    /// Wire ids are validated against the header, not against the buffer.
+    #[test]
+    fn in_range_wire_ids_still_parse() {
+        let bytes = build_synthetic_r1cs();
+        assert!(CircomCircuit::from_bytes(&bytes).is_ok());
+        assert!(SparseCircomCircuit::from_bytes(&bytes).is_ok());
     }
 
     fn build_synthetic_wtns() -> Vec<u8> {
