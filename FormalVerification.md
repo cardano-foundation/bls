@@ -8,9 +8,9 @@ comment-shaped contract, and what is not covered at all.
 
 - **Two functions are verified.** `next_power_of_two_u64` and `log2_u64` in
   `phase2.rs`, plus four small smoke-test functions in `verus_smoke.rs`.
-- **Eighteen `spec_*` functions are contracts, not proofs.** Every one of them is
+- **Nineteen `spec_*` functions are contracts, not proofs.** Every one of them is
   marked `#[verifier::external]`, which tells Verus to trust the postcondition
-  without checking the body. Seven of them have a vacuous `ensures true`.
+  without checking the body. Four of them still carry a vacuous `ensures true`.
 - **Verification was silently inert until 2026-09.** The crate compiled its
   `verus!` blocks but never invoked the verification engine. See
   [Enabling verification](#enabling-verification-read-this). A deliberately false
@@ -117,7 +117,7 @@ toolchain is genuinely checking the crate.
 
 ## What is *not* verified
 
-Eighteen `spec_*` functions across six files are annotated
+Nineteen `spec_*` functions across six files are annotated
 `#[verifier::external]`: the contract is type-checked for well-formedness and is
 usable by other proofs, but the body is **assumed**.
 
@@ -145,11 +145,46 @@ than the code they describe.
 | `spec_circom_from_bytes` | `circom_adapter.rs` | matrices shaped `n_constraints × n_wires` | asserted |
 | `spec_load_witness` | `circom_adapter.rs` | `witness.len() == n_wires` on `Ok` | asserted |
 | `spec_read_tau_g1` / `spec_read_tau_g2` | `ptau.rs` | result length == count on `Ok` | asserted |
-| `spec_native_msm_g1` / `_g2` | `backend.rs` | `ensures true` (`native`) | **vacuous** |
-| `spec_native_pairing_batch_check` | `backend.rs` | `ensures true` (`native`) | **vacuous** |
+| `spec_native_msm_g1` / `_g2` | `backend.rs` | length mismatch ⇒ `Err` (`native`) | asserted |
+| `spec_native_pairing_batch_check` | `backend.rs` | length mismatch ⇒ `Err` (`native`) | asserted |
+| `spec_native_ntt` | `backend.rs` | empty slice ⇒ `Err` (`native`) | asserted |
 
-Seven of eighteen carry no information at all. They document intent and are
+Four of nineteen carry no information at all. They document intent and are
 harmless, but they are not evidence.
+
+### Why the FFI specs stay unverified
+
+The four FFI contracts are the clearest case where a proof was considered and
+rejected on cost grounds. The length guards are real and are now covered by
+tests (`msm_rejects_length_mismatch`, `pairing_rejects_length_mismatch`):
+
+```rust
+// bls_ffi.rs
+if points.len() != scalars.len() { return Err(err(BlsStatus::MsmMismatch)); }
+unsafe { msm_g1_impl(points, scalars) }
+```
+
+Verus could in principle prove `points.len() != scalars.len() ==> r.is_err()`,
+but only after all of the following:
+
+- `BlsFr` / `BlsG1` / `BlsG2` / `BlsStatus` / `BackendError` each need an
+  `Ex*` mirror type plus a `View` impl, since the real types are declared
+  outside the macro. `BackendError` also carries a `&'static str`.
+- The function body must move *inside* `verus!`. A function declared outside it
+  can only be reached through `assume_specification`, which asserts the very
+  thing we would be trying to prove.
+- The `extern "C"` implementations need their own `assume_specification`, and
+  the `unsafe` block stays opaque regardless — so the proof would cover the
+  early return and nothing about the C++ callee.
+
+That buys a machine-checked `len` comparison in exchange for five type models
+and a restructured FFI layer, all of which must be kept in sync with the ABI.
+The assertion-plus-test combination conveys the same information at a fraction
+of the maintenance cost.
+
+One genuine limitation to note: `spec_native_ntt` states only the empty-slice
+half of the guard, because `usize::is_power_of_two` has no Verus model. The
+power-of-two half is covered by `ntt_rejects_non_power_of_two`.
 
 ## Known gaps
 
@@ -161,24 +196,17 @@ were done; the referenced spec functions do not exist in the source.
    at all. `nom` itself is an unverified external crate, so the
    `offset + n <= data.len()` discipline those parsers rely on is unchecked.
 
-2. **Wire ids are not bounds-checked — this is a live panic.** `parse_sparse_vector`
-   (`circom_adapter.rs:303`) reads a `u32` wire id from the file and stores it
-   without validating it against `header.n_wires`. `CircomCircuit::parse_r1cs`
-   then does `l[i][wire as usize]` (`circom_adapter.rs:112`), so a malformed
-   `.r1cs` whose header claims a small `n_wires` but whose constraints reference
-   a larger wire id panics with `index out of bounds`. A 148-byte input
-   reproduces it:
+2. ~~**Wire ids are not bounds-checked.**~~ **Fixed** in `229ea43`.
+   `parse_sparse_vector` used to store a `u32` wire id straight from the file,
+   and `CircomCircuit::parse_r1cs` then indexed `l[i][wire as usize]` with it,
+   so a 148-byte `.r1cs` panicked instead of returning an error. Both
+   representations now call `validate_wire_ids` after `parse_r1cs_raw`, which
+   rejects an out-of-range id with a diagnostic naming the wire and the declared
+   `n_wires`. The related unbounded `Vec::with_capacity(n_terms)` — a tiny file
+   could ask for a ~200 GB allocation — was bounded by what the buffer can hold.
 
-   ```
-   thread 'main' panicked at src/circom_adapter.rs:112:21:
-   index out of bounds: the len is 1 but the index is 9999
-   ```
-
-   `SparseCircomCircuit` is unaffected — it never indexes by wire id. This is a
-   denial-of-service on untrusted input and is the single highest-value thing to
-   fix. An earlier revision of this document asserted "wire ids are bounded —
-   `wire < n_wires` for every constraint term (via `spec_parse_r1cs_raw`)". No
-   such spec exists and no such check exists.
+   This is a runtime input check, not a proof: `nom` is an external crate, so
+   the parser itself remains unverified.
 
 3. **MPC state-machine invariants are unverified.** The Phase-2 delta-chain
    (`contribute()` appending exactly one contribution, `delta_*_before` chaining
