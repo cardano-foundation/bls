@@ -6,8 +6,11 @@ comment-shaped contract, and what is not covered at all.
 
 ## TL;DR — read this before trusting anything below
 
-- **Two functions are verified.** `next_power_of_two_u64` and `log2_u64` in
-  `phase2.rs`, plus four small smoke-test functions in `verus_smoke.rs`.
+- **Six functions are verified.** `next_power_of_two_u64` and `log2_u64` in
+  `phase2.rs`; the sparse-vector stride model `term_loop_model` and
+  `sparse_capacity_is_sound` in `circom_adapter.rs`; plus four small smoke-test
+  functions in `verus_smoke.rs`. The stride pair is the only proven code on an
+  untrusted-input path.
 - **Nineteen `spec_*` functions are contracts, not proofs.** Every one of them is
   marked `#[verifier::external]`, which tells Verus to trust the postcondition
   without checking the body. Four of them still carry a vacuous `ensures true`.
@@ -115,19 +118,48 @@ The proof rests on `axiom_u64_trailing_zeros` from `vstd`, which is why
 division), supported by two `proof fn` lemmas. These exist mainly to confirm the
 toolchain is genuinely checking the crate.
 
+### `circom_adapter.rs` — sparse-vector stride
+
+`parse_sparse_vector` walks `n_terms` terms out of an attacker-controlled
+buffer, and each term is a 4-byte wire id plus a 32-byte field element. Two
+functions pin that arithmetic down:
+
+- `term_loop_model` proves the loop consumes exactly `36 * k` bytes after `k`
+  iterations and reports failure as soon as fewer than 36 remain, yielding
+  `ok ==> n_terms * 36 <= rest_len`.
+- `sparse_capacity_is_sound` derives from that
+  `n_terms <= rest_len / 36`, using `vstd`'s `lemma_small_div_converse` for
+  the Euclidean-division step.
+
+This is what makes the `Vec::with_capacity(min(n_terms, rest_len / 36))` guard
+provably sufficient rather than merely plausible. The invariants use `int`
+arithmetic deliberately: Verus models `usize` as 32-bit, and a `u32` term count
+times 36 overflows that range, so a `usize`-only invariant would be unsound to
+write even though the real 64-bit target has no such limit.
+
+It is a *model*, not the parser. `nom` does the actual reading, so this fixes
+the stride and the loop bound while leaving `nom`'s own behaviour unverified.
+
 ## What is *not* verified
 
 Nineteen `spec_*` functions across six files are annotated
 `#[verifier::external]`: the contract is type-checked for well-formedness and is
 usable by other proofs, but the body is **assumed**.
 
-They all mention at least one type Verus has no model for — `ark_ff::Fr`,
-`ark_ec` curve/affine types, `DensePolynomial`, and the crate's own
-`Circuit` / `PtauFile` / `CircomCircuit` / `BackendError`. Writing
-`external_type_specification` declarations for the ark type aliases was
-attempted and abandoned: the aliases expand through private modules and require
-exact generic/bound matching, making the declarations larger and more fragile
-than the code they describe.
+They all mention at least one type Verus has no model for. The wall is
+`ark_bls12_381::Fr`, which expands to `Fp<MontBackend<4>, u64>` and reports:
+
+```
+error: `ark_ff::fields::models::fp::Fp` is not supported
+       (note: you may be able to add a Verus specification to this type
+       with the `external_type_specification` attribute)
+```
+
+This blocks even a bare `while i < vals.len()` over a `&mut [Fr]` — nothing
+about the loop needs field arithmetic, and it still will not verify. Declaring
+`Fr` would mean the `Ex*` + `View` pattern, which requires the type to satisfy
+`ZeroablePrimitive`, a `verus_builtin` trait that cannot be implemented for a
+foreign type. So the FFI and ark-facing contracts stay asserted.
 
 | Spec | File | Postcondition | Useful? |
 |------|------|---------------|---------|
@@ -192,9 +224,19 @@ These are **not** covered. An earlier revision of this document claimed they
 were done; the referenced spec functions do not exist in the source.
 
 1. **Parser byte-cursor bounds are unverified.** The `.r1cs` / `.wtns` / `.ptau`
-   parsers (`parse_r1cs_raw`, `parse_sparse_vector`, …) have no `verus!` block
-   at all. `nom` itself is an unverified external crate, so the
-   `offset + n <= data.len()` discipline those parsers rely on is unchecked.
+   parsers (`parse_r1cs_raw`, `parse_sparse_vector`, …) are driven by `nom`,
+   which is an unverified external crate, so the `offset + n <= data.len()`
+   discipline they rely on is unchecked.
+
+   One piece *is* proven, though: `sparse_capacity_is_sound`
+   (`circom_adapter.rs`) formally derives the per-term stride (4-byte wire id +
+   32-byte field element = 36 bytes) and shows that if the term loop pushes
+   `n_terms` terms then `n_terms <= rest_len / 36`. That is the justification
+   for the allocation guard below — it was previously a hand-written `min(...)`
+   with a comment asserting it was safe, and is now a machine-checked fact.
+   `term_loop_model` is a model rather than the parser itself: it tracks a
+   length instead of a slice and abstracts the field decode, so it pins the
+   stride arithmetic and the loop bound, not `nom`'s behaviour.
 
 2. ~~**Wire ids are not bounds-checked.**~~ **Fixed** in `229ea43`.
    `parse_sparse_vector` used to store a `u32` wire id straight from the file,
@@ -205,8 +247,8 @@ were done; the referenced spec functions do not exist in the source.
    `n_wires`. The related unbounded `Vec::with_capacity(n_terms)` — a tiny file
    could ask for a ~200 GB allocation — was bounded by what the buffer can hold.
 
-   This is a runtime input check, not a proof: `nom` is an external crate, so
-   the parser itself remains unverified.
+   The bounds *check* is a runtime one; `validate_wire_ids` itself is not
+   verified. Only the capacity half is proved, per item 1.
 
 3. **MPC state-machine invariants are unverified.** The Phase-2 delta-chain
    (`contribute()` appending exactly one contribution, `delta_*_before` chaining
