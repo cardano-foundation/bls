@@ -248,6 +248,440 @@ mod tests {
             .collect()
     }
 
+    /// One parsed C parameter: its normalized type and its name.
+    type CParam = (String, String);
+
+    /// One parsed C prototype: name, return type, parameters.
+    type CProto = (String, String, Vec<CParam>);
+
+    /// Parse the header's function prototypes as
+    /// `(name, return type, [(param type, param name)])`, normalizing the C
+    /// spelling (`bls_backend_g1_t *out` -> `bls_backend_g1_t*`) so a
+    /// declaration split across lines compares equal to a single-line one.
+    fn header_prototypes(header: &str) -> Vec<CProto> {
+        let cleaned = strip_c_comments(header);
+        let mut out = Vec::new();
+        let mut pending = String::new();
+        // A `typedef struct {...} name;` spans lines and is not a prototype.
+        let mut in_typedef = false;
+        let mut brace_depth = 0i32;
+
+        for line in cleaned.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                // Preprocessor directives are not declarations, and several
+                // (`#define ... 48`) contain no `;` at all — letting one
+                // accumulate would swallow the declaration after it.
+                continue;
+            }
+            // `extern "C" {` / `}` wrap the whole header; the opening brace
+            // would make every later line look mid-declaration.
+            if line == "extern \"C\" {" || line == "{" || line == "}" {
+                continue;
+            }
+
+            if in_typedef {
+                brace_depth += line.chars().filter(|&c| c == '{').count() as i32
+                    - line.chars().filter(|&c| c == '}').count() as i32;
+                if brace_depth <= 0 {
+                    in_typedef = false;
+                    pending.clear();
+                }
+                continue;
+            }
+            if line.starts_with("typedef") {
+                let d = line.chars().filter(|&c| c == '{').count() as i32
+                    - line.chars().filter(|&c| c == '}').count() as i32;
+                if d > 0 {
+                    in_typedef = true;
+                    brace_depth = d;
+                }
+                // A single-line typedef (`typedef ... name;`) is already done.
+                continue;
+            }
+
+            pending.push_str(line);
+            pending.push(' ');
+
+            if !ends_declaration(&pending) {
+                continue;
+            }
+            let decl = pending.trim().trim_end_matches(';').trim().to_string();
+            pending.clear();
+
+            if decl.is_empty() || !decl.contains('(') {
+                continue; // e.g. a bare brace or a struct member
+            }
+            if let Some(sig) = parse_c_prototype(&decl) {
+                out.push(sig);
+            }
+        }
+        out
+    }
+
+    /// True when `text` ends a declaration: a `;` at paren/brace depth 0.
+    fn ends_declaration(text: &str) -> bool {
+        let mut depth = 0i32;
+        for c in text.chars() {
+            match c {
+                '(' | '{' => depth += 1,
+                ')' | '}' => depth -= 1,
+                ';' if depth <= 0 => return true,
+                _ => {}
+            }
+        }
+        false
+    }
+
+    /// Remove `/* ... */` and `// ...` from a C header, preserving newlines so
+    /// line-based logic downstream still behaves.
+    fn strip_c_comments(s: &str) -> String {
+        let mut out = String::with_capacity(s.len());
+        let b: Vec<char> = s.chars().collect();
+        let mut i = 0;
+        while i < b.len() {
+            if b[i] == '/' && i + 1 < b.len() && b[i + 1] == '*' {
+                // Block comment: skip to the closing delimiter.
+                i += 2;
+                while i + 1 < b.len() && !(b[i] == '*' && b[i + 1] == '/') {
+                    if b[i] == '\n' {
+                        out.push('\n');
+                    }
+                    i += 1;
+                }
+                i = (i + 2).min(b.len());
+            } else if b[i] == '/' && i + 1 < b.len() && b[i + 1] == '/' {
+                // Line comment: skip to end of line.
+                while i < b.len() && b[i] != '\n' {
+                    i += 1;
+                }
+            } else {
+                out.push(b[i]);
+                i += 1;
+            }
+        }
+        out
+    }
+
+    /// Parse one C prototype body, e.g.
+    /// `bls_backend_status bls_msm_g1(bls_backend_g1_t *out, const bls_backend_g1_t *points, ...)`
+    /// into `("bls_backend_status", [("bls_backend_g1_t*", "out"), ...])`.
+    fn parse_c_prototype(text: &str) -> Option<CProto> {
+        let text = text.trim();
+        let open = text.find('(')?;
+        let close = text.rfind(')')?;
+        if close < open {
+            return None;
+        }
+        // Everything before '(' is "<ret> <name>"; split off the last token as
+        // the function name.
+        let head = &text[..open];
+        let (ret, fname) = split_type_and_name(head)?;
+
+        let args_src = &text[open + 1..close];
+        let mut params = Vec::new();
+        for raw in split_top_level_commas(args_src) {
+            let raw = raw.trim();
+            if raw.is_empty() {
+                continue;
+            }
+            if raw == "void" {
+                // `f(void)` means no parameters.
+                continue;
+            }
+            // An array parameter decays to a pointer; we have none in this ABI,
+            // but handle it rather than mis-parse silently.
+            let raw = raw.split('[').next().unwrap_or(raw).trim();
+            let (ty, name) = split_type_and_name(raw)?;
+            params.push((normalize_c_type(ty), name.to_string()));
+        }
+        Some((fname.to_string(), normalize_c_type(ret), params))
+    }
+
+    /// Split on commas that are not inside parentheses (e.g. a function-pointer
+    /// parameter type).
+    fn split_top_level_commas(s: &str) -> Vec<String> {
+        let mut parts = Vec::new();
+        let mut depth = 0i32;
+        let mut cur = String::new();
+        for c in s.chars() {
+            match c {
+                '(' => {
+                    depth += 1;
+                    cur.push(c);
+                }
+                ')' => {
+                    depth -= 1;
+                    cur.push(c);
+                }
+                ',' if depth == 0 => {
+                    parts.push(std::mem::take(&mut cur));
+                }
+                _ => cur.push(c),
+            }
+        }
+        if !cur.trim().is_empty() {
+            parts.push(cur);
+        }
+        parts
+    }
+
+    /// Split a declaration head into `(type, name)`.
+    ///
+    /// The name is always the final identifier. Everything before it is the
+    /// type, with one wrinkle: in a *parameter* (`const char *out`) the `*`
+    /// binds to the type, while in a *function head* (`const char *foo(void)`)
+    /// it binds to the name. Both spellings are accepted and the trailing `*`
+    /// is normalized away by `normalize_c_type`, so callers only need to know
+    /// where the name starts.
+    fn split_type_and_name(raw: &str) -> Option<(&str, &str)> {
+        let raw = raw.trim();
+        let is_ident = |c: char| c.is_alphanumeric() || c == '_';
+
+        // Locate the final identifier run; `rfind` gives the index *after* its
+        // last character, so walk back to where the run begins.
+        let name_end = raw.rfind(is_ident)?;
+        let mut name_start = name_end;
+        while name_start > 0 {
+            let prev = raw[..name_start].chars().next_back()?;
+            if !is_ident(prev) {
+                break;
+            }
+            name_start -= prev.len_utf8();
+        }
+        let name = &raw[name_start..];
+        if name.is_empty() || !name.chars().all(is_ident) {
+            return None;
+        }
+
+        let head_raw = &raw[..name_start];
+        // Only identifiers, spaces and pointers may appear before the name.
+        if !head_raw
+            .chars()
+            .all(|c| is_ident(c) || c == ' ' || c == '*')
+        {
+            return None;
+        }
+        // The name must be a standalone token: separated by whitespace, or by
+        // a `*` that belongs to the type. Without either, the whole head is one
+        // identifier and this is not a type/name pair at all.
+        let sep = head_raw
+            .chars()
+            .next_back()
+            .map(|c| c == ' ' || c == '*')
+            .unwrap_or(false);
+        if !sep || head_raw.trim().is_empty() {
+            return None;
+        }
+        // Keep the `*` in the type: it is part of it in both a parameter
+        // (`const char *out` -> `const char*`) and a function head
+        // (`const char *f(void)` -> return type `const char*`).
+        Some((head_raw.trim_end(), name))
+    }
+
+    /// `bls_backend_g1_t *` and `bls_backend_g1_t*` are the same type.
+    fn normalize_c_type(t: &str) -> String {
+        // Collapse whitespace runs, then delete every space adjacent to a `*`
+        // so `T *`, `T * ` and `T*` all normalize to `T*`.
+        let joined = t.split_whitespace().collect::<Vec<_>>().join(" ");
+        let bytes: Vec<char> = joined.chars().collect();
+        let mut out = String::with_capacity(joined.len());
+        for (i, &c) in bytes.iter().enumerate() {
+            if c == ' ' {
+                let near_star = bytes[i - 1] == '*' || bytes.get(i + 1) == Some(&'*');
+                if near_star {
+                    continue;
+                }
+            }
+            out.push(c);
+        }
+        out
+    }
+
+    /// Edge 1 catches a header edit; edge 2 catches a Rust edit. The C++
+    /// implementation is out of scope here by design — it is imported code — so
+    /// this verifies the declaration, not the definition.
+    #[test]
+    fn extern_signatures_match_committed_header() {
+        // name -> (return type, [(param type, param name)])
+        type ExpectedProto<'a> = (&'a str, &'a str, Vec<(&'a str, &'a str)>);
+        let expected: Vec<ExpectedProto> = vec![
+            ("bls_backend_version", "uint32_t", vec![]),
+            ("bls_backend_flavor", "const char*", vec![]),
+            (
+                "bls_msm_g1",
+                "bls_backend_status",
+                vec![
+                    ("bls_backend_g1_t*", "out"),
+                    ("const bls_backend_g1_t*", "points"),
+                    ("const bls_backend_fr_t*", "scalars"),
+                    ("size_t", "npoints"),
+                ],
+            ),
+            (
+                "bls_msm_g2",
+                "bls_backend_status",
+                vec![
+                    ("bls_backend_g2_t*", "out"),
+                    ("const bls_backend_g2_t*", "points"),
+                    ("const bls_backend_fr_t*", "scalars"),
+                    ("size_t", "npoints"),
+                ],
+            ),
+            (
+                "bls_pairing_batch_check",
+                "bls_backend_status",
+                vec![
+                    ("const bls_backend_g1_t*", "g1s"),
+                    ("const bls_backend_g2_t*", "g2s"),
+                    ("size_t", "npairs"),
+                    ("int*", "ok"),
+                ],
+            ),
+            (
+                "bls_ntt_in_place",
+                "bls_backend_status",
+                vec![
+                    ("bls_backend_fr_t*", "values"),
+                    ("size_t", "length"),
+                    ("const bls_backend_fr_t*", "root"),
+                    ("int", "inverse"),
+                ],
+            ),
+        ];
+
+        // `bls_backend_version(void)` and `bls_backend_flavor(void)` take no
+        // parameters; the parser drops a lone `void`.
+        let parsed = header_prototypes(HEADER);
+        assert_eq!(
+            parsed.len(),
+            expected.len(),
+            "header prototype count changed; bls_backend.h was edited (parsed {parsed:?})"
+        );
+        for ((name, exp_ret, exp_params), (pname, ret, params)) in
+            expected.iter().zip(parsed.iter())
+        {
+            assert_eq!(&pname, name, "header prototype order changed");
+            assert_eq!(
+                &normalize_c_type(ret),
+                &normalize_c_type(exp_ret),
+                "{name}: return type changed"
+            );
+            assert_eq!(
+                params.len(),
+                exp_params.len(),
+                "{name}: parameter count changed"
+            );
+            for (j, ((exp_ty, exp_pname), (ty, pname))) in
+                exp_params.iter().zip(params.iter()).enumerate()
+            {
+                assert_eq!(
+                    &normalize_c_type(ty),
+                    &normalize_c_type(exp_ty),
+                    "{name}: parameter {j} ({exp_pname}) type changed \
+                     -- a pointer swap here is silent memory corruption"
+                );
+                assert_eq!(
+                    pname, exp_pname,
+                    "{name}: parameter {j} renamed (check the binding's naming)"
+                );
+            }
+        }
+    }
+
+    /// Edge 2 of the above, enforced at compile time. If the `extern "C"`
+    /// declaration drifts from the signature this project intends, assigning it
+    /// to the expected fn-pointer type below stops the build.
+    #[test]
+    fn extern_items_coerce_to_expected_signatures() {
+        // These coercions are the actual check; the body only forces them to be
+        // evaluated. A mismatch is a compile error, not a test failure.
+        const _: unsafe extern "C" fn() -> u32 = bls_backend_version;
+        const _: unsafe extern "C" fn() -> *const c_char = bls_backend_flavor;
+        const _: unsafe extern "C" fn(*mut BlsG1, *const BlsG1, *const BlsFr, usize) -> c_int =
+            bls_msm_g1;
+        const _: unsafe extern "C" fn(*mut BlsG2, *const BlsG2, *const BlsFr, usize) -> c_int =
+            bls_msm_g2;
+        const _: unsafe extern "C" fn(*const BlsG1, *const BlsG2, usize, *mut c_int) -> c_int =
+            bls_pairing_batch_check;
+        const _: unsafe extern "C" fn(*mut BlsFr, usize, *const BlsFr, c_int) -> c_int =
+            bls_ntt_in_place;
+    }
+
+    /// Negative control for the prototype parser: the checks above must be able
+    /// to fail. Each mutation here corresponds to a real ABI break that would
+    /// otherwise pass silently.
+    #[test]
+    fn prototype_parser_detects_signature_drift() {
+        let base = header_prototypes(HEADER);
+        assert_eq!(base.len(), 6, "expected six prototypes, got {base:?}");
+
+        // (a) swapping two pointer parameters: silent corruption.
+        let swapped = HEADER.replace(
+            "bls_backend_g1_t *out,\n                              const bls_backend_g1_t *points,",
+            "const bls_backend_g1_t *points,\n                              bls_backend_g1_t *out,",
+        );
+        assert_ne!(
+            header_prototypes(&swapped),
+            base,
+            "a swapped pointer parameter went undetected"
+        );
+
+        // (a2) swapping two parameters of *identical* type. Only the name check
+        // can see this, so pin it explicitly: it is easy to weaken the type
+        // comparison later and silently lose the case.
+        let same_type = HEADER.replace(
+            "bls_backend_status bls_ntt_in_place(bls_backend_fr_t *values,",
+            "bls_backend_status bls_ntt_in_place(bls_backend_fr_t *root,",
+        );
+        assert_ne!(
+            header_prototypes(&same_type),
+            base,
+            "a same-typed parameter swap went undetected"
+        );
+
+        // (b) dropping a parameter entirely.
+        let dropped = HEADER.replace(
+            "const bls_backend_fr_t *scalars,\n                              size_t npoints);",
+            "size_t npoints);",
+        );
+        assert_ne!(
+            header_prototypes(&dropped),
+            base,
+            "a dropped parameter went undetected"
+        );
+
+        // (c) changing the return type.
+        let retyped = HEADER.replace(
+            "bls_backend_status bls_pairing_batch_check(",
+            "int bls_pairing_batch_check(",
+        );
+        assert_ne!(
+            header_prototypes(&retyped),
+            base,
+            "a changed return type went undetected"
+        );
+
+        // (d) adding a parameter the bindings do not pass.
+        let added = HEADER.replace(
+            "bls_backend_fr_t *values,",
+            "bls_backend_fr_t *values,\n                                     int extra,",
+        );
+        assert_ne!(
+            header_prototypes(&added),
+            base,
+            "an added parameter went undetected"
+        );
+
+        // (e) a prototype mentioned only inside a comment must not be parsed.
+        let commented = format!("/* bls_backend_status bls_ghost(int a); */\n{HEADER}");
+        assert_eq!(
+            header_prototypes(&commented),
+            base,
+            "a commented-out prototype leaked into the parsed set"
+        );
+    }
+
     /// The `BLS_BACKEND_*_BYTES` macros are part of the published ABI contract
     /// and the C++ decode routines hard-code the same 48-byte Fp stride, but
     /// they are `#define`s — not `typedef struct` lines — so the test above
