@@ -385,6 +385,38 @@ mod tests {
     }
 
     #[test]
+    fn msm_rejects_length_mismatch() {
+        use ark_ff::One;
+        let mut rng = thread_rng();
+        let p = G1Projective::rand(&mut rng).into_affine();
+        let q = G2Projective::rand(&mut rng).into_affine();
+
+        // Two bases, one scalar: the guard must reject before the C++ MSM,
+        // which would otherwise read `bases.len()` scalars from `scalars`.
+        let e1 = native_msm_g1(&[p, p], &[Fr::one()]).unwrap_err();
+        assert_eq!(e1.status, BlsStatus::MsmMismatch);
+
+        let e2 = native_msm_g1(&[p], &[Fr::one(), Fr::one()]).unwrap_err();
+        assert_eq!(e2.status, BlsStatus::MsmMismatch);
+
+        let e3 = native_msm_g2(&[q, q], &[Fr::one()]).unwrap_err();
+        assert_eq!(e3.status, BlsStatus::MsmMismatch);
+    }
+
+    #[test]
+    fn pairing_rejects_length_mismatch() {
+        let mut rng = thread_rng();
+        let p = G1Projective::rand(&mut rng).into_affine();
+        let q = G2Projective::rand(&mut rng).into_affine();
+
+        let e = native_pairing_batch_check(&[p, p], &[q]).unwrap_err();
+        assert_eq!(e.status, BlsStatus::MsmMismatch);
+
+        let e = native_pairing_batch_check(&[p], &[q, q]).unwrap_err();
+        assert_eq!(e.status, BlsStatus::MsmMismatch);
+    }
+
+    #[test]
     fn ntt_rejects_non_power_of_two() {
         let mut vals = vec![Fr::one(); 3];
         assert!(native_ntt(&mut vals, false).is_err());
@@ -402,31 +434,54 @@ use vstd::prelude::*;
 #[cfg(feature = "verus")]
 verus! {
 
-    /// Spec: [`native_msm_g1`] requires `bases.len() == scalars.len()`.
+    /// Spec: [`native_msm_g1`] rejects a length mismatch.
+    ///
+    /// This is deliberately a postcondition rather than a `requires`. The
+    /// wrapper does not demand equal lengths — it forwards whatever it is given
+    /// and lets `bls_ffi::msm_g1` reject the mismatch, which is what keeps a
+    /// caller error from reaching the `extern "C"` MSM with two different
+    /// counts. Stating it as a precondition would forbid the very call the
+    /// guard exists to catch.
     #[verifier::external]
     pub fn spec_native_msm_g1(bases: &[G1Affine], scalars: &[Fr]) -> (r: Result<G1Affine, BackendError>)
-        requires bases.len() == scalars.len(),
-        ensures true,
+        ensures
+            bases.len() != scalars.len() ==> r.is_err(),
     {
         native_msm_g1(bases, scalars)
     }
 
-    /// Spec: [`native_msm_g2`] requires `bases.len() == scalars.len()`.
+    /// Spec: [`native_msm_g2`] rejects a length mismatch. See
+    /// [`spec_native_msm_g1`] for why this is a postcondition.
     #[verifier::external]
     pub fn spec_native_msm_g2(bases: &[G2Affine], scalars: &[Fr]) -> (r: Result<G2Affine, BackendError>)
-        requires bases.len() == scalars.len(),
-        ensures true,
+        ensures
+            bases.len() != scalars.len() ==> r.is_err(),
     {
         native_msm_g2(bases, scalars)
     }
 
-    /// Spec: [`native_pairing_batch_check`] requires `g1.len() == g2.len()`.
+    /// Spec: [`native_pairing_batch_check`] rejects a length mismatch. See
+    /// [`spec_native_msm_g1`] for why this is a postcondition.
     #[verifier::external]
     pub fn spec_native_pairing_batch_check(g1: &[G1Affine], g2: &[G2Affine]) -> (r: Result<bool, BackendError>)
-        requires g1.len() == g2.len(),
-        ensures true,
+        ensures
+            g1.len() != g2.len() ==> r.is_err(),
     {
         native_pairing_batch_check(g1, g2)
+    }
+
+    /// Spec: [`native_ntt`] rejects an empty slice.
+    ///
+    /// The wrapper also rejects a length that is not a power of two, but
+    /// `usize::is_power_of_two` has no Verus model, so that half of the guard
+    /// can only be stated in prose. See `native_ntt`.
+    #[verifier::external]
+    pub fn spec_native_ntt(values: &mut [Fr], inverse: bool) -> (r: Result<(), BackendError>)
+        ensures
+            old(values).len() == 0 ==> r.is_err(),
+            r.is_ok() ==> old(values).len() > 0,
+    {
+        native_ntt(values, inverse)
     }
 
 }
