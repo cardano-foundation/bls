@@ -89,18 +89,26 @@ def generate(depth: int = 2, revocation_depth: int = 2, seed: int = 1):
     # 4. Build revocation SMT
     revocation_smt = KeyedSMT(revocation_depth)
 
-    # Insert a few revoked credentials (different from ours)
-    for _ in range(3):
+    # Our credential's SMT position.  A revoked credential that maps to the
+    # same position would make our credential a *member* (leaf != 0), so the
+    # non-membership witness would be unsatisfiable — skip such collisions.
+    our_idx = claims_msg % (1 << revocation_depth)
+
+    # Insert a few revoked credentials (different credential AND different index)
+    inserted = 0
+    attempts = 0
+    while inserted < 3 and attempts < 1000:
+        attempts += 1
         revoked_claims = rng.randint(1, P - 1)
-        # avoid collision with our credential
-        if revoked_claims == claims_msg:
-            continue
         idx = revoked_claims % (1 << revocation_depth)
+        # avoid collision with our credential or its SMT position
+        if revoked_claims == claims_msg or idx == our_idx:
+            continue
         leaf = poseidon_bls12_381(revoked_claims, 0)
         revocation_smt.set(idx, leaf)
+        inserted += 1
 
     # 5. Compute non-membership proof for our credential
-    our_idx = claims_msg % (1 << revocation_depth)
     rev_path = revocation_smt.path(our_idx)
 
     rev_siblings = [str(s) for s, _ in rev_path]

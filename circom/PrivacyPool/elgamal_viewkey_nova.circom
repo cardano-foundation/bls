@@ -40,7 +40,9 @@ template AuditViewkeyStep() {
     rAmt.in <== amount;
 
     // Twisted ElGamal encryption of `amount` to the auditor.
-    component enc = TwistedElGamalEncrypt(32);
+    // Full BLS12-381 scalar width so the generator's full-field `r` is in range
+    // (matches the Groth16 circuits' scalarBits = 253).
+    component enc = TwistedElGamalEncrypt(253);
     enc.message <== amount;
     enc.randomness <== r;
     enc.pk[0] <== pk_audit[0];

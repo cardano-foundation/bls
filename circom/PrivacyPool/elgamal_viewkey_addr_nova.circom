@@ -55,7 +55,7 @@ template AuditViewkeyAddrStep() {
     addr_limb1 <== l1;
 
     // Multi-message Twisted ElGamal to the auditor (shared randomness r).
-    component encAmt = TwistedElGamalEncrypt(32);
+    component encAmt = TwistedElGamalEncrypt(253);
     encAmt.message <== amount;
     encAmt.randomness <== r;
     encAmt.pk[0] <== pk_audit[0];
@@ -65,7 +65,7 @@ template AuditViewkeyAddrStep() {
     C[0] <== encAmt.C[0];
     C[1] <== encAmt.C[1];
 
-    component encA0 = TwistedElGamalEncrypt(32);
+    component encA0 = TwistedElGamalEncrypt(253);
     encA0.message <== addr_limb0;
     encA0.randomness <== r;
     encA0.pk[0] <== pk_audit[0];
@@ -75,7 +75,7 @@ template AuditViewkeyAddrStep() {
     C_a0[0] <== encA0.C[0];
     C_a0[1] <== encA0.C[1];
 
-    component encA1 = TwistedElGamalEncrypt(32);
+    component encA1 = TwistedElGamalEncrypt(253);
     encA1.message <== addr_limb1;
     encA1.randomness <== r;
     encA1.pk[0] <== pk_audit[0];

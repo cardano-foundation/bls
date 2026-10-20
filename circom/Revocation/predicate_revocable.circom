@@ -83,7 +83,9 @@ template PredicateRevocable(depth, revocation_depth) {
     signal claims_msg;
     claims_msg <== claimsHash.out;
 
-    // 4. Revocation non-membership: claims_msg is NOT in the revocation SMT
+    // 4. Revocation non-membership: claims_msg is NOT in the revocation SMT.
+    //    The SMT position is the low `revocation_depth` bits of claims_msg
+    //    (claims_msg % 2^revocation_depth); SMTNonMembership extracts them.
     component smt = SMTNonMembership(revocation_depth);
     smt.root <== revocation_root;
     smt.leaf_index <== claims_msg;

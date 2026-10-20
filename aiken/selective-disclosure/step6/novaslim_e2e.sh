@@ -126,7 +126,7 @@ for s in meta["spends"]:
     print(f"  {u}:")
     print(f"    amount          = {s['amount']}")
     print(f"    recipient_addr  = 0x{int(s['recipient_addr']):x}")
-    print(f"    commit(E,C,...) = {s['commitment'][:24]}...")
+    print(f"    commit(E,C,...) = E={str(s['E'][0])[:24]}... C={str(s['C'][0])[:24]}...")
 PY
 
 echo

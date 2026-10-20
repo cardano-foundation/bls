@@ -32,8 +32,11 @@ template SMTNonMembership(depth) {
         direction[i] * (direction[i] - 1) === 0;
     }
 
-    // 2. leaf_index must match the direction bits (little-endian bit decomposition)
-    component indexBits = Num2Bits(depth);
+    // 2. leaf_index's LOW `depth` bits must match the direction bits
+    //    (little-endian bit decomposition).  The SMT position is
+    //    claims_msg % 2^depth, so only the low bits are constrained; the
+    //    high bits of the field element are ignored.
+    component indexBits = Num2Bits(255);
     indexBits.in <== leaf_index;
     for (var i = 0; i < depth; i++) {
         indexBits.out[i] === direction[i];

@@ -96,14 +96,14 @@ template PredicateDelegatable(depth) {
     holder_pku <== holderPkMul.out[0];
     holder_pkv <== holderPkMul.out[1];
 
-    // 3. Compute delegation_msg = PoseidonT6(proxy_pku, proxy_pkv, delegation_expiry, 0, 0, 0)
+    // 3. Compute delegation_msg = PoseidonT5(proxy_pku, proxy_pkv, delegation_expiry, 0, 0)
+    //    (PoseidonBLS12_381_T6 is a 5-input permutation: in0..in4.)
     component delegationMsg = PoseidonBLS12_381_T6();
     delegationMsg.in0 <== proxy_pku;
     delegationMsg.in1 <== proxy_pkv;
     delegationMsg.in2 <== delegation_expiry;
     delegationMsg.in3 <== 0;
     delegationMsg.in4 <== 0;
-    delegationMsg.in5 <== 0;
     signal delegation_msg;
     delegation_msg <== delegationMsg.out;
 

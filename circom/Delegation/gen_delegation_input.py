@@ -50,7 +50,8 @@ def generate_delegation_input(depth: int = 2, seed: int = 1):
     delegation_expiry = 2030
 
     # ---- Delegation message ----
-    delegation_msg = poseidon_hash_t6(proxy_pk[0], proxy_pk[1], delegation_expiry, 0, 0, 0)
+    # PoseidonBLS12_381_T6 is a 5-input permutation (in0..in4).
+    delegation_msg = poseidon_hash_t6(proxy_pk[0], proxy_pk[1], delegation_expiry, 0, 0)
 
     # ---- Holder signs delegation_msg ----
     pk, R, S, r, k, r_raw, k_raw = eddsa_sign(holder_sk, delegation_msg)
