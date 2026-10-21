@@ -38,6 +38,9 @@ Artifacts go to `/tmp/sd_step1_{groth16,novaslim}/` (override with `OUT=`).
 The Groth16 script emits `predicate_vk.ak` (Aiken vk source to paste into the
 gate validator). The NovaSlim script emits `pred.ivc.cbor` + `pred_slim.proof.cbor`.
 
+<details>
+<summary><b>Representative timing (dev machine) (click to expand)</b></summary>
+
 ## Representative timing (dev machine)
 
 | Phase | Groth16 | NovaSlim |
@@ -53,3 +56,5 @@ gate validator). The NovaSlim script emits `pred.ivc.cbor` + `pred_slim.proof.cb
 > NovaSlim's fold/compress is dominant because the Predicate step circuit is a
 > **monolithic** re-proof of the whole predicate every step. Steps 2 & 3 use
 > tiny incremental step circuits and fold/compress in under 5 s.
+
+</details>

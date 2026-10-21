@@ -37,6 +37,9 @@ This repository demonstrates a complete, production-oriented **selective-disclos
 
 ---
 
+<details>
+<summary><b>Table of Contents (click to expand)</b></summary>
+
 ## Table of Contents
 
 1. [Overview](#overview)
@@ -60,6 +63,8 @@ This repository demonstrates a complete, production-oriented **selective-disclos
 
 ---
 
+</details>
+
 ## Overview
 
 This pattern enables a credential holder to prove they satisfy specific predicates (age, role, membership, etc.) without revealing:
@@ -73,6 +78,9 @@ The authorization to spend or access a resource comes from a **zero-knowledge pr
 > **Design principle: Data minimization.** Inspired by the W3C Verifiable Credentials data model and the Panther Protocol principle that "the protocol verifies only what's required — nothing more," the system follows the principle that the holder should share *no more information than strictly necessary*. In this design, the holder does not reveal individual claims at all — they reveal only the truth value of a predicate computed over those claims.
 
 ---
+
+<details>
+<summary><b>Design (click to expand)</b></summary>
 
 ## Design
 
@@ -138,6 +146,11 @@ Phase 2: Unlocking
 </details>
 
 ---
+
+</details>
+
+<details>
+<summary><b>Step 0: Proof System Implementation (Prerequisite) (click to expand)</b></summary>
 
 ## Step 0: Proof System Implementation (Prerequisite)
 
@@ -206,6 +219,11 @@ See [`nova-slim/README.md`](https://github.com/paweljakubas/nova-slim/blob/maste
 </details>
 
 ---
+
+</details>
+
+<details>
+<summary><b>Folding & Recursive Proofs (click to expand)</b></summary>
 
 ## Folding & Recursive Proofs
 
@@ -305,6 +323,11 @@ Both paths are implemented end-to-end. Choose Groth16 for minimal on-chain footp
 </details>
 
 ---
+
+</details>
+
+<details>
+<summary><b>Step 1: Predicate Proofs with Aiken (click to expand)</b></summary>
 
 ## Step 1: Predicate Proofs with Aiken
 
@@ -551,6 +574,11 @@ The redeemer contains the slim proof (~1.0 KiB for a 7.7K-constraint step circui
 
 ---
 
+</details>
+
+<details>
+<summary><b>Step 2: Twisted ElGamal Extension (click to expand)</b></summary>
+
 ## Step 2: Twisted ElGamal Extension
 
 <details>
@@ -707,6 +735,11 @@ The final folded state equals `−amount` (sum of `new_limb − old_limb` over a
 
 ---
 
+</details>
+
+<details>
+<summary><b>Step 3: Privacy Pools & Shielded Transactions (click to expand)</b></summary>
+
 ## Step 3: Privacy Pools & Shielded Transactions
 
 <details>
@@ -810,6 +843,11 @@ The folded chain provably transforms the input note's commitment into the Merkle
 
 ---
 
+</details>
+
+<details>
+<summary><b>Step 3+ — F5: Scaling to Multi-User with Batch Verification (click to expand)</b></summary>
+
 ## Step 3+ — F5: Scaling to Multi-User with Batch Verification
 
 <details>
@@ -911,6 +949,11 @@ For the complete implementation-by-implementation comparison, measured numbers, 
 
 ---
 
+</details>
+
+<details>
+<summary><b>Step 4: Compliant Shielded Transfer (Viewing-Key Auditor Reveal) (click to expand)</b></summary>
+
 ## Step 4: Compliant Shielded Transfer (Viewing-Key Auditor Reveal)
 
 <details>
@@ -984,6 +1027,11 @@ comparison): `privacy_pool_viewable.circom` proves `VALID` with the auditor reve
 </details>
 
 ---
+
+</details>
+
+<details>
+<summary><b>Step 5: Full Auditor Reveal (Amount + Recipient Address) (click to expand)</b></summary>
 
 ## Step 5: Full Auditor Reveal (Amount + Recipient Address)
 
@@ -1071,6 +1119,11 @@ auditor revealing `in_amount = 100` and `recipient_addr = 0x1234`;
 </details>
 
 ---
+
+</details>
+
+<details>
+<summary><b>Step 6: Multi-User Batch Pool with Full Auditor Reveal (click to expand)</b></summary>
 
 ## Step 6: Multi-User Batch Pool with Full Auditor Reveal
 
@@ -1169,6 +1222,11 @@ See [`step6/README.md`](step6/README.md) for the full comparison table and on-ch
 
 ---
 
+</details>
+
+<details>
+<summary><b>Runnable e2e Scripts & Timing (click to expand)</b></summary>
+
 ## Runnable e2e Scripts & Timing
 
 <details>
@@ -1245,6 +1303,11 @@ The script demonstrates how credential eligibility (Step 1) and confidential amo
 
 ---
 
+</details>
+
+<details>
+<summary><b>Step 7: Revocable Predicate Proofs (Expiry + Revocation) (click to expand)</b></summary>
+
 ## Step 7: Revocable Predicate Proofs (Expiry + Revocation)
 
 <details>
@@ -1292,6 +1355,11 @@ See [`step7/README.md`](step7/README.md) for the full comparison and security no
 </details>
 
 ---
+
+</details>
+
+<details>
+<summary><b>Step 8: Anonymous Delegation & Proxy Re-Encryption (click to expand)</b></summary>
 
 ## Step 8: Anonymous Delegation & Proxy Re-Encryption
 
@@ -1344,6 +1412,11 @@ See [`step8/README.md`](step8/README.md) for future extensions (threshold delega
 </details>
 
 ---
+
+</details>
+
+<details>
+<summary><b>Step 9: Recursive Proof Aggregation (Nova-Folded Batches) (click to expand)</b></summary>
 
 ## Step 9: Recursive Proof Aggregation (Nova-Folded Batches)
 
@@ -1405,6 +1478,11 @@ See [`step9/README.md`](step9/README.md) for the full architecture, estimated co
 
 </details>
 
+</details>
+
+<details>
+<summary><b>Comparison with CIP proposal: Native Confidential Transfers (click to expand)</b></summary>
+
 ## Comparison with CIP proposal: Native Confidential Transfers
 
 A parallel proposal aims to hide transaction amounts at the **ledger layer** using Pedersen commitments over ristretto255 and Bulletproofs range proofs. Our research demonstrates that **the same amount confidentiality is achievable within Cardano's existing BLS12-381 primitive set** — without new curves, without new proof systems, and without a hard fork.
@@ -1420,6 +1498,11 @@ A parallel proposal aims to hide transaction amounts at the **ledger layer** usi
 
 ---
 
+</details>
+
+<details>
+<summary><b>Compliance & Auditability (click to expand)</b></summary>
+
 ## Compliance & Auditability
 
 Privacy-by-default does not mean absence of oversight. Production deployments can layer compliance on top without weakening privacy.
@@ -1432,6 +1515,11 @@ Privacy-by-default does not mean absence of oversight. Production deployments ca
 | **Forensic Data Escrow** | Non-sensitive metadata encrypted to a governance multi-sig; decryptable under defined circumstances without exposing credential fields |
 
 ---
+
+</details>
+
+<details>
+<summary><b>Threat Model & Deployment (click to expand)</b></summary>
 
 ## Threat Model & Deployment
 
@@ -1459,6 +1547,11 @@ For full anonymity, even the transaction fee payer can be hidden via a **relayer
 
 ---
 
+</details>
+
+<details>
+<summary><b>References (click to expand)</b></summary>
+
 ## References
 
 1. A. De Salve et al., "Selective disclosure approaches in Self-Sovereign Identity: an experimental comparison," *IEEE Access*, 2025. DOI: [10.1109/ACCESS.2025.3649167](https://doi.org/10.1109/ACCESS.2025.3649167)
@@ -1470,3 +1563,5 @@ For full anonymity, even the transaction fee payer can be hidden via a **relayer
 7. A. De Salve, P. Mori, and L. Ricci, "A fully homomorphic encryption based scheme for verifiable credential selective disclosure," *IET Information Security*, 2018. DOI: [10.1049/iet-ifs.2018.5491](https://dl.acm.org/doi/10.1049/iet-ifs.2018.5491)
 8. **ZKPoSP** — V. Botta et al., "ZKPoSP: Post-Quantum Zero-Knowledge Proofs for Hierarchical Deterministic Wallets," IACR ePrint [2026/1508](https://eprint.iacr.org/2026/1508); CIP draft in [cardano-foundation/CIPs PR 1242](https://github.com/cardano-foundation/CIPs/pull/1242)
 9. CoinDesk Research, "Building the Zcash Machine: Tachyon and Quantum Readiness," June 2026. https://www.coindesk.com/research/building-the-zcash-machine-tachyon-and-quantum-readiness
+
+</details>

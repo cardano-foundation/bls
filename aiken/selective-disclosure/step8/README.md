@@ -4,6 +4,9 @@
 
 ---
 
+<details>
+<summary><b>What Step 8 adds (click to expand)</b></summary>
+
 ## What Step 8 adds
 
 | | Step 1 (Predicate) | **Step 8 (Delegatable)** |
@@ -14,6 +17,11 @@
 | **Proof size** | 192 B | 192 B (same) |
 
 ---
+
+</details>
+
+<details>
+<summary><b>Architecture (click to expand)</b></summary>
 
 ## Architecture
 
@@ -51,6 +59,8 @@ The circuit verifies:
 
 ---
 
+</details>
+
 ## Run
 
 ### Groth16
@@ -82,6 +92,9 @@ Same as Step 1. NovaSlim additionally needs the `nova-slim` CLI.
 
 ---
 
+<details>
+<summary><b>Representative timing (dev machine) (click to expand)</b></summary>
+
 ## Representative timing (dev machine)
 
 | Phase | Groth16 | NovaSlim (1 step) |
@@ -95,8 +108,15 @@ Same as Step 1. NovaSlim additionally needs the `nova-slim` CLI.
 
 ---
 
+</details>
+
+<details>
+<summary><b>Future extensions (click to expand)</b></summary>
+
 ## Future extensions
 
 - **Threshold delegation**: M-of-N proxies via Shamir secret sharing of `holder_sk`
 - **Hierarchical delegation**: proxy can sub-delegate with attenuated rights
 - **Revocable delegation**: add delegation tokens to the revocation SMT (Step 7)
+
+</details>

@@ -38,6 +38,11 @@ To run only tests matching the string `foo`, do:
 aiken check -m foo
 ```
 
+<details>
+<summary><b>Resources (click to expand)</b></summary>
+
 ## Resources
 
 Find more on [Aiken's user manual](https://aiken-lang.org) and the recommended library for the scheme [ilap/bls](https://github.com/ilap/bls).
+
+</details>

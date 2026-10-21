@@ -13,6 +13,9 @@ Cardano uses Blake2b-224 for address and key hashing, so an in-circuit gadget is
 
 ---
 
+<details>
+<summary><b>Circuit structure (click to expand)</b></summary>
+
 ## Circuit structure
 
 | File | Purpose | Source |
@@ -32,6 +35,11 @@ The upstream `hash-circuits` repo only provides `Blake2b_bytes` with `nn = 32` (
 Everything else (the `CompressionF` function, the 12 rounds, the IV, the sigma permutation) is unchanged.
 
 ---
+
+</details>
+
+<details>
+<summary><b>Compilation results (click to expand)</b></summary>
 
 ## Compilation results
 
@@ -53,6 +61,11 @@ circom blake2b224_preimage.circom --r1cs --wasm --sym --prime bls12381
 
 ---
 
+</details>
+
+<details>
+<summary><b>Witness generation (click to expand)</b></summary>
+
 ## Witness generation
 
 ```bash
@@ -70,6 +83,8 @@ hash hex   = 491112dd01155c07dab485f71b572e0cae759e2cd38b1c0e97554297
 ```
 
 ---
+
+</details>
 
 ## End-to-end pipeline
 
@@ -165,6 +180,9 @@ The exported Aiken source can be pasted into `aiken/groth16/lib/groth16/verifier
 
 ---
 
+<details>
+<summary><b>Files (click to expand)</b></summary>
+
 ## Files
 
 ```
@@ -181,9 +199,16 @@ Blake2b224Preimage/
 
 ---
 
+</details>
+
+<details>
+<summary><b>References (click to expand)</b></summary>
+
 ## References
 
 - [bkomuves/hash-circuits](https://github.com/bkomuves/hash-circuits) — Blake2b Circom circuits (MIT License)
 - [RFC 7693](https://tools.ietf.org/html/rfc7693) — The BLAKE2 Cryptographic Hash and Message Authentication Code (MAC)
 - [Cardano crypto specs](https://github.com/IntersectMBO/cardano-crypto) — Key derivation and Blake2b-224 usage in Cardano wallets
 - [`circom/README.md`](../README.md) — Parent directory with full pipeline documentation
+
+</details>

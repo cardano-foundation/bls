@@ -11,6 +11,9 @@ The leaf commitment binds all three secrets together: `commitment = MiMC(MiMC(nu
 
 ---
 
+<details>
+<summary><b>Circuit design (click to expand)</b></summary>
+
 ## Circuit design
 
 ```circom
@@ -61,6 +64,8 @@ template AnonymousAirdrop(depth, n) {
 **Private inputs:** `nonce`, `score`, `sibling[depth]`, `direction[depth]`
 
 ---
+
+</details>
 
 ## Full CLI flow
 
@@ -177,6 +182,9 @@ The assertion `gte.out === 1` fails because Bob's score (42) is less than the mi
 
 ---
 
+<details>
+<summary><b>Files (click to expand)</b></summary>
+
 ## Files
 
 | File | Description |
@@ -186,3 +194,5 @@ The assertion `gte.out === 1` fails because Bob's score (42) is less than the mi
 | `input.json` | Accepted witness input (Carol, score=120, minScore=100) |
 | `input_rejected.json` | Rejected witness input (Bob, score=42, minScore=100) |
 | `compute_airdrop_inputs.rs` | Rust helper to build SMT and compute inputs |
+
+</details>

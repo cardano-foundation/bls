@@ -26,6 +26,9 @@ authorized by the root, without the verifier ever seeing the key list. (Note: `A
 is a public input of the circuit, so this hides *how* a key is authorized, not
 *which* key — see [Drawbacks](#drawbacks).)
 
+<details>
+<summary><b>Why not just use `CardanoKeyOwnership`? (click to expand)</b></summary>
+
 ### Why not just use `CardanoKeyOwnership`?
 
 `CardanoKeyOwnership` answers one question: *"do you own this specific key `A`?"*.
@@ -49,6 +52,11 @@ The SMT version moves authorization from **a list of keys** to **a single root**
 - **Rotation and revocation are root updates.** Rebuild the tree without the key
   and publish a new root. Old proofs still verify against the old root.
 
+</details>
+
+<details>
+<summary><b>Drawbacks (click to expand)</b></summary>
+
 ### Drawbacks
 
 - **An extra trust anchor.** The root becomes the single point of authorization:
@@ -69,6 +77,11 @@ The SMT version moves authorization from **a list of keys** to **a single root**
   verifier sees exactly which public key is being proven; the proof hides how the
   key is authorized (leaf index / path), not which key it is. True key-hiding
   would require a design that does not publish `A`.
+
+</details>
+
+<details>
+<summary><b>What happens with the keys after the SMT is used? (click to expand)</b></summary>
 
 ### What happens with the keys after the SMT is used?
 
@@ -95,6 +108,8 @@ The SMT version moves authorization from **a list of keys** to **a single root**
 store, and check against the whole key list — and to receive the keys in the
 first place. With the SMT the authorized set is committed: the verifier needs only
 the root, and the keys never have to be revealed to it.
+
+</details>
 
 ### Workflow
 
@@ -181,6 +196,9 @@ the root, and the keys never have to be revealed to it.
    # → Verified 255 steps: slim sumcheck proof OK, state chain OK
    #    (no opening proofs — off-chain audit trail)
 ```
+
+<details>
+<summary><b>End-to-end flow — Implementation 7 (monolithic + h-scalar) (click to expand)</b></summary>
 
 ### End-to-end flow — Implementation 7 (monolithic + h-scalar)
 
@@ -294,6 +312,11 @@ snarkjs wchk cardano_key_ownership_smt.r1cs witness.wtns
 > ~2.9 s; the step-chain flow is documented below, and the two flows are
 > benchmarked in the [Benchmarks](#benchmarks--pre-nova-vs-nova) section.
 
+</details>
+
+<details>
+<summary><b>End-to-end flow — Implementation 8 (Nova step-chain) (click to expand)</b></summary>
+
 ### End-to-end flow — Implementation 8 (Nova step-chain)
 
 [`cardano_key_ownership_smt_nova.circom`](cardano_key_ownership_smt_nova.circom)
@@ -401,6 +424,11 @@ EOF
 
 > **Note:** `nova` verification here is still **O(N)** — it re-checks every step
 > proof. The O(1)-verify path is shipped as [Implementation 9](../../nova-prover/README.md#implementation-9--nifs--groth16-compression-default): `nova fold --nifs` → `trusted-setup ceremony-dev` on the emitted compression circuit → `nova compress` → `nova verify --compression-proof`. For a **transparent** O(1)-verify path with no ceremony, see [Implementation 10](../../nova-prover/README.md#implementation-10--nifs--sumcheck-compression-superseded-by-impl-11): `nova fold --nifs` → `nova compress --sumcheck` → `nova verify --sumcheck-proof` — no proving or verifying key needed for compression. For on-chain proof sizes under 16 KiB, see **Implementation 11** (slim proofs): `nova compress --slim` → `nova verify --slim-proof`.
+
+</details>
+
+<details>
+<summary><b>CLI vs shell/Python (click to expand)</b></summary>
 
 ## CLI vs shell/Python
 
@@ -659,6 +687,11 @@ See [`lattice-prover/README.md`](../../lattice-prover/README.md) for full Lova d
 
 </details>
 
+</details>
+
+<details>
+<summary><b>Design (click to expand)</b></summary>
+
 ## Design
 
 ### Circuit Structure
@@ -789,6 +822,11 @@ function. The circuit and the Rust CLI use the same round constants (see
    (see the [Impl 8 vs Impl 9 comparison](#end-to-end-comparison--implementation-8-step-chain-vs-implementation-9-nifs)).
    The SMT membership part remains in the monolithic circuit.
 
+</details>
+
+<details>
+<summary><b>Comparison with Existing Approaches (click to expand)</b></summary>
+
 ## Comparison with Existing Approaches
 
 | Feature | CardanoKeyOwnership | CardanoKeyOwnershipSMT |
@@ -803,3 +841,5 @@ function. The circuit and the Rust CLI use the same round constants (see
 | Set rotation / revocation | n/a (per-key proof) | Root update (rebuild SMT) |
 | Needs a key registry | ✗ | ✓ (path + root) |
 | SMT CLI integration | ✗ | ✓ |
+
+</details>

@@ -22,6 +22,9 @@ Thanks to that verification is quicker and has lower byte imprint.
 
 We can have two cases here,
 
+<details>
+<summary><b>1. Each __msg_i__ is unique (click to expand)</b></summary>
+
 ## 1. Each __msg_i__ is unique
 
 Basic primitives are **secure** and one can use
@@ -29,6 +32,11 @@ Basic primitives are **secure** and one can use
 ```aiken
         use bls/g1/basic.{aggregate, aggregate_verify, sign}
 ```
+
+</details>
+
+<details>
+<summary><b>2. There is the duplication of __msg_i__ for some i's or we do not know if it is the case (click to expand)</b></summary>
 
 ## 2. There is the duplication of __msg_i__ for some i's or we do not know if it is the case
 
@@ -65,6 +73,11 @@ If one want to see the problem there is `core_aggregate_verify` low level functi
 
 There are two other mitigations at hand, namely PoP and augmented signing.
 
+</details>
+
+<details>
+<summary><b>Augmented BLS signing mode (click to expand)</b></summary>
+
 ## Augmented BLS signing mode
 
 In order to avoid `rogue-key attack` the signed message altered to the following:
@@ -88,6 +101,11 @@ Thanks to that, the following verification is possible:
         aug_bls.aggregate_verify([pk1,pk2,pk3], [message,message,message], sig_aggr)
 ```
 
+</details>
+
+<details>
+<summary><b>Proof of Possession (PoP) BLS (click to expand)</b></summary>
+
 ## Proof of Possession (PoP) BLS
 
 PoP BLS is augmenting the BLS scheme with additional goodies.
@@ -99,6 +117,11 @@ In order to enable this, we need to import
         use bls/g1/pop.{aggregate, aggregate_verify, pop_prove, pop_verify, sign}
 ```
 
+</details>
+
+<details>
+<summary><b>Summary of situation (click to expand)</b></summary>
+
 ## Summary of situation
 
 | Scenario | Basic BLS | Augmented BLS	| PoP BLS |
@@ -107,6 +130,7 @@ In order to enable this, we need to import
 | not unique messages + `aggregate_verify([pks],[msgs],sig_aggr)` |	❌ unsafe as validation is not passing |	✅ safe |	✅ safe |
 | unique messages + `aggregate_verify([pks],[msgs],sig_aggr)` |	✅ safe	| ✅ safe	| ✅ safe |
 
+</details>
 
 ## Executive summary with IETF recommendations
 
@@ -134,6 +158,11 @@ To run only tests matching the string `foo`, do:
 aiken check -m foo
 ```
 
+<details>
+<summary><b>Resources (click to expand)</b></summary>
+
 ## Resources
 
 Find more on [Aiken's user manual](https://aiken-lang.org) and the recommended library for the scheme [ilap/bls](https://github.com/ilap/bls).
+
+</details>

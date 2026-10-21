@@ -42,6 +42,9 @@ documented in the parent README.
 | [`transfer.circom`](transfer.circom) | Single monolithic transfer: `newBalance == oldBalance − amount`, `amount` and `newBalance` range-checked to `[0, 2^16)`. |
 | [`twisted_elgamal_nova.circom`](twisted_elgamal_nova.circom) | **Nova IVC step** — processes one `u16` limb per step and accumulates `state_out = state_in + (new_limb − old_limb)`, with both limbs range-checked. `n_pub_in == n_pub_out == 1`. |
 
+<details>
+<summary><b>Design notes / caveats (click to expand)</b></summary>
+
 ## Design notes / caveats
 
 - **Message space**: the plaintext is recovered by brute-forcing `m·H`, so the
@@ -53,6 +56,8 @@ documented in the parent README.
 - **Range via `Num2Bits`**: each limb is decomposed with `Num2Bits(16)`, which
   constrains every bit to `{0,1}` and thereby bounds the limb to `[0, 2^16)`,
   so no separate range-proof template is required.
+
+</details>
 
 ## Compile
 
@@ -69,6 +74,9 @@ circom twisted_elgamal.circom --r1cs --wasm --sym --prime bls12381 \
 
 `--prime bls12381` **must** match the Rust prover / Nova verifier curve.
 
+<details>
+<summary><b>Size (click to expand)</b></summary>
+
 ## Size
 
 | Circuit | Non-linear constraints |
@@ -77,6 +85,8 @@ circom twisted_elgamal.circom --r1cs --wasm --sym --prime bls12381 \
 | `limb_decompose` (8 limbs) | 128 |
 | `transfer` | 32 |
 | `twisted_elgamal_nova` (1 step) | 32 |
+
+</details>
 
 ## Nova e2e
 

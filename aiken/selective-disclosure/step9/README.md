@@ -6,6 +6,9 @@
 
 ---
 
+<details>
+<summary><b>What Step 9 adds (click to expand)</b></summary>
+
 ## What Step 9 adds
 
 | | Step 6 (Batch) | **Step 9 (Meta-Batch)** |
@@ -17,6 +20,11 @@
 | **Proof size** | 192 B × N | **~0.4–1.5 KiB** (independent of N) |
 
 ---
+
+</details>
+
+<details>
+<summary><b>Architecture (click to expand)</b></summary>
 
 ## Architecture
 
@@ -84,6 +92,8 @@ Alternative approaches being explored:
 
 ---
 
+</details>
+
 ## Run
 
 ```bash
@@ -101,6 +111,9 @@ This runs the full pipeline:
 
 ---
 
+<details>
+<summary><b>Files (click to expand)</b></summary>
+
 ## Files
 
 | File | Purpose |
@@ -110,6 +123,8 @@ This runs the full pipeline:
 | `step9/groth16_nova_meta_e2e.sh` | Full e2e pipeline |
 
 ---
+
+</details>
 
 ## Prerequisites
 
@@ -129,6 +144,9 @@ The on-chain verifier is unchanged — it checks the same sumcheck protocol rega
 
 ---
 
+<details>
+<summary><b>Representative timing (dev machine, epochSize=8) (click to expand)</b></summary>
+
 ## Representative timing (dev machine, epochSize=8)
 
 | Phase | Time | Notes |
@@ -143,6 +161,11 @@ The on-chain verifier is unchanged — it checks the same sumcheck protocol rega
 
 ---
 
+</details>
+
+<details>
+<summary><b>Roadmap to completion (click to expand)</b></summary>
+
 ## Roadmap to completion
 
 | Milestone | Status | Effort |
@@ -156,9 +179,16 @@ The on-chain verifier is unchanged — it checks the same sumcheck protocol rega
 
 ---
 
+</details>
+
+<details>
+<summary><b>Comparison with earlier steps (click to expand)</b></summary>
+
 ## Comparison with earlier steps
 
 | Step | What it proves | Scale | Ceremony? |
 |------|---------------|-------|-----------|
 | 6 | N spends in one batch | N ≤ ~16 per tx | per-circuit |
 | **9** | **Unbounded spends folded to one proof** | **10K+ per day** | **none** |
+
+</details>

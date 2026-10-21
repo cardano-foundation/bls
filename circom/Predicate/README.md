@@ -38,6 +38,9 @@ The signature is verified **third-party**: the holder never learns the issuer's 
 
 ---
 
+<details>
+<summary><b>Circuit design (click to expand)</b></summary>
+
 ## Circuit design
 
 `predicate.circom` defines two reusable templates:
@@ -55,6 +58,8 @@ The signature is verified **third-party**: the holder never learns the issuer's 
 > **Note:** `claims_msg` is a **private** intermediate signal — it is computed in-circuit from the field values and used as the EdDSA message. It does not appear on-chain, so it cannot be used to brute-force the fields.
 
 ---
+
+</details>
 
 ## Full CLI flow
 
@@ -143,6 +148,9 @@ Verification result: VALID
 
 ---
 
+<details>
+<summary><b>Nova IVC step circuit (click to expand)</b></summary>
+
 ## Nova IVC step circuit
 
 `predicate_nova.circom` wraps the whole `Predicate(depth)` into a Nova step
@@ -184,6 +192,11 @@ predicate can later be composed with other folded step circuits in one IVC).
 
 ---
 
+</details>
+
+<details>
+<summary><b>Files (click to expand)</b></summary>
+
 ## Files
 
 | File | Description |
@@ -193,3 +206,5 @@ predicate can later be composed with other folded step circuits in one IVC).
 | `predicate_nova.circom` | Nova IVC step circuit (monolithic, depth = 2) |
 | `gen_predicate_input.py` | Issuer + holder witness generator (reuses `EdDSAJubJub/gen_test_vectors.py`) |
 | `input.json` | Valid witness input (holder, approved, adult) |
+
+</details>

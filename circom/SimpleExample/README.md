@@ -138,9 +138,12 @@ test verify_real_circom_proof() {
 }
 ```
 
-See the [`aiken/groth16` README](../../../../aiken/groth16/README.md) §**Circom pipeline** for a complete walkthrough including the parameterized API and validator-level integration.
+See the [`aiken/groth16` README](../../aiken/groth16/README.md) §**Circom pipeline** for a complete walkthrough including the parameterized API and validator-level integration.
 
 ---
+
+<details>
+<summary><b>Files in this directory (click to expand)</b></summary>
 
 ## Files in this directory
 
@@ -151,3 +154,5 @@ See the [`aiken/groth16` README](../../../../aiken/groth16/README.md) §**Circom
 | `multiplier.r1cs` | Generated R1CS (Step 1 output) |
 | `multiplier.wasm` | Generated witness calculator (Step 1 output) |
 | `witness.wtns` | Generated witness (Step 2 output) |
+
+</details>

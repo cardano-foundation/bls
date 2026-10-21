@@ -34,6 +34,9 @@ Overrides: `DEPTH=` (both). Artifacts in `/tmp/sd_step3_{groth16,novaslim}/`
 
 Groth16 emits `pp_vk.ak`; NovaSlim emits `pp.ivc.cbor` + `pp_slim.proof.cbor`.
 
+<details>
+<summary><b>Representative timing (dev machine) (click to expand)</b></summary>
+
 ## Representative timing (dev machine)
 
 | Phase | Groth16 | NovaSlim (4 steps) |
@@ -45,3 +48,5 @@ Groth16 emits `pp_vk.ak`; NovaSlim emits `pp.ivc.cbor` + `pp_slim.proof.cbor`.
 | prove / fold+compress | 2.5 s | 2.7 + 4.5 s |
 | verify | 0.05 s | 0.01 s |
 | **proof size** | **192 B** | **610 B** |
+
+</details>

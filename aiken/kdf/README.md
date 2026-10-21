@@ -117,9 +117,17 @@ let pk2 = keys.pk_from_sk_bls12_381(sk2)
 An Aiken-based implementation of [RFC 5869](https://datatracker.ietf.org/doc/html/rfc5869)
 (HMAC-based Extract-and-Expand Key Derivation Function).
 
+<details>
+<summary><b>Module (click to expand)</b></summary>
+
 ## Module
 
 - `kdf/hkdf/hkdf` – single public function `kdf`.
+
+</details>
+
+<details>
+<summary><b>Usage (click to expand)</b></summary>
 
 ## Usage
 
@@ -139,6 +147,11 @@ let okm = hkdf.kdf(
 `kdf` internally performs **Extract** (salt + IKM → PRK) followed by **Expand**
 (PRK + info → OKM).  The salt and info are both optional; pass empty bytearrays
 if you do not need them.
+
+</details>
+
+<details>
+<summary><b>Budget considerations (click to expand)</b></summary>
 
 ## Budget considerations
 
@@ -179,6 +192,11 @@ which is negligible on-chain.  Even an 82-byte output (2 blocks, SHA-256) is sti
 under ~30 M CPU units.  This makes HKDF suitable for validator scripts where you
 need to derive session keys or child keys from a shared secret.
 
+</details>
+
+<details>
+<summary><b>Test vectors (click to expand)</b></summary>
+
 ## Test vectors
 
 <details>
@@ -199,9 +217,19 @@ need to derive session keys or child keys from a shared secret.
 An Aiken-based implementation of the PBKDF2 scheme as outlined in
 [RFC 8018, Section 5.2](https://datatracker.ietf.org/doc/html/rfc8018#page-11).
 
+</details>
+
+<details>
+<summary><b>Module (click to expand)</b></summary>
+
 ## Module
 
 - `kdf/pbkdf2/pbkdf2` – single public function `kdf`.
+
+</details>
+
+<details>
+<summary><b>Usage (click to expand)</b></summary>
 
 ## Usage
 
@@ -221,6 +249,11 @@ let dk = pbkdf2.kdf(
 The hash algorithm is selected via the `HashAlgo` enum; the implementation
 is completely generic.  Swapping to a different hash only requires changing
 the first argument.
+
+</details>
+
+<details>
+<summary><b>Budget considerations (click to expand)</b></summary>
 
 ## Budget considerations
 
@@ -288,6 +321,11 @@ per transaction (subject to change with protocol updates).  Keep in mind that th
 must be shared across all scripts, minting policies, and certificate validations in the
 same transaction.
 
+</details>
+
+<details>
+<summary><b>Test vectors (click to expand)</b></summary>
+
 ## Test vectors
 
 <details>
@@ -349,6 +387,11 @@ The test suite covers:
 We investigated adding [Argon2](https://www.rfc-editor.org/rfc/rfc9106.txt)
 (RFC 9106, Biryukov et al., "Argon2 Memory-Hard Function") as a third KDF.  The conclusion
 is that **Argon2 is fundamentally incompatible with on-chain execution on Cardano**.
+
+</details>
+
+<details>
+<summary><b>Why Argon2 cannot run on-chain (click to expand)</b></summary>
 
 ## Why Argon2 cannot run on-chain
 
@@ -421,6 +464,11 @@ Argon2 uses `p` parallel lanes that synchronize between slices.  Aiken/Plutus is
 **single-threaded**.  We'd need to compute lanes sequentially, further increasing
 execution time.
 
+</details>
+
+<details>
+<summary><b>On-chain feasibility (click to expand)</b></summary>
+
 ## On-chain feasibility
 
 <details>
@@ -443,6 +491,11 @@ Even if fully implemented, Argon2 with the **smallest viable parameters** (8 KiB
 - Consume billions of CPU units
 - Provide **no meaningful security** (8 KiB is trivially attacked)
 
+</details>
+
+<details>
+<summary><b>Balloon hashing (not implemented) (click to expand)</b></summary>
+
 ## Balloon hashing (not implemented)
 
 We also briefly investigated **[Balloon hashing](https://eprint.iacr.org/2016/027)** (Bonneau et al., 2016) as a simpler
@@ -460,6 +513,11 @@ consume a significant fraction of the on-chain memory budget while offering only
 marginal resistance to hardware-accelerated attacks.  Like Argon2, it belongs
 **off-chain**.
 
+</details>
+
+<details>
+<summary><b>Verdict (click to expand)</b></summary>
+
 ## Verdict
 
 **Memory-hard KDFs (Argon2, Balloon hashing, Catena, etc.) should NOT be implemented
@@ -474,3 +532,5 @@ architecture is:
 For on-chain key derivation, **HKDF** (fast, low memory, secure for high-entropy inputs)
 and **PBKDF2** with very low iteration counts (expensive but manageable for small inputs)
 are the only viable options in the current Plutus V3 environment.
+
+</details>

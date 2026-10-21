@@ -89,6 +89,9 @@ inputs and outputs at every step, see
 
 ---
 
+<details>
+<summary><b>Command reference (click to expand)</b></summary>
+
 ## Command reference
 
 ### `trusted-setup` — ceremonies (separate CLI)
@@ -258,6 +261,11 @@ The output contains the `alpha_g1`, `beta_g2`, `gamma_g2`, `delta_g2`, `ic` list
 
 ---
 
+</details>
+
+<details>
+<summary><b>Complete workflows (click to expand)</b></summary>
+
 ## Complete workflows
 
 ### Dev ceremony workflow
@@ -419,6 +427,11 @@ cargo run --release -- verify \
 > **Note:** This uses deterministic test values (`tau=3`, `alpha=5`, etc.) and skips the ceremony step. For large circuits, use `--sparse` (Implementation 6) to avoid dense matrix allocation.
 
 ---
+
+</details>
+
+<details>
+<summary><b>End-to-end walkthrough — Circom circuit to on-chain verification (click to expand)</b></summary>
 
 ## End-to-end walkthrough — Circom circuit to on-chain verification
 
@@ -607,6 +620,11 @@ See the Aiken verifier's [`README.md`](../../aiken/groth16/README.md) for the fu
 
 ---
 
+</details>
+
+<details>
+<summary><b>Build (click to expand)</b></summary>
+
 ## Build
 
 ```bash
@@ -662,6 +680,11 @@ cargo build --release
 
 ---
 
+</details>
+
+<details>
+<summary><b>Proof serialization format (click to expand)</b></summary>
+
 ## Proof serialization format
 
 The proof files produced by this CLI use **arkworks' standard compressed serialization**, defined by the `CanonicalSerialize` / `CanonicalDeserialize` traits from the `ark-serialize` crate. This is the same format used by the arkworks `groth16` module internally.
@@ -704,6 +727,11 @@ For human inspection, use `hexdump -C proof.bin` or `xxd proof.bin`.
 
 ---
 
+</details>
+
+<details>
+<summary><b>Proving key format (click to expand)</b></summary>
+
 ## Proving key format
 
 The trusted-setup CLI produces two formats. The **preferred** one (group elements only) is what `trusted-setup ceremony-dev` and `trusted-setup phase2 finalize` output today.
@@ -722,9 +750,19 @@ See [`groth16-prover/docs/MPC_Ceremony_Research.md`](../../groth16-prover/docs/M
 
 ---
 
+</details>
+
+<details>
+<summary><b>Formal verification (click to expand)</b></summary>
+
 ## Formal verification
 
 The underlying `trusted-setup` library carries a [Verus](https://github.com/verus-lang/verus) formal-verification layer, but its verified surface is narrow: the Phase-2 helpers `next_power_of_two_u64` and `log2_u64` are proved, while eighteen `spec_*` contracts over ark-typed code are asserted rather than proved, and the parsers are not covered at all. All specs are feature-gated and do not affect this CLI's runtime behavior. See the [formal-verification document](../../FormalVerification.md) and the [`trusted-setup` README](../trusted-setup/README.md#formal-verification) for details.
+
+</details>
+
+<details>
+<summary><b>CLI test suite (click to expand)</b></summary>
 
 ## CLI test suite
 
@@ -769,3 +807,5 @@ Run the tests:
 cd clis/groth16
 cargo test
 ```
+
+</details>

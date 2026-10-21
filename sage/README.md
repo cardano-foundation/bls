@@ -6,6 +6,9 @@ This directory contains a **pure Sage** reference implementation of the same 3-c
 
 ---
 
+<details>
+<summary><b>Table of Contents (click to expand)</b></summary>
+
 ## Table of Contents
 
 - [Files](#files)
@@ -17,6 +20,8 @@ This directory contains a **pure Sage** reference implementation of the same 3-c
 - [Implementation 3 (Pippenger MSM — Rust only)](#implementation-3-pippenger-msm--rust-only)
 
 ---
+
+</details>
 
 ## Files
 
@@ -47,6 +52,9 @@ docker run --rm --entrypoint bash \
 ```
 
 ---
+
+<details>
+<summary><b>Implementation 1 (dense monomial) (click to expand)</b></summary>
 
 ## Implementation 1 (dense monomial)
 
@@ -79,6 +87,11 @@ Every step asserts its own correctness and prints the exact values that the Rust
 </details>
 
 ---
+
+</details>
+
+<details>
+<summary><b>Implementation 2 (FFT) (click to expand)</b></summary>
 
 ## Implementation 2 (FFT)
 
@@ -157,6 +170,11 @@ cargo run --bin print_qap_engines
 </details>
 
 ---
+
+</details>
+
+<details>
+<summary><b>Bit-for-bit Rust ↔ Sage verification (click to expand)</b></summary>
 
 ## Bit-for-bit Rust ↔ Sage verification
 
@@ -241,6 +259,11 @@ The witness polynomials `l(x) = Σ a_i·u_i(x)`, `r(x)`, `o(x)` and the quotient
 
 ---
 
+</details>
+
+<details>
+<summary><b>What the comparison proves (click to expand)</b></summary>
+
 ## What the comparison proves
 
 1. **The Rust FFT implementation is correct.** It uses `ark_poly::GeneralEvaluationDomain` (Cooley-Tukey IFFT) and `DensePolynomial` division. The output matches an independent Sage implementation that uses a hand-written radix-2 butterfly and the same BLS12-381 field arithmetic.
@@ -249,6 +272,11 @@ The witness polynomials `l(x) = Σ a_i·u_i(x)`, `r(x)`, `o(x)` and the quotient
 4. **zeroj's FFT path is aligned with our FFT path.** zeroj also uses the roots-of-unity domain for QAP construction. The only remaining discrepancy between zeroj and Rust (IC bases, proof points A/B/C) is explained by the fact that zeroj uses a **different circuit** (larger constraint system, different variable ordering) even for the same multiplication chain.
 
 ---
+
+</details>
+
+<details>
+<summary><b>Implementation 3 (Pippenger MSM — Rust only) (click to expand)</b></summary>
 
 ## Implementation 3 (Pippenger MSM — Rust only)
 
@@ -260,6 +288,13 @@ See [`groth16-prover/README.md`](../groth16-prover/README.md) §"Implementation 
 
 ---
 
+</details>
+
+<details>
+<summary><b>License (click to expand)</b></summary>
+
 ## License
 
 Apache-2.0
+
+</details>

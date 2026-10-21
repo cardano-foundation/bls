@@ -2,6 +2,9 @@
 
 A privacy-preserving shielded-spend circuit (Zcash-style Merkle-path verification, adapted from Stanford CS251 Programming Project #4). It proves that a secret coin commitment is present in a public Merkle tree, without revealing which coin, where it sits in the tree, or the path used to find it.
 
+<details>
+<summary><b>Circuit Templates (click to expand)</b></summary>
+
 ## Circuit Templates
 
 ### `IfThenElse`
@@ -31,6 +34,11 @@ Composed from two `IfThenElse` gadgets; enforces `s ∈ {0, 1}`.
 
 ---
 
+</details>
+
+<details>
+<summary><b>Files (click to expand)</b></summary>
+
 ## Files
 
 | File | Description |
@@ -45,6 +53,8 @@ Composed from two `IfThenElse` gadgets; enforces `s ∈ {0, 1}`.
 | `input.json` | Pre-computed witness input for `spend_depth2` (nullifier `2`, depth `2`) |
 
 ---
+
+</details>
 
 ## Pipeline — step by step
 
@@ -224,7 +234,12 @@ All tests pass, including the new end-to-end `spend_depth2` test.
 
 ---
 
+<details>
+<summary><b>References (click to expand)</b></summary>
+
 ## References
 
 - [Stanford CS251 Project #4](https://securitylab.github.io/cs251-fall20/hw/proj4.pdf) — original assignment description
 - [circomlib](https://github.com/iden3/circomlib) — source of `mimc.circom`
+
+</details>

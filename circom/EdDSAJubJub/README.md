@@ -24,6 +24,9 @@ Knowledge of `pk = [sk]·G` is implicit: the challenge `k` binds `pk`, and the v
 
 **Circuit size:** 12 601 wires, 12 600 constraints.
 
+<details>
+<summary><b>Circuit architecture (click to expand)</b></summary>
+
 ## Circuit architecture
 
 The top-level template `EdDSAVerifyJubJub` (`eddsa_jubjub.circom`) performs seven steps:
@@ -65,6 +68,8 @@ Constants are generated with `generate_parameters_grain.sage` and inlined direct
 | `escalarmulfix_jubjub.circom` | Fixed-base scalar multiplication (windowed, Montgomery ladder) |
 | `scalarmul_jubjub.circom` | Variable-base scalar multiplication (segmented Montgomery ladder) |
 | `pointbits_jubjub.circom` | Point compression / decompression (zkcrypto encoding) |
+
+</details>
 
 ## End-to-end pipeline
 
@@ -175,6 +180,9 @@ cargo run --release -- export-vk \
 
 This produces an Aiken source file with 7 public inputs and the VK points in compressed form, ready for an on-chain Groth16 verifier.
 
+<details>
+<summary><b>Test vectors (click to expand)</b></summary>
+
 ## Test vectors
 
 | Variable | Value |
@@ -185,3 +193,5 @@ This produces an Aiken source file with 7 public inputs and the VK points in com
 | `k` (computed) | `PoseidonT6(R, pk, msg) mod l` |
 
 `test_pbk_only.circom` is a minimal test circuit that exercises the fixed-base scalar multiplication independently (no Poseidon hashing). Its full pipeline also passes end-to-end.
+
+</details>

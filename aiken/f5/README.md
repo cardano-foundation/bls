@@ -14,6 +14,9 @@
 
 ---
 
+<details>
+<summary><b>Table of Contents (click to expand)</b></summary>
+
 ## Table of Contents
 
 1. [Goals](#goals)
@@ -22,6 +25,8 @@
 4. [How it boosts selective disclosure](#how-it-boosts-selective-disclosure)
 
 ---
+
+</details>
 
 ## Goals
 
@@ -39,6 +44,9 @@ Take the selective-disclosure pipeline's single-user privacy pool (Step 3) and m
 **Non-goals:** cross-chain delivery (canonical-bridge stealth — the F5 research direction's L1→L2 story, dependent on ecosystem maturity); auditor reveal mechanics (already Steps 4/5 of the pipeline); new proof systems (both Groth16 Path A and NovaSlim Path B stay available, unchanged).
 
 ---
+
+<details>
+<summary><b>Rationale (click to expand)</b></summary>
 
 ## Rationale
 
@@ -59,6 +67,8 @@ The multi-user pool does **not** require batching to be demonstrated. With the c
 Steps 4/5 (auditor reveal of amount and recipient) layer oversight *on top of* a shielded pool. Those layers only matter at scale — a compliance story for two users is theater. F5 gives Steps 4/5 the deployment shape they were designed for: a busy, many-user pool where a designated auditor can decrypt designated fields.
 
 ---
+
+</details>
 
 ## Capabilities
 
@@ -128,6 +138,9 @@ Start condition for the aggregation follow-on: the batched verifier above is e2e
 
 ---
 
+<details>
+<summary><b>How it boosts selective disclosure (click to expand)</b></summary>
+
 ## How it boosts selective disclosure
 
 1. **Makes Step 3's headline property actually hold.** The selective-disclosure README's privacy table already claims *"anonymity set: all users who ever deposited."* F5 is the mechanism that makes that claim true at scale: the same Step-3 spend circuit, but shared so the set is large, concentrated in one pool, and growing with every deposit.
@@ -144,6 +157,11 @@ Start condition for the aggregation follow-on: the batched verifier above is e2e
 
 ---
 
+</details>
+
+<details>
+<summary><b>References (click to expand)</b></summary>
+
 ## References
 
 1. [`groth16-prover/docs/F5_RESEARCH_DIRECTION.md`](../../groth16-prover/docs/F5_RESEARCH_DIRECTION.md) — shielded cross-chain privacy pool; F5a constraint budget (~65K for 2-in/2-out at depth 20).
@@ -153,3 +171,5 @@ Start condition for the aggregation follow-on: the batched verifier above is e2e
 5. [`aiken/f5/pool/`](pool/) — faithful off-chain pool simulation (Poseidon Merkle root bookkeeping + nullifier log), 25 unit/golden/property tests, keyed witness JSONs identical to `gen_privacy_input.py`.
 6. [`aiken/f5/demo/`](demo/) — reproducible N-user end-to-end Groth16 demo (`f5_e2e_groth16.sh`, `gen_multi_input.py`).
 7. [`aiken/f5/bench/`](bench/) — scaling benchmark: users/depth × {witness, ceremony, prove, verify, batch-verify} wall + RSS, `results.tsv` and markdown table.
+
+</details>

@@ -27,6 +27,9 @@ The prover reveals only the commitment (a single field element). The actual valu
 
 ---
 
+<details>
+<summary><b>Circuit structure (click to expand)</b></summary>
+
 ## Circuit structure
 
 | Circuit | Template | What it does | Constraints |
@@ -39,6 +42,8 @@ The prover reveals only the commitment (a single field element). The actual valu
 Both circuits are instantiated with `n = 32`.
 
 ---
+
+</details>
 
 ## End-to-end pipeline (validated)
 
@@ -158,6 +163,9 @@ This is a common pitfall when using snarkjs with BLS12-381. Always use strings f
 
 ---
 
+<details>
+<summary><b>Files (click to expand)</b></summary>
+
 ## Files
 
 ```
@@ -176,9 +184,16 @@ Dependencies (imported from sibling directories / npm):
 
 ---
 
+</details>
+
+<details>
+<summary><b>References (click to expand)</b></summary>
+
 ## References
 
 - [circomlib](https://github.com/iden3/circomlib) — Standard Circom gadgets (`Num2Bits`, comparators)
 - [`PoseidonPreimage/README.md`](../PoseidonPreimage/README.md) — Our BLS12-381 Poseidon implementation
 - [Poseidon paper](https://eprint.iacr.org/2019/458.pdf) — Original Poseidon hash function specification
 - [ZeroJ PoseidonParamsBLS12_381T3](https://github.com/bloxbean/zeroj) — Round constants and MDS matrix source
+
+</details>

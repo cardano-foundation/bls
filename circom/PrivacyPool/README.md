@@ -30,12 +30,17 @@ Each output note gets a **fresh** nullifier/blinding; the pool records the two
 new output commitments and publishes the input's `nullifier_hash` (so it
 cannot be double-spent) — the semantics of a shielded pool.
 
+<details>
+<summary><b>Constraint counts (BLS12-381) (click to expand)</b></summary>
+
 ## Constraint counts (BLS12-381)
 
 | Circuit | Non-linear | Linear | Total |
 |---------|-----------|--------|-------|
 | `privacy_pool` (depth 4, n=32) | 2,785 | 4,302 | 7,087 |
 | `privacy_pool_nova` (1 step) | 245 | 390 | 635 |
+
+</details>
 
 ## Compile
 

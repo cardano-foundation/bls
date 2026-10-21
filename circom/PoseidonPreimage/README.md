@@ -22,6 +22,9 @@ Round constants and MDS matrix are from ZeroJ's `PoseidonParamsBLS12_381T3`, gen
 
 ---
 
+<details>
+<summary><b>Files (click to expand)</b></summary>
+
 ## Files
 
 | File | Description |
@@ -32,6 +35,8 @@ Round constants and MDS matrix are from ZeroJ's `PoseidonParamsBLS12_381T3`, gen
 | `input.json` | Sample witness input (`pre_image = 42`) |
 
 ---
+
+</details>
 
 ## Pipeline — step by step
 
@@ -159,6 +164,9 @@ Expected: all tests pass, including `test_verify_poseidon_preimage_proof`.
 
 ---
 
+<details>
+<summary><b>Computing your own hash commitment (click to expand)</b></summary>
+
 ## Computing your own hash commitment
 
 To create a proof with a different secret, compute the Poseidon hash off-chain and update `input.json`:
@@ -179,8 +187,15 @@ Then update `input.json`:
 
 ---
 
+</details>
+
+<details>
+<summary><b>References (click to expand)</b></summary>
+
 ## References
 
 - [Poseidon Paper](https://eprint.iacr.org/2019/458.pdf) — Grassi et al., 2021
 - [circomlib](https://github.com/iden3/circomlib) — reference Circom implementations (BN254-oriented)
 - [ZeroJ PoseidonParamsBLS12_381T3](https://github.com/bloxbean/zeroj) — BLS12-381 Poseidon parameters used here
+
+</details>

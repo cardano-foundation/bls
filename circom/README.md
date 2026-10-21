@@ -25,6 +25,9 @@ This directory contains Circom circuits that can be loaded by the Rust prover vi
 
 ---
 
+<details>
+<summary><b>The Circom pipeline (what each tool does) (click to expand)</b></summary>
+
 ## The Circom pipeline (what each tool does)
 
 The standard Circom workflow involves three distinct steps, each with a dedicated tool:
@@ -46,6 +49,8 @@ The standard Circom workflow involves three distinct steps, each with a dedicate
 > **Note:** `snarkjs` is **not** required for proving. It is only a convenience wrapper for running the Circom-generated WASM witness calculator. In principle you could replace it with any WASM runtime (or even re-implement the witness computation in Rust) as long as it outputs a valid `.wtns` file.
 
 ---
+
+</details>
 
 ## Prerequisites
 
@@ -82,6 +87,9 @@ circom multiplier.circom --r1cs --wasm --sym --prime bls12381
 #   multiplier.sym    — signal name map (human-readable)
 ```
 
+<details>
+<summary><b>Generating the witness (click to expand)</b></summary>
+
 ## Generating the witness
 
 Create `input.json` with the private inputs, then run the WASM witness calculator via `snarkjs`:
@@ -89,6 +97,11 @@ Create `input.json` with the private inputs, then run the WASM witness calculato
 ```bash
 snarkjs wtns calculate multiplier.wasm input.json witness.wtns
 ```
+
+</details>
+
+<details>
+<summary><b>Using in the Rust prover (click to expand)</b></summary>
 
 ## Using in the Rust prover
 
@@ -104,6 +117,8 @@ circuit.load_witness("circom/SimpleExample/witness.wtns").unwrap();
 The parsed `L`, `R`, `O` matrices and witness vector are then fed into any `QapEngine` + `Prover` combination, producing a proof.
 
 ---
+
+</details>
 
 ## End-to-end pipeline (CLI)
 

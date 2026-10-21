@@ -186,6 +186,9 @@ nova verify --ivc bundle.ivc.json --sumcheck-proof sumcheck.proof.json
 
 ---
 
+<details>
+<summary><b>Command reference (click to expand)</b></summary>
+
 ## Command reference
 
 Run any command with `--help` for full flag details:
@@ -309,6 +312,11 @@ nova verify --ivc bundle.ivc.json --verifying-key step.vk
 
 ---
 
+</details>
+
+<details>
+<summary><b>Complete workflows (click to expand)</b></summary>
+
 ## Complete workflows
 
 ### <u>Default — paper-faithful Nova (Groth16 compression)</u>
@@ -359,6 +367,11 @@ nova verify --ivc bundle.ivc.json --verifying-key step.vk
 
 ---
 
+</details>
+
+<details>
+<summary><b>Example: CardanoKeyOwnership circuit (click to expand)</b></summary>
+
 ## Example: CardanoKeyOwnership circuit
 
 > **Note:** `cardano_ed25519_ownership_nova` is an **example step circuit** — one
@@ -390,6 +403,13 @@ nova verify --ivc bundle.ivc.json --slim-proof slim.proof.json
 
 ---
 
+</details>
+
+<details>
+<summary><b>License (click to expand)</b></summary>
+
 ## License
 
 Apache-2.0
+
+</details>

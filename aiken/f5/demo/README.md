@@ -56,6 +56,9 @@ The relative advantage grows with N — the batch verifier avoids all but one
 final exponentiation (≈40% of each pairing), so the cost scales roughly as
 `(N+3)/N` instead of 4.  At N=8 it reaches ~5×; at N=16, ~8×.
 
+<details>
+<summary><b>Artifacts (click to expand)</b></summary>
+
 ## Artifacts
 
 | file | meaning |
@@ -66,8 +69,15 @@ final exponentiation (≈40% of each pairing), so the cost scales roughly as
 | `$OUT/scenario.json` | ordering, final root, spent nullifier hashes, per-user publics |
 | `$OUT/timings.tsv` | `<user> <phase> <wall_s> <maxrss_KiB>` |
 
+</details>
+
+<details>
+<summary><b>What comes next (click to expand)</b></summary>
+
 ## What comes next
 
 * Benchmarks: sweep users × {witness, ceremony, prove, verify, batch-verify,
   proof size, memory} across depths.
 * See `../bench/` for the multi-config sweep.
+
+</details>

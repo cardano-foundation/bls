@@ -1,6 +1,6 @@
 # lattice CLI
 
-Command-line interface for the Lova post-quantum folding scheme. This binary wraps the [`lattice-prover`](../lattice-prover/) crate, providing `fold`, `verify`, and `params` subcommands.
+Command-line interface for the Lova post-quantum folding scheme. This binary wraps the [`lattice-prover`](../../lattice-prover/) crate, providing `fold`, `verify`, and `params` subcommands.
 
 > **Status:** 🔬 Research / evaluation — part of the post-quantum proof system track.
 
@@ -85,6 +85,9 @@ lattice --lova verify --m 256 --n 128
 | `--n` | Witness dimension (default: 128) |
 | `--steps` | Number of folding steps (default: 8) |
 | `--rounds` | Decomposition rounds (default: 64) |
+
+<details>
+<summary><b>Benchmarks (click to expand)</b></summary>
 
 ## Benchmarks
 
@@ -271,6 +274,11 @@ Key observations:
 - **Performance scales with witness dimension** — the 4-limb BLS12-381 expansion multiplies the effective dimension by 4×.
 - **Large circuits need optimization** — module-SIS commitments or RNS decomposition could reduce the expansion overhead.
 
+</details>
+
+<details>
+<summary><b>Comparison with Nova (same host: `pure`, Intel Core i7-7500U @ 2.70 GHz, 2C/4T, 32 GiB RAM, Debian 12) (click to expand)</b></summary>
+
 ## Comparison with Nova (same host: `pure`, Intel Core i7-7500U @ 2.70 GHz, 2C/4T, 32 GiB RAM, Debian 12)
 
 | Metric | Nova NIFS (Impl 9/10) | Lova (EdDSA, 4-limb) | Lova (Ed25519, 4-limb) |
@@ -279,6 +287,11 @@ Key observations:
 | Verify/step | 7.87 s (sumcheck) | **0.03 ms** | 10.7 s |
 | Proof size | 472.8 KiB (sumcheck) | **31.9 KiB** | 16,273 KiB |
 | Post-quantum | No | **Yes** | **Yes** |
+
+</details>
+
+<details>
+<summary><b>Project structure (click to expand)</b></summary>
 
 ## Project structure
 
@@ -299,6 +312,11 @@ clis/lattice/
     └── benchmark_lova_r1cs.rs   # R1CS-to-Lova benchmark (real circuits)
 ```
 
+</details>
+
+<details>
+<summary><b>Next steps (click to expand)</b></summary>
+
 ## Next steps
 
 1. **Phase 2: RNS in commitment scheme** — instead of converting RNS→Z_{2^64} before folding, run the Ajtai commitment as 8 smaller matrix multiplications (each mod 32-bit prime). This eliminates the 2× dimension overhead and is the real RNS speedup.
@@ -306,6 +324,13 @@ clis/lattice/
 3. **Parallelization** — use Rayon for multi-core fold (matrix operations are embarrassingly parallel).
 4. **Generate more Airdrop witnesses** — only 5 available; need 37 for full IVC chain benchmark.
 
+</details>
+
+<details>
+<summary><b>License (click to expand)</b></summary>
+
 ## License
 
 Apache-2.0
+
+</details>

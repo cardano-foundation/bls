@@ -53,6 +53,9 @@ echo "$TEN" | ./target/release/bls12-381 add --g1 --point_right "$THIRTEEN"
 
 ---
 
+<details>
+<summary><b>Commands (click to expand)</b></summary>
+
 ## Commands
 
 Run `cargo run --help` or `cargo run -- <command> --help` for detailed information about each command.
@@ -660,3 +663,5 @@ The output matches the original case — the verifier accepts either assignment,
 
 This technique, known as a **quadratic arithmetic program**, is the foundation of zk-SNARKs and other advanced zero-knowledge protocols built on BLS12-381.
 ```
+
+</details>

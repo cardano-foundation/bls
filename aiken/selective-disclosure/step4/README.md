@@ -51,6 +51,9 @@ registered auditor; the on-chain gate can whitelist that public key.
 
 Groth16 also emits `pp_vk.ak`; NovaSlim emits `vk_slim.proof.cbor`.
 
+<details>
+<summary><b>Representative timing (dev machine) (click to expand)</b></summary>
+
 ## Representative timing (dev machine)
 
 | Phase | Groth16 | NovaSlim (1 step) |
@@ -62,3 +65,5 @@ Groth16 also emits `pp_vk.ak`; NovaSlim emits `vk_slim.proof.cbor`.
 | prove / fold+compress | 7.6 s | 11.4 + 24.4 s |
 | verify | 0.05 s | 0.01 s |
 | **proof size** | **192 B** | **684 B** |
+
+</details>

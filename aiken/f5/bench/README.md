@@ -41,6 +41,9 @@ verify ~4.5-4.9 MiB).
 (witness/prove/verify/batch-verify are totals across all proofs of the config;
 ceremony runs once per config.)
 
+<details>
+<summary><b>Reading the numbers (click to expand)</b></summary>
+
 ## Reading the numbers
 
 * **Ceremony is constant** (~7.2-8.6 s) regardless of user count — the trusted
@@ -62,6 +65,8 @@ ceremony runs once per config.)
 
 This table is the "before/after" capture for the F5 verification upgrade:
 individual verify vs Impl 11 batch verify on the same proofs.
+
+</details>
 
 ## Reproducing
 

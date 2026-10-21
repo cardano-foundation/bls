@@ -8,8 +8,8 @@ This repository is a working laboratory for that curve: the mathematics derived 
 
 | Layer | What it contains | Where |
 |-------|-------------------|-------|
-| **Mathematics** | Curve parameters, generators, pairings, the BLS signature scheme and its aggregation modes, VRF, KDF — derived and cross-checked in SageMath | [High level introduction](#high-level-introduction) · [SageMath mechanics](#bls12-381-and-bls-mechanics-in-sagemath) |
-| **Tooling** | Rust CLIs for the curve itself, Groth16 proving, setup ceremonies, and sparse Merkle trees | [Command-line tools](#command-line-tools) |
+| **Mathematics** | Curve parameters, generators, pairings, the BLS signature scheme and its aggregation modes, VRF, KDF — derived and cross-checked in SageMath | [Curve overview](#bls12-381-elliptic-curves-overview) · [BLS](#bls) · [SageMath mechanics](#bls12-381-and-bls-mechanics-in-sagemath) |
+| **Tooling** | Rust CLIs for the curve itself, Groth16 proving, setup ceremonies, and sparse Merkle trees | [Command-line tools](#command-line-tools) · [Groth16 with Aiken](#groth16-with-bls12-381-curve-primitives) |
 | **On-chain verification** | Aiken (Plutus V3) verifiers — Groth16 pairing checks, Nova sumcheck verifiers, VRF, KDF, key generation | [Aiken on-chain verification](#aiken-on-chain-verification) |
 | **Applications** | Selective disclosure, privacy pools, confidential transfers with auditor reveal, multi-user batch pools | [Spotlight: selective disclosure](#spotlight-selective-disclosure) |
 
@@ -50,6 +50,9 @@ Everything above ends in the same place: a proof that has to be checked *on-chai
 
 ### Spotlight: selective disclosure
 
+<details>
+<summary><b>Proving a predicate without revealing the credential — the nine-step pipeline (click to expand)</b></summary>
+
 The application this repository ultimately builds toward is **selective disclosure**: proving a predicate over a credential — *I am over 21*, *I am a doctor*, *I live in an approved jurisdiction* — **without revealing the credential's fields, the holder's identity, or the transaction address**. Authorization comes from a zero-knowledge proof checked by an Aiken gate script, not from a signature by a known address.
 
 The implementation is a nine-step pipeline ([`aiken/selective-disclosure`](./aiken/selective-disclosure/README.md)), and every step is runnable end-to-end from the repo root:
@@ -76,22 +79,27 @@ Two proof paths run side by side: **Groth16** (192-byte proofs, per-circuit trus
 
 The property that makes this interesting: the gate script checks only the *truth value* of a predicate. The holder's address never enters the datum or the redeemer, so any valid proof unlocks any UTxO at that gate — the anonymity set is every user of the gate, not the owner of the funds. Compliance is layered on top rather than baked in: Steps 4–6 encrypt the amount (and the address) to a designated auditor's viewing key, so oversight remains possible without weakening the privacy of the transaction graph.
 
-## Contents
+</details>
 
-1. [Introduction](#high-level-introduction)
-2. [BLS12-381 elliptic curve overview](#bls12-381-elliptic-curves-overview)
-3. [BLS12-381 and BLS mechanics in sagemath](#bls12-381-and-bls-mechanics-in-sagemath)
-4. [Linear and non-linear equations](#solving-easy-linear-and-non-linear-equations-using-BLS12-381-curve-primitives)
-5. [Groth16 with Aiken BLS12-381](#groth16-with-bls12-381-curve-primitives)
+<details>
+<summary><b>BLS12-381 elliptic curves overview (click to expand)</b></summary>
 
-The [Overview](#overview) above is the map of the repository: the CLIs, the
-on-chain verifiers, and the selective-disclosure pipeline. The chapters below
-are the deep dive behind it — the mathematics, and the Groth16 stack the
-applications are built on.
+## BLS12-381 elliptic curves overview
 
-## High level introduction
+The same three letters, **BLS**, stand here for Barreto-Lynn-Scott — the authors of the curve family, not of the signature scheme of the next section, which takes the same abbreviation from Boneh-Lynn-Shacham. The family of curves was introduced in this [seminal paper](https://eprint.iacr.org/2002/088.pdf).
+BLS12-381 curve was proposed by [Sean Bowe in the context of ZCash](https://electriccoin.co/blog/new-snark-curve/).
+The usage of this curve was adopted in number of other blockchains, like Ethereum 2.0, Skale, Algorand, Dfinity or Chia.
+There is also support of this curve in Cardano, see for example, [cardano-crypto-class](https://github.com/IntersectMBO/cardano-base/tree/master/cardano-crypto-class) and the curve is exposed also in [aiken from 3.0 release](https://aiken-lang.github.io/stdlib/aiken/crypto.html). The great introduction and motivation for this curve was written in the blog post [BLS12-381 For The Rest Of Us](https://hackmd.io/@benjaminion/bls12-381#Motivation).
+It is especially worth mentioning and repeating that the elliptic curve BLS12-381 is currently in [IETF draft revision 12](https://datatracker.ietf.org/doc/draft-irtf-cfrg-pairing-friendly-curves/12/) stage of ratification and also included in [standards directory](standards/draft-irtf-cfrg-pairing-friendly-curves-12.txt).
 
-**BLS** abbreviation stands for names of inventors of the scheme, ie., Boneh-Lynn-Shacham, that proposed the scheme in the
+</details>
+
+<details>
+<summary><b>BLS (click to expand)</b></summary>
+
+## BLS
+
+The abbreviation stands for the names of the scheme's inventors, ie., Boneh-Lynn-Shacham, who proposed the scheme in the
 [Short signatures from the Weil pairing](https://mit6875.github.io/FA23HANDOUTS/boneh-lynn-shacham.pdf) paper.
 
 ### Secret, public key and pairing as a check
@@ -156,13 +164,10 @@ e(sig_{agg}, g_2)=e(H(m), pk_{agg})
 
 And this is regardless of the number of signatures engaged. 
 
-## BLS12-381 elliptic curves overview
+</details>
 
-Although the same abbreviation, BLS here, stands for Barreto-Lynn-Scott. The family of curves was introduced in this [seminal paper](https://eprint.iacr.org/2002/088.pdf).
-BLS12-381 curve was proposed by [Sean Bowe in the context of ZCash](https://electriccoin.co/blog/new-snark-curve/).
-The usage of this curve was adopted in number of other blockchains, like Ethereum 2.0, Skale, Algorand, Dfinity or Chia.
-There is also support of this curve in Cardano, see for example, [cardano-crypto-class](https://github.com/IntersectMBO/cardano-base/tree/master/cardano-crypto-class) and the curve is exposed also in [aiken from 3.0 release](https://aiken-lang.github.io/stdlib/aiken/crypto.html). The great introduction and motivation for this curve was written in the blog post [BLS12-381 For The Rest Of Us](https://hackmd.io/@benjaminion/bls12-381#Motivation).
-It is especially worth mentioning and repeating that the elliptic curve BLS12-381 is currently in [IETF draft revision 12](https://datatracker.ietf.org/doc/draft-irtf-cfrg-pairing-friendly-curves/12/) stage of ratification and also included in [standards directory](standards/draft-irtf-cfrg-pairing-friendly-curves-12.txt).
+<details>
+<summary><b>BLS12-381 and BLS mechanics in sagemath (click to expand)</b></summary>
 
 ## BLS12-381 and BLS mechanics in sagemath
 
@@ -301,7 +306,6 @@ atePairing(p1, p2)
 ```
 </details>
 
-
 <details>
 <summary>Secret, public key and verification pairing scheme</summary>
 
@@ -401,6 +405,11 @@ True
 
 </details>
 
+</details>
+
+<details>
+<summary><b>Solving easy linear and non-linear equations using BLS12-381 curve primitives (click to expand)</b></summary>
+
 ## Solving easy linear and non-linear equations using BLS12-381 curve primitives
 
 <details>
@@ -474,6 +483,11 @@ Both pairing outputs are identical, confirming that `xy = 26` holds — without 
 
 </details>
 
+</details>
+
+<details>
+<summary><b>Groth16 with BLS12-381 curve primitives (click to expand)</b></summary>
+
 ## Groth16 with BLS12-381 curve primitives
 
 The system was introduced in [seminal paper](https://eprint.iacr.org/2016/260.pdf).
@@ -483,3 +497,5 @@ Groth16 verifier written in Aiken is [here](./aiken/groth16/).
 The full walkthrough — Circom circuit → trusted setup → witness → proof → on-chain
 Aiken verification, with explicit inputs and outputs at every step — lives in
 [`clis/groth16/README.md`](./clis/groth16/README.md#end-to-end-walkthrough--circom-circuit-to-on-chain-verification).
+
+</details>

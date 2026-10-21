@@ -512,6 +512,9 @@ See [`lattice-prover/README.md`](../../lattice-prover/README.md) for full Lova d
 
 ---
 
+<details>
+<summary><b>How it works (Ed25519 variant) (click to expand)</b></summary>
+
 ## How it works (Ed25519 variant)
 
 ```circom
@@ -541,6 +544,11 @@ Uses `ScalarMul`, `PointEqual`, and `PointCompress` from `Ed25519Verify/` (Elect
 
 ---
 
+</details>
+
+<details>
+<summary><b>References (click to expand)</b></summary>
+
 ## References
 
 - [`Ed25519Verify/README.md`](../Ed25519Verify/README.md) — Full Ed25519 signature verification on BLS12-381
@@ -552,6 +560,13 @@ Uses `ScalarMul`, `PointEqual`, and `PointCompress` from `Ed25519Verify/` (Elect
 - [Anastasia-Labs/proof-tool](https://github.com/Anastasia-Labs/proof-tool) — competing approach analyzed in the pipeline/security comparison above
 - [CharlesHoskinson/proof-zk-recovery](https://github.com/CharlesHoskinson/proof-zk-recovery) — upstream the proof-tool builds on
 
+</details>
+
+<details>
+<summary><b>License (click to expand)</b></summary>
+
 ## License
 
 MIT (same as upstream circomlib and EdDSAJubJub/Ed25519Verify circuits).
+
+</details>

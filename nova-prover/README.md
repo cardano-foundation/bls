@@ -135,6 +135,9 @@ Impl 8 at N = 255. Full timing and parallel-speedup tables are below.
 
 ---
 
+<details>
+<summary><b>Design (click to expand)</b></summary>
+
 ## Design
 
 <details>
@@ -196,6 +199,11 @@ flowchart TB
 </details>
 
 ---
+
+</details>
+
+<details>
+<summary><b>Implementation tiers (click to expand)</b></summary>
 
 ## Implementation tiers
 
@@ -311,6 +319,11 @@ or `--slim-proof`.
 
 ---
 
+</details>
+
+<details>
+<summary><b>Benchmarks (click to expand)</b></summary>
+
 ## Benchmarks
 
 <details>
@@ -375,6 +388,11 @@ cargo run --release --bin benchmark_nova -- --circuit <step.r1cs> --steps <witne
 
 ---
 
+</details>
+
+<details>
+<summary><b>References (click to expand)</b></summary>
+
 ## References
 
 ### Folding schemes, recursive arguments, and SNARKs
@@ -401,6 +419,13 @@ For the post-quantum lattice-folding literature (LatticeFold, Lova, Neo, Protoga
 
 ---
 
+</details>
+
+<details>
+<summary><b>License (click to expand)</b></summary>
+
 ## License
 
 Apache-2.0
+
+</details>

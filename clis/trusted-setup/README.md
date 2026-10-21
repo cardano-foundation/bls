@@ -68,6 +68,9 @@ cargo build --release
 
 The binary will be at `target/release/trusted-setup`.
 
+<details>
+<summary><b>Commands (click to expand)</b></summary>
+
 ## Commands
 
 ### `ceremony` — legacy trusted setup (deprecated)
@@ -234,6 +237,11 @@ trusted-setup phase2 finalize \
   --verifying-key circuit.vk
 ```
 
+</details>
+
+<details>
+<summary><b>Consuming the keys (click to expand)</b></summary>
+
 ## Consuming the keys
 
 The `.pk` / `.vk` files produced by any of these ceremonies are consumed by the `groth16` CLI (`prove` / `verify` / `export-vk`) and by the on-chain Aiken verifiers. Both formats are auto-detected on load:
@@ -241,9 +249,19 @@ The `.pk` / `.vk` files produced by any of these ceremonies are consumed by the 
 - `FullProvingKey` (group elements only, from `ceremony-dev` / `phase2 finalize`) uses the fast MSM prover path.
 - Legacy `ProvingKey` (contains scalars, from `ceremony`) falls back to the scalar-based prover path.
 
+</details>
+
+<details>
+<summary><b>Library (click to expand)</b></summary>
+
 ## Library
 
 The crate also exposes the ceremony core as a library (`trusted_setup`) with modules `r1cs`, `qap`, `engine`, `ceremony`, `phase2`, `ptau`, `circom_adapter`, `prover`, and `cmd`. The `groth16-prover` library re-exports these modules, so `groth16_prover::ceremony` and friends keep working for existing callers.
+
+</details>
+
+<details>
+<summary><b>Native (blst) backend (click to expand)</b></summary>
 
 ## Native (blst) backend
 
@@ -336,6 +354,11 @@ Every row is a min-of-3 timing, and both backends are fed identical deterministi
 
 At 1M+ scale the G1 MSM speedup is larger on more representative hardware; on this throttled laptop a 2²⁰ G1 MSM (~2.05×) takes several minutes and a 2²² run is only reachable via `--max-msm 4194304`. The NTT kernel sits at parity with arkworks' radix-2 FFT (its cost is dominated by the byte↔Montgomery ABI round trip at the boundary); the decisive wins are the MSMs (1.7–2.2×) and pairings (1.4–2.8×), which are 90%+ of prove/verify time.
 
+</details>
+
+<details>
+<summary><b>Formal verification (click to expand)</b></summary>
+
 ## Formal verification
 
 The library carries a [Verus](https://github.com/verus-lang/verus) formal-verification layer in addition to its test suite. **The verified surface is small and specific:**
@@ -346,6 +369,11 @@ The library carries a [Verus](https://github.com/verus-lang/verus) formal-verifi
 
 The specs live in `verus! { ... }` blocks behind the `verus` cargo feature, so normal `cargo build`/`cargo test` are unaffected. Note that verification only actually runs because `Cargo.toml` sets `[package.metadata.verus] verify = true`; without it `cargo-verus verify` silently compiles without checking anything. See the [formal-verification document](../../FormalVerification.md) for the full status, the per-spec inventory, the known gaps, and how to run the verifier (the FFI specs additionally require the `native` feature).
 
+</details>
+
+<details>
+<summary><b>Tests (click to expand)</b></summary>
+
 ## Tests
 
 ```bash
@@ -354,3 +382,5 @@ cargo test
 ```
 
 Unit tests cover the ceremony/prove/verify roundtrips, the `.ptau` parser, and the Phase-2 accumulator; integration tests in `tests/cli.rs` exercise the full CLI (`ceremony`, `ceremony-dev`, `phase2 new/contribute/verify/finalize`) via `assert_cmd`. The native cross-validation and parity tests run under `cargo test --features native`.
+
+</details>

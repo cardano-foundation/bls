@@ -4,6 +4,9 @@
 
 ---
 
+<details>
+<summary><b>What Step 7 adds (click to expand)</b></summary>
+
 ## What Step 7 adds
 
 | | Step 1 (Predicate) | **Step 7 (Revocable)** |
@@ -14,6 +17,11 @@
 | **Proof size** | 192 B | 192 B (same) |
 
 ---
+
+</details>
+
+<details>
+<summary><b>Architecture (click to expand)</b></summary>
 
 ## Architecture
 
@@ -54,6 +62,8 @@ Private inputs: dob_year, country, Ru, Rv, S,
 
 ---
 
+</details>
+
 ## Run
 
 ### Groth16
@@ -89,6 +99,9 @@ Same as Step 1: `circom`, `snarkjs`, Python 3, `--prime bls12381`, Rust CLIs. No
 
 ---
 
+<details>
+<summary><b>Representative timing (dev machine) (click to expand)</b></summary>
+
 ## Representative timing (dev machine)
 
 | Phase | Groth16 | NovaSlim (1 step) |
@@ -102,6 +115,13 @@ Same as Step 1: `circom`, `snarkjs`, Python 3, `--prime bls12381`, Rust CLIs. No
 
 ---
 
+</details>
+
+<details>
+<summary><b>Security note (click to expand)</b></summary>
+
 ## Security note
 
 The revocation SMT uses the **lower bits** of `claims_msg` as the leaf index. For small `revocation_depth` (e.g., 2), multiple credentials may collide to the same leaf. In production, use `revocation_depth >= 20` (or a proper key-hash mapping) to avoid false positives.
+
+</details>

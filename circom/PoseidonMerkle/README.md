@@ -27,6 +27,9 @@ Round constants and MDS matrix are from ZeroJ's `PoseidonParamsBLS12_381T3`, gen
 
 ---
 
+<details>
+<summary><b>Files (click to expand)</b></summary>
+
 ## Files
 
 | File | Description |
@@ -37,6 +40,8 @@ Round constants and MDS matrix are from ZeroJ's `PoseidonParamsBLS12_381T3`, gen
 | `input.json` | Sample witness input for a depth-2 tree with three leaves |
 
 ---
+
+</details>
 
 ## Pipeline — step by step
 
@@ -203,8 +208,13 @@ aiken check
 
 ---
 
+<details>
+<summary><b>Notes (click to expand)</b></summary>
+
 ## Notes
 
 - The helper uses the exact same Poseidon permutation parameters as the Circom circuit, so the generated `digest` and siblings are guaranteed to satisfy the constraints.
 - The default example is a depth-2 tree. The generic `PoseidonMerkle(depth)` template can be instantiated with any depth by changing the `component main` line in a new top-level `.circom` file.
 - All Merkle-path inputs are private; only the root `digest` is public.
+
+</details>

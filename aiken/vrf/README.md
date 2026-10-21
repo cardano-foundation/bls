@@ -113,6 +113,9 @@ flowchart TD
     Beta1 -.->|"must equal"| Beta2
 ```
 
+<details>
+<summary><b>Proof of Prior Possession (click to expand)</b></summary>
+
 ## Proof of Prior Possession
 
 **The problem**: Alice wants to prove to Bob that she knows a secret X (e.g., a password or BLS secret key) without revealing X to Bob, and she wants Bob to be cryptographically certain that Alice possessed X *at the time the proof was created*.
@@ -274,6 +277,11 @@ let result = vrf.verify(pk_eve, "my_secret_password", pi_eve, "ECVRF_", False)
 - **Time-binding**: The proof attests to possession at the moment it was created, preventing retroactive forgery.
 
 See [validators/placeholder.ak](./validators/placeholder.ak) for a working test: `test_proof_of_prior_possession`
+
+</details>
+
+<details>
+<summary><b>Non-interactive Randomness (click to expand)</b></summary>
 
 ## Non-interactive Randomness
 
@@ -471,6 +479,11 @@ let result = vrf.verify(pk, round_input, tampered_pi, "ECVRF_", False)
 - **Unbiasability**: The operator cannot grind on inputs because the input is publicly fixed before the VRF is evaluated.
 
 See [validators/placeholder.ak](./validators/placeholder.ak) for a working test: `test_non_interactive_randomness`
+
+</details>
+
+<details>
+<summary><b>Privacy-Protected Data Structures (click to expand)</b></summary>
 
 ## Privacy-Protected Data Structures
 
@@ -765,6 +778,11 @@ let Some(beta_verified) = vrf.verify(pk, "alice_payment_100", pi_1, "ECVRF_", Fa
 
 See [validators/placeholder.ak](./validators/placeholder.ak) for a working test: `test_privacy_protected_data`
 
+</details>
+
+<details>
+<summary><b>Leader Selection (click to expand)</b></summary>
+
 ## Leader Selection
 
 **The problem**: In Proof-of-Stake blockchains and distributed consensus protocols, a random leader (or set of leaders) must be selected for each round or slot. The selection mechanism must satisfy several critical properties:
@@ -956,6 +974,11 @@ let is_valid_leader = bytearray_to_integer(True, beta_verified) < threshold_bob
 
 See [validators/placeholder.ak](./validators/placeholder.ak) for a working test: `test_leader_selection`
 
+</details>
+
+<details>
+<summary><b>Design choice: G2 versus G1 for VRF on BLS12-381 (click to expand)</b></summary>
+
 ## Design choice: G2 versus G1 for VRF on BLS12-381
 
 This implementation uses **G2** (the larger subgroup of BLS12-381) for all VRF group operations: public keys live in G2, `encode_to_curve` maps inputs to G2 points, and the proof embeds a G2 point (`Gamma`). We could equally have built the same scheme over **G1** (the smaller, faster subgroup). Below is the analysis of the trade-offs and the rationale for the current choice.
@@ -1012,6 +1035,11 @@ Yes. The VRF scheme is *group-agnostic*: replace `g2` imports with `g1`, change 
 
 ---
 
+</details>
+
+<details>
+<summary><b>Notes on lib/core.ak implementation (click to expand)</b></summary>
+
 ## Notes on lib/core.ak implementation
 
 VRF is standarized in [standard](https://www.rfc-editor.org/rfc/rfc9381.html#name-vrf-algorithms).
@@ -1029,15 +1057,22 @@ All G2 points in this implementation are stored and transmitted in **compressed 
 
 Decompression (`bls12_381_g2_uncompress`) happens only at verification time when the proof is decoded and the public key is loaded. This keeps wire format and on-chain datums compact at the cost of a small computational overhead at the verifier. No uncompressed points are ever serialized.
 
+</details>
+
 ## Building and testing
 
 ```sh
 aiken check
 ```
 
+<details>
+<summary><b>Resources on Aiken (click to expand)</b></summary>
+
 ## Resources on Aiken
 
 Find more on the [Aiken's user manual](https://aiken-lang.org).
+
+</details>
 
 ## VRF — E2E workflow (EC-VRF on JubJub/BLS12-381)
 

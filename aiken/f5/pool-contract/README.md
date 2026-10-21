@@ -50,6 +50,9 @@ To run only tests matching the string `foo`, do:
 aiken check -m foo
 ```
 
+<details>
+<summary><b>Documentation (click to expand)</b></summary>
+
 ## Documentation
 
 If you're writing a library, you might want to generate an HTML documentation for it.
@@ -60,6 +63,13 @@ Use:
 aiken docs
 ```
 
+</details>
+
+<details>
+<summary><b>Resources (click to expand)</b></summary>
+
 ## Resources
 
 Find more on the [Aiken's user manual](https://aiken-lang.org).
+
+</details>

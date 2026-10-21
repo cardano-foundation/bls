@@ -4,6 +4,9 @@
 
 ---
 
+<details>
+<summary><b>What Step 6 adds (click to expand)</b></summary>
+
 ## What Step 6 adds
 
 | | Step 3 (Privacy Pool) | Step 5 (Full Auditor Reveal) | **Step 6 (Batch + Audit)** |
@@ -19,6 +22,11 @@
 Step 6 is the **capstone** of the selective-disclosure pipeline: it marries the multi-user scaling of F5 (batch verification) with the regulatory compliance of Step 5 (full auditor reveal). A production deployment gets both privacy *and* oversight at scale.
 
 ---
+
+</details>
+
+<details>
+<summary><b>Architecture (click to expand)</b></summary>
 
 ## Architecture
 
@@ -71,6 +79,8 @@ Because `E, C, C_a0, C_a1` are **public outputs** of the circuit, they appear on
 
 ---
 
+</details>
+
 ## Run
 
 ### Groth16 (batch verify)
@@ -122,6 +132,9 @@ The Groth16 batch path is the scaling story: N=8 spends verified in one tx with 
 
 ---
 
+<details>
+<summary><b>Representative timing (dev machine, 4 users, depth 4) (click to expand)</b></summary>
+
 ## Representative timing (dev machine, 4 users, depth 4)
 
 | Phase | Groth16 | NovaSlim (per user) |
@@ -139,6 +152,11 @@ The Groth16 batch path is the scaling story: N=8 spends verified in one tx with 
 
 ---
 
+</details>
+
+<details>
+<summary><b>Comparison with earlier steps (click to expand)</b></summary>
+
 ## Comparison with earlier steps
 
 | Step | What it proves | Batch? | Audit? |
@@ -149,3 +167,5 @@ The Groth16 batch path is the scaling story: N=8 spends verified in one tx with 
 | **6** | **Pool + amount + address audit** | **✅ N→1** | **✅ full** |
 
 Step 6 is the production target: a compliant, scalable, multi-user shielded pool.
+
+</details>

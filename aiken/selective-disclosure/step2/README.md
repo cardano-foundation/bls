@@ -39,6 +39,9 @@ The NovaSlim path uses the new multi-limb generator
 
 Groth16 emits `transfer_vk.ak`; NovaSlim emits `teg.ivc.cbor` + `teg_slim.proof.cbor`.
 
+<details>
+<summary><b>Representative timing (dev machine) (click to expand)</b></summary>
+
 ## Representative timing (dev machine)
 
 | Phase | Groth16 | NovaSlim (8 limbs) |
@@ -49,3 +52,5 @@ Groth16 emits `transfer_vk.ak`; NovaSlim emits `teg.ivc.cbor` + `teg_slim.proof.
 | prove / fold+compress | 0.06 s | 0.3 + 0.4 s |
 | verify | 0.05 s | 0.01 s |
 | **proof size** | **192 B** | **462 B** |
+
+</details>

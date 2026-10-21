@@ -31,6 +31,9 @@ validators/
   predicate_gate.ak    SD Predicate Gate (policy in datum)
 ```
 
+<details>
+<summary><b>SD Predicate Gate (click to expand)</b></summary>
+
 ## SD Predicate Gate
 
 `validators/predicate_gate.ak` is a **reusable** spending validator: one script
@@ -52,6 +55,8 @@ baked into the script.
 Credential fields (`dob_year`, `country`, signature, Merkle path) never appear
 in `x` — they're hidden inside the folded witness — so the gate reveals only
 that *some eligible* holder produced a valid proof.
+
+</details>
 
 ## Check
 

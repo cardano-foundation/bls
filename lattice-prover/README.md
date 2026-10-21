@@ -34,6 +34,9 @@ See [`docs/lova-folding-design.md`](docs/lova-folding-design.md) for detailed de
 | **Prover time** | Fast | Varies by scheme |
 | **Security assumption** | Well-established | Newer, but standardized |
 
+<details>
+<summary><b>Post-Quantum Signature Comparison (click to expand)</b></summary>
+
 ## Post-Quantum Signature Comparison
 
 Ed25519 (classical) is **not quantum-secure** — Shor's algorithm breaks it. For benchmarks and future implementations, here are the NIST-standardized post-quantum alternatives:
@@ -63,6 +66,11 @@ Ed25519 (classical) is **not quantum-secure** — Shor's algorithm breaks it. Fo
 2. **Key aggregation** — BLS12-381 signature aggregation with PQ signatures
 3. **VRF/KDF** — Replace Ed25519-based constructions with PQ alternatives
 4. **Groth16/Nova** — Use PQ signatures for setup ceremony authentication
+
+</details>
+
+<details>
+<summary><b>High-level data flow (Lova) (click to expand)</b></summary>
 
 ## High-level data flow (Lova)
 
@@ -115,6 +123,11 @@ flowchart TB
     FOLD --> FIN
 ```
 
+</details>
+
+<details>
+<summary><b>Lova vs Nova — in plain words (click to expand)</b></summary>
+
 ## Lova vs Nova — in plain words
 
 **Nova** (our Impl 8–10) does one thing very well: fold two statements into one using a single scalar challenge, with Pedersen (elliptic-curve) commitments that bind *anything*. No norm constraints, tiny proofs, no field inversions. Its only weakness is being pre-quantum (DLOG).
@@ -122,6 +135,8 @@ flowchart TB
 **Lova** keeps Nova's *shape* of folding but goes post-quantum. The catch: its commitment (Ajtai/SIS) only binds **short** vectors, so Lova must keep every witness short — that is the whole design. Concretely, instead of folding one vector with one scalar it folds a **matrix of λ witness columns** with a **matrix of trit challenges**, and because a naive fold would grow the witness norm every round, each fold **decomposes the witness into digits** (decompose-and-fold) so the norm never grows. That extra machinery — decompose → commit → publish inner products → ternary fold — is precisely what Nova doesn't need.
 
 The price: everything scales with `λ`, `ℓ` (digits), and the number of rounds `t > 300`, which is why proofs are megabytes, not kilobytes.
+
+</details>
 
 ## CLI — `lattice --lova`
 
@@ -232,12 +247,20 @@ Key observations:
 - **Small circuits are practical** — EdDSA (15 signals) folds faster than Nova's NIFS (0.45 ms vs 185 ms), while remaining post-quantum secure.
 - **Large circuits need optimization** — module-SIS commitments or RNS decomposition could reduce the 4× limb expansion overhead.
 
+<details>
+<summary><b>Main cost centers (click to expand)</b></summary>
+
 ## Main cost centers
 
 1. **Per-fold proof size** — each round sends the commitment `Ĉ` (h×2λℓ over Z_q), the inner-product matrix `IP̃` ((2λℓ)²/2 integers), the cross terms (λ²), and the challenge (2λℓ×λ trits). Summed over `t` rounds → the dominant cost (`proof_size_bytes`, `util.rs:279`).
 2. **Number of rounds `t`** — knowledge soundness is argued by rewinding the prover `2λ` times per fold, forcing a large soundness error per fold and hence `t > 300` for `λ = 128`. Total proof ∝ `t·(2λℓ)²`.
 3. **Prover time** — the dense matrix product `A·W̃`, the integer inner products of `2λℓ` columns, and the digit decomposition dominate; the authors report **> 10 minutes** for witnesses `> 2^17`.
 4. **Final verification** — replaying the transcript plus revealing `W_final` and checking `A·W_final`, `W_finalᵀ·W_final`, and the norm bound; cheap, but the final witness is public (same limitation as Impl 9).
+
+</details>
+
+<details>
+<summary><b>Where Lova could improve — especially proof size (click to expand)</b></summary>
 
 ## Where Lova could improve — especially proof size
 
@@ -310,6 +333,11 @@ let witness_limbs = bls12_381_adapter::load_witness_as_limbs(&path)?;
 let witnesses = bls12_381_adapter::load_step_witnesses_as_limbs(&dir, Some(32))?;
 ```
 
+</details>
+
+<details>
+<summary><b>Findings / design (click to expand)</b></summary>
+
 ## Findings / design
 
 The full walkthrough — setup → folding → verification, annotated with overlap vs nova-prover's **Impl 10** (BLS12-381 Nova folding + sumcheck final SNARK) at every step, the trustless analysis, and the concrete-efficiency caveats — is in [`docs/lova-folding-design.md`](docs/lova-folding-design.md).
@@ -317,6 +345,11 @@ The full walkthrough — setup → folding → verification, annotated with over
 **Practical roadmap** — concrete steps to get from Lova (theoretical) to production-ready lattice ZKP: [`docs/lova-folding-design.md#practical-roadmap-from-lova-to-production`](docs/lova-folding-design.md#practical-roadmap-from-lova-to-production).
 
 A source-level review of the authors' implementation (lattirust + lova), including what actually builds and passes tests, the ring/transcript/folding abstractions worth porting, and the bugs to avoid (Goldilocks prime, loose operator-norm bound), is in [`docs/lattirust-codebase-review.md`](docs/lattirust-codebase-review.md).
+
+</details>
+
+<details>
+<summary><b>Sources (click to expand)</b></summary>
 
 ## Sources
 
@@ -327,11 +360,23 @@ A source-level review of the authors' implementation (lattirust + lova), includi
 - **IBM Toolkit:** Beatrice Biasioli et al. *A Toolkit for Succinct Lattice-Based Zero Knowledge Proofs.* IBM Research, 2026. Demonstrates **proof sizes under 100KB** using LaBRADOS + LNP-Lite (see [`docs/toolkit-lattice-zkp-2026-summary.md`](docs/toolkit-lattice-zkp-2026-summary.md)).
 - **NIST PQC Standards:** [FIPS 203 (ML-KEM)](https://csrc.nist.gov/pubs/fips/203/final), [FIPS 204 (ML-DSA)](https://csrc.nist.gov/pubs/fips/204/final), [FIPS 205 (SLH-DSA)](https://csrc.nist.gov/pubs/fips/205/final), [FIPS 206 (FN-DSA, draft)](https://csrc.nist.gov/projects/post-quantum-cryptography).
 
+</details>
+
+<details>
+<summary><b>Relationship to `nova-prover` (click to expand)</b></summary>
+
 ## Relationship to `nova-prover`
 
 - Classical stack (the default): [`nova-prover`](../nova-prover/) — Impl 8 step-chain, Impl 9 NIFS + Groth16 compression, Impl 10 sumcheck final SNARK.
 - PQ track: lattice folding (this crate) + PQ compression SNARK + hash-based on-chain verifier. Context and status: [Implementations](#implementations) and [`docs/lova-folding-design.md`](docs/lova-folding-design.md).
 
+</details>
+
+<details>
+<summary><b>License (click to expand)</b></summary>
+
 ## License
 
 Apache-2.0
+
+</details>

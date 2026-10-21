@@ -35,6 +35,9 @@ The Nova step-circuit is one *uniform* step handling every derivation type
 > which matches `cardano-address` exactly. The 6-step Nova chain reproduces this
 > `A` on the last step (`final apk == A`).
 
+<details>
+<summary><b>Why not just use `CardanoKeyOwnership`? (click to expand)</b></summary>
+
 ### Why not just use `CardanoKeyOwnership`?
 
 `CardanoKeyOwnership` answers *"do you own this key `A`?"* — it leaves *"is `A`
@@ -56,6 +59,11 @@ the prover knows. This is the natural statement for
 - **recovery / key-rotation flows**, where a root must be proven to control the
   current on-chain key without exposing any intermediate key.
 
+</details>
+
+<details>
+<summary><b>Drawbacks (click to expand)</b></summary>
+
 ### Drawbacks
 
 - **HMAC-SHA512 is expensive in-circuit.** Each step instantiates *both* CKD
@@ -75,6 +83,8 @@ the prover knows. This is the natural statement for
   apk-last-step-only design would cut the step size but break the uniform
   step-width IVC constraint.
 
+</details>
+
 ### Workflow — the 6-step chain
 
 | Step | `op` | Derivation | State in → out (`kL‖kR‖cc` + `apk`) |
@@ -92,6 +102,9 @@ for the same path, reduces the Ed25519 scalar mod `n` before the pubkey multiply
 outputs before writing it.
 
 ---
+
+<details>
+<summary><b>End-to-end flow — Nova step-chain (Implementation 10, transparent) (click to expand)</b></summary>
 
 ## End-to-end flow — Nova step-chain (Implementation 10, transparent)
 
@@ -128,6 +141,11 @@ nova compress --sumcheck --circuit <build>/cardano_ed25519_ownership_strong_nova
 nova verify --ivc strong_ivc.json --sumcheck-proof strong_sumcheck.proof
 # → Verified 6 steps: sumcheck compression proof OK, commitments OK, state chain OK
 ```
+
+</details>
+
+<details>
+<summary><b>End-to-end flow — real wallet via `cardano-address` (Impl 10) (click to expand)</b></summary>
 
 ## End-to-end flow — real wallet via `cardano-address` (Impl 10)
 
@@ -196,6 +214,11 @@ share the same byte order, so the 32-byte comparison is direct (`==`, no
 endianness flip). This is the exact soundness target of the case: the seed-only
 proof reproduces the wallet's own payment key in-circuit.
 
+</details>
+
+<details>
+<summary><b>End-to-end flow — monolithic Groth16 (Implementation 7; infeasible here) (click to expand)</b></summary>
+
 ## End-to-end flow — monolithic Groth16 (Implementation 7; infeasible here)
 
 The monolith `cardano_ed25519_ownership_strong.circom` folds the whole path into
@@ -214,6 +237,11 @@ addrIdx]`. Its witness IS computable on the measurement host `pure` (2 min 15 s,
 ```
 
 ---
+
+</details>
+
+<details>
+<summary><b>Benchmarks — pre-Nova vs Nova (click to expand)</b></summary>
 
 ## Benchmarks — pre-Nova vs Nova
 
@@ -278,6 +306,11 @@ Readings:
   Groth16, so the NIFS/sumcheck path is the only option on host `pure`.
 
 ---
+
+</details>
+
+<details>
+<summary><b>Design (click to expand)</b></summary>
 
 ## Design
 
@@ -382,6 +415,11 @@ CardanoKeyOwnershipStrong/
 
 ---
 
+</details>
+
+<details>
+<summary><b>Comparison with Existing Approaches (click to expand)</b></summary>
+
 ## Comparison with Existing Approaches
 
 - **In-repo families:** `cko` = single detached key, `smt` = key *set*
@@ -400,6 +438,11 @@ CardanoKeyOwnershipStrong/
   inside the circuit and re-checked by the python BIP32-style model
   (`gen_strong_nova_steps.py`) before any witness is written.
 
+</details>
+
+<details>
+<summary><b>References (click to expand)</b></summary>
+
 ## References
 
 - CIP-1852 — Cardano hierarchical deterministic wallet keys (1852H/1815H/0H…).
@@ -407,6 +450,13 @@ CardanoKeyOwnershipStrong/
 - RFC 8032 Ed25519; the ed25519 subgroup order `n = 2^252 + 27742317777372353535851937790883648493`.
 - Nova (Kothapalli, Setty, Tzialla) — NIFS folding + sumcheck compression (Implementation 10 in this repo).
 
+</details>
+
+<details>
+<summary><b>License (click to expand)</b></summary>
+
 ## License
 
 Same as the rest of the repository.
+
+</details>

@@ -19,6 +19,9 @@ The circuit follows RFC 8032 Section 6:
 
 **Status:** ✅ **Working end-to-end** — compiles with `circom --prime bls12381`, witness generation works for valid Ed25519 inputs, and the sparse dev ceremony + sparse prover produce and verify valid proofs.
 
+<details>
+<summary><b>Circuit structure (click to expand)</b></summary>
+
 ## Circuit structure
 
 | File | Purpose | Source |
@@ -47,6 +50,11 @@ The circuit follows RFC 8032 Section 6:
 
 ---
 
+</details>
+
+<details>
+<summary><b>Compilation results (click to expand)</b></summary>
+
 ## Compilation results
 
 ```bash
@@ -68,6 +76,8 @@ circom ed25519_verify.circom --r1cs --wasm --sym --prime bls12381
 | **Powers of Tau needed** | 2²² (4,194,304 max constraints) |
 
 ---
+
+</details>
 
 ## End-to-end pipeline
 
@@ -146,6 +156,9 @@ Paste the exported VK and proof bytes into an Aiken test or validator. The verif
 
 ---
 
+<details>
+<summary><b>Files (click to expand)</b></summary>
+
 ## Files
 
 ```
@@ -181,6 +194,11 @@ Ed25519Verify/
 
 ---
 
+</details>
+
+<details>
+<summary><b>References (click to expand)</b></summary>
+
 ## References
 
 - [Electron-Labs/ed25519-circom](https://github.com/Electron-Labs/ed25519-circom) — upstream Ed25519 Circom circuits (archived, MIT License)
@@ -188,3 +206,5 @@ Ed25519Verify/
 - [circomlib](https://github.com/iden3/circomlib) — standard Circom gadgets (`comparators`, `gates`, `bitify`)
 - [@electron-labs/sha512](https://www.npmjs.com/package/@electron-labs/sha512) — SHA-512 Circom implementation
 - [`../circom/README.md`](../README.md) — Parent directory with full pipeline documentation
+
+</details>

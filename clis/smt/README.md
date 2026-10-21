@@ -105,6 +105,9 @@ Options:
   -V, --version  Print version
 ```
 
+<details>
+<summary><b>Command reference (click to expand)</b></summary>
+
 ## Command reference
 
 ### `key` — derive CardanoKeyOwnershipSMT witness data from a key
@@ -293,6 +296,11 @@ smt compute-inputs \
   --out input.json
 ```
 
+</details>
+
+<details>
+<summary><b>Build (click to expand)</b></summary>
+
 ## Build
 
 ```bash
@@ -301,6 +309,11 @@ cargo build --release
 
 The binary is `target/release/smt`. The crate ships the MiMC / sparse-Merkle-tree / Ed25519 / Privacy-input helpers as its library target (`clis/smt/src/{mimc,sparse_merkle_tree,ed25519,privacy_inputs}.rs`); `groth16-prover` depends on this library for its `privacy` feature.
 
+</details>
+
+<details>
+<summary><b>Test suite (click to expand)</b></summary>
+
 ## Test suite
 
 ```bash
@@ -308,3 +321,5 @@ cargo test --release
 ```
 
 The integration tests in `tests/cli.rs` cover every command via `assert_cmd`, with a fixed-seed Ed25519 test vector cross-checked against the Python reference math (`gen_smt_input.py`).
+
+</details>

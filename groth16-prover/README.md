@@ -367,6 +367,9 @@ See [`clis/groth16/README.md`](../clis/groth16/README.md) for the `groth16` CLI 
 
 ---
 
+<details>
+<summary><b>Folding & Recursive Proofs (click to expand)</b></summary>
+
 ## Folding & Recursive Proofs
 
 This prover is designed to work with **Nova IVC folding** via the `nova-slim` CLI. While Groth16 produces a single proof for a fixed circuit, folding enables recursive composition: many steps fold into one constant-sized proof.
@@ -390,7 +393,7 @@ graph LR
     C --> W --> P --> F --> CMP --> V
 ```
 
-**Key point:** Groth16 proofs feed into Nova as *step witnesses*. The Groth16 prover generates the individual proofs; Nova folds them. See [`clis/nova/README.md`](../clis/nova/README.md) and [`aiken/selective-disclosure/README.md`](../../aiken/selective-disclosure/README.md) for the full folding pipeline.
+**Key point:** Groth16 proofs feed into Nova as *step witnesses*. The Groth16 prover generates the individual proofs; Nova folds them. See [`clis/nova/README.md`](../clis/nova/README.md) and [`aiken/selective-disclosure/README.md`](../aiken/selective-disclosure/README.md) for the full folding pipeline.
 
 **When to use Groth16 vs folding:**
 
@@ -402,6 +405,8 @@ graph LR
 | No trusted setup | ❌ Requires ceremony | ✅ Transparent |
 
 ---
+
+</details>
 
 ## End-to-End Quick Start
 
@@ -462,6 +467,9 @@ Paste `/tmp/multiplier_vk.ak` into your Aiken validator.
 
 ---
 
+<details>
+<summary><b>Benchmarks (click to expand)</b></summary>
+
 ## Benchmarks
 
 All timings are **min-of-3** on an Intel i7-7500U (2C/4T, throttled) in release mode.
@@ -493,6 +501,11 @@ cargo run --release --features native --bin benchmark_backend
 ```
 
 ---
+
+</details>
+
+<details>
+<summary><b>Implementation 1 (dense monomial) (click to expand)</b></summary>
 
 ## Implementation 1 (dense monomial)
 
@@ -639,6 +652,11 @@ let (proof, public_input) = prover.prove(
 
 ---
 
+</details>
+
+<details>
+<summary><b>Implementation 2 (FFT) (click to expand)</b></summary>
+
 ## Implementation 2 (FFT)
 
 <details>
@@ -758,6 +776,11 @@ let (proof, public_input) = prover.prove(
 
 ---
 
+</details>
+
+<details>
+<summary><b>Implementation 3 (Pippenger MSM) (click to expand)</b></summary>
+
 ## Implementation 3 (Pippenger MSM)
 
 <details>
@@ -837,6 +860,11 @@ let (proof, public_input) = prover.prove(
 </details>
 
 ---
+
+</details>
+
+<details>
+<summary><b>Implementation 4 (Circom adapter) (click to expand)</b></summary>
 
 ## Implementation 4 (Circom adapter)
 
@@ -965,6 +993,11 @@ Both use `FftQapEngine` + `PippengerProver` by default and output a standard ark
 </details>
 
 ---
+
+</details>
+
+<details>
+<summary><b>Implementation 5 (Circom adapter + FullProvingKey + on-the-fly QAP construction) (click to expand)</b></summary>
 
 ## Implementation 5 (Circom adapter + FullProvingKey + on-the-fly QAP construction)
 
@@ -1116,6 +1149,11 @@ let (proof, public_input) = prover.prove_with_full_pk(
 </details>
 
 ---
+
+</details>
+
+<details>
+<summary><b>Implementation 6 (Sparse-matrix prover) (click to expand)</b></summary>
 
 ## Implementation 6 (Sparse-matrix prover)
 
@@ -1355,6 +1393,11 @@ let (proof, public_input) = prover.prove_with_full_pk_sparse(
 
 ---
 
+</details>
+
+<details>
+<summary><b>Implementation 7 (h-query scalar compression + parallel proof assembly) (click to expand)</b></summary>
+
 ## Implementation 7 (h-query scalar compression + parallel proof assembly)
 
 <details>
@@ -1425,6 +1468,11 @@ The fast path computes the **exact same curve point** as the MSM path — it is 
 
 ---
 
+</details>
+
+<details>
+<summary><b>Implementation 8 (Native blst backend) (click to expand)</b></summary>
+
 ## Implementation 8 (Native blst backend)
 
 <details>
@@ -1472,6 +1520,11 @@ Measured Cpu-vs-Native numbers and the reproducible benchmark harness live in [`
 
 ---
 
+</details>
+
+<details>
+<summary><b>Implementation 11 (Batch verification and proof aggregation) (click to expand)</b></summary>
+
 ## Implementation 11 (Batch verification and proof aggregation)
 
 <details>
@@ -1495,6 +1548,11 @@ Cheaper on-chain verification — O(N) pairing checks → one — essential for 
 </details>
 
 ---
+
+</details>
+
+<details>
+<summary><b>Production innovations (click to expand)</b></summary>
 
 ## Production innovations
 
@@ -1603,6 +1661,11 @@ For **long-term research**:
 </details>
 
 ---
+
+</details>
+
+<details>
+<summary><b>Benchmarks (click to expand)</b></summary>
 
 ## Benchmarks
 
@@ -1746,6 +1809,11 @@ cargo run --bin benchmark_large_circuit --release
 
 ---
 
+</details>
+
+<details>
+<summary><b>References (click to expand)</b></summary>
+
 ## References
 
 All works cited across this README and the linked implementation / tutorial documentation.
@@ -1804,6 +1872,13 @@ All works cited across this README and the linked implementation / tutorial docu
 
 ---
 
+</details>
+
+<details>
+<summary><b>License (click to expand)</b></summary>
+
 ## License
 
 Apache-2.0
+
+</details>
