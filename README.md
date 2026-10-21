@@ -24,7 +24,11 @@ Four standalone Rust CLIs, each self-contained under `clis/`:
 | [`trusted-setup`](./clis/trusted-setup/) | Ceremony CLI: an instant single-party `ceremony-dev` for development and CI, and a multi-party Phase-2 MPC (`phase2 new → contribute → verify → finalize`) on top of a public Phase-1 `.ptau` SRS for production | [README](./clis/trusted-setup/README.md) |
 | [`smt`](./clis/smt/) | Sparse Merkle trees over BLS12-381 with MiMC(x⁷) hashing: `insert` / `digest` / `path` / `verify`, plus `export` and `compute-inputs`, which produce the Circom witness JSON consumed by the privacy circuits | [README](./clis/smt/README.md) |
 
-The CLIs are deliberately thin: the real work lives in library crates — [`groth16-prover`](./groth16-prover/) (Rust/arkworks Groth16, cross-checked bit-for-bit against Sage), [`nova-prover`](./nova-prover/) (Nova IVC folding and slim compression), and [`lattice-prover`](./lattice-prover/) (the post-quantum Lova folding track). Two more CLIs round out the set: [`nova`](./clis/nova/) for folding and compressing IVC chains, and [`lattice`](./clis/lattice/) for the Lova research track.
+The CLIs are deliberately thin: the real work lives in library crates — [`groth16-prover`](./groth16-prover/) (Rust/arkworks Groth16, cross-checked bit-for-bit against Sage), [`nova-prover`](./nova-prover/) (Nova IVC folding and compression), and [`lattice-prover`](./lattice-prover/) (the post-quantum Lova folding track). Two more CLIs round out the set: [`nova`](./clis/nova/) for folding and compressing IVC chains, and [`lattice`](./clis/lattice/) for the Lova research track.
+
+### Nova IVC
+
+Nova-based Incremental Verifiable Computation (IVC) splits a long computation into `N` identical **step circuits**, each proving `state_{i+1} = f(step_i, state_i)`, and proves every step incrementally — keeping ceremony cost and per-step memory tied to the step size rather than to the total computation. The [`nova`](./clis/nova/) CLI drives it (`nova params / ceremony / fold / compress / verify`) on top of the [`nova-prover`](./nova-prover/) crate, which holds the design doc, the Relaxed-R1CS folding + compression SNARK roadmap, and the benchmarks; the steps reuse the classical Groth16 stack ([`groth16-prover`](./groth16-prover/)). The post-quantum counterpart of that track — lattice-based folding — is the [`lattice-prover`](./lattice-prover/) crate, with Lova as its first implementation.
 
 > **Nova is maintained upstream.** The cutting-edge Nova implementation is **NovaSlim**, and it lives in its own repository: **[`paweljakubas/nova-slim`](https://github.com/paweljakubas/nova-slim)** — NIFS folding, transparent sumcheck compression, ~0.4 KiB on-chain proofs, no trusted setup and no pairings, with modular commitment (`pedersen` / `sis` / `hash`) and curve (BLS12-381, BN254, Pallas, Vesta, Grumpkin, Bandersnatch) backends. Everything Nova-related *in this repo* — the [`clis/nova`](./clis/nova/) CLI, the [`nova-prover`](./nova-prover/) crate, the [`aiken/nova`](./aiken/nova/) on-chain verifier, and the `novaslim_e2e.sh` scripts under [`aiken/selective-disclosure`](./aiken/selective-disclosure/) — is the in-tree snapshot of that work. **For new Nova work, start from `nova-slim`**; treat the in-tree copy as the reference point the rest of this repo is pinned to.
 >
@@ -32,7 +36,7 @@ The CLIs are deliberately thin: the real work lives in library crates — [`grot
 
 ### Aiken on-chain verification
 
-Everything above ends in the same place: a proof that has to be checked *on-chain*, inside a Plutus V3 spending script, cheaply enough to be worth doing. The `aiken/` tree holds those verifiers, each written against Cardano's native BLS12-381 builtins:
+Everything above ends in the same place: a proof that has to be checked *on-chain*, inside a Plutus V3 spending script, cheaply enough to be worth doing. The `aiken/` tree holds those verifiers, each written against Cardano's native BLS12-381 builtins — the [Aiken stdlib primitives](https://aiken-lang.github.io/stdlib/aiken/crypto/bls12_381/g1.html) (`bls12_381_G1_element`, `bls12_381_G2_element`, `bls12_381_millerLoop`, `bls12_381_finalVerify`) and [ilap/bls](https://github.com/ilap/bls):
 
 | Project | What it verifies on-chain | Docs |
 |---------|--------------------------|------|
@@ -68,22 +72,22 @@ The implementation is a nine-step pipeline ([`aiken/selective-disclosure`](./aik
 | 8 — Delegation | a proxy may generate proofs, bound and expiring | 192 B | ~758 B |
 | 9 — Recursive aggregation | epoch batches folded into one transparent proof | — | ~795 B (scaffold) |
 
-Two proof paths run side by side: **Groth16** (192-byte proofs, per-circuit trusted setup, cheapest on-chain) and **Nova IVC** (~0.45–0.8 KiB across the steps above, no trusted setup, step circuits composable across predicates). Both are checked on-chain by the Aiken validators above — the Groth16 path by a pairing check, the Nova path by a sumcheck. The Nova prover that drives these scripts is upstream in [`paweljakubas/nova-slim`](https://github.com/paweljakubas/nova-slim) — see the [Nova note](#command-line-tools) above.
+Two proof paths run side by side: **Groth16** (192-byte proofs, per-circuit trusted setup, cheapest on-chain) and **Nova IVC** (~0.45–0.8 KiB across the steps above, no trusted setup, step circuits composable across predicates). Both are checked on-chain by the Aiken validators above — the Groth16 path by a pairing check, the Nova path by a sumcheck. The Nova prover that drives these scripts is upstream in [`paweljakubas/nova-slim`](https://github.com/paweljakubas/nova-slim) — see [Nova IVC](#nova-ivc) above.
 
 The property that makes this interesting: the gate script checks only the *truth value* of a predicate. The holder's address never enters the datum or the redeemer, so any valid proof unlocks any UTxO at that gate — the anonymity set is every user of the gate, not the owner of the funds. Compliance is layered on top rather than baked in: Steps 4–6 encrypt the amount (and the address) to a designated auditor's viewing key, so oversight remains possible without weakening the privacy of the transaction graph.
 
 ## Contents
-1. [Overview](#overview)
-2. [Introduction](#high-level-introduction)
-3. [BLS12-381 Elliptic curve overview](#bls12-381-elliptic-curves-overview)
-4. [BLS12-381 and BLS mechanics in sagemath](#bls12-381-and-bls-mechanics-in-sagemath)
-5. [BLS mechanics in aiken](#bls-mechanics-in-aiken)
-6. [BLS12-381 primitives in aiken](#bls12-381-curve-primitives-in-aiken)
-7. [VRF using Aiken BLS12-381 primitives](#vrf-using-bls12-381-curve-primitives)
-8. [KDF using Aiken primitives, also BLS12-381](#kdf-using-aiken-primitives)
-9. [Linear and non-linear equations](#solving-easy-linear-and-non-linear-equations-using-BLS12-381-curve-primitives)
-10. [Groth16 with Aiken BLS12-381](#groth16-with-bls12-381-curve-primitives)
-11. [Nova IVC step-chain with BLS12-381](#nova-ivc-step-chain-with-bls12-381)
+
+1. [Introduction](#high-level-introduction)
+2. [BLS12-381 elliptic curve overview](#bls12-381-elliptic-curves-overview)
+3. [BLS12-381 and BLS mechanics in sagemath](#bls12-381-and-bls-mechanics-in-sagemath)
+4. [Linear and non-linear equations](#solving-easy-linear-and-non-linear-equations-using-BLS12-381-curve-primitives)
+5. [Groth16 with Aiken BLS12-381](#groth16-with-bls12-381-curve-primitives)
+
+The [Overview](#overview) above is the map of the repository: the CLIs, the
+on-chain verifiers, and the selective-disclosure pipeline. The chapters below
+are the deep dive behind it — the mathematics, and the Groth16 stack the
+applications are built on.
 
 ## High level introduction
 
@@ -397,24 +401,6 @@ True
 
 </details>
 
-## BLS mechanics in aiken
-
-The implementation of public key aggregation case using [aiken primitves](https://aiken-lang.github.io/stdlib/aiken/crypto/bls12_381/g1.html) and [ilap/bls](https://github.com/ilap/bls) is [here](./aiken/publickey-aggregation-case)
-
-The implementation of signature aggregation case using [aiken primitves](https://aiken-lang.github.io/stdlib/aiken/crypto/bls12_381/g1.html) and [ilap/bls](https://github.com/ilap/bls) is [here](./aiken/signature-aggregation-case)
-
-## BLS12-381 curve primitives in aiken
-
-The curve primitives and low-level operations are available through the [Aiken BLS12-381 CLI](./clis/bls12-381/README.md) (`clis/bls12-381`): key generation, signatures, scalar and point arithmetic, compress/uncompress, and pairing.
-
-## VRF using BLS12-381 curve primitives
-
-The implementation of VRF using [aiken primitves](https://aiken-lang.github.io/stdlib/aiken/crypto/bls12_381/g1.html) is [here](./aiken/vrf)
-
-## KDF using aiken primitives
-
-The implementation of KDF using [aiken primitves](https://aiken-lang.github.io) is [here](./aiken/kdf)
-
 ## Solving easy linear and non-linear equations using BLS12-381 curve primitives
 
 <details>
@@ -494,202 +480,6 @@ The system was introduced in [seminal paper](https://eprint.iacr.org/2016/260.pd
 Groth16 prover with circom adapter written in Rust is [here](./groth16-prover/), with its command-line interface in [`clis/groth16`](./clis/groth16/).
 Groth16 verifier written in Aiken is [here](./aiken/groth16/).
 
-## Nova IVC step-chain with BLS12-381
-
-Nova-based Incremental Verifiable Computation (IVC) splits a long computation into `N` identical **step circuits**, each proving `state_{i+1} = f(step_i, state_i)`, and proves every step incrementally — keeping ceremony cost and per-step memory tied to the step size rather than to the total computation. The step-chain POC proves each step as a standalone Groth16 proof and binds the state chain with a BLAKE2b512 transcript; each step proof is individually verifiable.
-
-The Nova IVC command-line interface is [here](./clis/nova/) (`clis/nova`, `nova params / ceremony / fold / compress / verify`), with the underlying IVC logic in the [`nova-prover`](./nova-prover/) crate, which also holds the design doc, the Relaxed-R1CS folding + compression SNARK roadmap, and the benchmarks. The steps reuse the classical Groth16 stack ([`groth16-prover`](./groth16-prover/)).
-
-> **The default path is the construction from the Nova paper — Implementation 9.** `nova fold --nifs` folds the `N` steps into a single Relaxed-R1CS instance; `nova compress` then compresses that folded instance with a Groth16 proof over the compression circuit, and `nova verify` checks it with **one pairing** — the paper's "SNARK compresses the folded instance", with the per-step cost amortized away. It costs one trusted setup for the compression circuit (`trusted-setup ceremony-dev --sparse` on the `.r1cs` emitted by `nova fold --nifs --compression-r1cs`), which is reusable across step shapes. The transparent sumcheck variants stay one flag away: `nova compress --sumcheck` (Implementation 10) and `nova compress --slim` (Implementation 11, ~1.5 KiB on-chain, no ceremony and no pairings) — the paths the upstream `nova-slim` CLI and the `novaslim_e2e.sh` scripts drive.
-
-> **The cutting-edge Nova lives upstream — [`paweljakubas/nova-slim`](https://github.com/paweljakubas/nova-slim).** The `clis/nova` CLI and the `nova-prover` crate described above are the in-tree snapshot of **NovaSlim**: NIFS folding, transparent sumcheck compression, ~0.4 KiB on-chain proofs, no trusted setup and no pairings, with modular commitment (`pedersen` / `sis` / `hash`) and curve (BLS12-381, BN254, Pallas, Vesta, Grumpkin, Bandersnatch) backends, plus a formal (conditional) QROM analysis and the technical specification. The `novaslim_e2e.sh` scripts under [`aiken/selective-disclosure`](./aiken/selective-disclosure/) drive that upstream CLI. **Start new Nova work in `nova-slim`**; the copy here is the reference point the rest of this repo is pinned to.
-
-The post-quantum research track — lattice-based folding as the PQ counterpart of the Nova stack — lives in the [`lattice-prover`](./lattice-prover/) crate (findings, design, and sources; no code yet). Lova is the first implementation, with LatticeFold, ProtogaLattice, and IBM Toolkit approaches planned.
-
-<details>
-<summary><b>Simplest end-to-end workflow (click to expand)</b></summary>
-
-Below is the minimal path from a Circom circuit to an on-chain Aiken verifier, with explicit inputs and outputs at each step.
-
----
-
-### 1. Compile the circuit (Circom)
-
-**Inputs:**
-- `multiplier.circom` — the circuit description
-
-**Command:**
-
-```bash
-cd circom/SimpleExample
-circom multiplier.circom --r1cs --wasm --prime bls12381
-```
-
-**Outputs:**
-- `multiplier.r1cs` — R1CS constraint system (structural description of the circuit)
-- `multiplier.wasm` — WebAssembly witness calculator (knows how to solve every wire value)
-
-**→ Next step uses:** `multiplier.r1cs`
-
----
-
-### 2. Trusted-setup ceremony (choose your path)
-
-The `trusted-setup` CLI (`clis/trusted-setup`) supports **two ceremony modes** that produce the **same** `.pk` / `.vk` binary format. The prover and verifier are agnostic to which path was used.
-
-#### Option A: Dev ceremony (`ceremony-dev`) — fastest, for testing/CI
-
-**When to use:** Local development, benchmarking, CI pipelines, or any scenario where you need a proving key **instantly** and security guarantees are not required.
-
-**Command:**
-
-```bash
-cd clis/trusted-setup
-cargo run --release -- ceremony-dev \
-  --circuit ../../circom/SimpleExample/multiplier.r1cs \
-  --proving-key /tmp/multiplier.pk \
-  --verifying-key /tmp/multiplier.vk
-```
-
-**What happens:** Generates random `alpha`, `beta`, `gamma`, `delta` locally, computes all group elements, and writes a `FullProvingKey` containing **only curve points** (no raw scalars). This is the **single-party, insecure** path — never use for production.
-
----
-
-#### Option B: Phase-2 MPC ceremony (`phase2`) — multi-party, for production
-
-**When to use:** Mainnet deployments, any scenario where you need **1-of-N honesty guarantees** (if at least one participant honestly discards their randomness, the ceremony remains secure).
-
-**Prerequisites:** A Phase-1 universal SRS file (`.ptau`) from a publicly audited ceremony such as [Perpetual Powers of Tau](https://github.com/privacy-scaling-explorations/perpetualpowersoftau). The `.ptau` contains `tau^i·G1` and `tau^i·G2` powers — no one knows the scalar `tau`.
-
-**Workflow:**
-
-```bash
-# 1. Initialize the circuit-specific accumulator (coordinator or first participant)
-cd clis/trusted-setup
-cargo run --release -- phase2 new \
-  --circuit ../../circom/SimpleExample/multiplier.r1cs \
-  --srs /path/to/pot14_final.ptau \
-  --zkey /tmp/multiplier_0000.zkey
-
-# 2. Participant 1 contributes randomness locally
-cargo run --release -- phase2 contribute \
-  --zkey-in /tmp/multiplier_0000.zkey \
-  --zkey-out /tmp/multiplier_0001.zkey \
-  --name "Alice"
-
-# 3. Participant N contributes (repeat for each participant)
-cargo run --release -- phase2 contribute \
-  --zkey-in /tmp/multiplier_0001.zkey \
-  --zkey-out /tmp/multiplier_final.zkey \
-  --name "Bob"
-
-# 4. Verify the final accumulator before finalizing
-cargo run --release -- phase2 verify \
-  --zkey /tmp/multiplier_final.zkey
-
-# 5. Convert to .pk / .vk (same format as ceremony-dev)
-cargo run --release -- phase2 finalize \
-  --zkey /tmp/multiplier_final.zkey \
-  --proving-key /tmp/multiplier.pk \
-  --verifying-key /tmp/multiplier.vk
-```
-
-**Output:**
-- `/tmp/multiplier.pk` — proving key (pre-computed group elements only; **no raw scalars**)
-- `/tmp/multiplier.vk` — verification key (CRS fixed points + per-variable public-input points; **share freely**)
-
-> **Design principle:** Both paths produce a `FullProvingKey` with the exact same binary layout. The `prove` and `verify` commands work identically regardless of provenance. Switching from dev to production is a one-line CLI change.
-
-**→ Next step uses:** `multiplier.wasm` (from step 1) + `input.json`
-
----
-
-### 3. Generate the witness (snarkjs)
-
-**Inputs:**
-- `multiplier.wasm` — witness calculator from step 1
-- `input.json` — concrete private/public inputs for this proof
-
-```json
-{ "x1": "2", "x2": "3" }
-```
-
-**Command:**
-
-```bash
-snarkjs wtns calculate multiplier.wasm input.json witness.wtns
-```
-
-**Output:**
-- `witness.wtns` — full witness vector containing all wire assignments.  
-  For the example above this is conceptually `[1, 6, 2, 3]`:
-  - `1` — the constant wire (always first)
-  - `6` — the public output `a = x1·x2`
-  - `2, 3` — the private inputs `x1, x2`
-
-**→ Next step uses:** `multiplier.r1cs` (from step 1) + `witness.wtns` + `/tmp/multiplier.pk` (from step 2)
-
----
-
-### 4. Generate the proof (groth16 CLI)
-
-**Inputs:**
-- `multiplier.r1cs` — constraint system from step 1
-- `witness.wtns` — witness vector from step 3
-- `/tmp/multiplier.pk` — proving key from step 2 (group elements only, no toxic waste)
-
-**Command:**
-
-```bash
-cd clis/groth16
-cargo run --release -- prove \
-  --circuit ../../circom/SimpleExample/multiplier.r1cs \
-  --witness ../../circom/SimpleExample/witness.wtns \
-  --proving-key /tmp/multiplier.pk \
-  --out /tmp/proof.bin
-```
-
-**Output:**
-- `/tmp/proof.bin` — serialized Groth16 proof containing three compressed curve points:
-  - `A` (G1, 48 bytes)
-  - `B` (G2, 96 bytes)
-  - `C` (G1, 48 bytes)
-
-The CLI uses `FftQapEngine` + `PippengerProver` under the hood (fast FFT-based QAP + batched MSM) over the pre-computed group elements in the proving key.
-
-**→ Next step uses:** proof points `(A, B, C)` + public inputs from `input.json` + `/tmp/multiplier.vk` (from step 2)
-
----
-
-### 5. Verify on-chain (Aiken)
-
-**Inputs:**
-- `proof = (A, B, C)` — compressed points from step 4
-- `public_inputs` — only the **public** portion of the witness vector:  
-  For the example above: **`[1, 6]`**
-  - `1` — the constant wire (always present)
-  - `6` — the public output `a = x1·x2 = 2·3 = 6`
-  - The private inputs (`x1 = 2`, `x2 = 3`) are **not** included here; they are hidden by the proof
-
-The Aiken verifier in [`aiken/groth16`](./aiken/groth16/) currently implements a **minimal hard-coded verifier** for a concrete 3-constraint circuit. For a generic circuit you would load the `verifying_key` points from step 2 into the validator. The on-chain logic:
-
-1. Decompress `A`, `B`, `C` and the verification-key points.
-2. Compute the public-input commitment `V = Σ public_input[i] · Ψ_V_G1[i]` via scalar multiplication and point addition.
-3. Run the pairing equation:
-
-```aiken
-let lhs = bls12_381_miller_loop(a, b)
-let rhs = bls12_381_miller_loop(alpha_g1, beta_g2)
-  |> bls12_381_mul_miller_loop_result(bls12_381_miller_loop(c, delta_g2))
-  |> bls12_381_mul_miller_loop_result(bls12_381_miller_loop(v, gamma_g2))
-
-bls12_381_final_verify(lhs, rhs)   // True = proof is valid
-```
-
-**Output:** `True` (accept) or `False` (reject)
-
-> **On-chain cost:** Groth16 verification is extremely efficient on Cardano. The 3-gate multiplier circuit consumes only **~20% of the per-script CPU budget** (~2.0B units out of 10B limit) and **~0.1% of memory** (~15K words). Crucially, verification cost is **essentially flat** regardless of circuit complexity — a circuit with thousands of constraints costs almost exactly the same as this toy example. Only the number of public inputs adds a small linear cost (~50M CPU per extra input). See the full cost analysis, scaling tables, and headroom calculations in [`groth16-prover/README.md`](./groth16-prover/README.md) §**Aiken On-Chain Verification Cost Analysis**.
-
-See the Aiken verifier's [`README.md`](./aiken/groth16/README.md) for the full hard-coded example, exact hex values, test results.
-
-</details>
+The full walkthrough — Circom circuit → trusted setup → witness → proof → on-chain
+Aiken verification, with explicit inputs and outputs at every step — lives in
+[`clis/groth16/README.md`](./clis/groth16/README.md#end-to-end-walkthrough--circom-circuit-to-on-chain-verification).

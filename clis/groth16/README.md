@@ -83,6 +83,10 @@ Options:
   -V, --version  Print version
 ```
 
+For the full circuit → proof → on-chain-verification walkthrough with explicit
+inputs and outputs at every step, see
+[End-to-end walkthrough](#end-to-end-walkthrough--circom-circuit-to-on-chain-verification).
+
 ---
 
 ## Command reference
@@ -413,6 +417,193 @@ cargo run --release -- verify \
 ```
 
 > **Note:** This uses deterministic test values (`tau=3`, `alpha=5`, etc.) and skips the ceremony step. For large circuits, use `--sparse` (Implementation 6) to avoid dense matrix allocation.
+
+---
+
+## End-to-end walkthrough — Circom circuit to on-chain verification
+
+Below is the minimal path from a Circom circuit to an on-chain Aiken verifier, with explicit inputs and outputs at each step. (The compact command-only versions of the same flows are in [Complete workflows](#complete-workflows) above.)
+
+---
+
+### 1. Compile the circuit (Circom)
+
+**Inputs:**
+- `multiplier.circom` — the circuit description
+
+**Command:**
+
+```bash
+cd circom/SimpleExample
+circom multiplier.circom --r1cs --wasm --prime bls12381
+```
+
+**Outputs:**
+- `multiplier.r1cs` — R1CS constraint system (structural description of the circuit)
+- `multiplier.wasm` — WebAssembly witness calculator (knows how to solve every wire value)
+
+**→ Next step uses:** `multiplier.r1cs`
+
+---
+
+### 2. Trusted-setup ceremony (choose your path)
+
+The `trusted-setup` CLI ([`clis/trusted-setup`](../trusted-setup/README.md)) supports **two ceremony modes** that produce the **same** `.pk` / `.vk` binary format. The prover and verifier are agnostic to which path was used.
+
+#### Option A: Dev ceremony (`ceremony-dev`) — fastest, for testing/CI
+
+**When to use:** Local development, benchmarking, CI pipelines, or any scenario where you need a proving key **instantly** and security guarantees are not required.
+
+**Command:**
+
+```bash
+cd clis/trusted-setup
+cargo run --release -- ceremony-dev \
+  --circuit ../../circom/SimpleExample/multiplier.r1cs \
+  --proving-key /tmp/multiplier.pk \
+  --verifying-key /tmp/multiplier.vk
+```
+
+**What happens:** Generates random `alpha`, `beta`, `gamma`, `delta` locally, computes all group elements, and writes a `FullProvingKey` containing **only curve points** (no raw scalars). This is the **single-party, insecure** path — never use for production.
+
+---
+
+#### Option B: Phase-2 MPC ceremony (`phase2`) — multi-party, for production
+
+**When to use:** Mainnet deployments, any scenario where you need **1-of-N honesty guarantees** (if at least one participant honestly discards their randomness, the ceremony remains secure).
+
+**Prerequisites:** A Phase-1 universal SRS file (`.ptau`) from a publicly audited ceremony such as [Perpetual Powers of Tau](https://github.com/privacy-scaling-explorations/perpetualpowersoftau). The `.ptau` contains `tau^i·G1` and `tau^i·G2` powers — no one knows the scalar `tau`.
+
+**Workflow:**
+
+```bash
+# 1. Initialize the circuit-specific accumulator (coordinator or first participant)
+cd clis/trusted-setup
+cargo run --release -- phase2 new \
+  --circuit ../../circom/SimpleExample/multiplier.r1cs \
+  --srs /path/to/pot14_final.ptau \
+  --zkey /tmp/multiplier_0000.zkey
+
+# 2. Participant 1 contributes randomness locally
+cargo run --release -- phase2 contribute \
+  --zkey-in /tmp/multiplier_0000.zkey \
+  --zkey-out /tmp/multiplier_0001.zkey \
+  --name "Alice"
+
+# 3. Participant N contributes (repeat for each participant)
+cargo run --release -- phase2 contribute \
+  --zkey-in /tmp/multiplier_0001.zkey \
+  --zkey-out /tmp/multiplier_final.zkey \
+  --name "Bob"
+
+# 4. Verify the final accumulator before finalizing
+cargo run --release -- phase2 verify \
+  --zkey /tmp/multiplier_final.zkey
+
+# 5. Convert to .pk / .vk (same format as ceremony-dev)
+cargo run --release -- phase2 finalize \
+  --zkey /tmp/multiplier_final.zkey \
+  --proving-key /tmp/multiplier.pk \
+  --verifying-key /tmp/multiplier.vk
+```
+
+**Output:**
+- `/tmp/multiplier.pk` — proving key (pre-computed group elements only; **no raw scalars**)
+- `/tmp/multiplier.vk` — verification key (CRS fixed points + per-variable public-input points; **share freely**)
+
+> **Design principle:** Both paths produce a `FullProvingKey` with the exact same binary layout. The `prove` and `verify` commands work identically regardless of provenance. Switching from dev to production is a one-line CLI change.
+
+**→ Next step uses:** `multiplier.wasm` (from step 1) + `input.json`
+
+---
+
+### 3. Generate the witness (snarkjs)
+
+**Inputs:**
+- `multiplier.wasm` — witness calculator from step 1
+- `input.json` — concrete private/public inputs for this proof
+
+```json
+{ "x1": "2", "x2": "3" }
+```
+
+**Command:**
+
+```bash
+snarkjs wtns calculate multiplier.wasm input.json witness.wtns
+```
+
+**Output:**
+- `witness.wtns` — full witness vector containing all wire assignments.  
+  For the example above this is conceptually `[1, 6, 2, 3]`:
+  - `1` — the constant wire (always first)
+  - `6` — the public output `a = x1·x2`
+  - `2, 3` — the private inputs `x1, x2`
+
+**→ Next step uses:** `multiplier.r1cs` (from step 1) + `witness.wtns` + `/tmp/multiplier.pk` (from step 2)
+
+---
+
+### 4. Generate the proof (groth16 CLI)
+
+**Inputs:**
+- `multiplier.r1cs` — constraint system from step 1
+- `witness.wtns` — witness vector from step 3
+- `/tmp/multiplier.pk` — proving key from step 2 (group elements only, no toxic waste)
+
+**Command:**
+
+```bash
+cd clis/groth16
+cargo run --release -- prove \
+  --circuit ../../circom/SimpleExample/multiplier.r1cs \
+  --witness ../../circom/SimpleExample/witness.wtns \
+  --proving-key /tmp/multiplier.pk \
+  --out /tmp/proof.bin
+```
+
+**Output:**
+- `/tmp/proof.bin` — serialized Groth16 proof containing three compressed curve points:
+  - `A` (G1, 48 bytes)
+  - `B` (G2, 96 bytes)
+  - `C` (G1, 48 bytes)
+
+The CLI uses `FftQapEngine` + `PippengerProver` under the hood (fast FFT-based QAP + batched MSM) over the pre-computed group elements in the proving key.
+
+**→ Next step uses:** proof points `(A, B, C)` + public inputs from `input.json` + `/tmp/multiplier.vk` (from step 2)
+
+---
+
+### 5. Verify on-chain (Aiken)
+
+**Inputs:**
+- `proof = (A, B, C)` — compressed points from step 4
+- `public_inputs` — only the **public** portion of the witness vector:  
+  For the example above: **`[1, 6]`**
+  - `1` — the constant wire (always present)
+  - `6` — the public output `a = x1·x2 = 2·3 = 6`
+  - The private inputs (`x1 = 2`, `x2 = 3`) are **not** included here; they are hidden by the proof
+
+The Aiken verifier in [`aiken/groth16`](../../aiken/groth16/) currently implements a **minimal hard-coded verifier** for a concrete 3-constraint circuit. For a generic circuit you would load the `verifying_key` points from step 2 into the validator. The on-chain logic:
+
+1. Decompress `A`, `B`, `C` and the verification-key points.
+2. Compute the public-input commitment `V = Σ public_input[i] · Ψ_V_G1[i]` via scalar multiplication and point addition.
+3. Run the pairing equation:
+
+```aiken
+let lhs = bls12_381_miller_loop(a, b)
+let rhs = bls12_381_miller_loop(alpha_g1, beta_g2)
+  |> bls12_381_mul_miller_loop_result(bls12_381_miller_loop(c, delta_g2))
+  |> bls12_381_mul_miller_loop_result(bls12_381_miller_loop(v, gamma_g2))
+
+bls12_381_final_verify(lhs, rhs)   // True = proof is valid
+```
+
+**Output:** `True` (accept) or `False` (reject)
+
+> **On-chain cost:** Groth16 verification is extremely efficient on Cardano. The 3-gate multiplier circuit consumes only **~20% of the per-script CPU budget** (~2.0B units out of 10B limit) and **~0.1% of memory** (~15K words). Crucially, verification cost is **essentially flat** regardless of circuit complexity — a circuit with thousands of constraints costs almost exactly the same as this toy example. Only the number of public inputs adds a small linear cost (~50M CPU per extra input). See the full cost analysis, scaling tables, and headroom calculations in [`groth16-prover/README.md`](../../groth16-prover/README.md) §**Aiken On-Chain Verification Cost Analysis**.
+
+See the Aiken verifier's [`README.md`](../../aiken/groth16/README.md) for the full hard-coded example, exact hex values, test results.
 
 ---
 

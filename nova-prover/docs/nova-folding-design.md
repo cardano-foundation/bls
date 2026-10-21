@@ -152,7 +152,7 @@ Proves final `U_N` satisfiable. The circuit is built **in Rust** (no circom need
 
 ### E2E demo + benchmark
 
-- Demo: `nova fold --nifs` → `trusted-setup ceremony-dev --sparse` on the emitted compression `.r1cs` → `nova compress` → `nova verify --compression-proof` (one pairing). Worked end to end on all four step circuits (255-step `cardano_ed25519_ownership_nova` / `ed25519_verify_nova`, 254-step `eddsa_jubjub_nova`, 5-step `anonymous_airdrop_nova`) — see the [E2E flow](README.md#e2e-flow--implementation-9-nifs) and [Benchmarks](README.md#benchmarks--nova-ivc-implementation-8-step-chain-vs-implementation-9-nifs).
+- Demo: `nova fold --nifs` → `trusted-setup ceremony-dev --sparse` on the emitted compression `.r1cs` → `nova compress` → `nova verify --compression-proof` (one pairing). Worked end to end on all four step circuits (255-step `cardano_ed25519_ownership_nova` / `ed25519_verify_nova`, 254-step `eddsa_jubjub_nova`, 5-step `anonymous_airdrop_nova`) — see the [E2E flow](../README.md#quick-start--implementation-9-paper-faithful-nova-default) and [Benchmarks](../README.md#benchmarks).
 - Measured (single run): NIFS fold 230 ms/step for the 7.7K-constraint steps vs 700 ms/step Groth16 fold (3.1×); single-pairing verify ~8.8 s for 255 steps (MSM-dominated); compression ceremony 6.2 s; bundle constant in N (579.6 KiB, dominated by the revealed `Z`/`E`).
 
 ## References

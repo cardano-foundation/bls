@@ -14,6 +14,14 @@ proof over that instance; and `verify` checks it — one pairing for the default
 Groth16 path, or native field operations (no pairings, no trusted setup) for the
 transparent sumcheck path.
 
+Nova-based Incremental Verifiable Computation proves every step incrementally, so
+the ceremony cost and the per-step memory are tied to the *step size* rather than
+to the total computation — a 255-step chain costs one step's worth of setup, not
+255 steps' worth. The steps themselves reuse the classical Groth16 stack
+([`groth16-prover`](../groth16-prover/)). The post-quantum counterpart of this
+track — lattice-based folding — is the [`lattice-prover`](../lattice-prover/)
+crate, with Lova as its first implementation.
+
 > **The cutting-edge Nova work lives upstream** — in
 > [`paweljakubas/nova-slim`](https://github.com/paweljakubas/nova-slim).  This
 > crate (and `clis/nova`) is the snapshot that the in-tree Aiken verifiers and

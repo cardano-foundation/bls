@@ -4,7 +4,7 @@
 
 **Lova** — *Lattice-Based Folding Scheme from Unstructured Lattices* (Fenzi, Knabenhans, Nguyen, Pham, ASIACRYPT 2024, [eprint 2024/1964](https://eprint.iacr.org/2024/1964); official Rust implementation in [lattirust/lova](https://github.com/lattirust/lova), built on the authors' [lattirust](https://github.com/cknabs/lattirust) library) — is the first folding scheme whose security relies on the **unstructured SIS assumption**. All arithmetic runs over hardware-friendly power-of-two moduli `q = 2^64`, so **no finite-field arithmetic is needed at all**. At its core lies a new **exact Euclidean norm proof** (of independent interest), which is what lets the verifier check the witness-norm bounds that SIS commitments require.
 
-Every step below is annotated with how it overlaps with / diverges from **Impl 10** — BLS12-381 Nova folding + sumcheck final SNARK — in [`nova-prover`](../../nova-prover/README.md#implementation-10-constant-size-nova-proofs).
+Every step below is annotated with how it overlaps with / diverges from **Impl 10** — BLS12-381 Nova folding + sumcheck final SNARK — in [`nova-prover`](../../nova-prover/README.md#implementation-10--nifs--sumcheck-compression-superseded-by-impl-11).
 
 > **Status:** 🔬 **Research / evaluation.** Findings for the post-quantum track (this crate, the PQ counterpart of `nova-prover`'s Impl 9). No code here yet.
 
