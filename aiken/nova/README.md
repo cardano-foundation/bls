@@ -1,10 +1,14 @@
 # Nova IVC On-Chain Verifier + SD Predicate Gate (Aiken)
 
 Aiken (Plutus V3) implementation that verifies **slim Nova IVC proofs** produced
-by the Rust [`nova-slim`](../../../nova-slim/README.md) on Cardano, plus a reusable
+by the Rust [`nova-slim`](https://github.com/paweljakubas/nova-slim/blob/master/README.md) on Cardano, plus a reusable
 **Selective-Disclosure (SD) Predicate Gate** built on top of it.
 
 Toolchain: **aiken v1.1.19** (see `aiken.toml`).
+
+> **The prover is upstream.** The cutting-edge Nova implementation — **NovaSlim** (NIFS folding, transparent sumcheck compression, ~0.4 KiB on-chain proofs, no trusted setup, no pairings) — is maintained in its own repository: **[`paweljakubas/nova-slim`](https://github.com/paweljakubas/nova-slim)**. This package is the on-chain (Plutus V3) counterpart of the proofs that repository produces; the in-tree [`clis/nova`](../../clis/nova/) CLI and [`nova-prover`](../../nova-prover/) crate are the matching snapshot of the prover side.
+
+> **This verifier targets the transparent path.** The Aiken verifiers here check the *slim sumcheck* proof (Implementation 11) — the one produced by `nova compress --slim` and by the upstream `nova-slim` CLI. The in-tree `nova compress` default is the paper-faithful Groth16 compression (Implementation 9, one pairing), whose on-chain counterpart lives in [`aiken/groth16`](../groth16/); the transparent path is one flag away (`--sumcheck` / `--slim`).
 
 ## What this verifier does
 

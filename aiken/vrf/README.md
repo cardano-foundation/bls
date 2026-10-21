@@ -1078,7 +1078,7 @@ nova fold --nifs --circuit circom/VRF/vrf_verify_nova.r1cs \
   --steps /tmp/vrf_witnesses --out /tmp/vrf_fold.json
 
 # 4. Sumcheck compress (no ceremony needed)
-nova compress --circuit circom/VRF/vrf_verify_nova.r1cs \
+nova compress --sumcheck --circuit circom/VRF/vrf_verify_nova.r1cs \
   --steps /tmp/vrf_witnesses --out /tmp/vrf_compress.json
 
 # 5. Verify (no verifying key needed)

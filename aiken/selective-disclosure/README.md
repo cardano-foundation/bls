@@ -149,11 +149,13 @@ Before any selective-disclosure flow can run end-to-end, we need a working proof
 | Path | Off-chain prover | On-chain verifier | Trusted setup | Proof size | Status |
 |------|-----------------|-------------------|---------------|------------|--------|
 | **A — Groth16** | `circom` + [`groth16-prover`](../../groth16-prover/README.md) (Rust/arkworks) | [`aiken/groth16`](../../aiken/groth16/README.md) (pairing check) | Per-circuit Phase-2 | 192 bytes | ✅ Working e2e |
-| **B — Nova IVC** | [`nova-slim`](../../../nova-slim/README.md) (Rust, folding) + Circom step circuits | [`nova-slim/cardano/nova-slim-verifier/`](../../../nova-slim/cardano/) (sumcheck verification) | None (transparent) | ~0.4–2.5 KiB slim | ✅ Working e2e |
+| **B — Nova IVC** | [`nova-slim`](https://github.com/paweljakubas/nova-slim/blob/master/README.md) (Rust, folding) + Circom step circuits | [`nova-slim/cardano/nova-slim-verifier/`](https://github.com/paweljakubas/nova-slim/tree/master/cardano) (sumcheck verification) | None (transparent) | ~0.4–2.5 KiB slim | ✅ Working e2e |
 
 **Path A** is the reference implementation: Circom circuits → R1CS → Rust Groth16 prover → Aiken on-chain pairing check.
 
-**Path B** uses [`nova-slim`](../../../nova-slim/README.md): the predicate is decomposed into identical step circuits, the holder folds N steps off-chain into a single compressed proof, and the on-chain verifier checks a sumcheck argument. No trusted setup; proof size is ~0.4–2.5 KiB depending on step-circuit size.
+**Path B** uses [`nova-slim`](https://github.com/paweljakubas/nova-slim/blob/master/README.md): the predicate is decomposed into identical step circuits, the holder folds N steps off-chain into a single compressed proof, and the on-chain verifier checks a sumcheck argument. No trusted setup; proof size is ~0.4–2.5 KiB depending on step-circuit size.
+
+> **Nova lives upstream.** The cutting-edge Nova implementation — **NovaSlim** — is maintained in its own repository, **[`paweljakubas/nova-slim`](https://github.com/paweljakubas/nova-slim)** (NIFS folding, transparent sumcheck compression, modular commitment and curve backends, formal QROM analysis). The `novaslim_e2e.sh` scripts in `step1`–`step9` drive that upstream CLI; the in-tree [`clis/nova`](../../clis/nova/) CLI and [`nova-prover`](../../nova-prover/) crate are the snapshot this pipeline is pinned to. **Start new Nova work upstream.**
 
 Both paths use BLS12-381 and the same Circom circuit infrastructure. The key trade-off is **proof size vs. flexibility**: Groth16 gives 192-byte proofs but requires a separate circuit per predicate; Nova gives ~0.4–2.5 KiB proofs but allows predicate composition by folding different step circuits.
 
@@ -199,7 +201,7 @@ See [`aiken/groth16/README.md`](../../aiken/groth16/README.md) and [`circom/READ
 4. **Verify** — `nova-slim verify --ivc <fold.json> --slim-proof <proof.cbor>`
 5. **On-chain** — the slim proof is submitted as a redeemer; the Aiken sumcheck verifier checks it
 
-See [`nova-slim/README.md`](../../../nova-slim/README.md) and [`nova-slim/cardano/`](../../../nova-slim/cardano/) for details.
+See [`nova-slim/README.md`](https://github.com/paweljakubas/nova-slim/blob/master/README.md) and [`nova-slim/cardano/`](https://github.com/paweljakubas/nova-slim/tree/master/cardano) for details.
 
 </details>
 
@@ -489,7 +491,7 @@ what the Aiken `gate` validator (Phase 3) consumes.
 
 ### Path B: NovaSlim e2e
 
-Below is a complete end-to-end run of the same predicate flow using [`nova-slim`](../../../nova-slim/README.md). All commands assume you are in the `bls/` repo root and `nova-slim` is built as a sibling directory.
+Below is a complete end-to-end run of the same predicate flow using [`nova-slim`](https://github.com/paweljakubas/nova-slim/blob/master/README.md). All commands assume you are in the `bls/` repo root and `nova-slim` is built as a sibling directory.
 
 ```bash
 # Build the nova-slim CLI (one time)

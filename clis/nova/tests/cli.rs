@@ -929,6 +929,115 @@ fn fold_nifs_emits_compression_r1cs() {
     assert!(bundle_file.path().exists());
 }
 
+/// The default `compress` path is the paper-faithful Groth16 compression
+/// (Implementation 9), so a compression proving key is mandatory unless the
+/// transparent alternatives (`--sumcheck` / `--slim`) are selected.
+#[test]
+fn compress_requires_proving_key_by_default() {
+    let r1cs = NamedTempFile::new().unwrap();
+    fs::write(r1cs.path(), build_synthetic_step_r1cs()).unwrap();
+
+    let steps_dir = tempfile::tempdir().unwrap();
+    let mut state = 2u64;
+    for (i, x) in [3u64, 5, 7].iter().enumerate() {
+        state = write_step_wtns(steps_dir.path(), i, state, *x);
+    }
+
+    let out = NamedTempFile::new().unwrap();
+    let mut cmd = Command::cargo_bin("nova").unwrap();
+    cmd.arg("compress")
+        .arg("--circuit")
+        .arg(r1cs.path())
+        .arg("--steps")
+        .arg(steps_dir.path())
+        .arg("--out")
+        .arg(out.path());
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "the following required arguments were not provided",
+        ))
+        .stderr(predicate::str::contains("--proving-key"));
+}
+
+/// `--sumcheck` selects the transparent sumcheck compression (Implementation
+/// 10) and needs no proving key.
+#[test]
+fn compress_sumcheck_needs_no_proving_key() {
+    let r1cs = NamedTempFile::new().unwrap();
+    fs::write(r1cs.path(), build_synthetic_step_r1cs()).unwrap();
+
+    let steps_dir = tempfile::tempdir().unwrap();
+    let mut state = 2u64;
+    for (i, x) in [3u64, 5, 7].iter().enumerate() {
+        state = write_step_wtns(steps_dir.path(), i, state, *x);
+    }
+
+    let out = NamedTempFile::new().unwrap();
+    let mut cmd = Command::cargo_bin("nova").unwrap();
+    cmd.arg("compress")
+        .arg("--sumcheck")
+        .arg("--circuit")
+        .arg(r1cs.path())
+        .arg("--steps")
+        .arg(steps_dir.path())
+        .arg("--out")
+        .arg(out.path());
+    cmd.assert().success();
+    assert!(out.path().exists());
+}
+
+/// `--sumcheck` and `--slim` are mutually exclusive: the slim proof is the
+/// on-chain variant of the sumcheck proof, not a separate compression mode.
+#[test]
+fn compress_sumcheck_and_slim_conflict() {
+    let mut cmd = Command::cargo_bin("nova").unwrap();
+    cmd.arg("compress")
+        .arg("--sumcheck")
+        .arg("--slim")
+        .arg("--circuit")
+        .arg("circuit.r1cs")
+        .arg("--steps")
+        .arg("steps")
+        .arg("--out")
+        .arg("out.json");
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("cannot be used with"));
+}
+
+/// `--groth16` remains accepted as an explicit alias of the default path,
+/// so scripts written against the older flag layout keep working.
+#[test]
+fn compress_groth16_flag_remains_accepted() {
+    let r1cs = NamedTempFile::new().unwrap();
+    fs::write(r1cs.path(), build_synthetic_step_r1cs()).unwrap();
+
+    let steps_dir = tempfile::tempdir().unwrap();
+    let mut state = 2u64;
+    for (i, x) in [3u64, 5, 7].iter().enumerate() {
+        state = write_step_wtns(steps_dir.path(), i, state, *x);
+    }
+
+    let out = NamedTempFile::new().unwrap();
+    let mut cmd = Command::cargo_bin("nova").unwrap();
+    cmd.arg("compress")
+        .arg("--groth16")
+        .arg("--circuit")
+        .arg(r1cs.path())
+        .arg("--steps")
+        .arg(steps_dir.path())
+        .arg("--proving-key")
+        .arg("missing.pk")
+        .arg("--out")
+        .arg(out.path());
+    // The flag is accepted (no clap usage error); the run then fails on the
+    // unreadable proving key.
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("failed to load proving key"));
+}
+
 /// Full Implementation 9 flow at the CLI level:
 ///   fold --nifs --compression-r1cs → ceremony (dev) on the compression
 ///   circuit → compress → verify with the compression VK.
@@ -995,12 +1104,11 @@ fn nifs_compress_verify_end_to_end() {
         fs::write(&vk_path, &vk_bytes).unwrap();
     }
 
-    // 3. compress -> one O(1) Groth16 proof
+    // 3. compress -> one O(1) Groth16 proof (default path, Implementation 9)
     let proof_file = NamedTempFile::new().unwrap();
     let mut compress = Command::cargo_bin("nova").unwrap();
     compress
         .arg("compress")
-        .arg("--groth16")
         .arg("--circuit")
         .arg(r1cs.path())
         .arg("--steps")

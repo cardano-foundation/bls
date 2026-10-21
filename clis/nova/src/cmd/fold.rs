@@ -37,7 +37,8 @@ pub struct Args {
 
     /// (With `--nifs`) also write the compression circuit `.r1cs` for this
     /// step circuit.  Feed it to `trusted-setup ceremony-dev --sparse` to
-    /// derive the compression proving / verifying keys (work item 2).
+    /// derive the compression proving / verifying keys — required by the
+    /// default Groth16 compression path (`nova compress --proving-key`).
     #[arg(long, value_name = "FILE", requires = "nifs")]
     pub compression_r1cs: Option<PathBuf>,
 

@@ -47,14 +47,14 @@ Overrides: `DEPTH=` (Groth16 pool). Artifacts in
 ## Prerequisites
 
 Same as Step 4: `circom`, `snarkjs`, Python 3, `--prime bls12381`, and the
-NovaSlim CLI at [`nova-slim`](../../../nova-slim).
+NovaSlim CLI at [`nova-slim`](https://github.com/paweljakubas/nova-slim).
 
 ## On-chain
 
 | Path | On-chain verifier | Datum / redeemer |
 |------|-------------------|------------------|
 | Groth16 | `aiken/groth16` gate (pairing check) | datum = `vk`, redeemer = `proof` + public `(merkle_root, nullifier_hash, out_commitment_1, out_commitment_2, fee, pk_audit, addr_commitment, E, C, C_a0, C_a1)` |
-| NovaSlim | [`nova-slim/cardano/nova-slim-verifier`](../../../nova-slim/cardano/nova-slim-verifier) | datum = `NifsBundle`, redeemer = `SlimProof` |
+| NovaSlim | [`nova-slim/cardano/nova-slim-verifier`](https://github.com/paweljakubas/nova-slim/tree/master/cardano/nova-slim-verifier) | datum = `NifsBundle`, redeemer = `SlimProof` |
 
 A policy layer (not enforced in-circuit) pins `pk_audit` to the pool's
 registered auditor; the on-chain gate can whitelist that public key.

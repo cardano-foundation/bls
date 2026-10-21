@@ -1,16 +1,89 @@
 # BLS12-381 deep dive and app possibilities using it
 
+## Overview
+
+**BLS12-381** is the pairing-friendly elliptic curve that Cardano's Plutus V3 exposes natively (`bls12_381_G1_element`, `bls12_381_G2_element`, `bls12_381_millerLoop`, `bls12_381_finalVerify`). It is the same curve behind Ethereum's consensus proofs, Zcash's Sapling, and Cardano's native scripts — and the one piece of cryptography that makes *both* compact signatures and modern zero-knowledge proofs possible on-chain.
+
+This repository is a working laboratory for that curve: the mathematics derived from scratch in SageMath, low-level Rust tooling, a complete Groth16 prover with trusted-setup ceremonies, and — most importantly — the applications that become reachable once you can pair, hash to a curve, and verify a proof inside a spending script.
+
+| Layer | What it contains | Where |
+|-------|-------------------|-------|
+| **Mathematics** | Curve parameters, generators, pairings, the BLS signature scheme and its aggregation modes, VRF, KDF — derived and cross-checked in SageMath | [High level introduction](#high-level-introduction) · [SageMath mechanics](#bls12-381-and-bls-mechanics-in-sagemath) |
+| **Tooling** | Rust CLIs for the curve itself, Groth16 proving, setup ceremonies, and sparse Merkle trees | [Command-line tools](#command-line-tools) |
+| **On-chain verification** | Aiken (Plutus V3) verifiers — Groth16 pairing checks, Nova sumcheck verifiers, VRF, KDF, key generation | [Aiken on-chain verification](#aiken-on-chain-verification) |
+| **Applications** | Selective disclosure, privacy pools, confidential transfers with auditor reveal, multi-user batch pools | [Spotlight: selective disclosure](#spotlight-selective-disclosure) |
+
+### Command-line tools
+
+Four standalone Rust CLIs, each self-contained under `clis/`:
+
+| CLI | What it does | Docs |
+|-----|--------------|------|
+| [`bls12-381`](./clis/bls12-381/) | Low-level curve toolkit: seed and key generation (HKDF-SHA256), BLS signing with domain separation tags, G1/G2 point arithmetic (`mul`, `add`, `neg`), compressed ⇄ uncompressed conversion, and the optimal Ate pairing | [README](./clis/bls12-381/README.md) |
+| [`groth16`](./clis/groth16/) | Proof lifecycle: `prove` / `verify` over Circom `.r1cs` + `.wtns` artifacts (FFT-QAP + Pippenger MSM, with sparse and h-scalar modes), plus `export-vk`, which emits a ready-to-paste Aiken verifying key | [README](./clis/groth16/README.md) |
+| [`trusted-setup`](./clis/trusted-setup/) | Ceremony CLI: an instant single-party `ceremony-dev` for development and CI, and a multi-party Phase-2 MPC (`phase2 new → contribute → verify → finalize`) on top of a public Phase-1 `.ptau` SRS for production | [README](./clis/trusted-setup/README.md) |
+| [`smt`](./clis/smt/) | Sparse Merkle trees over BLS12-381 with MiMC(x⁷) hashing: `insert` / `digest` / `path` / `verify`, plus `export` and `compute-inputs`, which produce the Circom witness JSON consumed by the privacy circuits | [README](./clis/smt/README.md) |
+
+The CLIs are deliberately thin: the real work lives in library crates — [`groth16-prover`](./groth16-prover/) (Rust/arkworks Groth16, cross-checked bit-for-bit against Sage), [`nova-prover`](./nova-prover/) (Nova IVC folding and slim compression), and [`lattice-prover`](./lattice-prover/) (the post-quantum Lova folding track). Two more CLIs round out the set: [`nova`](./clis/nova/) for folding and compressing IVC chains, and [`lattice`](./clis/lattice/) for the Lova research track.
+
+> **Nova is maintained upstream.** The cutting-edge Nova implementation is **NovaSlim**, and it lives in its own repository: **[`paweljakubas/nova-slim`](https://github.com/paweljakubas/nova-slim)** — NIFS folding, transparent sumcheck compression, ~0.4 KiB on-chain proofs, no trusted setup and no pairings, with modular commitment (`pedersen` / `sis` / `hash`) and curve (BLS12-381, BN254, Pallas, Vesta, Grumpkin, Bandersnatch) backends. Everything Nova-related *in this repo* — the [`clis/nova`](./clis/nova/) CLI, the [`nova-prover`](./nova-prover/) crate, the [`aiken/nova`](./aiken/nova/) on-chain verifier, and the `novaslim_e2e.sh` scripts under [`aiken/selective-disclosure`](./aiken/selective-disclosure/) — is the in-tree snapshot of that work. **For new Nova work, start from `nova-slim`**; treat the in-tree copy as the reference point the rest of this repo is pinned to.
+>
+> **The in-tree `nova` CLI defaults to the paper-faithful path.** `nova compress` produces the Nova paper's construction — fold with NIFS, compress the folded instance with a Groth16 proof, verify with **one pairing** — and needs one trusted setup for the compression circuit. The transparent sumcheck paths (`--sumcheck`, `--slim`) remain one flag away and are what the upstream `nova-slim` CLI drives.
+
+### Aiken on-chain verification
+
+Everything above ends in the same place: a proof that has to be checked *on-chain*, inside a Plutus V3 spending script, cheaply enough to be worth doing. The `aiken/` tree holds those verifiers, each written against Cardano's native BLS12-381 builtins:
+
+| Project | What it verifies on-chain | Docs |
+|---------|--------------------------|------|
+| [`aiken/groth16`](./aiken/groth16/) | Groth16 — the standard pairing check `e(A,B) = e(α,β)·e(C,δ)·e(V,γ)` over an arbitrary verifying key and public-input list; also holds the batched multi-pairing verifier | [README](./aiken/groth16/README.md) |
+| [`aiken/nova`](./aiken/nova/) | Slim Nova IVC proofs — a sumcheck argument with on-chain Fiat-Shamir challenge derivation, plus a reusable SD Predicate Gate whose policy lives in the datum rather than in the script. The prover side is upstream in [`paweljakubas/nova-slim`](https://github.com/paweljakubas/nova-slim) | [README](./aiken/nova/README.md) |
+| [`aiken/selective-disclosure`](./aiken/selective-disclosure/) | The nine-step selective-disclosure pipeline — predicate → ElGamal → privacy pool → auditor reveal → batch → revocation → delegation → recursion | [README](./aiken/selective-disclosure/README.md) |
+| [`aiken/f5`](./aiken/f5/) | Multi-user private pool: one shared Merkle root of note commitments, with N spends verified as a single multi-pairing product | [README](./aiken/f5/README.md) |
+| [`aiken/vrf`](./aiken/vrf/) | Verifiable Random Function — deterministic, verifiable, non-interactive randomness | [README](./aiken/vrf/README.md) |
+| [`aiken/kdf`](./aiken/kdf/) | HKDF (RFC 5869) and PBKDF2 (RFC 8018) plus BLS12-381 key generation, with an explicit warning about what must never be hashed on-chain | [README](./aiken/kdf/README.md) |
+| [`aiken/publickey-aggregation-case`](./aiken/publickey-aggregation-case/) · [`aiken/signature-aggregation-case`](./aiken/signature-aggregation-case/) | The two BLS aggregation modes — aggregate public keys over one message, or aggregate signatures over many — and the rogue-key caveat that forces the choice of `g2_basic` | [PK aggregation](./aiken/publickey-aggregation-case/README.md) · [SIG aggregation](./aiken/signature-aggregation-case/README.md) |
+
+### Spotlight: selective disclosure
+
+The application this repository ultimately builds toward is **selective disclosure**: proving a predicate over a credential — *I am over 21*, *I am a doctor*, *I live in an approved jurisdiction* — **without revealing the credential's fields, the holder's identity, or the transaction address**. Authorization comes from a zero-knowledge proof checked by an Aiken gate script, not from a signature by a known address.
+
+The implementation is a nine-step pipeline ([`aiken/selective-disclosure`](./aiken/selective-disclosure/README.md)), and every step is runnable end-to-end from the repo root:
+
+```bash
+./aiken/selective-disclosure/step1/groth16_e2e.sh   # predicate proof — the simplest flow
+./aiken/selective-disclosure/step6/groth16_e2e.sh   # multi-user batch with full auditor reveal
+./aiken/selective-disclosure/f5_pipeline_e2e.sh     # steps 1 → 2 → 3 in a single run
+```
+
+| Step | What it proves | Groth16 proof | Nova slim proof |
+|------|----------------|---------------|-----------------|
+| 1 — Predicate | `age ≥ 21`, membership in an approved set | 192 B | 758 B |
+| 2 — Twisted ElGamal | amounts encrypted, each limb range-proven | 192 B | 462 B |
+| 3 — Privacy pool | note membership + fresh nullifier + value conservation | 192 B | 610 B |
+| 4 — Compliant transfer | amount revealed to a viewing key only | 192 B | 684 B |
+| 5 — Full auditor reveal | amount **and** recipient address revealed | 192 B | 758 B |
+| 6 — Multi-user batch | N spends, one batched pairing check | 192 B × N | 758 B |
+| 7 — Revocable credential | not expired, not revoked (SMT non-membership) | 192 B | ~758 B |
+| 8 — Delegation | a proxy may generate proofs, bound and expiring | 192 B | ~758 B |
+| 9 — Recursive aggregation | epoch batches folded into one transparent proof | — | ~795 B (scaffold) |
+
+Two proof paths run side by side: **Groth16** (192-byte proofs, per-circuit trusted setup, cheapest on-chain) and **Nova IVC** (~0.45–0.8 KiB across the steps above, no trusted setup, step circuits composable across predicates). Both are checked on-chain by the Aiken validators above — the Groth16 path by a pairing check, the Nova path by a sumcheck. The Nova prover that drives these scripts is upstream in [`paweljakubas/nova-slim`](https://github.com/paweljakubas/nova-slim) — see the [Nova note](#command-line-tools) above.
+
+The property that makes this interesting: the gate script checks only the *truth value* of a predicate. The holder's address never enters the datum or the redeemer, so any valid proof unlocks any UTxO at that gate — the anonymity set is every user of the gate, not the owner of the funds. Compliance is layered on top rather than baked in: Steps 4–6 encrypt the amount (and the address) to a designated auditor's viewing key, so oversight remains possible without weakening the privacy of the transaction graph.
+
 ## Contents
-1. [Introduction](#high-level-introduction)
-2. [BLS12-381 Elliptic curve overview](#bls12-381-elliptic-curves-overview)
-3. [BLS12-381 and BLS mechanics in sagemath](#bls12-381-and-bls-mechanics-in-sagemath)
-4. [BLS mechanics in aiken](#bls-mechanics-in-aiken)
-5. [BLS12-381 primitives in aiken](#bls12-381-curve-primitives-in-aiken)
-6. [VRF using Aiken BLS12-381 primitives](#vrf-using-bls12-381-curve-primitives)
-7. [KDF using Aiken primitives, also BLS12-381](#kdf-using-aiken-primitives)
-8. [Linear and non-linear equations](#solving-easy-linear-and-non-linear-equations-using-BLS12-381-curve-primitives)
-9. [Groth16 with Aiken BLS12-381](#groth16-with-bls12-381-curve-primitives)
-10. [Nova IVC step-chain with BLS12-381](#nova-ivc-step-chain-with-bls12-381)
+1. [Overview](#overview)
+2. [Introduction](#high-level-introduction)
+3. [BLS12-381 Elliptic curve overview](#bls12-381-elliptic-curves-overview)
+4. [BLS12-381 and BLS mechanics in sagemath](#bls12-381-and-bls-mechanics-in-sagemath)
+5. [BLS mechanics in aiken](#bls-mechanics-in-aiken)
+6. [BLS12-381 primitives in aiken](#bls12-381-curve-primitives-in-aiken)
+7. [VRF using Aiken BLS12-381 primitives](#vrf-using-bls12-381-curve-primitives)
+8. [KDF using Aiken primitives, also BLS12-381](#kdf-using-aiken-primitives)
+9. [Linear and non-linear equations](#solving-easy-linear-and-non-linear-equations-using-BLS12-381-curve-primitives)
+10. [Groth16 with Aiken BLS12-381](#groth16-with-bls12-381-curve-primitives)
+11. [Nova IVC step-chain with BLS12-381](#nova-ivc-step-chain-with-bls12-381)
 
 ## High level introduction
 
@@ -85,12 +158,12 @@ Although the same abbreviation, BLS here, stands for Barreto-Lynn-Scott. The fam
 BLS12-381 curve was proposed by [Sean Bowe in the context of ZCash](https://electriccoin.co/blog/new-snark-curve/).
 The usage of this curve was adopted in number of other blockchains, like Ethereum 2.0, Skale, Algorand, Dfinity or Chia.
 There is also support of this curve in Cardano, see for example, [cardano-crypto-class](https://github.com/IntersectMBO/cardano-base/tree/master/cardano-crypto-class) and the curve is exposed also in [aiken from 3.0 release](https://aiken-lang.github.io/stdlib/aiken/crypto.html). The great introduction and motivation for this curve was written in the blog post [BLS12-381 For The Rest Of Us](https://hackmd.io/@benjaminion/bls12-381#Motivation).
-It is especially worth mentioning and repeating that the elliptic curve BLS12-381 is currently in [IETF draft revision 12](https://datatracker.ietf.org/doc/draft-irtf-cfrg-pairing-friendly-curves/12/) stage of ratification and also included in [standard directory](standard/draft-irtf-cfrg-pairing-friendly-curves-12.txt).
+It is especially worth mentioning and repeating that the elliptic curve BLS12-381 is currently in [IETF draft revision 12](https://datatracker.ietf.org/doc/draft-irtf-cfrg-pairing-friendly-curves/12/) stage of ratification and also included in [standards directory](standards/draft-irtf-cfrg-pairing-friendly-curves-12.txt).
 
 ## BLS12-381 and BLS mechanics in sagemath
 
 The golden are generated using _SageMath_ and compliant with [IETF draft revision 6](https://datatracker.ietf.org/doc/html/draft-irtf-cfrg-bls-signature-06)
-and also included in [standard directory](standard/draft-irtf-cfrg-bls-signature-06.txt).
+and also included in [standards directory](standards/draft-irtf-cfrg-bls-signature-06.txt).
 But to get a sense how things look like let's before envisage simple proof of concepts what we are after.
 
 <details>
@@ -425,7 +498,11 @@ Groth16 verifier written in Aiken is [here](./aiken/groth16/).
 
 Nova-based Incremental Verifiable Computation (IVC) splits a long computation into `N` identical **step circuits**, each proving `state_{i+1} = f(step_i, state_i)`, and proves every step incrementally — keeping ceremony cost and per-step memory tied to the step size rather than to the total computation. The step-chain POC proves each step as a standalone Groth16 proof and binds the state chain with a BLAKE2b512 transcript; each step proof is individually verifiable.
 
-The Nova IVC command-line interface is [here](./clis/nova/) (`clis/nova`, `nova params / ceremony / fold / verify`), with the underlying IVC logic in the [`nova-prover`](./nova-prover/) crate, which also holds the design doc, the Relaxed-R1CS folding + compression SNARK roadmap, and the benchmarks. The steps reuse the classical Groth16 stack ([`groth16-prover`](./groth16-prover/)).
+The Nova IVC command-line interface is [here](./clis/nova/) (`clis/nova`, `nova params / ceremony / fold / compress / verify`), with the underlying IVC logic in the [`nova-prover`](./nova-prover/) crate, which also holds the design doc, the Relaxed-R1CS folding + compression SNARK roadmap, and the benchmarks. The steps reuse the classical Groth16 stack ([`groth16-prover`](./groth16-prover/)).
+
+> **The default path is the construction from the Nova paper — Implementation 9.** `nova fold --nifs` folds the `N` steps into a single Relaxed-R1CS instance; `nova compress` then compresses that folded instance with a Groth16 proof over the compression circuit, and `nova verify` checks it with **one pairing** — the paper's "SNARK compresses the folded instance", with the per-step cost amortized away. It costs one trusted setup for the compression circuit (`trusted-setup ceremony-dev --sparse` on the `.r1cs` emitted by `nova fold --nifs --compression-r1cs`), which is reusable across step shapes. The transparent sumcheck variants stay one flag away: `nova compress --sumcheck` (Implementation 10) and `nova compress --slim` (Implementation 11, ~1.5 KiB on-chain, no ceremony and no pairings) — the paths the upstream `nova-slim` CLI and the `novaslim_e2e.sh` scripts drive.
+
+> **The cutting-edge Nova lives upstream — [`paweljakubas/nova-slim`](https://github.com/paweljakubas/nova-slim).** The `clis/nova` CLI and the `nova-prover` crate described above are the in-tree snapshot of **NovaSlim**: NIFS folding, transparent sumcheck compression, ~0.4 KiB on-chain proofs, no trusted setup and no pairings, with modular commitment (`pedersen` / `sis` / `hash`) and curve (BLS12-381, BN254, Pallas, Vesta, Grumpkin, Bandersnatch) backends, plus a formal (conditional) QROM analysis and the technical specification. The `novaslim_e2e.sh` scripts under [`aiken/selective-disclosure`](./aiken/selective-disclosure/) drive that upstream CLI. **Start new Nova work in `nova-slim`**; the copy here is the reference point the rest of this repo is pinned to.
 
 The post-quantum research track — lattice-based folding as the PQ counterpart of the Nova stack — lives in the [`lattice-prover`](./lattice-prover/) crate (findings, design, and sources; no code yet). Lova is the first implementation, with LatticeFold, ProtogaLattice, and IBM Toolkit approaches planned.
 

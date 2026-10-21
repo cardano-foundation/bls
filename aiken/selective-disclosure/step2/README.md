@@ -24,7 +24,7 @@ Overrides: `OLD=` `NEW=` (both scripts), `NLIMBS=` (NovaSlim). Artifacts in
 
 - `circom`, `snarkjs`, Python 3.
 - `--prime bls12381` (must match the Rust prover).
-- NovaSlim CLI at [`nova-slim`](../../../nova-slim) (build `cargo build --release`).
+- NovaSlim CLI at [`nova-slim`](https://github.com/paweljakubas/nova-slim) (build `cargo build --release`).
 
 The NovaSlim path uses the new multi-limb generator
 [`circom/TwistedElGamal/gen_teg_steps.py`](../../../circom/TwistedElGamal/gen_teg_steps.py)
@@ -35,7 +35,7 @@ The NovaSlim path uses the new multi-limb generator
 | Path | On-chain verifier | Datum / redeemer |
 |------|-------------------|------------------|
 | Groth16 | `aiken/groth16` gate (pairing check) | datum = `vk`, redeemer = `proof` + public `(oldBalance, newBalance)` |
-| NovaSlim | [`nova-slim/cardano/nova-slim-verifier`](../../../nova-slim/cardano/nova-slim-verifier) | datum = `NifsBundle`, redeemer = `SlimProof` |
+| NovaSlim | [`nova-slim/cardano/nova-slim-verifier`](https://github.com/paweljakubas/nova-slim/tree/master/cardano/nova-slim-verifier) | datum = `NifsBundle`, redeemer = `SlimProof` |
 
 Groth16 emits `transfer_vk.ak`; NovaSlim emits `teg.ivc.cbor` + `teg_slim.proof.cbor`.
 

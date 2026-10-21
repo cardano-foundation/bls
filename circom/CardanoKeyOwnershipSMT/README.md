@@ -164,7 +164,7 @@ the root, and the keys never have to be revealed to it.
    $ ../../clis/nova/target/release/nova fold --nifs \
        --circuit cardano_key_ownership_smt_nova.r1cs \
        --steps steps --out smt_ivc.json
-   $ ../../clis/nova/target/release/nova compress \
+   $ ../../clis/nova/target/release/nova compress --sumcheck \
        --circuit cardano_key_ownership_smt_nova.r1cs \
        --steps steps --out smt_sumcheck_proof.json
    $ ../../clis/nova/target/release/nova verify \
@@ -400,7 +400,7 @@ EOF
 ```
 
 > **Note:** `nova` verification here is still **O(N)** — it re-checks every step
-> proof. The O(1)-verify path is shipped as [Implementation 9](../../nova-prover/README.md#implementation-9-relaxed-r1cs-folding--single-compression-snark): `nova fold --nifs` → `trusted-setup ceremony-dev` on the emitted compression circuit → `nova compress --groth16` → `nova verify --compression-proof` — see the [Implementation 9 e2e flow](../../nova-prover/README.md#e2e-flow--implementation-9-nifs). For a **transparent** O(1)-verify path with no ceremony, see [Implementation 10](../../nova-prover/README.md#implementation-10-constant-size-nova-proofs): `nova fold --nifs` → `nova compress` → `nova verify --sumcheck-proof` — no proving or verifying key needed for compression. For on-chain proof sizes under 16 KiB, see **Implementation 11** (slim proofs): `nova compress --slim` → `nova verify --slim-proof`.
+> proof. The O(1)-verify path is shipped as [Implementation 9](../../nova-prover/README.md#implementation-9--nifs--groth16-compression-default): `nova fold --nifs` → `trusted-setup ceremony-dev` on the emitted compression circuit → `nova compress` → `nova verify --compression-proof`. For a **transparent** O(1)-verify path with no ceremony, see [Implementation 10](../../nova-prover/README.md#implementation-10--nifs--sumcheck-compression-superseded-by-impl-11): `nova fold --nifs` → `nova compress --sumcheck` → `nova verify --sumcheck-proof` — no proving or verifying key needed for compression. For on-chain proof sizes under 16 KiB, see **Implementation 11** (slim proofs): `nova compress --slim` → `nova verify --slim-proof`.
 
 ## CLI vs shell/Python
 
@@ -535,7 +535,7 @@ step witness generation with `gen_smt_nova_steps.py`). Then:
 **7. Compress with sumcheck** — no ceremony, no proving key:
 
 ```bash
-../../clis/nova/target/release/nova compress \
+../../clis/nova/target/release/nova compress --sumcheck \
   --circuit cardano_key_ownership_smt_nova.r1cs \
   --steps steps --out smt_sumcheck_proof.json
 # → Sumcheck proof written to smt_sumcheck_proof.json
@@ -568,14 +568,14 @@ EOF
 **Key differences from Implementation 9:**
 
 - **No compression ceremony.** Implementation 9 requires `trusted-setup ceremony-dev` on the compression circuit (15,448 constraints); Implementation 10 needs nothing.
-- **No proving key.** `compress` (default: sumcheck) needs only the step circuit and witnesses.
+- **No proving key.** `compress --sumcheck` needs only the step circuit and witnesses.
 - **No verifying key.** `verify --sumcheck-proof` needs only the NIFS bundle and sumcheck proof.
 - **True O(1) proof size.** Implementation 9's bundle is O(1) in N but O(step size) in constraints; Implementation 10's bundle is O(1) in both.
 - **ZK for free.** The verifier never sees the folded witness or error vector.
 
 The NIFS fold phase is **identical** to Implementation 9 (~224 ms/step on
 the 7,724-constraint step circuit). See the
-[Impl 10 benchmarks](../../nova-prover/README.md#implementation-10--nifs-fold--sumcheck-compression-no-ceremony)
+[Impl 10 benchmarks](../../nova-prover/README.md#implementation-10--nifs--sumcheck-compression-superseded-by-impl-11)
 for measured numbers. The SMT membership half of the combined statement
 remains in the monolithic circuit — the fold covers the scalar multiplication
 only.

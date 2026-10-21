@@ -13,6 +13,13 @@
 //!   4. `compress` — Groth16-compress a NIFS bundle into one proof
 //!   5. `verify` — verify a folded IVC bundle (pairings + chain + transcript)
 //!
+//! The default `compress` path is the paper-faithful Nova flow
+//! (Implementation 9): fold with `--nifs`, compress the folded instance
+//! with a Groth16 proof over the compression circuit, verify with a single
+//! pairing.  It needs a one-time trusted setup for that circuit; the
+//! transparent sumcheck alternatives are `--sumcheck` (Implementation 10)
+//! and `--slim` (Implementation 11).
+//!
 //! The core IVC logic lives in the `nova-prover` crate; this crate only
 //! adds the command-line interface on top of it.
 
@@ -81,10 +88,15 @@ pub enum Command {
     /// Re-folds the step witnesses deterministically, then compresses the
     /// final relaxed instance into one proof:
     ///
-    /// - **Implementation 9** (default): Groth16 compression proof, needs
-    ///   a one-time trusted setup for the compression circuit.
+    /// - **Implementation 9** (default): Groth16 compression proof — the
+    ///   paper-faithful Nova path, checked on-chain with a single pairing.
+    ///   Needs a one-time trusted setup for the compression circuit
+    ///   (`--proving-key`, from `trusted-setup ceremony-dev --sparse` on the
+    ///   `.r1cs` emitted by `fold --nifs --compression-r1cs`).
     /// - **Implementation 10** (`--sumcheck`): transparent sumcheck proof,
     ///   no trusted setup, O(log N) proof size.
+    /// - **Implementation 11** (`--slim`): slim on-chain sumcheck proof
+    ///   (~4 KiB), opening proofs kept off-chain as an audit trail.
     ///
     /// The result is consumed by `nova verify` on the NIFS bundle.
     ///
@@ -92,6 +104,7 @@ pub enum Command {
     ///
     ///   $ nova compress --circuit step_circuit.r1cs --steps ./step_witnesses/ --proving-key compression.pk --out compression.proof.json
     ///   $ nova compress --sumcheck --circuit step_circuit.r1cs --steps ./step_witnesses/ --out sumcheck.proof.json
+    ///   $ nova compress --slim --circuit step_circuit.r1cs --steps ./step_witnesses/ --out slim.proof.json
     Compress(cmd::compress::Args),
 
     /// Verify a folded IVC bundle
@@ -128,9 +141,10 @@ A long computation is decomposed into N identical step circuits and each step is
 either as a standalone Groth16 proof bound together by a BLAKE2b512 transcript\n\
 (Implementation 8: params, ceremony, fold, verify) or folded into one Relaxed-R1CS\n\
 instance with a NIFS and compressed into a single proof\n\
-(Implementation 9: fold --nifs, compress, verify --compression-proof)\n\
+(Implementation 9, the default: fold --nifs, compress --proving-key, verify --compression-proof)\n\
 or compressed with a transparent sumcheck argument requiring no trusted setup\n\
-(Implementation 10: fold --nifs, compress --sumcheck, verify --sumcheck-proof).\n\n\
+(Implementation 10: fold --nifs, compress --sumcheck, verify --sumcheck-proof;\n\
+Implementation 11: compress --slim, verify --slim-proof).\n\n\
 The core IVC logic lives in the `nova-prover` crate; the Groth16 proof-system core lives\n\
 in `groth16-prover` / `trusted-setup`. Step proofs use arkworks' canonical serialization\n\
 and are directly consumable by on-chain Aiken verifiers."

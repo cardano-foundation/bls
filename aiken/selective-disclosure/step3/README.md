@@ -23,14 +23,14 @@ Overrides: `DEPTH=` (both). Artifacts in `/tmp/sd_step3_{groth16,novaslim}/`
 
 - `circom`, `snarkjs`, Python 3.
 - `--prime bls12381` (must match the Rust prover).
-- NovaSlim CLI at [`nova-slim`](../../../nova-slim) (build `cargo build --release`).
+- NovaSlim CLI at [`nova-slim`](https://github.com/paweljakubas/nova-slim) (build `cargo build --release`).
 
 ## On-chain
 
 | Path | On-chain verifier | Datum / redeemer |
 |------|-------------------|------------------|
 | Groth16 | `aiken/groth16` gate (pairing check) | datum = `vk`, redeemer = `proof` + public `(merkle_root, nullifier_hash, out_commitment_1, out_commitment_2, fee)` |
-| NovaSlim | [`nova-slim/cardano/nova-slim-verifier`](../../../nova-slim/cardano/nova-slim-verifier) | datum = `NifsBundle`, redeemer = `SlimProof` |
+| NovaSlim | [`nova-slim/cardano/nova-slim-verifier`](https://github.com/paweljakubas/nova-slim/tree/master/cardano/nova-slim-verifier) | datum = `NifsBundle`, redeemer = `SlimProof` |
 
 Groth16 emits `pp_vk.ak`; NovaSlim emits `pp.ivc.cbor` + `pp_slim.proof.cbor`.
 

@@ -26,14 +26,14 @@ Artifacts go to `/tmp/sd_step1_{groth16,novaslim}/` (override with `OUT=`).
 - `circom`, `snarkjs`, Python 3 (see repo docs).
 - BLS12-381 compile flag: `--prime bls12381` (must match the Rust prover).
 - NovaSlim: `nova-slim/cli/target/release/nova-slim` from
-  [`nova-slim`](../../../nova-slim) (a sibling repo).
+  [`nova-slim`](https://github.com/paweljakubas/nova-slim) (a sibling repo).
 
 ## On-chain
 
 | Path | On-chain verifier | Datum / redeemer |
 |------|-------------------|------------------|
 | Groth16 | `aiken/groth16` gate (pairing check) | datum = `vk`, redeemer = `proof` + public inputs `(pku, pkv, current_year, country_root, eligible)` |
-| NovaSlim | [`nova-slim/cardano/nova-slim-verifier`](../../../nova-slim/cardano/nova-slim-verifier) | datum = `NifsBundle`, redeemer = `SlimProof` (sumcheck only, no openings) |
+| NovaSlim | [`nova-slim/cardano/nova-slim-verifier`](https://github.com/paweljakubas/nova-slim/tree/master/cardano/nova-slim-verifier) | datum = `NifsBundle`, redeemer = `SlimProof` (sumcheck only, no openings) |
 
 The Groth16 script emits `predicate_vk.ak` (Aiken vk source to paste into the
 gate validator). The NovaSlim script emits `pred.ivc.cbor` + `pred_slim.proof.cbor`.

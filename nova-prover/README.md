@@ -1,23 +1,34 @@
 # nova-prover
 
-Nova IVC folding for BLS12-381 (arkworks) — **Implementation 11** is the current
-default: NIFS folding + sumcheck compression + **slim on-chain proofs**.
+Nova IVC folding for BLS12-381 (arkworks) — the **default `nova` CLI path is
+Implementation 9**: NIFS folding + **Groth16 compression**, the construction from
+the Nova paper — the folded instance is compressed with one Groth16 proof and
+checked on-chain with a **single pairing**.  It costs one trusted setup for the
+compression circuit; the transparent sumcheck variants (Implementation 10/11)
+stay available via `--sumcheck` / `--slim`.
 
 A long computation is split into `N` identical step circuits, each proving
 `state_{i+1} = f(step_i, state_i)`. The `fold` operation transparently accumulates
 all steps into one Relaxed-R1CS instance; `compress` produces a constant-size
-sumcheck proof; and `verify` checks it with native field operations — no
-pairings, no trusted setup for compression, and **~1.5 KiB** on-chain footprint
-with the `--slim` flag.
+proof over that instance; and `verify` checks it — one pairing for the default
+Groth16 path, or native field operations (no pairings, no trusted setup) for the
+transparent sumcheck path.
 
-| | Impl 8 (legacy) | Impl 9 (legacy) | Impl 10 | **Impl 11 (default)** |
+> **The cutting-edge Nova work lives upstream** — in
+> [`paweljakubas/nova-slim`](https://github.com/paweljakubas/nova-slim).  This
+> crate (and `clis/nova`) is the snapshot that the in-tree Aiken verifiers and
+> the `novaslim_e2e.sh` scripts are built against.
+
+| | Impl 8 (legacy) | <u>**Impl 9 (default)**</u> | Impl 10 | Impl 11 |
 |---|---|---|---|---|
 | Per-step work | Groth16 proof | NIFS fold (2 MSMs) | NIFS fold | NIFS fold |
-| Proof bundle | O(N) — N proofs | O(step) — reveals Z/E | O(1) — sumcheck + HashPC | **O(1) — slim sumcheck** |
-| On-chain verify | N pairings | 1 pairing | sumcheck + HashPC (pairing-free) | **sumcheck only (pairing-free)** |
-| Trusted setup | per step | compression circuit only | **none** | **none** |
-| ZK | No | No | Yes | **Yes** |
-| On-chain size | 47 KiB × N | ~580 KiB | ~473 KiB | **~1.5 KiB** |
+| Proof bundle | O(N) — N proofs | O(step) — reveals Z/E | O(1) — sumcheck + HashPC | O(1) — slim sumcheck |
+| On-chain verify | N pairings | **1 pairing** | sumcheck + HashPC (pairing-free) | sumcheck only (pairing-free) |
+| Trusted setup | per step | **compression circuit only** | none | none |
+| ZK | No | No | Yes | Yes |
+| On-chain size | 47 KiB × N | ~580 KiB | ~473 KiB | ~1.5 KiB |
+| Nova paper | no | **yes** | no (sumcheck instead) | no (sumcheck instead) |
+| CLI | `fold` (no `--nifs`) | `compress` (default) | `compress --sumcheck` | `compress --slim` |
 
 The proof-system core (R1CS/QAP/engine, ceremony, circom adapter, prover)
 lives in `groth16-prover` / `trusted-setup`; this crate adds the IVC layer.
@@ -25,40 +36,63 @@ The `nova` CLI (`clis/nova`) wraps this crate's operations.
 
 ---
 
-## Quick start — Implementation 11 (slim on-chain proofs)
+## Quick start — Implementation 9 (paper-faithful Nova, default)
 
 ```bash
 # 1. Inspect the step circuit (must satisfy n_pub_in == n_pub_out)
 nova params --circuit step_circuit.r1cs
 
 # 2. Fold step witnesses into a single Relaxed-R1CS instance
+#    (transparent — no proving key) and emit the compression circuit
+nova fold --nifs --circuit step_circuit.r1cs \
+  --steps ./step_witnesses/ --out bundle.ivc.json \
+  --compression-r1cs compression.r1cs
+
+# 3. One-time trusted setup for the compression circuit (reusable per step shape)
+trusted-setup ceremony-dev --sparse --circuit compression.r1cs \
+  --proving-key compression.pk --verifying-key compression.vk
+
+# 4. Compress the folded instance into one Groth16 proof
+nova compress --circuit step_circuit.r1cs \
+  --steps ./step_witnesses/ \
+  --proving-key compression.pk --out compression.proof.json
+
+# 5. Verify — one pairing check + native commitment recomputation
+nova verify --ivc bundle.ivc.json \
+  --compression-proof compression.proof.json --compression-vk compression.vk
+# → Verified N steps: compression proof OK, commitments OK, state chain OK
+# → Final transcript: <64-byte hex>
+```
+
+The compression circuit is the Nova paper's "SNARK compresses the folded
+instance" step: it checks the relaxed equation `(AZ)∘(BZ) = u(CZ) + E` for the
+final instance, so the on-chain check is a single pairing instead of N.
+
+### Transparent alternative — no ceremony
+
+`--sumcheck` selects the transparent sumcheck compression (Implementation 10)
+and `--slim` the on-chain-friendly slim proof (Implementation 11).  Neither
+needs a proving key, a verifying key, or a ceremony:
+
+```bash
 nova fold --nifs --circuit step_circuit.r1cs \
   --steps ./step_witnesses/ --out bundle.ivc.json
 
-# 3. Compress into a slim on-chain proof (~1.5 KiB, no ceremony)
+# Full sumcheck proof (includes HashPC opening proofs for off-chain audit)
+nova compress --sumcheck --circuit step_circuit.r1cs \
+  --steps ./step_witnesses/ --out sumcheck.proof.json
+nova verify --ivc bundle.ivc.json --sumcheck-proof sumcheck.proof.json
+
+# Slim on-chain proof (~1.5 KiB, opening proofs kept off-chain as an audit trail)
 nova compress --slim --circuit step_circuit.r1cs \
   --steps ./step_witnesses/ --out slim.proof.json
-
-# 4. Verify (no verifying key needed)
 nova verify --ivc bundle.ivc.json --slim-proof slim.proof.json
-# → Verified N steps: sumcheck OK, state chain OK
-# → Final transcript: <64-byte hex>
 ```
 
 The `--slim` flag strips the HashPC opening proofs (`w_opening`, `e_opening`)
 from the sumcheck bundle. Soundness is preserved because the sumcheck protocol
 itself proves knowledge of a witness consistent with the committed instance;
 the opening proofs are only needed for an off-chain audit trail.
-
-### Full sumcheck proof (with openings, for audit)
-
-Omit `--slim` to produce the full sumcheck proof (includes HashPC opening
-proofs for off-chain verification):
-
-```bash
-nova compress --circuit step_circuit.r1cs --steps ./step_witnesses/ --out sumcheck.proof.json
-nova verify --ivc bundle.ivc.json --sumcheck-proof sumcheck.proof.json
-```
 
 ### Parallel mode
 
@@ -155,9 +189,10 @@ flowchart TB
 
 ---
 
-## Historical implementations
+## Implementation tiers
 
-Earlier tiers are preserved for reference and backward compatibility. All step
+All tiers are preserved — Implementation 9 is the default `nova` CLI path, the
+rest stay available for comparison and backward compatibility.  All step
 circuits and witness formats are unchanged across tiers.
 
 ### Implementation 8 — step-chain Groth16 (legacy)
@@ -182,21 +217,23 @@ nova verify --ivc bundle.ivc.json --verifying-key step.vk
 
 </details>
 
-### Implementation 9 — NIFS + Groth16 compression (legacy)
+### Implementation 9 — NIFS + Groth16 compression (default)
 
 <details>
 <summary><b>Impl 9 — click to expand</b></summary>
 
-> **Status:** ✅ Done (POC, superseded by Impl 10/11). Folds N steps into one
-> Relaxed-R1CS instance, then compresses with a single Groth16 proof. Constant
-> in N but O(step) in bundle size because Z/E are revealed as public inputs.
+> **Status:** ✅ Done — **the default `nova compress` path**, and the
+> construction closest to the Nova paper: fold N steps into one Relaxed-R1CS
+> instance with NIFS, then compress that instance with a single Groth16 proof
+> over the compression circuit.  Constant in N, but O(step) in bundle size
+> because Z/E are revealed as public inputs.
 
 ```bash
 nova fold --nifs --circuit step_circuit.r1cs --steps ./step_witnesses/ --out bundle.ivc.json \
   --compression-r1cs compression.r1cs
 trusted-setup ceremony-dev --sparse --circuit compression.r1cs \
   --proving-key compression.pk --verifying-key compression.vk
-nova compress --groth16 --circuit step_circuit.r1cs --steps ./step_witnesses/ \
+nova compress --circuit step_circuit.r1cs --steps ./step_witnesses/ \
   --proving-key compression.pk --out compression.proof.json
 nova verify --ivc bundle.ivc.json --compression-proof compression.proof.json --compression-vk compression.vk
 ```
@@ -218,7 +255,7 @@ nova verify --ivc bundle.ivc.json --compression-proof compression.proof.json --c
 
 ```bash
 nova fold --nifs --circuit step_circuit.r1cs --steps ./step_witnesses/ --out bundle.ivc.json
-nova compress --circuit step_circuit.r1cs --steps ./step_witnesses/ --out sumcheck.proof.json
+nova compress --sumcheck --circuit step_circuit.r1cs --steps ./step_witnesses/ --out sumcheck.proof.json
 nova verify --ivc bundle.ivc.json --sumcheck-proof sumcheck.proof.json
 ```
 
@@ -228,12 +265,13 @@ nova verify --ivc bundle.ivc.json --sumcheck-proof sumcheck.proof.json
 
 </details>
 
-### Implementation 11 — Cardano-ready slim proofs (current default)
+### Implementation 11 — Cardano-ready slim proofs (transparent alternative)
 
 <details>
 <summary><b>Impl 11 — click to expand</b></summary>
 
-> **Status:** ✅ Shipped. Three orthogonal optimizations on Impl 10:
+> **Status:** ✅ Shipped — the transparent counterpart to the default Impl 9
+> path.  Three orthogonal optimizations on Impl 10:
 > 1. **Slim proofs** — strips HashPC opening proofs (~98% smaller, ~1.5 KiB on-chain).
 > 2. **Parallel fold/sumcheck** — rayon `par_iter` for cross-term and row products.
 > 3. **Lazy Pedersen MSM** — `lazy_commit` flag in `OptFlags` (API-ready).
@@ -253,9 +291,10 @@ they are not required for on-chain soundness.
 | Final IVC state | ~1 KiB | ~0.4 KiB (binary) |
 | **On-chain total** | **~473 KiB** | **~1.5 KiB** |
 
-**CLI.** `compress` defaults to sumcheck; `--groth16` for Groth16 compression;
-`--slim` for slim on-chain output. `verify` accepts `--slim-proof`,
-`--sumcheck-proof`, or `--compression-proof`.
+**CLI.** `compress` defaults to Groth16 compression (Implementation 9); `--sumcheck`
+for the transparent full sumcheck proof and `--slim` for slim on-chain output.
+`verify` accepts `--compression-proof` (with `--compression-vk`), `--sumcheck-proof`,
+or `--slim-proof`.
 
 **Property tests.** Parallel and sequential paths produce identical output
 (fold, sumcheck, E2E). See `nova-prover/src/lib.rs` and `src/sumcheck.rs`.
@@ -273,7 +312,7 @@ Measured with `cargo run --release --bin benchmark_nova -- --circuit <step.r1cs>
 on a single machine / single core, keys kept in memory. All numbers in a row
 come from the **same run**. Step witnesses use full-size state values.
 
-### Timing — Impl 11 (default) path
+### Timing — transparent sumcheck path (Impl 10/11)
 
 | Step circuit | Constraints | Steps | Fold total | Fold/step | Compress | Verify |
 |---|---|---|---|---|---|---|
@@ -311,7 +350,7 @@ baseline and parallel.
 ```bash
 cd nova-prover
 
-# Implementation 11 (default slim path)
+# Implementation 11 (transparent slim path)
 cargo run --release --bin benchmark_nova -- --sumcheck --circuit <step.r1cs> --steps <witness-dir>
 
 # With parallel optimization

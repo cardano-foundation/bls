@@ -121,7 +121,7 @@ nova fold --nifs --circuit <build>/cardano_ed25519_ownership_strong_nova.r1cs \
 # → NIFS bundle written (6 steps → one instance)
 
 # 4. Compress with a transparent sumcheck (re-folds deterministically)
-nova compress --circuit <build>/cardano_ed25519_ownership_strong_nova.r1cs \
+nova compress --sumcheck --circuit <build>/cardano_ed25519_ownership_strong_nova.r1cs \
   --steps <steps> --out strong_sumcheck.proof
 
 # 5. Verify (no verifying key)
@@ -157,7 +157,7 @@ python3 CardanoKeyOwnershipStrong/gen_strong_nova_steps.py \
 # 3. Transparent Nova chain (no trusted setup, no keys)
 nova fold --nifs --circuit <build>/cardano_ed25519_ownership_strong_nova.r1cs \
   --steps <steps> --out strong_ivc.json
-nova compress --circuit <build>/cardano_ed25519_ownership_strong_nova.r1cs \
+nova compress --sumcheck --circuit <build>/cardano_ed25519_ownership_strong_nova.r1cs \
   --steps <steps> --out strong_sumcheck.proof
 nova verify --ivc strong_ivc.json --sumcheck-proof strong_sumcheck.proof
 # → Verified 6 steps: sumcheck compression proof OK, commitments OK, state chain OK

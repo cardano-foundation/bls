@@ -5,43 +5,80 @@ Command-line interface for Nova IVC folding on BLS12-381.
 A long computation is split into `N` identical step circuits, each proving
 `state_{i+1} = f(step_i, state_i)`. The CLI supports **two paths**:
 
-| | <u>**Recommended — no ceremony, slim proof**</u> | With ceremony (legacy) |
+| | <u>**Paper-faithful Nova (default)**</u> | Transparent alternative |
 |---|---|---|
-| **Path** | `fold --nifs` → `compress --slim` → `verify --slim-proof` | `ceremony` → `fold` → `verify` (or `fold --nifs` → `compress --groth16` → `verify --compression-proof`) |
-| **Proof size** | **O(1) — ~1.5 KiB on-chain** | O(N) or O(step) — 47 KiB × N or ~580 KiB |
-| **Trusted setup** | **None** for compression | Per-step ceremony (Impl 8) or compression ceremony (Impl 9) |
-| **On-chain verify** | **Pairing-free** — native field sumcheck | N pairings (Impl 8) or 1 pairing (Impl 9) |
-| **ZK** | **Yes** — witness-hiding | No |
+| **Path** | `fold --nifs` → `compress` → `verify --compression-proof` | `fold --nifs` → `compress --slim` → `verify --slim-proof` |
+| **Implementation** | **9** — NIFS + Groth16 compression | 11 — NIFS + sumcheck + slim proof |
+| **Proof size** | O(step) — ~580 KiB | **O(1) — ~1.5 KiB on-chain** |
+| **Trusted setup** | **Compression circuit only** (one-time, reusable) | **None** for compression |
+| **On-chain verify** | **1 pairing** | **Pairing-free** — native field sumcheck |
+| **ZK** | No | **Yes** — witness-hiding |
 
-The **recommended path** (Implementation 11) uses transparent NIFS folding + sumcheck
-compression + slim proofs. No ceremony, no proving key, no verifying key — only the
-step circuit and witnesses are needed.
+The **default path** (Implementation 9) is the construction from the Nova paper:
+fold the steps with NIFS, compress the folded instance with a Groth16 proof over
+the compression circuit, and check it on-chain with a single pairing.  It needs
+one trusted setup for the compression circuit.
+
+The **transparent alternative** (Implementation 11) swaps the Groth16 compression
+for a transparent sumcheck argument with slim on-chain proofs.  No ceremony, no
+proving key, no verifying key — only the step circuit and witnesses are needed.
 
 The core IVC logic lives in `nova-prover`; this crate is the thin CLI wrapper.
 Design, benchmarks, and implementation history are in [`nova-prover/README.md`](../../nova-prover/README.md).
+
+> **The cutting-edge Nova work lives upstream** — in
+> [`paweljakubas/nova-slim`](https://github.com/paweljakubas/nova-slim).  This
+> CLI is the snapshot that the in-tree Aiken verifiers are built against.
 
 ---
 
 ## Executive Summary
 
-The `nova` CLI implements **Nova IVC folding** — a recursive proof technique that compresses N step-circuit executions into a single constant-sized proof. No trusted setup required.
+The `nova` CLI implements **Nova IVC folding** — a recursive proof technique that compresses N step-circuit executions into a single constant-sized proof.
 
 **What you get:**
-- `fold` — Fold N step witnesses into one accumulated instance (NIFS)
-- `compress --slim` — Compress to an on-chain proof (~0.4–2.5 KiB)
-- `verify` — Verify off-chain or via Aiken sumcheck validator
-- Transparent operation — no `.pk`, no `.vk`, no ceremony
+- `fold --nifs` — Fold N step witnesses into one accumulated instance (NIFS)
+- `compress` — Compress to one Groth16 proof (default) or a slim sumcheck proof (`--slim`)
+- `verify` — Verify off-chain or via Aiken verifier
 
-**Quick start (10 steps):**
+**Quick start (default path):**
 ```bash
 cd clis/nova
 cargo build --release
 
+# 1. Fold (transparent — no proving key) and emit the compression circuit
+./target/release/nova fold --nifs \
+  --circuit ../../circom/CardanoKeyOwnership/cardano_ed25519_ownership_nova.r1cs \
+  --steps ./step_witnesses/ \
+  --out bundle.ivc.json \
+  --compression-r1cs compression.r1cs
+
+# 2. One-time trusted setup for the compression circuit
+trusted-setup ceremony-dev --sparse --circuit compression.r1cs \
+  --proving-key compression.pk --verifying-key compression.vk
+
+# 3. Compress to one Groth16 proof
+./target/release/nova compress \
+  --circuit ../../circom/CardanoKeyOwnership/cardano_ed25519_ownership_nova.r1cs \
+  --steps ./step_witnesses/ \
+  --proving-key compression.pk \
+  --out compression.proof.json
+
+# 4. Verify — one pairing check
+./target/release/nova verify \
+  --ivc bundle.ivc.json \
+  --compression-proof compression.proof.json \
+  --compression-vk compression.vk
+# → Verified N steps: compression proof OK, commitments OK, state chain OK
+```
+
+**Quick start (transparent, no ceremony):**
+```bash
 # 1. Fold
 ./target/release/nova fold --nifs \
   --circuit ../../circom/CardanoKeyOwnership/cardano_ed25519_ownership_nova.r1cs \
   --steps ./step_witnesses/ \
-  --out bundle.ivc.cbor
+  --out bundle.ivc.json
 
 # 2. Compress to slim proof
 ./target/release/nova compress --slim \
@@ -61,6 +98,7 @@ cargo build --release
 | Phase | Time | Output size |
 |-------|------|-------------|
 | Fold 255 steps | ~185 ms/step | 47 KiB × N (growing) |
+| Compress (Groth16, default) | one Groth16 proof | ~580 KiB |
 | Compress (full sumcheck) | ~7.9 s | ~472 KiB |
 | Compress (--slim) | ~8 s | **~1.5 KiB** |
 | Verify (slim) | ~0.3 ms | — |
@@ -76,7 +114,37 @@ cargo build --release
 
 ---
 
-## Quick start — recommended path (no ceremony)
+## Quick start — default path (paper-faithful Nova)
+
+```bash
+# 1. Inspect the step circuit (must satisfy n_pub_in == n_pub_out)
+nova params --circuit step_circuit.r1cs
+
+# 2. Fold step witnesses into a single Relaxed-R1CS instance and emit
+#    the compression circuit (2× the step constraints)
+nova fold --nifs --circuit step_circuit.r1cs \
+  --steps ./step_witnesses/ --out bundle.ivc.json \
+  --compression-r1cs compression.r1cs
+
+# 3. One-time trusted setup for the compression circuit (reusable per step shape)
+trusted-setup ceremony-dev --sparse --circuit compression.r1cs \
+  --proving-key compression.pk --verifying-key compression.vk
+
+# 4. Compress into one Groth16 proof
+nova compress --circuit step_circuit.r1cs --steps ./step_witnesses/ \
+  --proving-key compression.pk --out compression.proof.json
+
+# 5. Verify — one pairing check + native commitment recomputation
+nova verify --ivc bundle.ivc.json \
+  --compression-proof compression.proof.json --compression-vk compression.vk
+# → Verified N steps: compression proof OK, commitments OK, state chain OK
+```
+
+The compression circuit is the Nova paper's "SNARK compresses the folded
+instance" step: it checks the relaxed equation `(AZ)∘(BZ) = u(CZ) + E` for the
+final instance, so verification on-chain is a single pairing instead of N.
+
+## Quick start — transparent path (no ceremony)
 
 ```bash
 # 1. Inspect the step circuit (must satisfy n_pub_in == n_pub_out)
@@ -109,10 +177,10 @@ nova compress --slim --opt-parallel --circuit step_circuit.r1cs --steps ./step_w
 
 ### Full sumcheck proof (with openings, for audit)
 
-Omit `--slim` to keep the HashPC opening proofs:
+Add `--sumcheck` to keep the HashPC opening proofs:
 
 ```bash
-nova compress --circuit step_circuit.r1cs --steps ./step_witnesses/ --out sumcheck.proof.json
+nova compress --sumcheck --circuit step_circuit.r1cs --steps ./step_witnesses/ --out sumcheck.proof.json
 nova verify --ivc bundle.ivc.json --sumcheck-proof sumcheck.proof.json
 ```
 
@@ -142,7 +210,7 @@ Commands:
   params    Inspect a step circuit and emit a JSON descriptor
   ceremony  Run a single-party ceremony for a step circuit
   fold      Fold step witnesses into an IVC bundle
-  compress  Compress a NIFS bundle into a single proof (sumcheck by default, --groth16 for Groth16)
+  compress  Compress a NIFS bundle into a single proof (Groth16 by default, --sumcheck / --slim for the transparent paths)
   verify    Verify a folded IVC bundle
   help      Print this message or the help of the given subcommand(s)
 ```
@@ -156,15 +224,19 @@ nova params --circuit step_circuit.r1cs
 nova params --circuit step_circuit.r1cs --out step_circuit.desc.json
 ```
 
-### `ceremony` — trusted setup (legacy path only)
+### `ceremony` — per-step trusted setup (legacy Impl 8 path only)
 
-Single-party dev-only ceremony. Produces per-step `.pk` / `.vk`.
+Single-party dev-only ceremony for the **step** circuit.  Produces per-step
+`.pk` / `.vk`.
 
 ```bash
 nova ceremony --circuit step_circuit.r1cs --proving-key step.pk --verifying-key step.vk
 ```
 
-> **Warning:** dev-only. Not needed for the recommended slim path.
+> **Warning:** dev-only.  The default `compress` path does **not** need it —
+> only the compression circuit needs a setup, and that one comes from
+> `trusted-setup ceremony-dev --sparse` on the `.r1cs` emitted by
+> `fold --nifs --compression-r1cs`.
 
 ### `fold` — fold step witnesses
 
@@ -175,39 +247,49 @@ nova fold --circuit step_circuit.r1cs --proving-key step.pk \
   --steps ./step_witnesses/ --out bundle.ivc.json
 ```
 
-**With `--nifs`** (recommended): transparent folding, no proving key, O(1) bundle.
+**With `--nifs`**: transparent folding, no proving key, O(1) bundle.
 
 ```bash
 nova fold --nifs --circuit step_circuit.r1cs \
   --steps ./step_witnesses/ --out bundle.ivc.json
 ```
 
+Add `--compression-r1cs compression.r1cs` to emit the compression circuit needed
+by the default Groth16 compression path.
+
 Add `--opt-parallel` for rayon-parallelized cross-term computation.
 
 ### `compress` — compress into one proof
 
-**Default (recommended):** sumcheck compression, no ceremony.
+**Default:** Groth16 compression (Implementation 9) — the paper-faithful Nova
+path.  Requires the compression proving key.
 
 ```bash
-nova compress --circuit step_circuit.r1cs --steps ./step_witnesses/ --out sumcheck.proof.json
+nova compress --circuit step_circuit.r1cs --steps ./step_witnesses/ \
+  --proving-key compression.pk --out compression.proof.json
 ```
 
-**Slim on-chain proof (recommended):** strips HashPC openings (~98% smaller).
+**Transparent sumcheck proof (Implementation 10):** no ceremony, no proving key.
+
+```bash
+nova compress --sumcheck --circuit step_circuit.r1cs --steps ./step_witnesses/ --out sumcheck.proof.json
+```
+
+**Slim on-chain proof (Implementation 11):** strips HashPC openings (~98% smaller).
 
 ```bash
 nova compress --slim --circuit step_circuit.r1cs --steps ./step_witnesses/ --out slim.proof.json
 ```
 
-**Groth16 compression (legacy Impl 9):** requires `--proving-key` from a compression ceremony.
-
-```bash
-nova compress --groth16 --circuit step_circuit.r1cs --steps ./step_witnesses/ \
-  --proving-key compression.pk --out compression.proof.json
-```
-
 ### `verify` — verify a folded bundle
 
-**Slim proof (recommended):**
+**Groth16 compression proof (default path):**
+
+```bash
+nova verify --ivc bundle.ivc.json --compression-proof compression.proof.json --compression-vk compression.vk
+```
+
+**Slim proof:**
 
 ```bash
 nova verify --ivc bundle.ivc.json --slim-proof slim.proof.json
@@ -217,12 +299,6 @@ nova verify --ivc bundle.ivc.json --slim-proof slim.proof.json
 
 ```bash
 nova verify --ivc bundle.ivc.json --sumcheck-proof sumcheck.proof.json
-```
-
-**Groth16 compression (legacy Impl 9):**
-
-```bash
-nova verify --ivc bundle.ivc.json --compression-proof compression.proof.json --compression-vk compression.vk
 ```
 
 **Step-chain (legacy Impl 8):**
@@ -235,7 +311,26 @@ nova verify --ivc bundle.ivc.json --verifying-key step.vk
 
 ## Complete workflows
 
-### <u>Recommended — slim proof, no ceremony</u>
+### <u>Default — paper-faithful Nova (Groth16 compression)</u>
+
+```bash
+# 1. Fold (transparent, no proving key) and emit the compression circuit
+nova fold --nifs --circuit step_circuit.r1cs --steps ./step_witnesses/ --out bundle.ivc.json \
+  --compression-r1cs compression.r1cs
+
+# 2. Ceremony for compression circuit (one-time, reusable)
+trusted-setup ceremony-dev --sparse --circuit compression.r1cs \
+  --proving-key compression.pk --verifying-key compression.vk
+
+# 3. Compress (Groth16)
+nova compress --circuit step_circuit.r1cs --steps ./step_witnesses/ \
+  --proving-key compression.pk --out compression.proof.json
+
+# 4. Verify (one pairing)
+nova verify --ivc bundle.ivc.json --compression-proof compression.proof.json --compression-vk compression.vk
+```
+
+### Transparent — slim proof, no ceremony
 
 ```bash
 # 1. Fold (transparent, no proving key)
@@ -246,25 +341,6 @@ nova compress --slim --circuit step_circuit.r1cs --steps ./step_witnesses/ --out
 
 # 3. Verify (pairing-free, no VK)
 nova verify --ivc bundle.ivc.json --slim-proof slim.proof.json
-```
-
-### With ceremony — Groth16 compression (legacy)
-
-```bash
-# 1. Fold (transparent)
-nova fold --nifs --circuit step_circuit.r1cs --steps ./step_witnesses/ --out bundle.ivc.json \
-  --compression-r1cs compression.r1cs
-
-# 2. Ceremony for compression circuit (one-time, reusable)
-trusted-setup ceremony-dev --sparse --circuit compression.r1cs \
-  --proving-key compression.pk --verifying-key compression.vk
-
-# 3. Compress (Groth16)
-nova compress --groth16 --circuit step_circuit.r1cs --steps ./step_witnesses/ \
-  --proving-key compression.pk --out compression.proof.json
-
-# 4. Verify (one pairing)
-nova verify --ivc bundle.ivc.json --compression-proof compression.proof.json --compression-vk compression.vk
 ```
 
 ### Step-chain — per-step Groth16 (legacy)
@@ -294,22 +370,22 @@ of 7,724 constraints each (24 public inputs / 24 public outputs). The full
 witness-generation walkthrough is in
 [`circom/CardanoKeyOwnership/README.md`](../../circom/CardanoKeyOwnership/README.md).
 
-**Recommended slim path:**
+**Default path (paper-faithful Nova):**
 
 ```bash
 nova params --circuit cardano_ed25519_ownership_nova.r1cs
+nova fold --nifs --circuit cardano_ed25519_ownership_nova.r1cs --steps <witness-dir> --out bundle.ivc.json --compression-r1cs compression.r1cs
+trusted-setup ceremony-dev --sparse --circuit compression.r1cs --proving-key compression.pk --verifying-key compression.vk
+nova compress --circuit cardano_ed25519_ownership_nova.r1cs --steps <witness-dir> --proving-key compression.pk --out compression.proof.json
+nova verify --ivc bundle.ivc.json --compression-proof compression.proof.json --compression-vk compression.vk
+```
+
+**Transparent path (no ceremony, for comparison):**
+
+```bash
 nova fold --nifs --circuit cardano_ed25519_ownership_nova.r1cs --steps <witness-dir> --out bundle.ivc.json
 nova compress --slim --circuit cardano_ed25519_ownership_nova.r1cs --steps <witness-dir> --out slim.proof.json
 nova verify --ivc bundle.ivc.json --slim-proof slim.proof.json
-```
-
-**Legacy Groth16 path (for comparison):**
-
-```bash
-nova fold --nifs --circuit cardano_ed25519_ownership_nova.r1cs --steps <witness-dir> --out bundle.ivc.json --compression-r1cs compression.r1cs
-trusted-setup ceremony-dev --sparse --circuit compression.r1cs --proving-key compression.pk --verifying-key compression.vk
-nova compress --groth16 --circuit cardano_ed25519_ownership_nova.r1cs --steps <witness-dir> --proving-key compression.pk --out compression.proof.json
-nova verify --ivc bundle.ivc.json --compression-proof compression.proof.json --compression-vk compression.vk
 ```
 
 ---
