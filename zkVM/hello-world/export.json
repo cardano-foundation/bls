@@ -1,3 +1,5 @@
+    Compiling zkvm/hello-world 0.0.0 (.)
+    Compiling aiken-lang/stdlib v3.1.0 (./build/packages/aiken-lang-stdlib)
 {
   "name": "hello.hello_hash",
   "parameters": [

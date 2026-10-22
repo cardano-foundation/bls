@@ -165,3 +165,5 @@ zkVM/
 - [x] Created `zkVM/hello-world/` — an Aiken library exporting `hello_hash(msg: ByteArray) -> ByteArray` (`sha2_256`), with a test matching `SHA-256("Hello, world!") = 315f5bdb...94edd3`.
 - [x] Confirmed the same hash value on-chain/off-chain via Aiken stdlib and in both zkVM guests (Phase 0).
 - Exported UPLC artifact via `aiken export` for potential guest-side evaluation; next step: run the real UPLC program inside OpenVM/Jolt (or a UPLC interpreter guest) and prove the same digest.
+
+- [x] **Phase 1b**: Ran the equivalent UPLC logic (direct `sha2_256` on bytes) via `aiken uplc eval` and confirmed it matches the zkVM outputs. The exported function program exists (`hello_hash.flat`, `export.json`); next step is embedding the UPLC evaluator in a zkVM guest or running the script artifact directly.
