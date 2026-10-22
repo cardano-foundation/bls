@@ -1,0 +1,24 @@
+{
+  "name": "hello.hello_hash",
+  "parameters": [
+    {
+      "title": "msg",
+      "schema": {
+        "$ref": "#/definitions/ByteArray"
+      }
+    }
+  ],
+  "return_type": {
+    "title": "return_type",
+    "schema": {
+      "$ref": "#/definitions/ByteArray"
+    }
+  },
+  "compiledCode": "49010100237246eb8005",
+  "hash": "b0392f316315f1532cc2eb0dbd225ad3e871100478a5e1db8c653a3d",
+  "definitions": {
+    "ByteArray": {
+      "dataType": "bytes"
+    }
+  }
+}

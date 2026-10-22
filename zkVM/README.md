@@ -159,3 +159,9 @@ zkVM/
 - Plutus/UPLC: <https://plutus.cardano.iot/>
 
 </details>
+
+## Phase 1: Aiken differential testing
+
+- [x] Created `zkVM/hello-world/` — an Aiken library exporting `hello_hash(msg: ByteArray) -> ByteArray` (`sha2_256`), with a test matching `SHA-256("Hello, world!") = 315f5bdb...94edd3`.
+- [x] Confirmed the same hash value on-chain/off-chain via Aiken stdlib and in both zkVM guests (Phase 0).
+- Exported UPLC artifact via `aiken export` for potential guest-side evaluation; next step: run the real UPLC program inside OpenVM/Jolt (or a UPLC interpreter guest) and prove the same digest.
