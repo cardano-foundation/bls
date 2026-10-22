@@ -1,0 +1,15 @@
+[package]
+name = "openvm-hello-aiken"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+members = []
+
+[dependencies]
+openvm = { git = "https://github.com/openvm-org/openvm.git", tag = "v2.0.2" }
+openvm-sha2 = { git = "https://github.com/openvm-org/openvm.git", tag = "v2.0.2" }
+
+[features]
+default = []
+std = ["openvm/std"]
