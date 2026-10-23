@@ -76,18 +76,18 @@ cargo run --bin uplc
 # UPLC hello_hash(Hello, world!) sha256 = 315f5bdb...
 ```
 
-To prove it inside the zkVM (after `cargo openvm setup` has been run once):
+To prove it inside the zkVM (the existing `app.pk`/`app.vk` from the SHA-256
+hello-world guest work because the VM config in `openvm.toml` is unchanged):
 
 ```bash
 cd zkVM/openvm/hello-aiken
 cargo openvm build --bin uplc
-cargo openvm keygen
-cargo openvm prove app --bin uplc
+cargo openvm prove app --bin uplc --exe openvm/release/uplc.vmexe
 cargo openvm verify app --bin uplc
 ```
 
-Status: dependency wired; host execution matches `aiken uplc eval`. zkVM build,
-keygen and prove steps are the next validation target.
+Status: ✅ end-to-end verified. The prover outputs the same digest as
+`aiken uplc eval` and the proof verifies successfully.
 
 ## Guest
 
