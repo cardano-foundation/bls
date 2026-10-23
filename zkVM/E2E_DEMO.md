@@ -39,7 +39,7 @@ sequenceDiagram
     participant Verifier
 
     Dev->>Aiken: aiken build / export
-    Note over Aiken: produces UPLC; for hello_hash equivalent use same hash
+    Note over Aiken: produces UPLC, for hello_hash equivalent use same hash
     Dev->>Guest: Write guest using openvm-sha2 / logic
     Dev->>CargoOpenVM: cargo openvm build
     CargoOpenVM->>Guest: Build with nightly-2026-01-18 for riscv32im-risc0-zkvm-elf
@@ -78,7 +78,7 @@ sequenceDiagram
     JoltProver-->>Host: (output, proof, io_device)
     Host->>JoltVerifier: verify(output, io_device.panic, proof)
     JoltVerifier-->>Host: OK
-    Note over Host: Public output returned directly (e.g. [u8;32])
+    Note over Host: Public output returned directly (e.g. 32-byte array)
 ```
 
 ## Complete E2E demonstration
