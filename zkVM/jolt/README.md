@@ -42,6 +42,39 @@ cd zkVM/jolt/hello
 cargo run --release     # compiles the guest, preprocesses, proves, verifies
 ```
 
+## UPLC evaluator guest (`hello-aiken`)
+
+`hello-aiken/guest/src/lib.rs` declares a `#[jolt::provable]` function that runs
+the `uplc-guest` CEK evaluator on the real `hello_hash.flat` artifact. It is
+equivalent to:
+
+```bash
+cd zkVM/uplc-guest
+cargo run --bin uplc-eval -- \
+  ../hello-world/hello_hash.flat \
+  --data-bytes 48656c6c6f2c20776f726c6421
+```
+
+Run the UPLC guest end-to-end:
+
+```bash
+cd zkVM/jolt/hello-aiken
+cargo run --release --bin uplc
+```
+
+Expected output:
+
+```text
+preprocessing time: 5.167s
+prove time: 23.801s
+proof size: 72.6 kB
+verify time: 0.660s
+output (hex): 315f5bdb76d078c43b8ac0064e4a0164612b1fce77c869345bfc94c75894edd3
+```
+
+Status: ✅ end-to-end verified. The prover output matches `aiken uplc eval` and
+the proof verifies successfully.
+
 The host (`src/main.rs`) drives the four stages:
 
 ```rust

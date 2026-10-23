@@ -9,7 +9,9 @@ path = "./src/main.rs"
 
 [features]
 guest = []
+field-inline = ["jolt/field-inline"]
 
 [dependencies]
-jolt-sdk = { git = "https://github.com/a16z/jolt" }
+jolt = { package = "jolt-sdk", git = "https://github.com/a16z/jolt" }
 jolt-inlines-sha2 = { git = "https://github.com/a16z/jolt", default-features = false }
+uplc-guest = { path = "../../../uplc-guest", default-features = false }
