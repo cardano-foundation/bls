@@ -1,4 +1,4 @@
-# Jolt - Phase 0 baseline
+# Jolt
 
 Minimal end-to-end Jolt run: compile a Rust function to a RV64IMAC guest,
 prove it, and verify the proof. The guest computes
@@ -92,7 +92,7 @@ Two crates are needed for the inline (accelerated) SHA-2 instruction:
 - Never `cargo install` in the project dir: `/tmp` was wiped by a reboot during
   this experiment, so use a persistent `CARGO_TARGET_DIR` for long builds.
 
-## Artifacts (not committed)
+## Artifacts (not to be committed)
 
 `target/`, `/tmp/jolt-guest-targets/`, `/tmp/jolt-hello.proof` and
 `~/.cache/dory/` are build outputs and can be deleted freely.

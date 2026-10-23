@@ -134,13 +134,13 @@ cargo run --release
 ```bash
 # Decode/examine exported UPLC
 cd zkVM/hello-world
-/home/pawel/.aiken/versions/v1.1.19/aiken-x86_64-unknown-linux-musl/aiken uplc decode -c hello_hash.flat
+aiken uplc decode -c hello_hash.flat
 # (program 1.1.0 (lam i_0 [ (builtin sha2_256) [ (builtin unBData) i_0 ] ]))
 
 # Evaluate directly with Aiken
 cat > /tmp/hash2.uplc << 'EOF'
 (program 1.1.0 [(lam i_0 [(builtin sha2_256) i_0]) (con bytestring #48656c6c6f2c20776f726c6421)])
-/home/pawel/.aiken/versions/v1.1.19/aiken-x86_64-unknown-linux-musl/aiken uplc eval /tmp/hash2.uplc | grep -oP '#[0-9a-f]{64}'
+aiken uplc eval /tmp/hash2.uplc | grep -oP '#[0-9a-f]{64}'
 
 # To run actual UPLC in zkVM guest: embed a UPLC evaluator (e.g. nash-plutus/amaru-uplc) in guest,
 # load the flat program, apply args, evaluate, and reveal result. This is the work for full script fidelity.

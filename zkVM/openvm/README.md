@@ -1,4 +1,4 @@
-# OpenVM - Phase 0 baseline
+# OpenVM
 
 Minimal end-to-end OpenVM run: compile a Rust guest to RISC-V, prove it, and
 verify the proof. The guest computes `SHA-256("Hello, world!")` and reveals the
@@ -102,7 +102,7 @@ Changing `openvm.toml` changes the VM commit and therefore requires re-running
   Solidity verifier, or verify the STARK in a guest (`openvm-verify-stark`) —
   neither is BLS12-381, see `../../README.md`.
 
-## Artifacts (not committed)
+## Artifacts (not to be committed)
 
 `.proof`, `.vmexe`, `.pk`/`.vk` and `target/` are build outputs; delete them
 with `rm -rf target openvm* ./*.proof` when not needed.

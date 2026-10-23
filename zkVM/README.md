@@ -3,8 +3,12 @@
 Run an Aiken program inside a zero-knowledge VM (OpenVM or Jolt) and verify the
 resulting proof on Cardano.
 
-Phase 0 (baselines) is complete: both zkVMs prove and verify the same
+**Status**: both zkVMs prove and verify the same
 `SHA-256("Hello, world!")` hello-world program end to end on CPU.
+
+Coming: real programs (`aiken/kdf`, `aiken/vrf`, `aiken/selective-disclosure`),
+recursion/aggregation as feasible, and a differential-test harness.
+
 
 ## Quick start
 
@@ -22,36 +26,7 @@ cargo run --release
 Full instructions, one-time setup and gotchas:
 [OpenVM](./openvm/README.md) - [Jolt](./jolt/README.md).
 
-## Phase 0 results
-
-Same guest output for both VMs:
-`315f5bdb76d078c43b8ac0064e4a0164612b1fce77c869345bfc94c75894edd3`
-(`SHA-256("Hello, world!")`).
-
-| | OpenVM v2.0.2 | Jolt 0.1.0 (`main`) |
-|---|---|---|
-| ISA | RV32IM | RV64IMAC |
-| Prove | 658 s | **11.6 s** |
-| Verify | 0.55 s | 0.66 s |
-| Proof size | 547 KiB (app) / 522 KiB (stark) | **68.1 kB** |
-| Peak RAM (prover) | 2.6 GB | - |
-| One-time cost | 70 min CLI build, ~20 min setup | 20 min host build, ~6 s preprocessing |
-
-Machine: 4 cores, 31 GB RAM, no GPU, CPU backend for both.
-
-<details><summary><b>PLAN (click to expand)</b></summary>
-
-## Plan
-
-### Phase 0: Baselines (done)
-Run a hello-world program end to end in both zkVMs, prove and verify on CPU, and
-document the simplest possible run instructions plus metrics.
-
-- [x] OpenVM: install CLI, run hello world e2e, record metrics
-- [x] Jolt: install CLI, run hello world e2e, record metrics
-- [x] Top-level quick start and results
-
-### Phase 1: Aiken guest integration
+### Aiken guest integration strategies
 Aiken compiles to UPLC, not RISC-V, so there are two routes:
 
 1. **Port the logic** to a Rust guest and differential-test it against the
@@ -59,23 +34,19 @@ Aiken compiles to UPLC, not RISC-V, so there are two routes:
 2. **Run a UPLC interpreter in the guest** on the real `.plc` artifact (keeps
    script fidelity, much more work).
 
-### Phase 2: Proof generation
+### Proof generation
 Make the proof cheap enough to be practical on CPU-only hardware; measure
 segments, memory and proof sizes for realistic Aiken programs.
 
-### Phase 3: On-chain verification
+### On-chain verification
 Produce a BLS12-381 Groth16 proof that the existing verifier in
 [`aiken/groth16`](../aiken/groth16/README.md) can check. Both zkVMs currently
 aggregate over **BN254**, so this is a wrapping step on the aggregation side,
 not a guest-side change.
 
-### Phase 4: Hardening
-Real programs (`aiken/kdf`, `aiken/vrf`, `aiken/selective-disclosure`),
-recursion/aggregation as feasible, and a differential-test harness.
-
 </details>
 
-<details><summary><b>WHY ZKVM (click to expand)</b></summary>
+<details><summary><b>Why zkVM (click to expand)</b></summary>
 
 ## Why
 
@@ -85,7 +56,7 @@ recursion/aggregation as feasible, and a differential-test harness.
 
 </details>
 
-<details><summary><b>DESIGN NOTES (click to expand)</b></summary>
+<details><summary><b>Design notes (click to expand)</b></summary>
 
 ## Design notes
 
@@ -103,7 +74,19 @@ recursion/aggregation as feasible, and a differential-test harness.
 
 </details>
 
-<details><summary><b>COMPARISON (click to expand)</b></summary>
+<details><summary><b>Consequences of design (click to expand)</b></summary>
+
+- Aiken is UPLC, not RISC-V: porting vs. interpreting is the central design
+  choice
+- BLS12-381 Groth16 wrapping of a BN254 proof is expensive
+- Jolt is alpha and has no on-chain verifier or recursion yet.
+- Proving is CPU-bound here; OpenVM's 658 s hello-world proof is dominated by
+  fixed overhead and will not scale linearly.
+- Disk is tight on the dev machine (OpenVM and Jolt builds are several GB each).
+
+</details>
+
+<details><summary><b>Comparison between zkVMs (click to expand)</b></summary>
 
 ## Comparison
 
@@ -114,8 +97,8 @@ recursion/aggregation as feasible, and a differential-test harness.
 | ZK | yes | optional (`zk` feature, BlindFold) |
 | Prove (hello world) | 658 s | 11.6 s |
 | Proof size | 522-547 KiB | 68.1 kB |
-| On-chain verifier | Halo2/Solidity, EVM-oriented | roadmap |
-| Maturity | audited components, formal RV32IM verification | alpha, unaudited |
+| On-chain verifier | Halo2/Solidity, EVM-oriented | coming |
+| Maturity | audited components, formal RV32IM verification | unaudited |
 | Guest toolchain | Rust nightly + risc0 RV32 target | Rust 1.95 + RV64 target |
 
 </details>
@@ -128,29 +111,14 @@ recursion/aggregation as feasible, and a differential-test harness.
 zkVM/
 ├── openvm/     # OpenVM CLI harness + hello world (RV32IM)
 ├── jolt/       # Jolt host + guest (RV64IMAC)
-├── hello-world/  # planned: the Aiken program to prove
-├── uplc-guest/   # planned: UPLC interpreter guest
-└── onchain/      # planned: BN254 -> BLS12-381 wrapping + Aiken verifier
+├── hello-world/  # the Aiken program to prove
+├── uplc-guest/   # UPLC interpreter guest (coming)
+└── onchain/      # BN254 -> BLS12-381 wrapping + Aiken verifier (coming)
 ```
 
 </details>
 
-<details><summary><b>RISKS (click to expand)</b></summary>
-
-## Open questions and risks
-
-- Aiken is UPLC, not RISC-V: porting vs. interpreting is the central design
-  choice of Phase 1.
-- BLS12-381 Groth16 wrapping of a BN254 proof is expensive and is the main
-  unknown of Phase 3.
-- Jolt is alpha and has no on-chain verifier or recursion yet.
-- Proving is CPU-bound here; OpenVM's 658 s hello-world proof is dominated by
-  fixed overhead and will not scale linearly.
-- Disk is tight on the dev machine (OpenVM and Jolt builds are several GB each).
-
-</details>
-
-<details><summary><b>SOURCES (click to expand)</b></summary>
+<details><summary><b>Useful sources (click to expand)</b></summary>
 
 ## Sources
 
@@ -159,11 +127,3 @@ zkVM/
 - Plutus/UPLC: <https://plutus.cardano.iot/>
 
 </details>
-
-## Phase 1: Aiken differential testing
-
-- [x] Created `zkVM/hello-world/` — an Aiken library exporting `hello_hash(msg: ByteArray) -> ByteArray` (`sha2_256`), with a test matching `SHA-256("Hello, world!") = 315f5bdb...94edd3`.
-- [x] Confirmed the same hash value on-chain/off-chain via Aiken stdlib and in both zkVM guests (Phase 0).
-- Exported UPLC artifact via `aiken export` for potential guest-side evaluation; next step: run the real UPLC program inside OpenVM/Jolt (or a UPLC interpreter guest) and prove the same digest.
-
-- [x] **Phase 1b**: Ran the equivalent UPLC logic (direct `sha2_256` on bytes) via `aiken uplc eval` and confirmed it matches the zkVM outputs. The exported function program exists (`hello_hash.flat`, `export.json`); next step is embedding the UPLC evaluator in a zkVM guest or running the script artifact directly.
