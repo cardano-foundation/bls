@@ -3,12 +3,21 @@
 Run an Aiken program inside a zero-knowledge VM (OpenVM or Jolt) and verify the
 resulting proof on Cardano.
 
-**Status**: both zkVMs prove and verify the same
-`SHA-256("Hello, world!")` hello-world program end to end on CPU.
+**Status**:
 
-Coming: real programs (`aiken/kdf`, `aiken/vrf`, `aiken/selective-disclosure`),
-recursion/aggregation as feasible, and a differential-test harness.
+- OpenVM and Jolt prove and verify the same `SHA-256("Hello, world!")` guest end
+  to end on CPU.
+- The `no_std` UPLC CEK evaluator in [`uplc-guest`](./uplc-guest/README.md)
+  decodes the real `hello-world/hello_hash.flat` artifact and matches
+  `aiken uplc eval`. It builds for `riscv32im-unknown-none-elf`, but is not yet
+  wired into either zkVM.
+- Implemented builtins: `sha2_256`, `unBData`. That covers `hello-world`, not
+  real validators.
 
+Next: run the evaluator inside both zkVM guests and measure scaling, extend the
+builtin set for real Aiken programs (`aiken/kdf`, `aiken/vrf`,
+`aiken/selective-disclosure`), then produce a BLS12-381 Groth16 proof for the
+existing on-chain verifier.
 
 ## Quick start
 
@@ -21,6 +30,13 @@ cargo openvm prove app && cargo openvm verify app
 # Jolt (RV64IMAC, ~12 s prove on 4 cores)
 cd zkVM/jolt/hello
 cargo run --release
+
+# UPLC evaluator on the real Aiken artifact (host, no zkVM yet)
+cd zkVM/uplc-guest
+cargo test
+cargo run --bin uplc-eval -- \
+  ../hello-world/hello_hash.flat \
+  --data-bytes 48656c6c6f2c20776f726c6421
 ```
 
 Full instructions, one-time setup and gotchas:
@@ -31,8 +47,10 @@ Aiken compiles to UPLC, not RISC-V, so there are two routes:
 
 1. **Port the logic** to a Rust guest and differential-test it against the
    Plutus VM (simplest, loses "run the actual script").
-2. **Run a UPLC interpreter in the guest** on the real `.plc` artifact (keeps
-   script fidelity, much more work).
+2. **Run a UPLC interpreter in the guest** on the real `.flat` artifact (keeps
+   script fidelity, much more work). The `no_std` evaluator is implemented and
+   differential-tested for `hello-world`, but still has to be wired into the
+   OpenVM/Jolt guests and extended to the full builtin set.
 
 ### Proof generation
 Make the proof cheap enough to be practical on CPU-only hardware; measure
@@ -43,8 +61,6 @@ Produce a BLS12-381 Groth16 proof that the existing verifier in
 [`aiken/groth16`](../aiken/groth16/README.md) can check. Both zkVMs currently
 aggregate over **BN254**, so this is a wrapping step on the aggregation side,
 not a guest-side change.
-
-</details>
 
 <details><summary><b>Why zkVM (click to expand)</b></summary>
 
@@ -112,7 +128,7 @@ zkVM/
 ├── openvm/     # OpenVM CLI harness + hello world (RV32IM)
 ├── jolt/       # Jolt host + guest (RV64IMAC)
 ├── hello-world/  # the Aiken program to prove
-├── uplc-guest/   # UPLC interpreter guest (coming)
+├── uplc-guest/   # no_std UPLC CEK evaluator (hello-world subset)
 └── onchain/      # BN254 -> BLS12-381 wrapping + Aiken verifier (coming)
 ```
 

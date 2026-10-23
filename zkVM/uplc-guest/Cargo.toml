@@ -2,6 +2,22 @@
 name = "uplc-guest"
 version = "0.1.0"
 edition = "2021"
+description = "Minimal no_std UPLC CEK evaluator for zkVM guests"
+license = "Apache-2.0"
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "uplc-eval"
+path = "src/bin/uplc_eval.rs"
+required-features = ["std"]
+
+[features]
+default = ["std"]
+std = ["num-bigint/std", "num-traits/std", "sha2/std"]
 
 [dependencies]
-nash-plutus = { version = "0.3", default-features = false }
+num-bigint = { version = "0.4", default-features = false }
+num-traits = { version = "0.2", default-features = false }
+sha2 = { version = "0.10", default-features = false }

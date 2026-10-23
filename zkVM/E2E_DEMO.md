@@ -129,21 +129,35 @@ cargo run --release
 # Proof serialized to /tmp/jolt-hello-aiken.proof
 ```
 
-### Path 3: Full Aiken program via UPLC (Phase 1b/c - current state)
+### Path 3: Full Aiken program via UPLC (evaluator implemented, not yet in-guest)
 
 ```bash
-# Decode/examine exported UPLC
+# Decode/examine the exported artifact
 cd zkVM/hello-world
 aiken uplc decode -c hello_hash.flat
 # (program 1.1.0 (lam i_0 [ (builtin sha2_256) [ (builtin unBData) i_0 ] ]))
 
-# Evaluate directly with Aiken
-cat > /tmp/hash2.uplc << 'EOF'
-(program 1.1.0 [(lam i_0 [(builtin sha2_256) i_0]) (con bytestring #48656c6c6f2c20776f726c6421)])
-aiken uplc eval /tmp/hash2.uplc | grep -oP '#[0-9a-f]{64}'
+# Evaluate the real artifact with the no_std evaluator
+cd ../uplc-guest
+cargo test  # includes differential check against `aiken uplc eval`
+cargo run --bin uplc-eval -- \
+  ../hello-world/hello_hash.flat \
+  --data-bytes 48656c6c6f2c20776f726c6421
+# 315f5bdb76d078c43b8ac0064e4a0164612b1fce77c869345bfc94c75894edd3
 
-# To run actual UPLC in zkVM guest: embed a UPLC evaluator (e.g. nash-plutus/amaru-uplc) in guest,
-# load the flat program, apply args, evaluate, and reveal result. This is the work for full script fidelity.
+# Aiken CLI oracle for the same program and argument
+cat > /tmp/hello_data.uplc << 'EOF'
+(program 1.1.0 [
+  (lam i_0 [ (builtin sha2_256) [ (builtin unBData) i_0 ] ])
+  (con data (B #48656c6c6f2c20776f726c6421))
+])
+EOF
+aiken uplc eval /tmp/hello_data.uplc | grep -oP '#[0-9a-f]{64}'
+
+# The evaluator is `no_std` and builds for riscv32im-unknown-none-elf:
+cargo build --no-default-features --target riscv32im-unknown-none-elf
+# Next: wire it into the OpenVM/Jolt guests and extend the builtin set.
+# Currently implemented: sha2_256 and unBData (the hello_hash subset).
 ```
 
 ## Comparison table (OpenVM vs Jolt)
@@ -162,11 +176,11 @@ aiken uplc eval /tmp/hash2.uplc | grep -oP '#[0-9a-f]{64}'
 | GPU support | OpenVM has GPU acceleration support in general; we tested CPU-only | Jolt has GPU paths evolving; tested CPU-only here |
 | On-chain verification | Path exists via aggregation/wrapping (EVM) - targeted for recursion/wrapping to Groth16 | More complex on-chain path; recursion/folding story differs, on-chain verification less turnkey today |
 | Maturity for this use case | More CLI-driven, explicit keys/flows, good for reproducible app proofs | Developer-friendly Rust API, fast iteration, small proofs, preprocessing-oriented |
-| Notes for Aiken/UPLC | Same as other RISC-V guests; need to bring UPLC evaluator into RV32IM guest | Same; RV64IMAC more registers/64-bit but guest code similar |
+| Notes for Aiken/UPLC | Same as other RISC-V guests; the `no_std` UPLC evaluator builds for RV32IM but is not yet in-guest | Same; RV64IMAC more registers/64-bit but guest code similar |
 
 ## Trade-offs
 
-- **Fidelity vs effort**: Porting equivalent logic (Route 1a) is fastest and matches exactly for pure functions like hash; running actual UPLC (Route 1b) gives full script fidelity but requires embedding a full CEK evaluator in the zkVM guest.
+- **Fidelity vs effort**: Porting equivalent logic (Route 1a) is fastest and matches exactly for pure functions like hash; running actual UPLC (Route 1b) gives full script fidelity but requires embedding a full CEK evaluator in the zkVM guest. A minimal `no_std` evaluator now exists and matches Aiken on `hello_hash.flat`; wiring it into the guests and covering more builtins is still required.
 - **Speed vs proof system**: Jolt is much faster to prove on CPU for this tiny program with smaller proofs; OpenVM's STARK path is more established for aggregation/recursion flows.
 - **Tooling**: OpenVM feels more "CLI + artifacts"; Jolt feels more "library/SDK integrated into Rust build".
 - **Memory**: OpenVM's app proving used ~2.6 GB for this small guest - need to watch for larger guests; environment has ~15 GB free total now.
