@@ -56,6 +56,39 @@ cargo openvm prove stark   # aggregated STARK proof
 cargo openvm verify stark  # verifies against openvm-hello.baseline.json
 ```
 
+## UPLC evaluator guest (`hello-aiken`)
+
+`hello-aiken/src/bin/uplc.rs` runs the real Aiken `hello_hash.flat` artifact
+inside the zkVM using the `uplc-guest` CEK evaluator. It is equivalent to:
+
+```bash
+cd zkVM/uplc-guest
+cargo run --bin uplc-eval -- \
+  ../hello-world/hello_hash.flat \
+  --data-bytes 48656c6c6f2c20776f726c6421
+```
+
+Run the UPLC guest on the host (fast, no proof):
+
+```bash
+cd zkVM/openvm/hello-aiken
+cargo run --bin uplc
+# UPLC hello_hash(Hello, world!) sha256 = 315f5bdb...
+```
+
+To prove it inside the zkVM (after `cargo openvm setup` has been run once):
+
+```bash
+cd zkVM/openvm/hello-aiken
+cargo openvm build --bin uplc
+cargo openvm keygen
+cargo openvm prove app --bin uplc
+cargo openvm verify app --bin uplc
+```
+
+Status: dependency wired; host execution matches `aiken uplc eval`. zkVM build,
+keygen and prove steps are the next validation target.
+
 ## Guest
 
 `hello/src/main.rs` is `no_std` Rust:
