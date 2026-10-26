@@ -366,6 +366,55 @@ Parallelism shows the strongest gains on large step circuits (7,724 constraints)
 where row-level work amortizes rayon overhead. Proof sizes are identical between
 baseline and parallel.
 
+### Competitive comparison with upstream NovaSlim
+
+The in-tree `nova-prover` is intentionally a stable snapshot; the upstream
+implementation is [`paweljakubas/nova-slim`](https://github.com/paweljakubas/nova-slim).
+`circom/benchmarks_nova_slim.py` runs the same CardanoKeyOwnership workload
+through three systems side-by-side:
+
+- **Groth16 mono** — BLS `groth16-prover` / `trusted-setup`
+- **BLS Nova** — this crate (`nova-prover`), Impl 9 (Groth16 compression) and Impl 11 (transparent slim)
+- **NovaSlim upstream** — `paweljakubas/nova-slim`, BLS12-381 Pedersen, transparent sumcheck slim proofs
+
+Latest run: `CardanoKeyOwnership (Ed25519)`, 1,967,405 monolithic constraints /
+255 × 7,724 step constraints.
+
+| Phase | Groth16 mono | BLS Nova Impl 9 | BLS Nova Impl 11 | NovaSlim upstream |
+|---|---|---|---|---|
+| witness / step gen | 25.2s | 246.3s | 246.3s | 246.3s |
+| ceremony (one-time) | 1169.8s | 15.6s | none | none |
+| fold | — | 153.4s | 153.4s | 156.0s / 164.5s par |
+| compress / prove | 160.1s | 149.1s | 183.0s | 25.7s / 22.7s par |
+| verify | 3.6s | 23.4s | 0.0s | 0.0004s |
+| **e2e steady** | **189.3s** | **572.6s** | **572.6s** | **428.4s** |
+
+| Artifact | Groth16 mono | BLS Nova Impl 9 | BLS Nova Impl 11 | NovaSlim upstream |
+|---|---|---|---|---|
+| Proof size | 192 B | 660.5 KiB | 6.6 KiB | 721 B |
+| VK size | 178.0 MiB | 2.1 MiB | none | none |
+| PK size | 1.23 GiB | 15.6 MiB | none | none |
+
+Take-aways:
+
+- NovaSlim is the fastest transparent path end-to-end (~428s steady vs ~573s
+  for BLS Nova Impl 11), driven by a ~6× faster transparent sumcheck compression
+  versus the in-tree Groth16 compression path.
+- The BLS Nova Impl 11 slim proof is 6.6 KiB only because the in-tree CLI emits
+  JSON; NovaSlim's CBOR encoding brings the same underlying data down to 721 B.
+- Groth16 mono has the fastest steady-state time (~189s) but requires a
+  ~19.5-minute per-circuit ceremony and a 1.23 GiB proving key.
+
+Reproduce:
+
+```bash
+cd /home/pawel/Work/cardano-foundation/bls
+python3 circom/benchmarks_nova_slim.py --family cko --steps 255
+```
+
+Raw logs and machine-readable summaries are written to
+`/tmp/opencode/bench_nova_slim/` by default (`--workdir` to override).
+
 ### Running the benchmark
 
 ```bash

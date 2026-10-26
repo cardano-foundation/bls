@@ -34,6 +34,8 @@ Nova-based Incremental Verifiable Computation (IVC) splits a long computation in
 > **Nova is maintained upstream.** The cutting-edge Nova implementation is **NovaSlim**, and it lives in its own repository: **[`paweljakubas/nova-slim`](https://github.com/paweljakubas/nova-slim)** — NIFS folding, transparent sumcheck compression, ~0.4 KiB on-chain proofs, no trusted setup and no pairings, with modular commitment (`pedersen` / `sis` / `hash`) and curve (BLS12-381, BN254, Pallas, Vesta, Grumpkin, Bandersnatch) backends. Everything Nova-related *in this repo* — the [`clis/nova`](./clis/nova/) CLI, the [`nova-prover`](./nova-prover/) crate, the [`aiken/nova`](./aiken/nova/) on-chain verifier, and the `novaslim_e2e.sh` scripts under [`aiken/selective-disclosure`](./aiken/selective-disclosure/) — is the in-tree snapshot of that work. **For new Nova work, start from `nova-slim`**; treat the in-tree copy as the reference point the rest of this repo is pinned to.
 >
 > **The in-tree `nova` CLI defaults to the paper-faithful path.** `nova compress` produces the Nova paper's construction — fold with NIFS, compress the folded instance with a Groth16 proof, verify with **one pairing** — and needs one trusted setup for the compression circuit. The transparent sumcheck paths (`--sumcheck`, `--slim`) remain one flag away and are what the upstream `nova-slim` CLI drives.
+>
+> **Benchmarks against upstream NovaSlim** are in [`nova-prover/README.md`](./nova-prover/README.md#competitive-comparison-with-upstream-novaslim) and reproducible via `python3 circom/benchmarks_nova_slim.py --family cko --steps 255`.
 
 ### Aiken on-chain verification
 

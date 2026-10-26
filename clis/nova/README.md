@@ -112,6 +112,12 @@ trusted-setup ceremony-dev --sparse --circuit compression.r1cs \
 | On-chain verify | Pairing check | Sumcheck (field ops) |
 | Predicate composition | Fixed circuit | Fold step circuits freely |
 
+> **Competitive benchmark with upstream NovaSlim.** A reproducible side-by-side
+> comparison of BLS Groth16, BLS Nova (Impl 9 / Impl 11), and upstream
+> `paweljakubas/nova-slim` on the same CardanoKeyOwnership workload is in
+> [`nova-prover/README.md`](../../nova-prover/README.md#competitive-comparison-with-upstream-novaslim)
+> and runnable via `python3 ../../circom/benchmarks_nova_slim.py --family cko --steps 255`.
+
 ---
 
 ## Quick start — default path (paper-faithful Nova)
