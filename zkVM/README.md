@@ -16,11 +16,12 @@ resulting proof on Cardano.
 - Jolt `hello-aiken/guest/src/lib.rs` evaluates an arbitrary Aiken `.flat`
   artifact with runtime-supplied `Data::B` arguments end-to-end, producing a
   verified proof with the same digest as `aiken uplc eval`.
-- Implemented builtins: `sha2_256`, `unBData`, and bytearray primitives
-  (`appendByteString`, `sliceByteString`, `lengthOfByteString`,
-  `indexByteString`, `equalsByteString`, `lessThanByteString`,
-  `lessThanEqualsByteString`). Integer arithmetic, more hashes, and Data
-  constructors/destructors are next.
+- Implemented builtins: `sha2_256`, `unBData`, bytearray primitives, and
+  integer arithmetic (`addInteger`, `subtractInteger`, `multiplyInteger`,
+  `divideInteger`, `quotientInteger`, `remainderInteger`, `modInteger`,
+  `equalsInteger`, `lessThanInteger`, `lessThanEqualsInteger`). All are covered
+  by golden, property, and differential tests against `aiken uplc eval`. More
+  hashes and Data constructors/destructors are next.
 
 Next: validate the OpenVM UPLC guest through `cargo openvm prove app`, wire the
 same evaluator into the Jolt guest, extend the builtin set for real Aiken

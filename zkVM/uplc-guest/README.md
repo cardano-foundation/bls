@@ -12,10 +12,13 @@ matches the Aiken CLI output. Builtins currently implemented:
 - Bytearray: `appendByteString`, `sliceByteString`, `lengthOfByteString`,
   `indexByteString`, `equalsByteString`, `lessThanByteString`,
   `lessThanEqualsByteString`
+- Integer: `addInteger`, `subtractInteger`, `multiplyInteger`, `divideInteger`,
+  `quotientInteger`, `remainderInteger`, `modInteger`, `equalsInteger`,
+  `lessThanInteger`, `lessThanEqualsInteger`
 
 Other builtins are decoded but return `UnsupportedBuiltin` when executed. The
-next step is integer arithmetic, more hash algorithms, and Data constructors /
-destructors.
+next step is more hash algorithms (`sha3_256`, `blake2b_256`, `keccak_256`) and
+Data constructors / destructors.
 
 ## Layout
 

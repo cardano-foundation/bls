@@ -1,7 +1,8 @@
 use alloc::{collections::VecDeque, format, rc::Rc, string::String, vec::Vec};
 use core::fmt;
 use num_bigint::BigInt;
-use num_traits::ToPrimitive;
+use num_integer::Integer;
+use num_traits::{ToPrimitive, Zero};
 use sha2::{Digest, Sha256};
 
 use crate::data::Data;
@@ -22,6 +23,7 @@ pub enum EvalError {
     CaseTagOutOfRange(u64, usize),
     IndexOutOfRange,
     IntegerOutOfRange,
+    DivisionByZero,
     ExplicitError,
 }
 
@@ -39,6 +41,7 @@ impl fmt::Display for EvalError {
             Self::UnsupportedBuiltin(tag) => write!(f, "unsupported builtin {tag}"),
             Self::IndexOutOfRange => write!(f, "index out of range"),
             Self::IntegerOutOfRange => write!(f, "integer out of range"),
+            Self::DivisionByZero => write!(f, "division by zero"),
             Self::CaseTagOutOfRange(tag, branches) => {
                 write!(f, "case tag {tag} out of range for {branches} branches")
             }
@@ -474,6 +477,49 @@ fn apply_builtin(fun: Builtin, args: &[Value]) -> Result<Value, EvalError> {
             };
             Ok(Value::Con(Constant::Bool(result)))
         }
+        Builtin::ADD_INTEGER
+        | Builtin::SUBTRACT_INTEGER
+        | Builtin::MULTIPLY_INTEGER
+        | Builtin::DIVIDE_INTEGER
+        | Builtin::QUOTIENT_INTEGER
+        | Builtin::REMAINDER_INTEGER
+        | Builtin::MOD_INTEGER => {
+            let left = args[0].as_integer().ok_or(EvalError::ExpectedInteger)?;
+            let right = args[1].as_integer().ok_or(EvalError::ExpectedInteger)?;
+            let result = match fun {
+                Builtin::ADD_INTEGER => left + right,
+                Builtin::SUBTRACT_INTEGER => left - right,
+                Builtin::MULTIPLY_INTEGER => left * right,
+                Builtin::DIVIDE_INTEGER | Builtin::QUOTIENT_INTEGER
+                | Builtin::REMAINDER_INTEGER | Builtin::MOD_INTEGER => {
+                    if right.is_zero() {
+                        return Err(EvalError::DivisionByZero);
+                    }
+                    match fun {
+                        Builtin::DIVIDE_INTEGER => left.div_floor(right),
+                        Builtin::QUOTIENT_INTEGER => left / right,
+                        Builtin::REMAINDER_INTEGER => left % right,
+                        Builtin::MOD_INTEGER => left.mod_floor(right),
+                        _ => unreachable!(),
+                    }
+                }
+                _ => unreachable!(),
+            };
+            Ok(Value::Con(Constant::Integer(result)))
+        }
+        Builtin::EQUALS_INTEGER
+        | Builtin::LESS_THAN_INTEGER
+        | Builtin::LESS_THAN_EQUALS_INTEGER => {
+            let left = args[0].as_integer().ok_or(EvalError::ExpectedInteger)?;
+            let right = args[1].as_integer().ok_or(EvalError::ExpectedInteger)?;
+            let result = match fun {
+                Builtin::EQUALS_INTEGER => left == right,
+                Builtin::LESS_THAN_INTEGER => left < right,
+                Builtin::LESS_THAN_EQUALS_INTEGER => left <= right,
+                _ => unreachable!(),
+            };
+            Ok(Value::Con(Constant::Bool(result)))
+        }
         _ => Err(EvalError::UnsupportedBuiltin(fun.0)),
     }
 }
@@ -604,6 +650,185 @@ mod tests {
         match value {
             Value::Con(Constant::Bool(true)) => {}
             other => panic!("expected true, got {}", other.describe()),
+        }
+    }
+
+    #[test]
+    fn add_integer_golden() {
+        let program = Program {
+            version: Version {
+                major: 1,
+                minor: 1,
+                patch: 0,
+            },
+            term: alloc::rc::Rc::new(apply_builtin(
+                Builtin::ADD_INTEGER,
+                &[const_int(7), const_int(-3)],
+            )),
+        };
+        let value = eval(&program).unwrap();
+        assert_eq!(value.as_integer(), Some(&BigInt::from(4)));
+    }
+
+    #[test]
+    fn multiply_integer_golden() {
+        let program = Program {
+            version: Version {
+                major: 1,
+                minor: 1,
+                patch: 0,
+            },
+            term: alloc::rc::Rc::new(apply_builtin(
+                Builtin::MULTIPLY_INTEGER,
+                &[const_int(-6), const_int(7)],
+            )),
+        };
+        let value = eval(&program).unwrap();
+        assert_eq!(value.as_integer(), Some(&BigInt::from(-42)));
+    }
+
+    #[test]
+    fn divide_and_quotient_integer_distinction() {
+        // Euclidean division: -7 div 3 = -3 (floor)
+        let program = Program {
+            version: Version {
+                major: 1,
+                minor: 1,
+                patch: 0,
+            },
+            term: alloc::rc::Rc::new(apply_builtin(
+                Builtin::DIVIDE_INTEGER,
+                &[const_int(-7), const_int(3)],
+            )),
+        };
+        let value = eval(&program).unwrap();
+        assert_eq!(value.as_integer(), Some(&BigInt::from(-3)));
+
+        // Truncated division: -7 quot 3 = -2
+        let program = Program {
+            version: Version {
+                major: 1,
+                minor: 1,
+                patch: 0,
+            },
+            term: alloc::rc::Rc::new(apply_builtin(
+                Builtin::QUOTIENT_INTEGER,
+                &[const_int(-7), const_int(3)],
+            )),
+        };
+        let value = eval(&program).unwrap();
+        assert_eq!(value.as_integer(), Some(&BigInt::from(-2)));
+    }
+
+    #[test]
+    fn mod_and_remainder_integer_distinction() {
+        // Euclidean mod: -7 mod 3 = 2
+        let program = Program {
+            version: Version {
+                major: 1,
+                minor: 1,
+                patch: 0,
+            },
+            term: alloc::rc::Rc::new(apply_builtin(
+                Builtin::MOD_INTEGER,
+                &[const_int(-7), const_int(3)],
+            )),
+        };
+        let value = eval(&program).unwrap();
+        assert_eq!(value.as_integer(), Some(&BigInt::from(2)));
+
+        // Truncated remainder: -7 rem 3 = -1
+        let program = Program {
+            version: Version {
+                major: 1,
+                minor: 1,
+                patch: 0,
+            },
+            term: alloc::rc::Rc::new(apply_builtin(
+                Builtin::REMAINDER_INTEGER,
+                &[const_int(-7), const_int(3)],
+            )),
+        };
+        let value = eval(&program).unwrap();
+        assert_eq!(value.as_integer(), Some(&BigInt::from(-1)));
+    }
+
+    #[test]
+    fn integer_arithmetic_property() {
+        // (a + b) - b == a
+        for a in [-100, -1, 0, 1, 100] {
+            for b in [-53, -7, 0, 7, 53] {
+                let add = apply_builtin(Builtin::ADD_INTEGER, &[const_int(a), const_int(b)]);
+                let program = Program {
+                    version: Version {
+                        major: 1,
+                        minor: 1,
+                        patch: 0,
+                    },
+                    term: alloc::rc::Rc::new(apply_builtin(
+                        Builtin::SUBTRACT_INTEGER,
+                        &[add, const_int(b)],
+                    )),
+                };
+                let value = eval(&program).unwrap();
+                assert_eq!(value.as_integer(), Some(&BigInt::from(a)));
+            }
+        }
+    }
+
+    #[test]
+    fn bytearray_append_length_property() {
+        // length(append(a, b)) == length(a) + length(b)
+        let sizes = [0, 1, 5, 23];
+        for len_a in sizes {
+            for len_b in sizes {
+                let a = vec![0u8; len_a];
+                let b = vec![1u8; len_b];
+                let append = apply_builtin(
+                    Builtin::APPEND_BYTE_STRING,
+                    &[const_bytes(&a), const_bytes(&b)],
+                );
+                let program = Program {
+                    version: Version {
+                        major: 1,
+                        minor: 1,
+                        patch: 0,
+                    },
+                    term: alloc::rc::Rc::new(apply_builtin(
+                        Builtin::LENGTH_OF_BYTE_STRING,
+                        &[append],
+                    )),
+                };
+                let value = eval(&program).unwrap();
+                assert_eq!(
+                    value.as_integer(),
+                    Some(&BigInt::from(len_a + len_b)),
+                    "append length mismatch for {} + {}",
+                    len_a,
+                    len_b
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn slice_whole_byte_string_property() {
+        // slice(0, len, bytes) == bytes
+        for len in [0, 1, 5, 23] {
+            let bytes = vec![7u8; len];
+            let program = Program {
+                version: Version {
+                    major: 1,
+                    minor: 1,
+                    patch: 0,
+                },
+                term: alloc::rc::Rc::new(apply_builtin(
+                    Builtin::SLICE_BYTE_STRING,
+                    &[const_int(0), const_int(len as i64), const_bytes(&bytes)],
+                )),
+            };
+            let value = eval(&program).unwrap();
+            assert_eq!(value.as_bytes(), Some(bytes.as_slice()));
         }
     }
 }
