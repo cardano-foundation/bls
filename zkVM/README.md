@@ -10,9 +10,9 @@ resulting proof on Cardano.
 - The `no_std` UPLC CEK evaluator in [`uplc-guest`](./uplc-guest/README.md)
   decodes the real `hello-world/hello_hash.flat` artifact and matches
   `aiken uplc eval`. It builds for `riscv32im-unknown-none-elf`.
-- OpenVM `hello-aiken/src/bin/uplc.rs` runs the real `hello_hash.flat` artifact
-  through the `uplc-guest` CEK evaluator end-to-end: host execution, zkVM build,
-  `prove app`, and `verify app` all succeed and match `aiken uplc eval`.
+- OpenVM `hello-aiken/src/bin/uplc.rs` evaluates an arbitrary Aiken `.flat`
+  artifact with runtime-supplied `Data::B` arguments end-to-end (host, zkVM,
+  `prove app`, `verify app`) and matches `aiken uplc eval`.
 - Jolt `hello-aiken/guest/src/lib.rs` runs the same `hello_hash.flat` artifact
   through the `uplc-guest` CEK evaluator end-to-end, producing a verified proof
   with the same digest as `aiken uplc eval`.

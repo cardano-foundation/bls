@@ -55,39 +55,46 @@ recursive/on-chain verification:
 cargo openvm prove stark   # aggregated STARK proof
 cargo openvm verify stark  # verifies against openvm-hello.baseline.json
 ```
-
 ## UPLC evaluator guest (`hello-aiken`)
 
-`hello-aiken/src/bin/uplc.rs` runs the real Aiken `hello_hash.flat` artifact
-inside the zkVM using the `uplc-guest` CEK evaluator. It is equivalent to:
-
-```bash
-cd zkVM/uplc-guest
-cargo run --bin uplc-eval -- \
-  ../hello-world/hello_hash.flat \
-  --data-bytes 48656c6c6f2c20776f726c6421
-```
+`hello-aiken/src/bin/uplc.rs` runs a real Aiken `.flat` artifact inside the
+zkVM using the `uplc-guest` CEK evaluator. The program and `Data` arguments
+(`Data::B` only for now) are supplied at runtime instead of being hardcoded.
 
 Run the UPLC guest on the host (fast, no proof):
 
 ```bash
 cd zkVM/openvm/hello-aiken
-cargo run --bin uplc
-# UPLC hello_hash(Hello, world!) sha256 = 315f5bdb...
+cargo run --bin uplc -- ../../hello-world/hello_hash.flat \
+  --data-bytes 48656c6c6f2c20776f726c6421
+# UPLC output sha256 = 315f5bdb...
 ```
 
-To prove it inside the zkVM (the existing `app.pk`/`app.vk` from the SHA-256
-hello-world guest work because the VM config in `openvm.toml` is unchanged):
+To run it inside the zkVM, first generate the OpenVM input JSON from the same
+CLI arguments:
+
+```bash
+cd zkVM/openvm/hello-aiken
+cargo run --bin uplc -- ../../hello-world/hello_hash.flat \
+  --data-bytes 48656c6c6f2c20776f726c6421 \
+  --write-input /tmp/uplc_input.json
+
+cargo openvm run --bin uplc --input /tmp/uplc_input.json
+```
+
+To prove and verify (the existing `app.pk`/`app.vk` from the SHA-256
+hello-world guest still work because `openvm.toml` is unchanged):
 
 ```bash
 cd zkVM/openvm/hello-aiken
 cargo openvm build --bin uplc
-cargo openvm prove app --bin uplc --exe openvm/release/uplc.vmexe
+cargo openvm prove app --bin uplc --exe openvm/release/uplc.vmexe \
+  --input /tmp/uplc_input.json
 cargo openvm verify app --bin uplc
 ```
 
-Status: ✅ end-to-end verified. The prover outputs the same digest as
-`aiken uplc eval` and the proof verifies successfully.
+Status: ✅ end-to-end verified. Host execution, zkVM execution, `prove app`,
+and `verify app` all output the same digest as `aiken uplc eval`.
 
 ## Guest
 
