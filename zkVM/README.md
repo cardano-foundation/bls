@@ -13,9 +13,9 @@ resulting proof on Cardano.
 - OpenVM `hello-aiken/src/bin/uplc.rs` evaluates an arbitrary Aiken `.flat`
   artifact with runtime-supplied `Data::B` arguments end-to-end (host, zkVM,
   `prove app`, `verify app`) and matches `aiken uplc eval`.
-- Jolt `hello-aiken/guest/src/lib.rs` runs the same `hello_hash.flat` artifact
-  through the `uplc-guest` CEK evaluator end-to-end, producing a verified proof
-  with the same digest as `aiken uplc eval`.
+- Jolt `hello-aiken/guest/src/lib.rs` evaluates an arbitrary Aiken `.flat`
+  artifact with runtime-supplied `Data::B` arguments end-to-end, producing a
+  verified proof with the same digest as `aiken uplc eval`.
 - Implemented builtins: `sha2_256`, `unBData`. That covers `hello-world`, not
   real validators.
 
