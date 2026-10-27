@@ -1,5 +1,7 @@
 use alloc::{collections::VecDeque, format, rc::Rc, string::String, vec::Vec};
 use core::fmt;
+use num_bigint::BigInt;
+use num_traits::ToPrimitive;
 use sha2::{Digest, Sha256};
 
 use crate::data::Data;
@@ -14,9 +16,12 @@ pub enum EvalError {
     NotADelay,
     NotAConstr,
     ExpectedByteString,
+    ExpectedInteger,
     ExpectedData,
     UnsupportedBuiltin(u8),
     CaseTagOutOfRange(u64, usize),
+    IndexOutOfRange,
+    IntegerOutOfRange,
     ExplicitError,
 }
 
@@ -29,8 +34,11 @@ impl fmt::Display for EvalError {
             Self::NotADelay => write!(f, "attempted to force a non-delayed term"),
             Self::NotAConstr => write!(f, "case scrutinee is not a constructor"),
             Self::ExpectedByteString => write!(f, "expected a bytestring constant"),
+            Self::ExpectedInteger => write!(f, "expected an integer constant"),
             Self::ExpectedData => write!(f, "expected a data constant"),
             Self::UnsupportedBuiltin(tag) => write!(f, "unsupported builtin {tag}"),
+            Self::IndexOutOfRange => write!(f, "index out of range"),
+            Self::IntegerOutOfRange => write!(f, "integer out of range"),
             Self::CaseTagOutOfRange(tag, branches) => {
                 write!(f, "case tag {tag} out of range for {branches} branches")
             }
@@ -98,6 +106,13 @@ impl Value {
     pub fn as_bytes(&self) -> Option<&[u8]> {
         match self {
             Self::Con(Constant::ByteString(bytes)) => Some(bytes),
+            _ => None,
+        }
+    }
+
+    pub fn as_integer(&self) -> Option<&BigInt> {
+        match self {
+            Self::Con(Constant::Integer(value)) => Some(value),
             _ => None,
         }
     }
@@ -364,8 +379,29 @@ fn apply(fun: Value, arg: Value) -> Result<Control, EvalError> {
 
 fn builtin_arity(fun: Builtin) -> Option<usize> {
     match fun {
-        Builtin::SHA2_256 => Some(1),
-        Builtin::UN_B_DATA => Some(1),
+        Builtin::ADD_INTEGER
+        | Builtin::SUBTRACT_INTEGER
+        | Builtin::MULTIPLY_INTEGER
+        | Builtin::DIVIDE_INTEGER
+        | Builtin::QUOTIENT_INTEGER
+        | Builtin::REMAINDER_INTEGER
+        | Builtin::MOD_INTEGER
+        | Builtin::EQUALS_INTEGER
+        | Builtin::LESS_THAN_INTEGER
+        | Builtin::LESS_THAN_EQUALS_INTEGER
+        | Builtin::APPEND_BYTE_STRING
+        | Builtin::EQUALS_BYTE_STRING
+        | Builtin::LESS_THAN_BYTE_STRING
+        | Builtin::LESS_THAN_EQUALS_BYTE_STRING => Some(2),
+        Builtin::SHA2_256
+        | Builtin::SHA3_256
+        | Builtin::BLAKE2B_256
+        | Builtin::LENGTH_OF_BYTE_STRING
+        | Builtin::UN_B_DATA
+        | Builtin::UN_I_DATA
+        | Builtin::SERIALISE_DATA => Some(1),
+        Builtin::INDEX_BYTE_STRING => Some(2),
+        Builtin::SLICE_BYTE_STRING => Some(3),
         _ => None,
     }
 }
@@ -384,6 +420,190 @@ fn apply_builtin(fun: Builtin, args: &[Value]) -> Result<Value, EvalError> {
             Value::Con(Constant::Data(_)) => Err(EvalError::ExpectedByteString),
             _ => Err(EvalError::ExpectedData),
         },
+        Builtin::APPEND_BYTE_STRING => {
+            let left = args[0].as_bytes().ok_or(EvalError::ExpectedByteString)?;
+            let right = args[1].as_bytes().ok_or(EvalError::ExpectedByteString)?;
+            let mut result = Vec::with_capacity(left.len() + right.len());
+            result.extend_from_slice(left);
+            result.extend_from_slice(right);
+            Ok(Value::Con(Constant::ByteString(result)))
+        }
+        Builtin::SLICE_BYTE_STRING => {
+            let start = args[0]
+                .as_integer()
+                .ok_or(EvalError::ExpectedInteger)?
+                .to_usize()
+                .ok_or(EvalError::IntegerOutOfRange)?;
+            let len = args[1]
+                .as_integer()
+                .ok_or(EvalError::ExpectedInteger)?
+                .to_usize()
+                .ok_or(EvalError::IntegerOutOfRange)?;
+            let bytes = args[2].as_bytes().ok_or(EvalError::ExpectedByteString)?;
+            let end = start.saturating_add(len).min(bytes.len());
+            let start = start.min(bytes.len());
+            Ok(Value::Con(Constant::ByteString(bytes[start..end].to_vec())))
+        }
+        Builtin::LENGTH_OF_BYTE_STRING => {
+            let bytes = args[0].as_bytes().ok_or(EvalError::ExpectedByteString)?;
+            Ok(Value::Con(Constant::Integer(BigInt::from(bytes.len()))))
+        }
+        Builtin::INDEX_BYTE_STRING => {
+            let bytes = args[0].as_bytes().ok_or(EvalError::ExpectedByteString)?;
+            let index = args[1]
+                .as_integer()
+                .ok_or(EvalError::ExpectedInteger)?
+                .to_usize()
+                .ok_or(EvalError::IntegerOutOfRange)?;
+            let byte = bytes.get(index).ok_or(EvalError::IndexOutOfRange)?;
+            Ok(Value::Con(Constant::Integer(BigInt::from(*byte))))
+        }
+        Builtin::EQUALS_BYTE_STRING => {
+            let left = args[0].as_bytes().ok_or(EvalError::ExpectedByteString)?;
+            let right = args[1].as_bytes().ok_or(EvalError::ExpectedByteString)?;
+            Ok(Value::Con(Constant::Bool(left == right)))
+        }
+        Builtin::LESS_THAN_BYTE_STRING | Builtin::LESS_THAN_EQUALS_BYTE_STRING => {
+            let left = args[0].as_bytes().ok_or(EvalError::ExpectedByteString)?;
+            let right = args[1].as_bytes().ok_or(EvalError::ExpectedByteString)?;
+            let ordering = left.cmp(right);
+            let result = if fun == Builtin::LESS_THAN_BYTE_STRING {
+                ordering == core::cmp::Ordering::Less
+            } else {
+                ordering != core::cmp::Ordering::Greater
+            };
+            Ok(Value::Con(Constant::Bool(result)))
+        }
         _ => Err(EvalError::UnsupportedBuiltin(fun.0)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::term::Version;
+
+    fn const_bytes(bytes: &[u8]) -> Term {
+        Term::Constant(Constant::ByteString(bytes.to_vec()))
+    }
+
+    fn const_int(value: i64) -> Term {
+        Term::Constant(Constant::Integer(BigInt::from(value)))
+    }
+
+    fn apply_builtin(fun: Builtin, args: &[Term]) -> Term {
+        let mut term = Term::Builtin(fun);
+        for arg in args {
+            term = Term::Apply(alloc::rc::Rc::new(term), alloc::rc::Rc::new(arg.clone()));
+        }
+        term
+    }
+
+    #[test]
+    fn append_byte_string() {
+        let program = Program {
+            version: Version {
+                major: 1,
+                minor: 1,
+                patch: 0,
+            },
+            term: alloc::rc::Rc::new(apply_builtin(
+                Builtin::APPEND_BYTE_STRING,
+                &[const_bytes(b"Hello, "), const_bytes(b"world!")],
+            )),
+        };
+        let value = eval(&program).unwrap();
+        assert_eq!(value.as_bytes(), Some(b"Hello, world!".as_slice()));
+    }
+
+    #[test]
+    fn length_of_byte_string() {
+        let program = Program {
+            version: Version {
+                major: 1,
+                minor: 1,
+                patch: 0,
+            },
+            term: alloc::rc::Rc::new(apply_builtin(
+                Builtin::LENGTH_OF_BYTE_STRING,
+                &[const_bytes(b"Hello")],
+            )),
+        };
+        let value = eval(&program).unwrap();
+        assert_eq!(value.as_integer(), Some(&BigInt::from(5)));
+    }
+
+    #[test]
+    fn index_byte_string() {
+        let program = Program {
+            version: Version {
+                major: 1,
+                minor: 1,
+                patch: 0,
+            },
+            term: alloc::rc::Rc::new(apply_builtin(
+                Builtin::INDEX_BYTE_STRING,
+                &[const_bytes(b"Hi"), const_int(1)],
+            )),
+        };
+        let value = eval(&program).unwrap();
+        assert_eq!(value.as_integer(), Some(&BigInt::from(b'i')));
+    }
+
+    #[test]
+    fn slice_byte_string() {
+        let program = Program {
+            version: Version {
+                major: 1,
+                minor: 1,
+                patch: 0,
+            },
+            term: alloc::rc::Rc::new(apply_builtin(
+                Builtin::SLICE_BYTE_STRING,
+                &[const_int(1), const_int(3), const_bytes(b"Hello")],
+            )),
+        };
+        let value = eval(&program).unwrap();
+        assert_eq!(value.as_bytes(), Some(b"ell".as_slice()));
+    }
+
+    #[test]
+    fn equals_byte_string() {
+        let program = Program {
+            version: Version {
+                major: 1,
+                minor: 1,
+                patch: 0,
+            },
+            term: alloc::rc::Rc::new(apply_builtin(
+                Builtin::EQUALS_BYTE_STRING,
+                &[const_bytes(b"abc"), const_bytes(b"abc")],
+            )),
+        };
+        let value = eval(&program).unwrap();
+        match value {
+            Value::Con(Constant::Bool(true)) => {}
+            other => panic!("expected true, got {}", other.describe()),
+        }
+    }
+
+    #[test]
+    fn less_than_byte_string() {
+        let program = Program {
+            version: Version {
+                major: 1,
+                minor: 1,
+                patch: 0,
+            },
+            term: alloc::rc::Rc::new(apply_builtin(
+                Builtin::LESS_THAN_BYTE_STRING,
+                &[const_bytes(b"abc"), const_bytes(b"abd")],
+            )),
+        };
+        let value = eval(&program).unwrap();
+        match value {
+            Value::Con(Constant::Bool(true)) => {}
+            other => panic!("expected true, got {}", other.describe()),
+        }
     }
 }

@@ -6,10 +6,16 @@ real Aiken `.flat` artifacts (raw or CBOR-wrapped) and evaluates them without
 `riscv32im-unknown-none-elf` with `--no-default-features`.
 
 **Status**: evaluates the committed `../hello-world/hello_hash.flat` artifact and
-matches the Aiken CLI output. Builtins currently implemented: `sha2_256` and
-`unBData`, which is exactly the subset used by `hello_hash`. Other builtins are
-decoded but return `UnsupportedBuiltin` when executed. Wiring this crate into
-the OpenVM and Jolt guests is the next step.
+matches the Aiken CLI output. Builtins currently implemented:
+- Hashes: `sha2_256`
+- Data: `unBData`
+- Bytearray: `appendByteString`, `sliceByteString`, `lengthOfByteString`,
+  `indexByteString`, `equalsByteString`, `lessThanByteString`,
+  `lessThanEqualsByteString`
+
+Other builtins are decoded but return `UnsupportedBuiltin` when executed. The
+next step is integer arithmetic, more hash algorithms, and Data constructors /
+destructors.
 
 ## Layout
 
