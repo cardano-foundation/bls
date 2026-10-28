@@ -21,7 +21,7 @@ cd zkVM/openvm/hello-aiken && cargo run --bin uplc -- ../../hello-world/hello_ha
 | VM | ISA | Prover | Proof | On-chain | Status |
 |---|---|---|---|---|---|
 | [OpenVM](openvm/README.md) | RV32IM | STARK+Halo2 (BN254) | 522-658 KiB | Possible via BN254→BLS12-381 wrap | Verified |
-| [Jolt](jolt/README.md) | RV64IMAC | Dory (BN254) | 68 KiB | Coming | Verified |
+| [Jolt](jolt/README.md) | RV64IMAC | Dory (BN254) | 68 KiB | Possible via BN254→BLS12-381 wrap | Verified |
 
 ## Aiken programs supported
 

@@ -129,7 +129,7 @@ cargo run --release
 # Proof serialized to /tmp/jolt-hello-aiken.proof
 ```
 
-### Path 3: Full Aiken program via UPLC (evaluator implemented, not yet in-guest)
+### Path 3: Full Aiken program via UPLC (evaluator integrated in guests)
 
 ```bash
 # Decode/examine the exported artifact
@@ -139,25 +139,24 @@ aiken uplc decode -c hello_hash.flat
 
 # Evaluate the real artifact with the no_std evaluator
 cd ../uplc-guest
-cargo test  # includes differential check against `aiken uplc eval`
+cargo test  # includes differential checks against `aiken uplc eval`
 cargo run --bin uplc-eval -- \
   ../hello-world/hello_hash.flat \
   --data-bytes 48656c6c6f2c20776f726c6421
 # 315f5bdb76d078c43b8ac0064e4a0164612b1fce77c869345bfc94c75894edd3
 
-# Aiken CLI oracle for the same program and argument
-cat > /tmp/hello_data.uplc << 'EOF'
-(program 1.1.0 [
-  (lam i_0 [ (builtin sha2_256) [ (builtin unBData) i_0 ] ])
-  (con data (B #48656c6c6f2c20776f726c6421))
-])
-EOF
-aiken uplc eval /tmp/hello_data.uplc | grep -oP '#[0-9a-f]{64}'
+# Run in OpenVM guest
+cd ../openvm/hello-aiken
+cargo run --bin uplc -- ../../hello-world/hello_hash.flat --data-bytes 48656c6c6f2c20776f726c6421
+
+# Run in Jolt guest
+cd ../../jolt/hello-aiken
+cargo run --release --bin uplc -- ../../hello-world/hello_hash.flat --data-bytes 48656c6c6f2c20776f726c6421
 
 # The evaluator is `no_std` and builds for riscv32im-unknown-none-elf:
+cd ../../uplc-guest
 cargo build --no-default-features --target riscv32im-unknown-none-elf
-# Next: wire it into the OpenVM/Jolt guests and extend the builtin set.
-# Currently implemented: sha2_256 and unBData (the hello_hash subset).
+# Supports hashes, Data, bytearray/integer, BLS12-381 builtins.
 ```
 
 ## Comparison table (OpenVM vs Jolt)
@@ -180,25 +179,8 @@ cargo build --no-default-features --target riscv32im-unknown-none-elf
 
 ## Trade-offs
 
-- **Fidelity vs effort**: Porting equivalent logic (Route 1a) is fastest and matches exactly for pure functions like hash; running actual UPLC (Route 1b) gives full script fidelity but requires embedding a full CEK evaluator in the zkVM guest. A minimal `no_std` evaluator now exists and matches Aiken on `hello_hash.flat`; wiring it into the guests and covering more builtins is still required.
+- **Fidelity vs effort**: Porting equivalent logic (Route 1a) is fastest and matches exactly for pure functions like hash; running actual UPLC (Route 1b) gives full script fidelity. The `no_std` evaluator is implemented and integrated into OpenVM/Jolt guests with full builtin support (hashes, Data, bytearray/integer, BLS12-381).
 - **Speed vs proof system**: Jolt is much faster to prove on CPU for this tiny program with smaller proofs; OpenVM's STARK path is more established for aggregation/recursion flows.
 - **Tooling**: OpenVM feels more "CLI + artifacts"; Jolt feels more "library/SDK integrated into Rust build".
-- **Memory**: OpenVM's app proving used ~2.6 GB for this small guest - need to watch for larger guests; environment has ~15 GB free total now.
-- **Future Cardano integration**: The plan points to wrapping to BLS12-381 Groth16 (via aggregation) for verification with `aiken/groth16`; OpenVM's recursion story is clearer in docs, Jolt on-chain paths are more evolving.
-
-## First comparison benchmarks (measured)
-
-From the repo's Phase 0 and current runs:
-
-| Metric | OpenVM (hello) | Jolt (hello) | OpenVM (hello-aiken equiv.) | Jolt (hello-aiken equiv.) |
-|---|---|---|---|---|
-| Guest logic | SHA-256("Hello, world!") | SHA-256("Hello, world!") | SHA-256("Hello, world!") via openvm-sha2 (Aiken-equiv) | SHA-256("Hello, world!") via jolt-inlines-sha2 (Aiken-equiv) |
-| Build/transpile/compile | ~25 s build + transpile (cached) | Host release build ~20 min first time; guest compile fast after | Similar to hello | Similar pattern |
-| Preprocessing/setup | Keygen ~2 min, setup ~20 min (once) | Shared+prover preprocessing ~6 s | Same | Similar (~6 s range) |
-| Prove | 658 s (app) | 11.6 s | Not re-measured fully; expected similar order of magnitude | Not re-measured fully; expected similar order of magnitude |
-| Verify | 0.55 s (app) | 0.66 s | Expected similar | Expected similar |
-| Proof size | 547 KiB (app) | 68.1 kB | Expected similar | Expected similar |
-| Peak RAM | ~2.6 GB | ~ (not fully captured) | ~ (likely similar) | ~ (likely similar) |
-| Public output | 315f5bdb...94edd3 | 315f5bdb...94edd3 | 315f5bdb...94edd3 | 315f5bdb...94edd3 |
-
-Notes: benchmarks done on 4 cores, 31 GB RAM, no GPU. Times vary with caching/toolchain state. The "hello-aiken" guests produce identical digests confirming equivalence with Aiken's `hello_hash`.
+- **Memory**: OpenVM's app proving used ~2.6 GB for this small guest - need to watch for larger guests.
+- **Future Cardano integration**: Both VMs use BN254 internally and need wrapping to BLS12-381 Groth16 for Cardano verification (see `zkVM/benchmarks.md`). OpenVM's recursion story is clearer; Jolt on-chain paths are evolving.

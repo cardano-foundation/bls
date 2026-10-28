@@ -37,6 +37,125 @@ Nova-based Incremental Verifiable Computation (IVC) splits a long computation in
 >
 > **Benchmarks against upstream NovaSlim** are in [`nova-prover/README.md`](./nova-prover/README.md#competitive-comparison-with-upstream-novaslim) and reproducible via `python3 circom/benchmarks_nova_slim.py --family cko --steps 255`.
 
+<details>
+<summary><b>End-to-end flow: Aiken program → UPLC → zkVM → proof → verification (detailed)</b></summary>
+
+This section traces exactly how data moves through the repo, what each component is responsible for, and where transformations happen. There are two supported paths to end up with a verifiable proof checked on Cardano.
+
+## Paths
+
+| Path | When to use | Proof system | On-chain verifier | Notes |
+|------|-------------|--------------|-------------------|-------|
+| **A) Circuit-based (Groth16/Nova)** | Fixed predicate/circuit (selective disclosure, privacy pool). Want smallest on-chain cost. | Groth16 (BLS12-381) or Nova IVC (sumcheck/NIFS) | [`aiken/groth16`](./aiken/groth16/), [`aiken/nova`](./aiken/nova/) | Requires designing/compiling a circuit (Circom/R1CS), trusted setup or transparent setup. Proofs are tiny (192B–~1.5KB). |
+| **B) zkVM-based (OpenVM/Jolt)** | Run arbitrary Aiken/UPLC logic as-is with no circuit rewrite. Want "prove the script execution". | zkVM STARK (OpenVM) or Dory (Jolt), both over BN254 | Needs BN254 → BLS12-381 wrapping (WIP in [`zkVM/onchain/`](./zkVM/onchain/)) | Uses the real `.flat` artifact. Larger proofs (68KB–658KB) but maximum fidelity to the Aiken program. |
+
+## Path B: Aiken → UPLC → zkVM → proof → verification (detailed)
+
+### 1) Compile Aiken to UPLC
+
+| Component | Responsibility | Input | Output |
+|-----------|---------------|-------|--------|
+| [`aiken` CLI](https://aiken-lang.org/) | Typecheck, desugar, compile Aiken to Untyped Plutus Core (UPLC). | `*.ak` files, `aiken.toml` | UPLC program(s). `aiken check` runs tests, `aiken build` builds project, `aiken export -m <module> -n <fn>` emits blueprint with `compiledCode` (hex of flat). |
+| `aiken/vrf`, `aiken/kdf`, `zkVM/hello-world` | Source programs used for e2e examples. | Aiken source | Verifiable reference behavior matched by tests. |
+
+- **Data transform:** Aiken AST → UPLC terms (lambdas/applications/constants/builtins). Names become de Bruijn indices. Builtin functions map to Plutus builtin tags.
+- **Notes:** Complex validator builds can be slow/hang in some projects; `aiken export` of library functions is the reliable way to get a runnable program artifact here.
+
+### 2) Encode to Plutus Flat
+
+| Component | Responsibility | Input | Output |
+|-----------|---------------|-------|--------|
+| Aiken uplc encoder / [`zkVM/uplc-encoder/`](./zkVM/uplc-encoder/) | Serialize UPLC to Plutus Flat format. | UPLC program (or `compiledCode` hex) | `*.flat` binary. |
+| [`zkVM/hello-world/`](./zkVM/hello-world/) | Committed test artifacts (`hello_hash.flat`, `vrf_*.flat`, `kdf_hkdf.flat`). | Pre-exported flat | Used by guests and tests. |
+
+- **Data transform:** UPLC AST → Flat bitstream (term encodings, constant encodings, builtin tags). The flat format is what the `uplc-guest` decoder expects.
+- **Important:** `uplc-guest/src/flat.rs` handles raw flat and CBOR-wrapped flat. It decodes constants including `Data` (via CBOR) and BLS12-381 constant types.
+
+### 3) Prepare program + arguments
+
+| Component | Responsibility | Input | Output |
+|-----------|---------------|-------|--------|
+| Host CLI ([`zkVM/openvm/hello-aiken/src/bin/uplc.rs`](./zkVM/openvm/hello-aiken/src/bin/uplc.rs), [`zkVM/jolt/hello-aiken/src/bin/uplc.rs`](./zkVM/jolt/hello-aiken/src/bin/uplc.rs)) | Load `.flat` and collect runtime args. | `.flat` path, `--data-bytes HEX` flags | In-memory `(flat: Vec<u8>, args: Vec<Data>)`. |
+| Input encoder (host side) | Pack into zkVM input blob. | `flat + args` | OpenVM: JSON `{"input":["0x01..."]}` written via `--write-input`; Jolt: `flat_with_args` blob passed to host. |
+
+- **Data transform:** Hex strings → bytes → `Data::B(bytes)` (currently only `Data::B` is supported in the zkVM input format). Blob layout: `[flat_len:u32][flat][num_args:u32]([arg_len:u32][arg_bytes])` (little-endian).
+- **Responsibility:** The host is responsible for I/O, argument encoding, and (for OpenVM) producing the input JSON consumed by `cargo openvm run/prove`.
+
+### 4) Evaluate in zkVM guest (execution trace generation)
+
+| Component | Responsibility | Input | Output |
+|-----------|---------------|-------|--------|
+| [`zkVM/uplc-guest/`](./zkVM/uplc-guest/) | `no_std` CEK evaluator. Decodes flat, manages environment/continuations, executes builtins. | `flat` bytes, `Vec<Data>` args | UPLC `Value` (e.g. bytestring). |
+| OpenVM guest ([`zkVM/openvm/hello-aiken`](./zkVM/openvm/hello-aiken)) | RV32IM guest. Reads input via `openvm::io::read_vec`, calls `eval_flat`, extracts bytes, reveals via `openvm::io::reveal_bytes32`. | zkVM input blob | Public output = 32-byte digest (for hash-returning programs). |
+| Jolt guest ([`zkVM/jolt/hello-aiken/guest`](./zkVM/jolt/hello-aiken/guest)) | RV64IMAC guest with `#[jolt::provable]`. Decodes blob, evaluates, returns `[u8; 32]`. | `flat_with_args` blob | Public output returned to host. |
+
+- **Data transform:** Flat → decoded `Program`/`Term`s → CEK machine execution → `Value`. Builtins map to native/optimized operations (hashes, Data CBOR, bytearray/integer, BLS12-381). Result converted to bytes and revealed as public output.
+- **Key point:** This is executing the **real Aiken/UPLC program**, not a hand-ported reimplementation. [`zkVM/uplc-guest/tests/differential.rs`](./zkVM/uplc-guest/tests/differential.rs) verifies behavior against `aiken uplc eval`.
+
+### 5) Prove and verify
+
+| Component | Responsibility | Input | Output |
+|-----------|---------------|-------|--------|
+| OpenVM prover (`cargo openvm prove app/stark`) | Compile guest to RISC-V, transpile to `.vmexe`, run preprocessing/keygen (once), generate STARK proof over execution trace. | `.vmexe`, input JSON, keys (`app.pk/app.vk` or recursive keys) | `*.app.proof`, optional aggregated STARK proof. |
+| Jolt host/prover (`cargo run --release --bin uplc`) | Compile guest crate, preprocess, prove, verify in one flow (SDK-driven). | flat+args | Proof + timing + public output. |
+| Verifiers (`cargo openvm verify app/stark`, Jolt verify) | Check proof against public output/VM commitment. | Proof + verification key/baseline | Accept/reject. |
+
+- **Data transform:** RISC-V execution trace → constraints/lookups → polynomial commitments (BabyBear STARKs for OpenVM, Dory over BN254 for Jolt) → proof bytes.
+- **Measured (from repo):** OpenVM app prove ~658s, proof ~547KB; Jolt prove ~11.6s, proof ~68KB (hello_hash baseline).
+
+### 6) Bridge to Cardano verification (on-chain)
+
+| Component | Responsibility | Input | Output |
+|-----------|---------------|-------|--------|
+| zkVM aggregation/wrapping ([`zkVM/onchain/`](./zkVM/onchain/), WIP) | Convert/aggregate BN254 proofs to be verifiable by Cardano's BLS12-381 native builtins. | zkVM proof(s) | Groth16-style proof over BLS12-381 (or verifier circuit) consumable on-chain. |
+| Cardano Plutus V3 verifiers ([`aiken/groth16`](./aiken/groth16/), [`aiken/nova`](./aiken/nova/)) | On-chain pairing/sumcheck verification using `bls12_381_*` builtins. | Proof, verifying key, public inputs | Spend validity in Plutus script. |
+
+- **Why needed:** OpenVM and Jolt produce proofs over BN254; Cardano's native pairing/builtin support is oriented around BLS12-381. The bridge is the main remaining integration piece.
+
+## Path A: Circuit-based flow (for comparison)
+
+| Step | Component | Transform |
+|------|-----------|-----------|
+| 1) Specify computation | Circuit (Circom) or native design | Logic → R1CS constraints/QAP |
+| 2) Setup | [`clis/trusted-setup`](./clis/trusted-setup/), [`groth16-prover`](./groth16-prover/) | Phase 1/2 → proving/verifying keys |
+| 3) Witness/prove | [`clis/groth16`](./clis/groth16/) | Inputs → witness → Groth16 proof (G1/G2 elements) |
+| 4) On-chain verify | [`aiken/groth16`](./aiken/groth16/) | Pairing check `e(A,B)=e(α,β)·e(C,δ)·e(V,γ)` over BLS12-381 |
+
+This is cheaper on-chain and production-proven in the repo, but requires circuit engineering per application. See [`clis/groth16/README.md`](./clis/groth16/README.md) for a full walkthrough.
+
+## Component map (responsibilities)
+
+| Component | Role |
+|-----------|------|
+| `aiken/*` | On-chain verifiers (Groth16/Nova/VRF/KDF) using Cardano BLS12-381 builtins. |
+| `groth16-prover/`, `nova-prover/`, `lattice-prover/` | Proof system implementations (arkworks-based). |
+| `clis/*` | Thin CLIs wrapping the libraries (prove/verify/setup/fold). |
+| `zkVM/uplc-guest/` | **Program execution engine**: decodes flat, runs CEK, implements Plutus builtins (including BLS12-381). No_std, zkVM-friendly. |
+| `zkVM/openvm/*`, `zkVM/jolt/*` | **VM integration**: guest entrypoints, input encoding/decoding, host drivers, proving/verification flows. |
+| `zkVM/hello-world/` | Canonical test artifacts and Aiken reference. |
+| `circom/`, `aiken/selective-disclosure/` | End-to-end application pipelines (predicate→pool→batch) with reproducible scripts. |
+
+## Quick verification commands
+
+```bash
+# Verify evaluator matches Aiken
+cd zkVM/uplc-guest && cargo test
+
+# Run real Aiken artifact on zkVM host
+cd zkVM/openvm/hello-aiken && cargo run --bin uplc -- ../../hello-world/hello_hash.flat --data-bytes 48656c6c6f2c20776f726c6421
+
+# Run vrf/kdf artifacts
+cd zkVM/uplc-guest && cargo run --bin uplc-eval -- ../hello-world/vrf_verify.flat
+cd zkVM/uplc-guest && cargo run --bin uplc-eval -- ../hello-world/kdf_hkdf.flat
+
+# Cardano-native Groth16 e2e
+cd clis/groth16 && cargo test
+```
+
+See also: [`zkVM/E2E_DEMO.md`](./zkVM/E2E_DEMO.md), [`zkVM/benchmarks.md`](./zkVM/benchmarks.md).
+
+</details>
+
 ### Aiken on-chain verification
 
 Everything above ends in the same place: a proof that has to be checked *on-chain*, inside a Plutus V3 spending script, cheaply enough to be worth doing. The `aiken/` tree holds those verifiers, each written against Cardano's native BLS12-381 builtins — the [Aiken stdlib primitives](https://aiken-lang.github.io/stdlib/aiken/crypto/bls12_381/g1.html) (`bls12_381_G1_element`, `bls12_381_G2_element`, `bls12_381_millerLoop`, `bls12_381_finalVerify`) and [ilap/bls](https://github.com/ilap/bls):
