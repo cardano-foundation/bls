@@ -1,0 +1,27 @@
+[package]
+name = "zkvm-onchain"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "BN254 zkVM proof wrapping to BLS12-381 Groth16 for Cardano verification"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+hex = "0.4"
+thiserror = "1.0"
+
+[dev-dependencies]
+tempfile = "3"
+
+[features]
+default = []
+verus = []
+
+[[bin]]
+name = "wrap-openvm"
+path = "src/bin/wrap_openvm.rs"
+
+[[bin]]
+name = "wrap-jolt"
+path = "src/bin/wrap_jolt.rs"

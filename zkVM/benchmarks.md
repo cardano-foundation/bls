@@ -5,9 +5,9 @@
 | Metric | Groth16 (aiken/groth16) | Nova IVC (aiken/nova/upstream nova-slim) | OpenVM (this repo) | Jolt (this repo) |
 |--------|-------------------------|------------------------------------------|-------------------|-----------------|
 | Setup | Per-circuit trusted setup | Transparent or compression setup | VM keys (once per VM config) | VM preprocessing (per program) |
-| Proof size | ~192 bytes | ~0.4-1.5 KB | 522-658 KB | ~68 KB |
+| Proof size | ~192 bytes | ~0.4-1.5 KB | 522-658 KB → 192 B (wrapped) | ~68 KB → 192 B (wrapped) |
 | Prove time (CPU) | Varies by circuit | Fold+compress varies | ~11 min (hello_hash) | ~12-24 s (hello_hash) |
-| Verify time (on-chain) | 1 pairing | Sumcheck/pairing depending on variant | Needs BN254→BLS12-381 wrap (expensive) | Needs BN254→BLS12-381 wrap (expensive) |
+| Verify time (on-chain) | 1 pairing (BLS12-381) | Sumcheck/pairing depending on variant | Wrap + 1 pairing (BLS12-381) | Wrap + 1 pairing (BLS12-381) |
 | Program flexibility | Fixed circuit only | Step-circuit IVC | Any UPLC/Aiken program | Any UPLC/Aiken program |
 | On-chain ready | Yes (BLS12-381 builtins) | Yes (sumcheck verifier in aiken/nova) | No (BN254 aggregation) | No (BN254) |
 
@@ -39,7 +39,7 @@ What was needed:
 2. **VM guests** - OpenVM and Jolt harnesses reading flat+args, returning digest as public output.
 3. **Input encoding** - Custom blob format for passing program+args to zkVM.
 4. **Aiken integration** - `aiken export` produces compiledCode; evaluator must match Plutus semantics (tested via differential tests).
-5. **On-chain bridging** - Both VMs use BN254 internally; Cardano needs BLS12-381 Groth16. Requires wrapping/recursion step (WIP in zkVM/onchain/).
+5. **On-chain bridging** - Both VMs use BN254 internally; Cardano needs BLS12-381 Groth16. Wrapping framework added in `zkVM/onchain/` with tests, Verus specs, and e2e script. Full circuit implementation in progress.
 
 ## Comparison to upstream nova-slim
 
