@@ -51,7 +51,8 @@ zkVM/
 ├── jolt/         # Jolt harness  
 ├── hello-world/  # Test artifacts
 ├── uplc-guest/   # no_std UPLC evaluator
-└── onchain/      # BN254→BLS12-381 wrapping to BLS12-381 Groth16 for Cardano
+├── onchain/      # BN254→BLS12-381 wrapping to BLS12-381 Groth16 for Cardano
+└── tools/        # Helper tools (artifact generation)
 ```
 
 ## References
