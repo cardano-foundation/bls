@@ -1,80 +1,54 @@
 # UPLC guest evaluator
 
-A minimal `no_std` UPLC CEK evaluator intended for RISC-V zkVM guests. It decodes
-real Aiken `.flat` artifacts (raw or CBOR-wrapped) and evaluates them without
-`std`, C dependencies or host syscalls. Builds for
-`riscv32im-unknown-none-elf` with `--no-default-features`.
+no_std CEK evaluator for running Aiken `.flat` artifacts in RISC-V zkVMs.
 
-**Status**: evaluates the committed `../hello-world/hello_hash.flat` artifact and
-matches the Aiken CLI output. Builtins currently implemented:
-- Hashes: `sha2_256`, `sha3_256`, `blake2b_256`, `blake2b_224`, `keccak_256`
-- Data: `unBData`, `unIData`, `unListData`, `unMapData`, `unConstrData`,
-  `bData`, `iData`, `listData`, `mapData`, `constrData`, `equalsData`,
-  `serialiseData`, `chooseData`
-- Bytearray: `appendByteString`, `sliceByteString`, `lengthOfByteString`,
-  `indexByteString`, `equalsByteString`, `lessThanByteString`,
-  `lessThanEqualsByteString`, `replicateByte`, `xorByteString`
-- Integer: `addInteger`, `subtractInteger`, `multiplyInteger`, `divideInteger`,
-  `quotientInteger`, `remainderInteger`, `modInteger`, `equalsInteger`,
-  `lessThanInteger`, `lessThanEqualsInteger`, `integerToByteString`
-- BLS12-381: `bls12_381_G1_add`, `bls12_381_G1_neg`, `bls12_381_G1_scalarMul`,
-  `bls12_381_G1_equal`, `bls12_381_G1_compress`, `bls12_381_G1_uncompress`,
-  `bls12_381_G1_hashToGroup`, `bls12_381_G2_add`, `bls12_381_G2_neg`,
-  `bls12_381_G2_scalarMul`, `bls12_381_G2_equal`, `bls12_381_G2_compress`,
-  `bls12_381_G2_uncompress`, `bls12_381_G2_hashToGroup`,
-  `bls12_381_millerLoop`, `bls12_381_mulMlResult`, `bls12_381_finalVerify`,
-  `bls12_381_G1_multiScalarMul`, `bls12_381_G2_multiScalarMul`
+## Builtins supported
 
-Other builtins are decoded but return `UnsupportedBuiltin` when executed. The
-next step is BLS12-381 curve operations used by the `aiken/vrf` project, plus
-the remaining bytearray bit/byte operations (`andByteString`, `orByteString`,
-`complementByteString`, etc.) if `aiken/kdf` needs them.
+| Category | Builtins |
+|----------|----------|
+| Hash | sha2_256, sha3_256, blake2b_256, blake2b_224, keccak_256 |
+| Data | bData, iData, listData, mapData, constrData, unBData, unIData, unListData, unMapData, unConstrData, equalsData, serialiseData, chooseData |
+| ByteString | append, slice, length, index, equals, lessThan, lessThanEquals, replicateByte, xorByteString, integerToByteString |
+| Integer | add, subtract, multiply, divide, quotient, remainder, mod, equals, lessThan, lessThanEquals |
+| BLS12-381 G1/G2 | add, neg, scalarMul, equal, compress, uncompress, hashToGroup, multiScalarMul |
+| BLS12-381 Pairing | millerLoop, mulMlResult, finalVerify |
 
-## Layout
-
-| File | Purpose |
-|---|---|
-| `src/flat.rs` | Flat decoder: terms, constants, Plutus Data CBOR, CBOR-wrapped flat |
-| `src/machine.rs` | CEK machine: environments, continuations, builtins |
-| `src/term.rs` | Terms, constants, builtin tags, hex helpers |
-| `src/data.rs` | Plutus `Data` and minimal CBOR decoder |
-| `src/bin/uplc_eval.rs` | Host CLI |
-| `tests/differential.rs` | Compares our output with `aiken uplc eval` |
-
-## Evaluate the hello-world artifact
+## Quick start
 
 ```bash
 cd zkVM/uplc-guest
-
-# hello_hash expects a Plutus Data bytestring argument
-cargo run --bin uplc-eval -- \
-  ../hello-world/hello_hash.flat \
-  --data-bytes 48656c6c6f2c20776f726c6421
-# 315f5bdb76d078c43b8ac0064e4a0164612b1fce77c869345bfc94c75894edd3
+cargo test                    # all tests
+cargo run --bin uplc-eval -- ../hello-world/hello_hash.flat --data-bytes 48656c6c6f2c20776f726c869345bfc94c75894edd3  # example
 ```
 
-## Differential test
+## Run on zkVMs
 
+**OpenVM:**
 ```bash
-cargo test
+cd zkVM/openvm/hello-aiken
+cargo run --bin uplc -- ../../hello-world/hello_hash.flat --data-bytes 48656c6c6f2c20776f726c6421
+cargo run --bin uplc -- ../../hello-world/hello_hash.flat --data-bytes 48656c6c6f2c20776f726c6421 --write-input /tmp/in.json
+cargo openvm run --bin uplc --input /tmp/in.json
 ```
 
-`hello_hash_matches_aiken` runs `aiken uplc eval` on the equivalent textual
-program and asserts that both produce the same digest. If `aiken` is not on
-`PATH`, the test skips the comparison and only checks the known digest.
-
-## Guest build check
-
+**Jolt:**
 ```bash
-cargo build --no-default-features --target riscv32im-unknown-none-elf
+cd zkVM/jolt/hello-aiken
+cargo run --release --bin uplc -- ../../hello-world/hello_hash.flat --data-bytes 48656c6c6f2c20776f726c6421
 ```
 
-## Notes and limitations
+## Files
 
-- De Bruijn indices are 1-based, matching the Plutus/UPLC flat encoding.
-- Constants support integers (arbitrary precision), bytestrings, strings, bools,
-  unit, `Data`, lists, arrays and pairs. BLS and ledger-value constants are not
-  decoded yet.
-- The current builtin set is intentionally small. Extending it is required
-  before running non-trivial Aiken validators (see the parent README).
-- Evaluation does not charge or enforce an `ExBudget` yet.
+| File | Purpose |
+|------|---------|
+| `src/flat.rs` | Flat decoder (terms, constants, Data CBOR) |
+| `src/machine.rs` | CEK machine + builtins |
+| `src/term.rs` | Terms/constants/builtin tags |
+| `src/data.rs` | Plutus Data + CBOR encode/decode |
+| `tests/differential.rs` | Compare vs `aiken uplc eval` |
+
+## Notes
+
+- De Bruijn indices are 1-based (Plutus/UPLC flat format)
+- `no_std` compatible for RISC-V guests (`--no-default-features`)
+- Evaluation has no budget metering yet
