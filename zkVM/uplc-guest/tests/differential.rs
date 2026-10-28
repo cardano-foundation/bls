@@ -194,6 +194,87 @@ fn integer_less_than_matches_aiken() {
     }
 }
 
+#[test]
+fn data_i_data_matches_aiken() {
+    if !aiken_available() {
+        return;
+    }
+
+    let uplc = r#"(program 1.1.0 [
+  (builtin unIData)
+  [ (builtin iData) (con integer -42) ]
+])
+"#;
+
+    let flat = aiken_encode(uplc, "idata");
+    let value = eval_flat(&flat, &[]).expect("evaluator failed");
+    let expected = extract_integer(&aiken_eval(uplc, "idata"));
+    assert_eq!(value.as_integer().unwrap().to_string(), expected);
+}
+
+#[test]
+fn data_b_data_matches_aiken() {
+    if !aiken_available() {
+        return;
+    }
+
+    let uplc = r#"(program 1.1.0 [
+  (builtin unBData)
+  [ (builtin bData) (con bytestring #deadbeef) ]
+])
+"#;
+
+    let flat = aiken_encode(uplc, "bdata");
+    let value = eval_flat(&flat, &[]).expect("evaluator failed");
+    let expected_hex = extract_bytestring_hex(&aiken_eval(uplc, "bdata"));
+    assert_eq!(value.to_hex_string().unwrap(), expected_hex);
+}
+
+#[test]
+fn data_equals_matches_aiken() {
+    if !aiken_available() {
+        return;
+    }
+
+    let uplc = r#"(program 1.1.0 [
+  (builtin equalsData)
+  (con data (I 42))
+  (con data (I 42))
+])
+"#;
+
+    let flat = aiken_encode(uplc, "equalsdata");
+    let value = eval_flat(&flat, &[]).expect("evaluator failed");
+    let expected = aiken_eval(uplc, "equalsdata").contains("True");
+    match value {
+        uplc_guest::Value::Con(uplc_guest::Constant::Bool(b)) => assert_eq!(b, expected),
+        other => panic!("expected bool, got {}", other.describe()),
+    }
+}
+
+#[test]
+fn data_serialise_matches_aiken() {
+    if !aiken_available() {
+        return;
+    }
+
+    let uplc = r#"(program 1.1.0 [
+  (builtin serialiseData)
+  (con data (Constr 0 [I 42, B #deadbeef]))
+])
+"#;
+
+    let flat = aiken_encode(uplc, "serialise");
+    let value = eval_flat(&flat, &[]).expect("evaluator failed");
+    let bytes = value.as_bytes().expect("result is not a bytestring");
+    let expected_hex = extract_bytestring_hex(&aiken_eval(uplc, "serialise"));
+    let expected_bytes = uplc_guest::hex_decode(&expected_hex).expect("invalid aiken hex");
+    let decoded = uplc_guest::decode_cbor(bytes).expect("failed to decode our bytes");
+    let expected_decoded =
+        uplc_guest::decode_cbor(&expected_bytes).expect("failed to decode aiken bytes");
+    assert_eq!(decoded, expected_decoded);
+}
+
 fn extract_bytestring_hex(result: &str) -> String {
     let hash_start = result.find('#').expect("aiken output has no hex result") + 1;
     result[hash_start..].trim_end_matches(')').to_string()

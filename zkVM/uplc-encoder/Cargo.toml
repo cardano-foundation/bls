@@ -1,0 +1,9 @@
+[package]
+name = "uplc-encoder"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Helper to encode UPLC text to flat using the Aiken uplc crate"
+
+[dependencies]
+uplc = "=1.1.19"

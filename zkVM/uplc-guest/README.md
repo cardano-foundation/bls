@@ -7,18 +7,28 @@ real Aiken `.flat` artifacts (raw or CBOR-wrapped) and evaluates them without
 
 **Status**: evaluates the committed `../hello-world/hello_hash.flat` artifact and
 matches the Aiken CLI output. Builtins currently implemented:
-- Hashes: `sha2_256`
-- Data: `unBData`
+- Hashes: `sha2_256`, `sha3_256`, `blake2b_256`, `blake2b_224`, `keccak_256`
+- Data: `unBData`, `unIData`, `unListData`, `unMapData`, `unConstrData`,
+  `bData`, `iData`, `listData`, `mapData`, `constrData`, `equalsData`,
+  `serialiseData`, `chooseData`
 - Bytearray: `appendByteString`, `sliceByteString`, `lengthOfByteString`,
   `indexByteString`, `equalsByteString`, `lessThanByteString`,
-  `lessThanEqualsByteString`
+  `lessThanEqualsByteString`, `replicateByte`, `xorByteString`
 - Integer: `addInteger`, `subtractInteger`, `multiplyInteger`, `divideInteger`,
   `quotientInteger`, `remainderInteger`, `modInteger`, `equalsInteger`,
-  `lessThanInteger`, `lessThanEqualsInteger`
+  `lessThanInteger`, `lessThanEqualsInteger`, `integerToByteString`
+- BLS12-381: `bls12_381_G1_add`, `bls12_381_G1_neg`, `bls12_381_G1_scalarMul`,
+  `bls12_381_G1_equal`, `bls12_381_G1_compress`, `bls12_381_G1_uncompress`,
+  `bls12_381_G1_hashToGroup`, `bls12_381_G2_add`, `bls12_381_G2_neg`,
+  `bls12_381_G2_scalarMul`, `bls12_381_G2_equal`, `bls12_381_G2_compress`,
+  `bls12_381_G2_uncompress`, `bls12_381_G2_hashToGroup`,
+  `bls12_381_millerLoop`, `bls12_381_mulMlResult`, `bls12_381_finalVerify`,
+  `bls12_381_G1_multiScalarMul`, `bls12_381_G2_multiScalarMul`
 
 Other builtins are decoded but return `UnsupportedBuiltin` when executed. The
-next step is more hash algorithms (`sha3_256`, `blake2b_256`, `keccak_256`) and
-Data constructors / destructors.
+next step is BLS12-381 curve operations used by the `aiken/vrf` project, plus
+the remaining bytearray bit/byte operations (`andByteString`, `orByteString`,
+`complementByteString`, etc.) if `aiken/kdf` needs them.
 
 ## Layout
 

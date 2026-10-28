@@ -28,6 +28,118 @@ pub fn decode_cbor(bytes: &[u8]) -> Result<Data, DataError> {
     Ok(data)
 }
 
+pub fn decode_cbor_with_length(bytes: &[u8]) -> Result<(Data, usize), DataError> {
+    let mut decoder = CborDecoder { bytes, pos: 0 };
+    let data = decoder.item()?;
+    Ok((data, decoder.pos))
+}
+
+pub fn encode_cbor(data: &Data) -> Vec<u8> {
+    let mut encoder = CborEncoder { out: Vec::new() };
+    encoder.item(data);
+    encoder.out
+}
+
+struct CborEncoder {
+    out: Vec<u8>,
+}
+
+impl CborEncoder {
+    fn item(&mut self, data: &Data) {
+        match data {
+            Data::Constr(tag, fields) => self.constr(*tag, fields),
+            Data::Map(entries) => {
+                self.head(5, entries.len() as u64);
+                for (key, value) in entries {
+                    self.item(key);
+                    self.item(value);
+                }
+            }
+            Data::List(items) => {
+                self.head(4, items.len() as u64);
+                for item in items {
+                    self.item(item);
+                }
+            }
+            Data::I(value) => self.integer(value),
+            Data::B(bytes) => {
+                self.head(2, bytes.len() as u64);
+                self.out.extend_from_slice(bytes);
+            }
+        }
+    }
+
+    fn constr(&mut self, tag: u64, fields: &[Data]) {
+        if tag <= 6 {
+            self.head(6, 121 + tag);
+        } else if tag <= 127 {
+            self.head(6, 1280 + tag - 7);
+        } else {
+            self.head(6, 102);
+            self.head(4, 2);
+            self.integer(&BigInt::from(tag));
+            self.head(4, fields.len() as u64);
+            for field in fields {
+                self.item(field);
+            }
+            return;
+        }
+        self.head(4, fields.len() as u64);
+        for field in fields {
+            self.item(field);
+        }
+    }
+
+    fn integer(&mut self, value: &BigInt) {
+        if let Some(unsigned) = value.to_u64() {
+            self.head(0, unsigned);
+        } else if let Some(signed) = value.to_i64() {
+            // signed < 0 because to_u64 failed
+            let encoded = (-signed - 1) as u64;
+            self.head(1, encoded);
+        } else {
+            // Arbitrary precision: use CBOR bignum tags.
+            let (sign, magnitude) = value.clone().into_parts();
+            let bytes = magnitude.to_bytes_be();
+            match sign {
+                num_bigint::Sign::Plus | num_bigint::Sign::NoSign => {
+                    self.head(6, 2); // positive bignum tag
+                    self.head(2, bytes.len() as u64);
+                    self.out.extend_from_slice(&bytes);
+                }
+                num_bigint::Sign::Minus => {
+                    self.head(6, 3); // negative bignum tag
+                    self.head(2, bytes.len() as u64);
+                    self.out.extend_from_slice(&bytes);
+                }
+            }
+        }
+    }
+
+    fn head(&mut self, major: u8, info: u64) {
+        let major_shifted = major << 5;
+        match info {
+            0..=23 => self.out.push(major_shifted | info as u8),
+            24..=0xff => {
+                self.out.push(major_shifted | 24);
+                self.out.push(info as u8);
+            }
+            0x100..=0xffff => {
+                self.out.push(major_shifted | 25);
+                self.out.extend_from_slice(&(info as u16).to_be_bytes());
+            }
+            0x10000..=0xffffffff => {
+                self.out.push(major_shifted | 26);
+                self.out.extend_from_slice(&(info as u32).to_be_bytes());
+            }
+            _ => {
+                self.out.push(major_shifted | 27);
+                self.out.extend_from_slice(&info.to_be_bytes());
+            }
+        }
+    }
+}
+
 struct CborDecoder<'a> {
     bytes: &'a [u8],
     pos: usize,
@@ -78,6 +190,10 @@ impl<'a> CborDecoder<'a> {
         let major = initial >> 5;
         let info = initial & 0x1f;
 
+        if info == 31 {
+            return self.indefinite(major);
+        }
+
         match major {
             0 => Ok(Data::I(BigInt::from(self.uint(info)?))),
             1 => {
@@ -88,6 +204,7 @@ impl<'a> CborDecoder<'a> {
                 let len = self.uint(info)? as usize;
                 Ok(Data::B(self.take(len)?.to_vec()))
             }
+            3 => Err(DataError::InvalidIndefinite),
             4 => {
                 let len = self.uint(info)? as usize;
                 let mut items = Vec::with_capacity(len);
@@ -110,6 +227,54 @@ impl<'a> CborDecoder<'a> {
             }
             _ => Err(DataError::InvalidIndefinite),
         }
+    }
+
+    fn indefinite(&mut self, major: u8) -> Result<Data, DataError> {
+        match major {
+            2 => {
+                let mut bytes = Vec::new();
+                loop {
+                    let initial = self.byte()?;
+                    if initial == 0xff {
+                        break;
+                    }
+                    let len = self.uint(initial & 0x1f)? as usize;
+                    bytes.extend_from_slice(self.take(len)?);
+                }
+                Ok(Data::B(bytes))
+            }
+            3 => Err(DataError::InvalidIndefinite),
+            4 => {
+                let mut items = Vec::new();
+                loop {
+                    if self.peek_break()? {
+                        self.pos += 1;
+                        break;
+                    }
+                    items.push(self.item()?);
+                }
+                Ok(Data::List(items))
+            }
+            5 => {
+                let mut items = Vec::new();
+                loop {
+                    if self.peek_break()? {
+                        self.pos += 1;
+                        break;
+                    }
+                    items.push((self.item()?, self.item()?));
+                }
+                Ok(Data::Map(items))
+            }
+            _ => Err(DataError::InvalidIndefinite),
+        }
+    }
+
+    fn peek_break(&self) -> Result<bool, DataError> {
+        if self.pos >= self.bytes.len() {
+            return Err(DataError::UnexpectedEnd);
+        }
+        Ok(self.bytes[self.pos] == 0xff)
     }
 
     fn tagged(&mut self, tag: u64) -> Result<Data, DataError> {

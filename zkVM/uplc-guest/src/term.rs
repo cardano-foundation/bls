@@ -1,4 +1,5 @@
 use alloc::{boxed::Box, rc::Rc, string::String, vec::Vec};
+use bls12_381::{G1Affine, G2Affine, Gt};
 use num_bigint::BigInt;
 
 use crate::data::Data;
@@ -28,6 +29,30 @@ impl Builtin {
     pub const SHA2_256: Self = Self(18);
     pub const SHA3_256: Self = Self(19);
     pub const BLAKE2B_256: Self = Self(20);
+    pub const KECCAK_256: Self = Self(71);
+    pub const BLAKE2B_224: Self = Self(72);
+    pub const INTEGER_TO_BYTE_STRING: Self = Self(73);
+    pub const XOR_BYTE_STRING: Self = Self(77);
+    pub const REPLICATE_BYTE: Self = Self(81);
+    pub const BLS12_381_G1_ADD: Self = Self(54);
+    pub const BLS12_381_G1_NEG: Self = Self(55);
+    pub const BLS12_381_G1_SCALAR_MUL: Self = Self(56);
+    pub const BLS12_381_G1_EQUAL: Self = Self(57);
+    pub const BLS12_381_G1_COMPRESS: Self = Self(58);
+    pub const BLS12_381_G1_UNCOMPRESS: Self = Self(59);
+    pub const BLS12_381_G1_HASH_TO_GROUP: Self = Self(60);
+    pub const BLS12_381_G2_ADD: Self = Self(61);
+    pub const BLS12_381_G2_NEG: Self = Self(62);
+    pub const BLS12_381_G2_SCALAR_MUL: Self = Self(63);
+    pub const BLS12_381_G2_EQUAL: Self = Self(64);
+    pub const BLS12_381_G2_COMPRESS: Self = Self(65);
+    pub const BLS12_381_G2_UNCOMPRESS: Self = Self(66);
+    pub const BLS12_381_G2_HASH_TO_GROUP: Self = Self(67);
+    pub const BLS12_381_MILLER_LOOP: Self = Self(68);
+    pub const BLS12_381_MUL_ML_RESULT: Self = Self(69);
+    pub const BLS12_381_FINAL_VERIFY: Self = Self(70);
+    pub const BLS12_381_G1_MULTI_SCALAR_MUL: Self = Self(92);
+    pub const BLS12_381_G2_MULTI_SCALAR_MUL: Self = Self(93);
     pub const APPEND_STRING: Self = Self(22);
     pub const EQUALS_STRING: Self = Self(23);
     pub const ENCODE_UTF8: Self = Self(24);
@@ -65,6 +90,9 @@ pub enum ConstantType {
     Unit,
     Bool,
     Data,
+    Bls12_381G1Element,
+    Bls12_381G2Element,
+    Bls12_381MlResult,
     List(Box<ConstantType>),
     Array(Box<ConstantType>),
     Pair(Box<ConstantType>, Box<ConstantType>),
@@ -78,9 +106,70 @@ pub enum Constant {
     Unit,
     Bool(bool),
     Data(Data),
+    Bls12_381G1Element(G1Affine),
+    Bls12_381G2Element(G2Affine),
+    Bls12_381MlResult(Gt),
     List(Vec<Constant>),
     Array(Vec<Constant>),
     Pair(Box<Constant>, Box<Constant>),
+}
+
+impl Constant {
+    pub fn as_integer(&self) -> Option<&BigInt> {
+        match self {
+            Self::Integer(value) => Some(value),
+            _ => None,
+        }
+    }
+
+    pub fn as_bytes(&self) -> Option<&[u8]> {
+        match self {
+            Self::ByteString(bytes) => Some(bytes),
+            _ => None,
+        }
+    }
+
+    pub fn as_data(&self) -> Option<&Data> {
+        match self {
+            Self::Data(value) => Some(value),
+            _ => None,
+        }
+    }
+
+    pub fn as_list(&self) -> Option<&Vec<Constant>> {
+        match self {
+            Self::List(values) => Some(values),
+            _ => None,
+        }
+    }
+
+    pub fn as_pair(&self) -> Option<(&Constant, &Constant)> {
+        match self {
+            Self::Pair(first, second) => Some((first, second)),
+            _ => None,
+        }
+    }
+
+    pub fn as_bls12_381_g1_element(&self) -> Option<&G1Affine> {
+        match self {
+            Self::Bls12_381G1Element(value) => Some(value),
+            _ => None,
+        }
+    }
+
+    pub fn as_bls12_381_g2_element(&self) -> Option<&G2Affine> {
+        match self {
+            Self::Bls12_381G2Element(value) => Some(value),
+            _ => None,
+        }
+    }
+
+    pub fn as_bls12_381_ml_result(&self) -> Option<&Gt> {
+        match self {
+            Self::Bls12_381MlResult(value) => Some(value),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]

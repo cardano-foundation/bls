@@ -192,6 +192,9 @@ fn type_from_tags(tags: &[u8]) -> Result<(ConstantType, usize), DecodeError> {
         [CONST_UNIT, ..] => Ok((ConstantType::Unit, 1)),
         [CONST_BOOL, ..] => Ok((ConstantType::Bool, 1)),
         [CONST_DATA, ..] => Ok((ConstantType::Data, 1)),
+        [9, ..] => Ok((ConstantType::Bls12_381G1Element, 1)),
+        [10, ..] => Ok((ConstantType::Bls12_381G2Element, 1)),
+        [11, ..] => Ok((ConstantType::Bls12_381MlResult, 1)),
         [CONST_LIST_ONE, CONST_LIST_TWO, rest @ ..] => {
             let (inner, consumed) = type_from_tags(rest)?;
             Ok((ConstantType::List(Box::new(inner)), 2 + consumed))
@@ -227,6 +230,9 @@ fn decode_constant_with_type(
         }
         ConstantType::Unit => Ok(Constant::Unit),
         ConstantType::Bool => Ok(Constant::Bool(decoder.bit()?)),
+        ConstantType::Bls12_381G1Element
+        | ConstantType::Bls12_381G2Element
+        | ConstantType::Bls12_381MlResult => Err(DecodeError::UnsupportedConstantType),
         ConstantType::Data => {
             let bytes = decoder.bytes()?;
             Ok(Constant::Data(decode_cbor(&bytes)?))
