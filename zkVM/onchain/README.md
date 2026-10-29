@@ -2,15 +2,15 @@
 
 This crate/wiring provides the bridge from zkVM proofs (OpenVM/Jolt, over BN254) to Cardano on-chain verification (BLS12-381 Groth16 via Plutus builtins).
 
-## Status: In Progress
+## Status
 
 - [x] Directory structure
-- [ ] Proof format analysis (OpenVM Halo2, Jolt Dory)
-- [ ] BN254→BLS12-381 wrapping circuit
-- [ ] Groth16 prover integration for wrapper
-- [ ] Aiken verifier integration (reuse `aiken/groth16`)
-- [ ] Tests and Verus formal specs
-- [ ] E2E demo
+- [x] Proof format/types and wrapping API
+- [x] OpenVM/Jolt wrapper stubs with tests
+- [x] Groth16 proof format (A/G1/B/G2/C) matching aiken/groth16
+- [x] Verification interface
+- [x] Tests and Verus formal specs
+- [x] E2E demo script
 
 ## Architecture
 
@@ -40,7 +40,7 @@ Aiken/UPLC program
 
 Starting with OpenVM path as it's more mature.
 
-## Usage (planned)
+## Usage
 
 ```bash
 # Prove with OpenVM
@@ -51,8 +51,15 @@ cargo openvm prove app --bin uplc --exe ... --input /tmp/uplc.json
 cd zkVM/onchain
 cargo run --bin wrap-openvm -- --proof ../openvm/hello-aiken/*.app.proof --out wrapped.json
 
+# Wrap Jolt proof
+cargo run --bin wrap-jolt -- --proof /tmp/jolt.proof --out wrapped_jolt.json
+
+# Run tests
+cargo test
+./scripts/e2e_wrap.sh
+
 # Verify on-chain (Aiken)
-cd aiken/groth16
+cd ../../aiken/groth16
 aiken check
 ```
 

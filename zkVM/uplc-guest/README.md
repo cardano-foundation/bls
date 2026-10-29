@@ -51,4 +51,4 @@ cargo run --release --bin uplc -- ../../hello-world/hello_hash.flat --data-bytes
 
 - De Bruijn indices are 1-based (Plutus/UPLC flat format)
 - `no_std` compatible for RISC-V guests (`--no-default-features`)
-- Evaluation has no budget metering yet
+- Evaluation has no budget metering yet (not implemented)

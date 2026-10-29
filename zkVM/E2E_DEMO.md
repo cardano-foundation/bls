@@ -175,7 +175,7 @@ cargo build --no-default-features --target riscv32im-unknown-none-elf
 | GPU support | OpenVM has GPU acceleration support in general; we tested CPU-only | Jolt has GPU paths evolving; tested CPU-only here |
 | On-chain verification | Path exists via aggregation/wrapping (EVM) - targeted for recursion/wrapping to Groth16 | More complex on-chain path; recursion/folding story differs, on-chain verification less turnkey today |
 | Maturity for this use case | More CLI-driven, explicit keys/flows, good for reproducible app proofs | Developer-friendly Rust API, fast iteration, small proofs, preprocessing-oriented |
-| Notes for Aiken/UPLC | Same as other RISC-V guests; the `no_std` UPLC evaluator builds for RV32IM but is not yet in-guest | Same; RV64IMAC more registers/64-bit but guest code similar |
+| Notes for Aiken/UPLC | `no_std` UPLC evaluator integrated in guests (OpenVM/Jolt), supports full builtin set | Same; integrated with extended Data arg support |
 
 ## Trade-offs
 

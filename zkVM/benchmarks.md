@@ -9,7 +9,8 @@
 | Prove time (CPU) | Varies by circuit | Fold+compress varies | ~11 min (hello_hash) | ~12-24 s (hello_hash) |
 | Verify time (on-chain) | 1 pairing (BLS12-381) | Sumcheck/pairing depending on variant | Wrap + 1 pairing (BLS12-381) | Wrap + 1 pairing (BLS12-381) |
 | Program flexibility | Fixed circuit only | Step-circuit IVC | Any UPLC/Aiken program | Any UPLC/Aiken program |
-| On-chain ready | Yes (BLS12-381 builtins) | Yes (sumcheck verifier in aiken/nova) | No (BN254 aggregation) | No (BN254) |
+| On-chain ready | Yes (BLS12-381 builtins) | Yes (sumcheck verifier in aiken/nova) | Via wrap (BN254→BLS12-381, `zkVM/onchain/`) | Via wrap (BN254→BLS12-381, `zkVM/onchain/`) |
+| Wrapping | N/A | N/A | Implemented (`zkVM/onchain/`) | Implemented (`zkVM/onchain/`) |
 
 ## hello_hash baseline
 
