@@ -44,6 +44,6 @@ cargo run --bin uplc -- ../../hello-world/kdf_hkdf.flat
 
 ## Notes
 
-- Only `Data::B` args supported in input blob format
+- Input format supports all Plutus Data types: `B`, `I`, `List`, `Map`, `Constr` (tagged)
 - Existing `app.pk`/`app.vk` from hello-world work if `openvm.toml` unchanged
 - Full proving takes minutes on CPU; use host execution for development

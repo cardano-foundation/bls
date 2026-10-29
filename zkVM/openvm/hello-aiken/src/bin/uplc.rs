@@ -6,7 +6,8 @@ extern crate alloc;
 use alloc::{format, string::String, vec::Vec};
 
 use uplc_guest::{eval_flat, Data};
-
+#[cfg(target_os = "zkvm")]
+use num_bigint;
 openvm::entry!(main);
 
 pub fn main() {
@@ -103,13 +104,54 @@ fn encode_input_blob(flat: &[u8], args: &[Data]) -> Vec<u8> {
     out.extend_from_slice(flat);
     push_u32(&mut out, args.len() as u32);
     for arg in args {
-        let Data::B(bytes) = arg else {
-            panic!("only Data::B arguments are supported in the zkVM input format");
-        };
-        push_u32(&mut out, bytes.len() as u32);
-        out.extend_from_slice(bytes);
+        encode_data(&mut out, arg);
     }
     out
+}
+
+#[cfg(not(target_os = "zkvm"))]
+fn encode_data(out: &mut Vec<u8>, data: &Data) {
+    match data {
+        Data::B(bytes) => {
+            out.push(0);
+            push_u32(out, bytes.len() as u32);
+            out.extend_from_slice(bytes);
+        }
+        Data::I(i) => {
+            out.push(1);
+            let bytes = i.to_signed_bytes_le();
+            push_u32(out, bytes.len() as u32);
+            out.extend_from_slice(&bytes);
+        }
+        Data::List(items) => {
+            out.push(2);
+            push_u32(out, items.len() as u32);
+            for item in items {
+                encode_data(out, item);
+            }
+        }
+        Data::Map(entries) => {
+            out.push(3);
+            push_u32(out, entries.len() as u32);
+            for (k, v) in entries {
+                encode_data(out, k);
+                encode_data(out, v);
+            }
+        }
+        Data::Constr(tag, fields) => {
+            out.push(4);
+            push_u64(out, *tag);
+            push_u32(out, fields.len() as u32);
+            for field in fields {
+                encode_data(out, field);
+            }
+        }
+    }
+}
+
+#[cfg(not(target_os = "zkvm"))]
+fn push_u64(out: &mut Vec<u8>, value: u64) {
+    out.extend_from_slice(&value.to_le_bytes());
 }
 
 #[cfg(target_os = "zkvm")]
@@ -120,11 +162,78 @@ fn decode_input_blob(bytes: &[u8]) -> Option<(Vec<u8>, Vec<Data>)> {
     let num_args = read_u32(bytes, &mut pos)? as usize;
     let mut args = Vec::with_capacity(num_args);
     for _ in 0..num_args {
-        let arg_len = read_u32(bytes, &mut pos)? as usize;
-        let arg_bytes = read_bytes(bytes, &mut pos, arg_len)?;
-        args.push(Data::B(arg_bytes));
+        args.push(decode_data(bytes, &mut pos)?);
     }
     Some((flat, args))
+}
+
+#[cfg(target_os = "zkvm")]
+fn decode_data(bytes: &[u8], pos: &mut usize) -> Option<Data> {
+    let tag = read_u8(bytes, pos)?;
+    match tag {
+        0 => {
+            let len = read_u32(bytes, pos)? as usize;
+            let b = read_bytes(bytes, pos, len)?;
+            Some(Data::B(b))
+        }
+        1 => {
+            let len = read_u32(bytes, pos)? as usize;
+            let b = read_bytes(bytes, pos, len)?;
+            let mut sign = 1i128;
+            if !b.is_empty() && b[len-1] & 0x80 != 0 {
+                sign = -1;
+            }
+            let mut val: i128 = 0;
+            for &byte in b.iter().rev() {
+                val = val * 256 + (byte as i128);
+            }
+            if sign == -1 {
+                val = -val;
+            }
+            Some(Data::I(num_bigint::BigInt::from(val)))
+        }
+        2 => {
+            let len = read_u32(bytes, pos)? as usize;
+            let mut items = alloc::vec::Vec::with_capacity(len);
+            for _ in 0..len {
+                items.push(decode_data(bytes, pos)?);
+            }
+            Some(Data::List(items))
+        }
+        3 => {
+            let len = read_u32(bytes, pos)? as usize;
+            let mut items = alloc::vec::Vec::with_capacity(len);
+            for _ in 0..len {
+                let k = decode_data(bytes, pos)?;
+                let v = decode_data(bytes, pos)?;
+                items.push((k, v));
+            }
+            Some(Data::Map(items))
+        }
+        4 => {
+            let tag = read_u64(bytes, pos)?;
+            let len = read_u32(bytes, pos)? as usize;
+            let mut fields = alloc::vec::Vec::with_capacity(len);
+            for _ in 0..len {
+                fields.push(decode_data(bytes, pos)?);
+            }
+            Some(Data::Constr(tag, fields))
+        }
+        _ => None,
+    }
+}
+
+#[cfg(target_os = "zkvm")]
+fn read_u8(bytes: &[u8], pos: &mut usize) -> Option<u8> {
+    if *pos >= bytes.len() { return None; }
+    let v = bytes[*pos]; *pos += 1; Some(v)
+}
+
+#[cfg(target_os = "zkvm")]
+fn read_u64(bytes: &[u8], pos: &mut usize) -> Option<u64> {
+    if *pos + 8 > bytes.len() { return None; }
+    let v = u64::from_le_bytes(bytes[*pos..*pos+8].try_into().unwrap());
+    *pos += 8; Some(v)
 }
 
 #[cfg(not(target_os = "zkvm"))]

@@ -4,7 +4,8 @@ extern crate alloc;
 
 use alloc::vec::Vec;
 use uplc_guest::{eval_flat, Data};
-
+#[cfg(feature = "guest")]
+use num_bigint;
 #[jolt::provable(heap_size = 32768, max_trace_length = 65536)]
 fn uplc_eval(flat_with_args: &[u8]) -> [u8; 32] {
     let (flat, args) = decode_input_blob(&flat_with_args).expect("invalid input blob");
@@ -22,11 +23,70 @@ fn decode_input_blob(bytes: &[u8]) -> Option<(Vec<u8>, Vec<Data>)> {
     let num_args = read_u32(bytes, &mut pos)? as usize;
     let mut args = Vec::with_capacity(num_args);
     for _ in 0..num_args {
-        let arg_len = read_u32(bytes, &mut pos)? as usize;
-        let arg_bytes = read_bytes(bytes, &mut pos, arg_len)?;
-        args.push(Data::B(arg_bytes));
+        args.push(decode_data(bytes, &mut pos)?);
     }
     Some((flat, args))
+}
+
+fn decode_data(bytes: &[u8], pos: &mut usize) -> Option<Data> {
+    let tag = read_u8(bytes, pos)?;
+    match tag {
+        0 => {
+            let len = read_u32(bytes, pos)? as usize;
+            let b = read_bytes(bytes, pos, len)?;
+            Some(Data::B(b))
+        }
+        1 => {
+            let len = read_u32(bytes, pos)? as usize;
+            let b = read_bytes(bytes, pos, len)?;
+            let mut val: i128 = 0;
+            for &byte in b.iter().rev() {
+                val = val * 256 + (byte as i128);
+            }
+            Some(Data::I(num_bigint::BigInt::from(val)))
+        }
+        2 => {
+            let len = read_u32(bytes, pos)? as usize;
+            let mut items = Vec::with_capacity(len);
+            for _ in 0..len {
+                items.push(decode_data(bytes, pos)?);
+            }
+            Some(Data::List(items))
+        }
+        3 => {
+            let len = read_u32(bytes, pos)? as usize;
+            let mut items = Vec::with_capacity(len);
+            for _ in 0..len {
+                let k = decode_data(bytes, pos)?;
+                let v = decode_data(bytes, pos)?;
+                items.push((k, v));
+            }
+            Some(Data::Map(items))
+        }
+        4 => {
+            let tagv = read_u64(bytes, pos)?;
+            let len = read_u32(bytes, pos)? as usize;
+            let mut fields = Vec::with_capacity(len);
+            for _ in 0..len {
+                fields.push(decode_data(bytes, pos)?);
+            }
+            Some(Data::Constr(tagv, fields))
+        }
+        _ => None,
+    }
+}
+
+fn read_u8(bytes: &[u8], pos: &mut usize) -> Option<u8> {
+    if *pos >= bytes.len() { return None; }
+    let v = bytes[*pos]; *pos += 1; Some(v)
+}
+
+fn read_u64(bytes: &[u8], pos: &mut usize) -> Option<u64> {
+    if *pos + 8 > bytes.len() { return None; }
+    let mut arr = [0u8; 8];
+    arr.copy_from_slice(&bytes[*pos..*pos+8]);
+    *pos += 8;
+    Some(u64::from_le_bytes(arr))
 }
 
 fn read_u32(bytes: &[u8], pos: &mut usize) -> Option<u32> {

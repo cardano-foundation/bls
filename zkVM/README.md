@@ -25,7 +25,7 @@ cd zkVM/openvm/hello-aiken && cargo run --bin uplc -- ../../hello-world/hello_ha
 
 ## Aiken programs supported
 
-The `uplc-guest` evaluator runs real `.flat` artifacts with full builtin support (hashes, Data, BLS12-381, etc.).
+The `uplc-guest` evaluator runs real `.flat` artifacts with full builtin support (hashes, Data, BLS12-381, etc.). Both OpenVM and Jolt guests support all Plutus Data argument types (`B`, `I`, `List`, `Map`, `Constr`).
 
 | Program | Module | Flat artifact | Notes |
 |---------|--------|---------------|-------|

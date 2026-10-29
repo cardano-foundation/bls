@@ -18,7 +18,7 @@ Same artifacts as OpenVM:
 - `../../hello-world/vrf_*.flat` - VRF functions
 - `../../hello-world/kdf_hkdf.flat` - HKDF
 
-Only `Data::B` args supported.
+Input format supports all Plutus Data types: `B`, `I`, `List`, `Map`, `Constr` (tagged).
 
 ## Notes
 
