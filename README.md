@@ -10,7 +10,7 @@ This repository is a working laboratory for that curve: the mathematics derived 
 |-------|-------------------|-------|
 | **Mathematics** | Curve parameters, generators, pairings, the BLS signature scheme and its aggregation modes, VRF, KDF — derived and cross-checked in SageMath | [Curve overview](#bls12-381-elliptic-curves-overview) · [BLS](#bls) · [SageMath mechanics](#bls12-381-and-bls-mechanics-in-sagemath) |
 | **Tooling** | Rust CLIs for the curve itself, Groth16 proving, setup ceremonies, and sparse Merkle trees | [Command-line tools](#command-line-tools) · [Groth16 with Aiken](#groth16-with-bls12-381-curve-primitives) |
-| **zkVM** | Running Aiken programs inside a zero-knowledge VM (OpenVM, Jolt) and verifying the resulting proof on Cardano | [zkVM plan](./zkVM/README.md) |
+| **zkVM** | Running Aiken programs inside a zero-knowledge VM (OpenVM, Jolt) and verifying the resulting proof on Cardano | [zkVM plan](./zkVM/README.md) · [CI](./zkVM/ci/) |
 | **On-chain verification** | Aiken (Plutus V3) verifiers — Groth16 pairing checks, Nova sumcheck verifiers, VRF, KDF, key generation | [Aiken on-chain verification](#aiken-on-chain-verification) |
 | **Applications** | Selective disclosure, privacy pools, confidential transfers with auditor reveal, multi-user batch pools | [Spotlight: selective disclosure](#spotlight-selective-disclosure) |
 

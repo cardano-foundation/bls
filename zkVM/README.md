@@ -53,7 +53,8 @@ zkVM/
 ├── uplc-guest/   # no_std UPLC evaluator
 ├── onchain/      # BN254→BLS12-381 wrapping to BLS12-381 Groth16 for Cardano
 ├── tools/        # Helper tools (artifact generation)
-└── e2e-examples/ # VRF/KDF e2e examples for OpenVM and Jolt
+├── e2e-examples/ # VRF/KDF e2e examples for OpenVM and Jolt
+└── ci/           # CI scripts and Makefile
 ```
 
 ## References
