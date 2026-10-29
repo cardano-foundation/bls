@@ -1,0 +1,23 @@
+[package]
+name = "zkvm-e2e-examples"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "End-to-end examples for VRF/KDF on OpenVM and Jolt"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+hex = "0.4"
+thiserror = "1.0"
+
+[dev-dependencies]
+tempfile = "3"
+
+[features]
+default = []
+verus = []
+
+[dependencies.chrono]
+version = "0.4"
+features = ["serde"]

@@ -29,7 +29,17 @@ From READMEs (measured on 4-core CPU):
 | hello_hash | ~0.01s | simple sha2 |
 | vrf_verify | ~0.025s | BLS12-381 pairing ops |
 | vrf_keys_from_secret | <0.01s | BLS hash-to-group |
+| vrf_prove | <0.01s | BLS hash-to-group + ops |
 | kdf_hkdf | <0.01s | hash builtins |
+
+## zkVM E2E (host execution verified)
+
+| Program | OpenVM host | Jolt host | Notes |
+|---------|-------------|-----------|-------|
+| hello_hash | ✓ | ✓ | Baseline |
+| vrf_keys_from_secret | ✓ (flat loads) | ✓ (flat loads) | Args need full Data encoding |
+| vrf_verify | ✓ (flat loads) | ✓ (flat loads) | Complex args |
+| kdf_hkdf | ✓ (flat loads) | ✓ (flat loads) | Lambda/partial application |
 
 ## Bringing zkVMs to Cardano
 
