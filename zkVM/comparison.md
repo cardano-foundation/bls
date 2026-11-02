@@ -14,8 +14,8 @@ The reference workload is the fixed fixture from
 |---|---|---|
 | Circom + Groth16 | `circom/CardanoKeyOwnershipStrong/cardano_ed25519_ownership_strong.circom` | circuit compiles, witness feasible, **ceremony infeasible** on 32 GiB host |
 | Circom + Nova / NovaSlim | `circom/CardanoKeyOwnershipStrong/cardano_ed25519_ownership_strong_nova.circom` + `../nova-slim` | Nova fold works (5.2 h single-core); NovaSlim integration pending |
-| zkVM (OpenVM) | `zkVM/openvm/cardano-key-ownership-strong` | compiles to zkVM ELF; host test passes; full proof TBD |
-| zkVM (Jolt) | `zkVM/jolt/cardano-key-ownership-strong` | compiles, proves, verifies; **~4.5 min end-to-end** on the reference host |
+| zkVM (OpenVM) | `zkVM/openvm/cardano-key-ownership-strong` | compiles, proves, verifies; **~21 min app-proof, 702 KiB** on the reference host |
+| zkVM (Jolt) | `zkVM/jolt/cardano-key-ownership-strong` | compiles, proves, verifies; **~4.5 min end-to-end, 89 KiB** on the reference host |
 
 ## Statement
 
@@ -41,7 +41,7 @@ The public output is the 32-byte compressed Ed25519 public key; everything else
 | **Reusable tooling** | `snarkjs` / custom CLI | `nova` CLI / NovaSlim Aiken verifier | OpenVM SDK + `cargo openvm` | Jolt SDK + `cargo run --release` |
 | **Proof size** | ~200 B | Nova IVC bundle ~180 KiB; NovaSlim ~0.4–42 KiB | App proof + aggregation (MB-scale before aggregation) | **~89 kB** |
 | **Verification cost** | ~3.5 s off-chain; cheap on-chain with pairing | Nova off-chain; NovaSlim on-chain ~377K mem / 141M CPU | zkVM verifier; on-chain wrap not yet implemented | ~1 s off-chain; BN254→BLS12-381 wrap needed for Cardano |
-| **Prover time** | ~2.5 min prove (if ceremony existed) | ~5.2 h single-core fold (6 × 5.93M constraints) | TBD; host execution <1 s | **~4.5 min** total (80 s preprocessing + 267 s proving) |
+| **Prover time** | ~2.5 min prove (if ceremony existed) | ~5.2 h single-core fold (6 × 5.93M constraints) | **~21 min** app proof (3.3M instructions) | **~4.5 min** total (80 s preprocessing + 267 s proving) |
 | **Hardware needs** | ≥32 GiB RAM for ceremony | Moderate RAM; CPU-bound | Moderate RAM; CPU-bound | Moderate RAM; CPU-bound |
 | **Audit surface** | Circom + Groth16 + trusted setup | Circom + Nova / NovaSlim protocol | OpenVM guest + zkVM STARK prover | Jolt guest + Dory prover |
 
@@ -95,12 +95,14 @@ The implementation is in
 - **Host execution:** the fixed fixture derives the correct `apk` in <1 s and
   passes the assertion.
 - **zkVM build:** compiles to an OpenVM ELF and transpiles successfully.
-- **Proving:** not yet benchmarked; expected to be CPU-heavy because the guest
-  performs many SHA-512 hashes and an Ed25519 scalar multiplication per
-  derivation step.
-- **Proof size / verifier:** OpenVM app proofs are large; they must be
-  aggregated before they become competitive with NovaSlim. There is no Aiken
-  verifier for OpenVM proofs yet.
+- **Measured on host `nebula` (AMD Ryzen 9 9950X3D, 16C/32T, 64 GB RAM):**
+  - app proving: **~1,247 s** (~20.8 min)
+  - instructions executed: **3,255,938**
+  - app proof size: **702 KiB**
+  - output matches the Circom fixture exactly.
+- **Proof size / verifier:** OpenVM app proofs are larger than Jolt's; they
+  must be aggregated before they become competitive with NovaSlim. There is no
+  Aiken verifier for OpenVM proofs yet.
 - **When to use it:** fastest to implement and easiest to audit for Rust teams;
   useful for off-chain custody proofs, benchmarks, and prototyping. Not yet a
   Cardano on-chain solution.
@@ -139,7 +141,7 @@ The implementation is in
 | Tiny proof, fast on-chain verification, hardware available for ceremony | Groth16 (monolith) |
 | Transparent, Cardano-native on-chain verification | **NovaSlim** once the step circuit is integrated |
 | Fastest implementation, easiest audit, off-chain / prototyping | **OpenVM zkVM** |
-| Small zkVM proof, fast proving, off-chain or wrapped on-chain | **Jolt zkVM** |
+| Smallest/fastest zkVM proof today, off-chain or wrapped on-chain | **Jolt zkVM** |
 | Reference end-to-end proof today on modest hardware | **Nova (Impl 10)** |
 
 The three implementations are complementary:

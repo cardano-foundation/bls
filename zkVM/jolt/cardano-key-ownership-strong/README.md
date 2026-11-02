@@ -37,7 +37,7 @@ cd zkVM/jolt/cardano-key-ownership-strong
 cargo run --release
 ```
 
-Expected output (host `nebula`, Ryzen 9 9950X3D, 16C/32T, 64 GB RAM):
+Expected output (host `nebula`, AMD Ryzen 9 9950X3D, 16C/32T, 64 GB RAM):
 
 ```text
 preprocessing time: 79.945s
@@ -50,6 +50,17 @@ fixture OK
 
 The hardcoded fixture (`master = bytes(range(96))`) and expected `apk` match the
 Circom circuit's golden output exactly.
+
+## Measured numbers
+
+| Phase | Time | Size |
+|---|---|---|
+| guest build + preprocessing | **~80 s** | — |
+| proving | **~267 s** | **88.9 KiB** proof |
+| verification | **~1 s** | — |
+| total end-to-end | **~4.5 min** | — |
+
+These are the fastest zkVM numbers we have for this statement today.
 
 ## Project layout
 

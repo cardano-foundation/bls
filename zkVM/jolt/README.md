@@ -11,12 +11,13 @@ cd zkVM/jolt/hello-aiken
 cargo run --release --bin uplc -- ../../hello-world/hello_hash.flat --data-bytes 48656c6c6f2c20776f726c6421
 ```
 
-## Native Cardano proof of wallet derivation
+## Featured use case — CardanoKeyOwnershipStrong
 
 - [`cardano-key-ownership-strong`](cardano-key-ownership-strong) — proves
   knowledge of a 96-byte Cardano master `XPrv` that derives the payment public
   key at `m/1852H/1815H/0H/0/0` inside the Jolt guest. End-to-end proving takes
-  ~4.5 minutes and produces an ~89 kB proof on the reference host.
+  **~4.5 minutes** and produces an **~89 KiB** proof on a Ryzen 9 9950X3D; see
+  the project README for details.
 
 ## Examples
 

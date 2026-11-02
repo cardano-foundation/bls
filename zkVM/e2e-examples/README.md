@@ -1,8 +1,9 @@
-# VRF/KDF E2E Examples
+# E2E Examples
 
-End-to-end examples for running VRF and KDF Aiken programs on OpenVM and Jolt zkVMs.
+End-to-end examples for running Aiken/UPLC programs and native Cardano
+proof-of-derivation guests on OpenVM and Jolt zkVMs.
 
-## Artifacts
+## VRF/KDF
 
 | Program | Artifact | Description |
 |---------|----------|-------------|
@@ -11,19 +12,22 @@ End-to-end examples for running VRF and KDF Aiken programs on OpenVM and Jolt zk
 | vrf/verify | `../hello-world/vrf_verify.flat` | Verify VRF proof |
 | kdf/hkdf | `../hello-world/kdf_hkdf.flat` | HKDF key derivation |
 
-## Quick start
+```bash
+./scripts/run_vrf_kdf.sh
+```
+
+## CardanoKeyOwnershipStrong
+
+Run the BIP32-Ed25519 / CIP-1852 derivation guest on both zkVMs in host
+execution mode:
 
 ```bash
-# Run all examples
-./scripts/run_vrf_kdf.sh
-
-# Or run individually
-cd ../openvm/hello-aiken
-cargo run --bin uplc -- ../../hello-world/vrf_verify.flat
-
-cd ../jolt/hello-aiken
-cargo run --release --bin uplc -- ../../hello-world/kdf_hkdf.flat
+./scripts/run_cardano_key_ownership_strong.sh
 ```
+
+Full prove/verify commands are in the project READMEs:
+[`openvm/cardano-key-ownership-strong`](../openvm/cardano-key-ownership-strong)
+and [`jolt/cardano-key-ownership-strong`](../jolt/cardano-key-ownership-strong).
 
 ## Argument encoding
 

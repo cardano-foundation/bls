@@ -2,20 +2,38 @@
 
 Run Aiken/UPLC programs in OpenVM or Jolt zkVMs and prove them. Compare with native Groth16/Nova on Cardano.
 
+## Featured use case — CardanoKeyOwnershipStrong
+
+Prove knowledge of a 96-byte Cardano master `XPrv` that derives the payment
+public key at `m/1852H/1815H/0H/0/0` — the full BIP32-Ed25519 / CIP-1852
+derivation chain — inside a zkVM.
+
+```bash
+# OpenVM (RV32IM) — easiest to build, larger app proof
+cd zkVM/openvm/cardano-key-ownership-strong
+cargo run                              # host execution (<1 s)
+cargo openvm build
+cargo openvm keygen
+cargo openvm prove app --input /tmp/strong_master.json   # ~21 min, 702 KiB
+
+# Jolt (RV64IMAC) — fastest zkVM proof today
+cd zkVM/jolt/cardano-key-ownership-strong
+cargo run --release                    # ~4.5 min end-to-end, 89 KiB proof
+```
+
+Both produce the same public key as the reference Circom circuit:
+`63658c2ec89f2fc978bd99c4ee00c6057d6a5b0baa29dc9d62beb4c5e511862c`.
+See [`comparison.md`](comparison.md) for Groth16, Nova/NovaSlim, OpenVM, and
+Jolt side-by-side numbers.
+
 ## Quick start
 
 ```bash
 # OpenVM (RV32IM) - hello world
 cd zkVM/openvm/hello && cargo openvm run && cargo openvm prove app && cargo openvm verify app
 
-# OpenVM - CardanoKeyOwnershipStrong (BIP32-Ed25519 derivation in zkVM)
-cd zkVM/openvm/cardano-key-ownership-strong && cargo run
-
 # Jolt (RV64IMAC) - hello world
 cd zkVM/jolt/hello && cargo run --release
-
-# Jolt - CardanoKeyOwnershipStrong (BIP32-Ed25519 derivation in zkVM)
-cd zkVM/jolt/cardano-key-ownership-strong && cargo run --release
 
 # UPLC guest with real Aiken artifact
 cd zkVM/uplc-guest && cargo test
@@ -26,8 +44,12 @@ cd zkVM/openvm/hello-aiken && cargo run --bin uplc -- ../../hello-world/hello_ha
 
 | VM | ISA | Prover | Proof | On-chain | Status |
 |---|---|---|---|---|---|
-| [OpenVM](openvm/README.md) | RV32IM | STARK+Halo2 (BN254) | 522-658 KiB | Possible via BN254→BLS12-381 wrap | Verified |
-| [Jolt](jolt/README.md) | RV64IMAC | Dory (BN254) | 68 KiB | Possible via BN254→BLS12-381 wrap | Verified |
+| [OpenVM](openvm/README.md) | RV32IM | STARK+Halo2 (BN254) | 522-658 KiB app | Possible via BN254→BLS12-381 wrap | Verified |
+| [Jolt](jolt/README.md) | RV64IMAC | Dory (BN254) | ~89 KiB for `strong` | Possible via BN254→BLS12-381 wrap | Verified |
+
+Both VMs run the same [`CardanoKeyOwnershipStrong`](../circom/CardanoKeyOwnershipStrong)
+derivation in Rust — see [`openvm/cardano-key-ownership-strong`](openvm/cardano-key-ownership-strong)
+and [`jolt/cardano-key-ownership-strong`](jolt/cardano-key-ownership-strong).
 
 ## Aiken programs supported
 
@@ -39,21 +61,12 @@ The `uplc-guest` evaluator runs real `.flat` artifacts with full builtin support
 | vrf | aiken/vrf | `hello-world/vrf_verify.flat`, `vrf_keys_from_secret.flat`, `vrf_prove.flat` | BLS12-381 VRF |
 | kdf | aiken/kdf | `hello-world/kdf_hkdf.flat` | HKDF/PBKDF2 |
 
-## Comparison to Cardano-native approaches
+## Comparison
 
-| Approach | Setup | Proof size | Verify cost | Notes |
-|----------|-------|-----------|-------------|-------|
-| Groth16 (aiken/groth16) | Per-circuit trusted setup | ~192 bytes | 1 pairing | Cheapest on-chain, fixed circuit |
-| Nova IVC (aiken/nova, upstream nova-slim) | Transparent or compression setup | ~0.4-1.5 KB | Sumcheck/pairing | Fold many steps, composable |
-| zkVM (OpenVM/Jolt) | VM keys (per config) | 68-658 KB | Expensive (wrap needed) | Run arbitrary Aiken code without circuit writing |
-
-**Trade-off:** zkVMs give programmability (run any UPLC program) at the cost of larger proofs and need BN254→BLS12-381 wrapping for Cardano verification. Native Groth16/Nova are smaller but require circuit design.
-
-## CardanoKeyOwnershipStrong comparison
-
-See [`comparison.md`](comparison.md) for a detailed comparison of Groth16,
-Nova/NovaSlim, and zkVM (OpenVM) on the full CIP-1852 BIP32-Ed25519 derivation
-statement.
+See [`comparison.md`](comparison.md) for Groth16, Nova/NovaSlim, OpenVM, and
+Jolt side-by-side numbers. In short: zkVMs trade proof size for programmability
+(no hand-written circuits), and still need a BN254→BLS12-381 wrap for native
+Cardano verification.
 
 ## Layout
 

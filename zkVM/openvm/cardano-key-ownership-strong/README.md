@@ -63,18 +63,38 @@ cargo openvm prove app --input /tmp/strong_master.json
 cargo openvm verify app
 ```
 
-> **Note:** full proving is CPU-only in this configuration and can take several
-> minutes. Use host execution for development.
+> **Note:** full proving is CPU-only in this configuration. On the reference
+> host it takes ~21 minutes for the app proof and produces a 702 KiB proof.
 
 ## Input format
 
 `openvm::io::read_vec()` expects the 96-byte master key as a plain byte vector.
-When using the OpenVM CLI, wrap the hex string as a JSON string.
+When using the OpenVM CLI, wrap the hex string as a JSON string (the `0x01`
+prefix tells the CLI to write the following bytes as raw input):
+
+```bash
+printf '{"input":["0x01%s"]}' \
+  "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f\
+   202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f\
+   404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f" \
+  > /tmp/strong_master.json
+```
 
 ## Output
 
 `openvm::io::reveal_bytes32(apk)` commits the final 32-byte compressed Ed25519
 public key as the public output of the proof.
+
+## Measured numbers
+
+Host `nebula` (AMD Ryzen 9 9950X3D, 16C/32T, 64 GB RAM):
+
+| Phase | Time | Size |
+|---|---|---|
+| `cargo openvm build` | ~26 s | 1.7 MiB ELF |
+| `cargo openvm prove app` | **~1,247 s** (~20.8 min) | **702 KiB** app proof |
+| instructions executed | 3,255,938 | — |
+| output | matches Circom fixture | 32 B |
 
 ## Comparison with the Circom path
 
@@ -82,13 +102,13 @@ public key as the public output of the proof.
 |---|---|---|
 | Backend | R1CS folding (Nova / NovaSlim) | OpenVM (RV32IM) |
 | Trust setup | Transparent | Transparent |
-| Prover work | Heavy folding (~5.2 h single-core on `pure`) | zkVM cycle count (TBD) |
-| Proof size | Nova ~179 KB; NovaSlim ~0.4–42 KiB | App proof (OpenVM) |
+| Prover work | Heavy folding (~5.2 h single-core on `pure`) | **~21 min app proof** |
+| Proof size | Nova ~179 KiB; NovaSlim ~0.4–42 KiB | **702 KiB** app proof |
 | Verifier | Custom Nova verifier / Aiken (NovaSlim) | OpenVM verifier |
 | Statement flexibility | Fixed R1CS | General Rust code |
 
 See [`zkVM/comparison.md`](../comparison.md) for a comparison that also includes
-Groth16 and NovaSlim.
+Groth16, NovaSlim, and Jolt.
 
 ## License
 
