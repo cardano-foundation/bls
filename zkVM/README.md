@@ -14,6 +14,9 @@ cd zkVM/openvm/cardano-key-ownership-strong && cargo run
 # Jolt (RV64IMAC) - hello world
 cd zkVM/jolt/hello && cargo run --release
 
+# Jolt - CardanoKeyOwnershipStrong (BIP32-Ed25519 derivation in zkVM)
+cd zkVM/jolt/cardano-key-ownership-strong && cargo run --release
+
 # UPLC guest with real Aiken artifact
 cd zkVM/uplc-guest && cargo test
 cd zkVM/openvm/hello-aiken && cargo run --bin uplc -- ../../hello-world/hello_hash.flat --data-bytes 48656c6c6f2c20776f726c6421
@@ -57,8 +60,9 @@ statement.
 ```
 zkVM/
 ├── openvm/                       # OpenVM harness
-│   └── cardano-key-ownership-strong/  # full CIP-1852 derivation in zkVM
+│   └── cardano-key-ownership-strong/  # full CIP-1852 derivation in OpenVM
 ├── jolt/                         # Jolt harness
+│   └── cardano-key-ownership-strong/  # full CIP-1852 derivation in Jolt
 ├── hello-world/                  # Test artifacts
 ├── uplc-guest/                   # no_std UPLC evaluator
 ├── onchain/                      # BN254→BLS12-381 wrapping to BLS12-381 Groth16 for Cardano
