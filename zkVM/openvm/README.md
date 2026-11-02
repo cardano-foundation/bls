@@ -20,6 +20,12 @@ cargo openvm prove app --bin uplc --exe openvm/release/uplc.vmexe --input /tmp/u
 cargo openvm verify app --bin uplc
 ```
 
+## Native Cardano proof of wallet derivation
+
+- [`cardano-key-ownership-strong`](cardano-key-ownership-strong) — proves
+  knowledge of a 96-byte Cardano master `XPrv` that derives the payment public
+  key at `m/1852H/1815H/0H/0/0` inside the OpenVM guest.
+
 ## Examples
 
 ### hello_hash (baseline)

@@ -1,0 +1,18 @@
+[package]
+name = "openvm-cardano-key-ownership-strong"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+members = []
+
+[dependencies]
+openvm = { git = "https://github.com/openvm-org/openvm.git", tag = "v2.0.2" }
+openvm-sha2 = { git = "https://github.com/openvm-org/openvm.git", tag = "v2.0.2" }
+curve25519-dalek = { version = "4.1", default-features = false, features = ["alloc", "precomputed-tables"] }
+num-bigint = { version = "0.4", default-features = false }
+hex = { version = "0.4", optional = true }
+
+[features]
+default = ["std", "hex"]
+std = ["openvm/std"]

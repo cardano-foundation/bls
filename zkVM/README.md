@@ -8,7 +8,10 @@ Run Aiken/UPLC programs in OpenVM or Jolt zkVMs and prove them. Compare with nat
 # OpenVM (RV32IM) - hello world
 cd zkVM/openvm/hello && cargo openvm run && cargo openvm prove app && cargo openvm verify app
 
-# Jolt (RV64IMAC) - hello world  
+# OpenVM - CardanoKeyOwnershipStrong (BIP32-Ed25519 derivation in zkVM)
+cd zkVM/openvm/cardano-key-ownership-strong && cargo run
+
+# Jolt (RV64IMAC) - hello world
 cd zkVM/jolt/hello && cargo run --release
 
 # UPLC guest with real Aiken artifact
@@ -43,18 +46,26 @@ The `uplc-guest` evaluator runs real `.flat` artifacts with full builtin support
 
 **Trade-off:** zkVMs give programmability (run any UPLC program) at the cost of larger proofs and need BN254→BLS12-381 wrapping for Cardano verification. Native Groth16/Nova are smaller but require circuit design.
 
+## CardanoKeyOwnershipStrong comparison
+
+See [`comparison.md`](comparison.md) for a detailed comparison of Groth16,
+Nova/NovaSlim, and zkVM (OpenVM) on the full CIP-1852 BIP32-Ed25519 derivation
+statement.
+
 ## Layout
 
 ```
 zkVM/
-├── openvm/       # OpenVM harness
-├── jolt/         # Jolt harness  
-├── hello-world/  # Test artifacts
-├── uplc-guest/   # no_std UPLC evaluator
-├── onchain/      # BN254→BLS12-381 wrapping to BLS12-381 Groth16 for Cardano
-├── tools/        # Helper tools (artifact generation)
-├── e2e-examples/ # VRF/KDF e2e examples for OpenVM and Jolt
-└── ci/           # CI scripts and Makefile
+├── openvm/                       # OpenVM harness
+│   └── cardano-key-ownership-strong/  # full CIP-1852 derivation in zkVM
+├── jolt/                         # Jolt harness
+├── hello-world/                  # Test artifacts
+├── uplc-guest/                   # no_std UPLC evaluator
+├── onchain/                      # BN254→BLS12-381 wrapping to BLS12-381 Groth16 for Cardano
+├── tools/                        # Helper tools (artifact generation)
+├── e2e-examples/                 # VRF/KDF e2e examples for OpenVM and Jolt
+├── comparison.md                 # Groth16 vs NovaSlim vs zkVM comparison
+└── ci/                           # CI scripts and Makefile
 ```
 
 ## References
