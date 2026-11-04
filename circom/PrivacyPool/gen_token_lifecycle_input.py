@@ -52,7 +52,8 @@ _H = (
 
 def pedersen_commit(value: int, blinding: int):
     """C = value * H + blinding * G"""
-    vH = ed_mul(value, _H[0], _H[1])
+    # ed_mul assumes k > 0; treat value == 0 as the identity point.
+    vH = ed_mul(value, _H[0], _H[1]) if value != 0 else (0, 1)
     rG = ed_mul(blinding, _G[0], _G[1])
     C = ed_add(vH[0], vH[1], rG[0], rG[1])
     return C
@@ -314,7 +315,12 @@ def main():
     (out / "auditor_meta.json").write_text(json.dumps({
         "auditor_root": str(auditor_root),
         "auditor_set": scenario["auditor_set"],
-        "spends": [{"user": s["user"], **s["auditor_meta"], **s["token_meta"]} for s in scenario["spends"]],
+        "spends": [{
+            "user": s["user"],
+            "fee": s["public"][4],
+            **s["auditor_meta"],
+            **s["token_meta"],
+        } for s in scenario["spends"]],
     }, indent=2) + "\n")
 
     print(f"wrote {len(witnesses)} user witnesses under {out}")
