@@ -9,7 +9,7 @@
 This repository demonstrates a complete, production-oriented **selective-disclosure** system for Cardano. It lets a credential holder prove they satisfy complex predicates (age gates, role checks, residency sets) without revealing any underlying data — not their name, not their address, not their credential fields.
 
 **What you get:**
-- **10 progressive steps** from simple predicate proofs to dynamic multi-auditor pools
+- **11 progressive steps** from simple predicate proofs to private token lifecycle in the pool
 - **Two proof paths:** Groth16 (192-byte proofs, trusted setup) and Nova IVC (transparent folding, ~0.4–2.5 KiB proofs)
 - **End-to-end scripts** for every step — run `step{N}/groth16_e2e.sh` or `step{N}/novaslim_e2e.sh`
 - **On-chain verifiers** in Aiken for both proof systems
@@ -24,6 +24,7 @@ This repository demonstrates a complete, production-oriented **selective-disclos
 | 5 — Full Audit | Amount + address encrypted | ~33K | 192 B | ~1.2 KiB | ✅ Working e2e |
 | 6 — Batch Pool | N spends in one tx | ~33K × N | 192 B × N | ~1.2 KiB | ✅ Working e2e |
 | 10 — Dynamic Auditors | Auditor from active Merkle set | ~35K | 192 B | ~1.3 KiB | ✅ Working e2e |
+| 11 — Token Lifecycle | Pedersen token commitments in pool | ~58K | 192 B | — | ✅ Working e2e |
 | 9 — Recursive | Unbounded spends folded | 8.7K / step | — | ~0.8 KiB | ✅ Scaffold e2e |
 
 **Quick start:**
@@ -57,7 +58,8 @@ This repository demonstrates a complete, production-oriented **selective-disclos
  12. [Step 8: Anonymous Delegation & Proxy Re-Encryption](#step-8-anonymous-delegation--proxy-re-encryption)
   13. [Step 9: Recursive Proof Aggregation (Nova-Folded Batches)](#step-9-recursive-proof-aggregation-nova-folded-batches)
   14. [Step 10: Dynamic Multi-Auditor Privacy Pool](#step-10-dynamic-multi-auditor-privacy-pool)
-  15. [Runnable e2e Scripts & Timing](#runnable-e2e-scripts--timing)
+  15. [Step 11: Private Token Lifecycle](#step-11-private-token-lifecycle)
+  16. [Runnable e2e Scripts & Timing](#runnable-e2e-scripts--timing)
  15. [Comparison with CIP proposal: Native Confidential Transfers](#comparison-with-cip-proposal-native-confidential-transfers)
  16. [Compliance & Auditability](#compliance--auditability)
  17. [Threat Model & Deployment](#threat-model--deployment)
@@ -1234,7 +1236,7 @@ See [`step6/README.md`](step6/README.md) for the full comparison table and on-ch
 <details>
 <summary><b>Expand</b></summary>
 
-Every step has a `step{N}/` directory of runnable scripts (`aiken/selective-disclosure/step{N}/`) that reproduce the e2e from scratch. Steps 1–8 and Step 10 were run to completion and verified (`VALID` / `state chain OK`). Step 9 has a working e2e script and a scaffold circuit; the embedded pairing arithmetic is TODO.
+Every step has a `step{N}/` directory of runnable scripts (`aiken/selective-disclosure/step{N}/`) that reproduce the e2e from scratch. Steps 1–8, Step 10 and Step 11 were run to completion and verified (`VALID` / `state chain OK`). Step 9 has a working e2e script and a scaffold circuit; the embedded pairing arithmetic is TODO.
 
 ```text
 aiken/selective-disclosure/
@@ -1247,7 +1249,8 @@ aiken/selective-disclosure/
 ├── step7/  groth16_e2e.sh   novaslim_e2e.sh   README.md   (Revocable Predicate)
 ├── step8/  groth16_e2e.sh   novaslim_e2e.sh   README.md   (Anonymous Delegation)
 ├── step9/  groth16_nova_meta_e2e.sh   README.md          (Recursive Aggregation — scaffold)
-└── step10/ groth16_e2e.sh   novaslim_e2e.sh   README.md   (Dynamic Multi-Auditor)
+├── step10/ groth16_e2e.sh   novaslim_e2e.sh   README.md   (Dynamic Multi-Auditor)
+└── step11/ groth16_e2e.sh                       README.md   (Private Token Lifecycle)
 ```
 
 Run from the repo root (or anywhere; repo root is auto-detected):
@@ -1277,6 +1280,7 @@ in a table:
 - [`step8/README.md`](step8/README.md) — Anonymous Delegation & Proxy Re-Encryption
 - [`step9/README.md`](step9/README.md) — Recursive Proof Aggregation (Nova-folded batches — research)
 - [`step10/README.md`](step10/README.md) — Dynamic Multi-Auditor Privacy Pool (active-set Merkle tree)
+- [`step11/README.md`](step11/README.md) — Private Token Lifecycle (Pedersen commitments in the pool)
 
 See those READMEs for the measured numbers rather than repeating them here.
 
@@ -1522,6 +1526,58 @@ proxy re-encryption machinery.
 
 See [`step10/README.md`](step10/README.md) for the full design, circuit files,
 and operational lifecycle.
+
+</details>
+
+</details>
+
+<details>
+<summary><b>Step 11: Private Token Lifecycle (click to expand)</b></summary>
+
+## Step 11: Private Token Lifecycle
+
+> **One-line summary:** Step 10's dynamic-auditor pool, but every spend is bound to real Pedersen token commitments.  The circuit proves token-value conservation across the spend, bridging a CIP-113-style private token to the privacy pool.
+
+Step 10 hid the sender, amount, and graph while supporting multiple auditors.
+Step 11 adds the **asset layer**:
+
+| | Step 10 | **Step 11** |
+|---|---|---|
+| Asset | Abstract pool note | **Pedersen token commitment** |
+| Conservation | Pool-note arithmetic | **Pool + token commitments** |
+| Mint/burn semantics | None | **Input → two output commitments** |
+| Ledger view | Nothing | **Token UTxOs carrying commitments** |
+
+The token commitment uses the same generators as Twisted ElGamal:
+
+```
+C_token = value * H + blinding * G     (G = BASE8, H = 2*G)
+```
+
+The circuit proves:
+
+```
+token_in_value  = token_out1_value + token_out2_value + fee
+in_amount       = token_in_value
+out_amount_1    = token_out1_value
+out_amount_2    = token_out2_value
+```
+
+so the contract can enforce mint/burn of real token UTxOs without learning the
+values.  Amount and recipient address are still encrypted to a dynamically
+chosen active auditor.
+
+```bash
+./aiken/selective-disclosure/step11/groth16_e2e.sh
+```
+
+Overrides: `USERS=`, `AUDITORS=`, `DEPTH=`, `AUDITOR_DEPTH=`, `SEED=`, `OUT=`.
+
+Constraint count at depth 4 / auditor-depth 4 is **~58K** non-linear constraints;
+proof size remains **192 bytes**.
+
+See [`step11/README.md`](step11/README.md) for the full design, circuit files,
+and the CIP-113 mapping.
 
 </details>
 
