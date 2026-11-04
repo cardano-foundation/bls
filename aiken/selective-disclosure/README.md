@@ -9,7 +9,7 @@
 This repository demonstrates a complete, production-oriented **selective-disclosure** system for Cardano. It lets a credential holder prove they satisfy complex predicates (age gates, role checks, residency sets) without revealing any underlying data — not their name, not their address, not their credential fields.
 
 **What you get:**
-- **9 progressive steps** from simple predicate proofs to recursive batch aggregation
+- **10 progressive steps** from simple predicate proofs to dynamic multi-auditor pools
 - **Two proof paths:** Groth16 (192-byte proofs, trusted setup) and Nova IVC (transparent folding, ~0.4–2.5 KiB proofs)
 - **End-to-end scripts** for every step — run `step{N}/groth16_e2e.sh` or `step{N}/novaslim_e2e.sh`
 - **On-chain verifiers** in Aiken for both proof systems
@@ -23,6 +23,7 @@ This repository demonstrates a complete, production-oriented **selective-disclos
 | 3 — Privacy Pool | Spend from Merkle tree | ~15K | 192 B | ~0.8 KiB | ✅ Working e2e |
 | 5 — Full Audit | Amount + address encrypted | ~33K | 192 B | ~1.2 KiB | ✅ Working e2e |
 | 6 — Batch Pool | N spends in one tx | ~33K × N | 192 B × N | ~1.2 KiB | ✅ Working e2e |
+| 10 — Dynamic Auditors | Auditor from active Merkle set | ~35K | 192 B | ~1.3 KiB | ✅ Working e2e |
 | 9 — Recursive | Unbounded spends folded | 8.7K / step | — | ~0.8 KiB | ✅ Scaffold e2e |
 
 **Quick start:**
@@ -54,8 +55,9 @@ This repository demonstrates a complete, production-oriented **selective-disclos
  10. [Step 6: Multi-User Batch Pool with Full Auditor Reveal](#step-6-multi-user-batch-pool-with-full-auditor-reveal)
  11. [Step 7: Revocable Predicate Proofs (Expiry + Revocation)](#step-7-revocable-predicate-proofs-expiry--revocation)
  12. [Step 8: Anonymous Delegation & Proxy Re-Encryption](#step-8-anonymous-delegation--proxy-re-encryption)
- 13. [Step 9: Recursive Proof Aggregation (Nova-Folded Batches)](#step-9-recursive-proof-aggregation-nova-folded-batches)
- 14. [Runnable e2e Scripts & Timing](#runnable-e2e-scripts--timing)
+  13. [Step 9: Recursive Proof Aggregation (Nova-Folded Batches)](#step-9-recursive-proof-aggregation-nova-folded-batches)
+  14. [Step 10: Dynamic Multi-Auditor Privacy Pool](#step-10-dynamic-multi-auditor-privacy-pool)
+  15. [Runnable e2e Scripts & Timing](#runnable-e2e-scripts--timing)
  15. [Comparison with CIP proposal: Native Confidential Transfers](#comparison-with-cip-proposal-native-confidential-transfers)
  16. [Compliance & Auditability](#compliance--auditability)
  17. [Threat Model & Deployment](#threat-model--deployment)
@@ -1232,7 +1234,7 @@ See [`step6/README.md`](step6/README.md) for the full comparison table and on-ch
 <details>
 <summary><b>Expand</b></summary>
 
-Every step has a `step{N}/` directory of runnable scripts (`aiken/selective-disclosure/step{N}/`) that reproduce the e2e from scratch. Steps 1–8 were run to completion and verified (`VALID` / `state chain OK`). Step 9 has a working e2e script and a scaffold circuit; the embedded pairing arithmetic is TODO.
+Every step has a `step{N}/` directory of runnable scripts (`aiken/selective-disclosure/step{N}/`) that reproduce the e2e from scratch. Steps 1–8 and Step 10 were run to completion and verified (`VALID` / `state chain OK`). Step 9 has a working e2e script and a scaffold circuit; the embedded pairing arithmetic is TODO.
 
 ```text
 aiken/selective-disclosure/
@@ -1244,7 +1246,8 @@ aiken/selective-disclosure/
 ├── step6/  groth16_e2e.sh   novaslim_e2e.sh   README.md   (Multi-User Batch + Audit)
 ├── step7/  groth16_e2e.sh   novaslim_e2e.sh   README.md   (Revocable Predicate)
 ├── step8/  groth16_e2e.sh   novaslim_e2e.sh   README.md   (Anonymous Delegation)
-└── step9/  groth16_nova_meta_e2e.sh   README.md          (Recursive Aggregation — scaffold)
+├── step9/  groth16_nova_meta_e2e.sh   README.md          (Recursive Aggregation — scaffold)
+└── step10/ groth16_e2e.sh   novaslim_e2e.sh   README.md   (Dynamic Multi-Auditor)
 ```
 
 Run from the repo root (or anywhere; repo root is auto-detected):
@@ -1273,6 +1276,7 @@ in a table:
 - [`step7/README.md`](step7/README.md) — Revocable Predicate Proofs (expiry + revocation)
 - [`step8/README.md`](step8/README.md) — Anonymous Delegation & Proxy Re-Encryption
 - [`step9/README.md`](step9/README.md) — Recursive Proof Aggregation (Nova-folded batches — research)
+- [`step10/README.md`](step10/README.md) — Dynamic Multi-Auditor Privacy Pool (active-set Merkle tree)
 
 See those READMEs for the measured numbers rather than repeating them here.
 
@@ -1475,6 +1479,49 @@ graph TB
 - ⏳ **Full batch verifier in R1CS** — verify all N Groth16 proofs inside the step circuit
 
 See [`step9/README.md`](step9/README.md) for the full architecture, estimated constraint budget, and roadmap to completion.
+
+</details>
+
+</details>
+
+<details>
+<summary><b>Step 10: Dynamic Multi-Auditor Privacy Pool (click to expand)</b></summary>
+
+## Step 10: Dynamic Multi-Auditor Privacy Pool
+
+> **One-line summary:** Replace the single hard-coded auditor with a **Merkle active-set of auditors**.  Each spend encrypts amount + recipient address to one active auditor, and the circuit proves `pk_audit` is in the current `auditor_root`.  Auditors can join after setup and can be revoked.
+
+Step 6 encrypts every spend to a single `pk_audit` fixed at trusted-setup time.
+Step 10 generalises this to a **dynamic set**:
+
+| | Step 6 | **Step 10** |
+|---|---|---|
+| Auditors | 1 fixed | **N active** |
+| Join after setup | ❌ | **✅** insert key → new root |
+| Replace / revoke | ❌ | **✅** rebuild tree → new root |
+| Holder choice | none | **any active auditor** |
+
+The active set is a Merkle tree whose leaves are `Poseidon(pk_audit.x, pk_audit.y)`.
+The spend circuit adds a standard `PoseidonMerklePath` membership proof for the
+chosen auditor, binding the spend to the current `auditor_root` public input.
+The on-chain gate checks that this root matches the root stored in the pool
+datum.  Admin updates to the root are ordinary transactions; no new trusted
+setup is required.
+
+```bash
+./aiken/selective-disclosure/step10/groth16_e2e.sh     # multi-auditor batch
+./aiken/selective-disclosure/step10/novaslim_e2e.sh    # needs nova-slim CLI
+```
+
+Overrides: `USERS=`, `AUDITORS=`, `DEPTH=`, `AUDITOR_DEPTH=`, `SEED=`, `OUT=`.
+
+**Forward-secrecy caveat:** revoking an auditor stops future spends from using
+them, but past on-chain ciphertexts remain decryptable by that auditor's
+`sk_audit`.  If retroactive rotation is required, combine Step 10 with Step 8's
+proxy re-encryption machinery.
+
+See [`step10/README.md`](step10/README.md) for the full design, circuit files,
+and operational lifecycle.
 
 </details>
 
