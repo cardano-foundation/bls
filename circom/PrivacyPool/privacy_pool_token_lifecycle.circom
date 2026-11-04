@@ -113,19 +113,20 @@ template PrivacyPoolTokenLifecycle(depth, nBits, scalarBits, auditorDepth) {
     token_in_value === token_out1_value + token_out2_value + fee;
 
     // Prove token commitments open to the claimed values/blindings.
-    component tokenIn = PedersenCommit(nBits);
+    // scalarBits is used because blinding factors are full field elements.
+    component tokenIn = PedersenCommit(scalarBits);
     tokenIn.value <== token_in_value;
     tokenIn.blinding <== token_in_blinding;
     tokenIn.C[0] === token_in_commitment[0];
     tokenIn.C[1] === token_in_commitment[1];
 
-    component tokenOut1 = PedersenCommit(nBits);
+    component tokenOut1 = PedersenCommit(scalarBits);
     tokenOut1.value <== token_out1_value;
     tokenOut1.blinding <== token_out1_blinding;
     tokenOut1.C[0] === token_out_commitment_1[0];
     tokenOut1.C[1] === token_out_commitment_1[1];
 
-    component tokenOut2 = PedersenCommit(nBits);
+    component tokenOut2 = PedersenCommit(scalarBits);
     tokenOut2.value <== token_out2_value;
     tokenOut2.blinding <== token_out2_blinding;
     tokenOut2.C[0] === token_out_commitment_2[0];
