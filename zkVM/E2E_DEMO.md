@@ -189,9 +189,9 @@ cargo build --no-default-features --target riscv32im-unknown-none-elf
 ## E2E data flow: simplest example (hello_hash) — step by step
 
 <details>
-<summary><b>Click to expand detailed trace (OpenVM & Jolt)</b></summary>
+<summary><b>Click to expand detailed trace</b></summary>
 
-This traces the simplest working example end-to-end: prove `hello_hash("Hello, world!")` inside OpenVM or Jolt and verify. Shows what artifacts exist, what data transforms, and which crypto primitives are used.
+This traces the simplest working example end-to-end: prove `hello_hash("Hello, world!")` inside OpenVM or Jolt and verify. Shows what artifacts exist, what data transforms, which crypto primitives are used, and the exact command for each step.
 
 ### Artifacts involved
 | Artifact | Location | Purpose |
@@ -203,61 +203,42 @@ This traces the simplest working example end-to-end: prove `hello_hash("Hello, w
 | Jolt guest/host | `zkVM/jolt/hello-aiken/` | RV64IMAC guest + SDK |
 | Input blob/JSON | generated at runtime | program + args passed to VM |
 
-### Step-by-step
+### OpenVM path
 
-#### 1) Aiken → UPLC → Flat
-| Action | Component | Data in | Data out | Crypto/Notes |
-|--------|-----------|---------|----------|--------------|
-| Compile | `aiken check/build` | Aiken source | UPLC AST/terms | Type checking, desugaring |
-| Export/encode | `aiken export` or flat encoder | UPLC | `hello_hash.flat` (binary) | Plutus Flat serialization |
-| Verify | `uplc-guest` differential tests | `.flat` + args | matches `aiken uplc eval` | Oracle comparison |
+| Step | Action | Component | Data in | Data out | Command |
+|------|--------|-----------|---------|----------|---------|
+| 1 | Compile Aiken → Flat | `aiken` | `hello_hash.ak` | `hello_hash.flat` | `cd zkVM/hello-world && aiken export --module hello --name hello_hash .` |
+| 2 | Build input JSON | `uplc` host bin | `hello_hash.flat` + arg hex | `/tmp/openvm_in.json` | `cd zkVM/openvm/hello-aiken && cargo run --bin uplc -- ../../hello-world/hello_hash.flat --data-bytes 48656c6c6f2c20776f726c6421 --write-input /tmp/openvm_in.json` |
+| 3 | Build guest | `cargo-openvm` | Rust guest | `openvm/release/uplc.vmexe` | `cd zkVM/openvm/hello-aiken && cargo openvm build --bin uplc` |
+| 4 | Generate trace | `cargo-openvm` | `uplc.vmexe` + input | execution trace | `cd zkVM/openvm/hello-aiken && cargo openvm run --bin uplc --exe openvm/release/uplc.vmexe --input /tmp/openvm_in.json` |
+| 5 | Prove | `cargo-openvm` | trace + keys | `openvm-hello-aiken.app.proof` | `cd zkVM/openvm/hello-aiken && cargo openvm prove app --bin uplc --exe openvm/release/uplc.vmexe --input /tmp/openvm_in.json` |
+| 6 | Verify | `cargo-openvm` | proof + VK + public output | accept/reject | `cd zkVM/openvm/hello-aiken && cargo openvm verify app --bin uplc` |
 
-#### 2) Prepare args & input
-| Action | Component | Data in | Data out | Crypto/Notes |
-|--------|-----------|---------|----------|--------------|
+### Jolt path
+
+| Step | Action | Component | Data in | Data out | Command |
+|------|--------|-----------|---------|----------|---------|
+| 1 | Compile Aiken → Flat | `aiken` | `hello_hash.ak` | `hello_hash.flat` | `cd zkVM/hello-world && aiken export --module hello --name hello_hash .` |
+| 2–5 | Host builds guest, preprocesses, proves, verifies | Jolt SDK | `hello_hash.flat` + arg hex | proof + public output | `cd zkVM/jolt/hello-aiken && cargo run --release --bin uplc -- ../../hello-world/hello_hash.flat --data-bytes 48656c6c6f2c20776f726c6421` |
+
+### Data transforms (shared by both paths)
+
+| Action | Component | Data in | Data out | Notes |
+|--------|-----------|---------|----------|-------|
 | Encode arg | Host CLI | `48656c6c6f2c20776f726c6421` (hex for "Hello, world!") | `Data::B(bytes)` | Simple serialization |
-| Pack blob | Host CLI | `.flat` + `[Data::B]` | Binary blob `[len:u32][flat][count:u32][arg_tag][len][bytes]` or legacy format | Little-endian. Extended format supports all Data types. |
-| OpenVM JSON | `--write-input` | Blob | `{"input":["0x01..."]}` | Hex-encoded for `cargo openvm` |
-
-#### 3) Execute in zkVM guest (trace generation)
-| Action | Component | Data in | Data out | Crypto/Notes |
-|--------|-----------|---------|----------|--------------|
-| Load input | Guest (OpenVM/Jolt) | VM input | Parsed `(flat, args)` | Decoding |
+| Pack blob | Host CLI | `.flat` + `[Data::B]` | Binary blob `[len:u32][flat][count:u32][arg_tag][len][bytes]` | Little-endian; extended format supports all Data types |
 | Decode flat | `uplc-guest::flat` | Flat bytes | UPLC Program/Terms | Flat bitstream decode |
-| CEK eval | `uplc-guest::machine` | Program + args | `Value::ByteString(sha256)` | CEK machine; `sha2_256` builtin via `sha2` crate |
-| Reveal/output | Guest | Bytestring | Public output `315f5bdb...` | OpenVM: `reveal_bytes32`, Jolt: return `[u8;32]` |
+| CEK eval | `uplc-guest::machine` | Program + args | `Value::ByteString(sha256)` | `sha2_256` builtin via `sha2` crate |
+| Reveal/output | Guest | Bytestring | Public output `315f5bdb...` | OpenVM: `reveal_bytes32`; Jolt: return `[u8;32]` |
 
 **Crypto primitive:** SHA-256 (native in guest via `openvm-sha2` or `jolt-inlines-sha2` where possible).
 
-#### 4) Prove
-| Action | Component | Data in | Data out | Crypto/Notes |
-|--------|-----------|---------|----------|--------------|
-| Compile/Transpile | `cargo openvm build` / Jolt SDK | Guest Rust (RV32IM/RV64IMAC) | VM executable (`.vmexe`) or compiled guest | RISC-V toolchain |
-| Preprocess/Keygen | OpenVM keygen/setup / Jolt preprocess | VM config/program | Proving/verifying keys, preprocessing data | One-time or per-program |
-| Prove | `cargo openvm prove app` / `cargo run --release` | Exe + input + keys | Proof (`.app.proof` or in-memory) | **OpenVM:** STARK over execution trace (BabyBear field) + lookups. **Jolt:** Dory polynomial commitments over BN254 with sumcheck/lookups. |
+### (Optional) On-chain bridge
 
-#### 5) Verify
-| Action | Component | Data in | Data out | Crypto/Notes |
-|--------|-----------|---------|----------|--------------|
-| Verify proof | `cargo openvm verify app` / Jolt verify | Proof + VK + public output | Accept/Reject | STARK verification or Dory verification. Public output checked. |
-
-#### 6) (Optional) On-chain bridge
-| Action | Component | Data in | Data out | Crypto/Notes |
-|--------|-----------|---------|----------|--------------|
-| Wrap | `zkVM/onchain` (`wrap-openvm`/`wrap-jolt`) | BN254 proof | BLS12-381 Groth16 proof (A/B/C) | Converts to format verifiable by `aiken/groth16` using Cardano's `bls12_381_*` builtins |
-| On-chain verify | `aiken/groth16` Plutus script | Wrapped proof + VK + public inputs | Spend valid/invalid | Miller loop + final verify on BLS12-381 |
-
-### Quick commands (copy/paste)
-```bash
-# Host only (fastest)
-cd zkVM/openvm/hello-aiken && cargo run --bin uplc -- ../../hello-world/hello_hash.flat --data-bytes 48656c6c6f2c20776f726c6421
-cd zkVM/jolt/hello-aiken && cargo run --release --bin uplc -- ../../hello-world/hello_hash.flat --data-bytes 48656c6c6f2c20776f726c6421
-
-# OpenVM prove/verify
-cd zkVM/openvm/hello-aiken
-cargo run --bin uplc -- ../../hello-world/hello_hash.flat --data-bytes 48656c6c6f2c20776f726c6421 --write-input /tmp/in.json
-cargo openvm build --bin uplc && cargo openvm prove app --bin uplc --exe openvm/release/uplc.vmexe --input /tmp/in.json && cargo openvm verify app --bin uplc
-```
+| Action | Component | Data in | Data out | Command/Notes |
+|--------|-----------|---------|----------|---------------|
+| Wrap BN254 proof to BLS12-381 Groth16 | `zkVM/onchain` (`wrap-openvm`/`wrap-jolt`) | BN254 proof | Groth16 proof (A/B/C) | Converts to format verifiable by `aiken/groth16` using Cardano's `bls12_381_*` builtins |
+| On-chain verify | `aiken/groth16` Plutus script | Wrapped proof + VK + public inputs | spend valid/invalid | Miller loop + final verify on BLS12-381 |
 
 **Expected public output:** `315f5bdb76d078c43b8ac0064e4a0164612b1fce77c869345bfc94c75894edd3`
 
