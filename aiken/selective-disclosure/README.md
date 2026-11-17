@@ -1568,13 +1568,18 @@ values.  Amount and recipient address are still encrypted to a dynamically
 chosen active auditor.
 
 ```bash
+# Groth16 (trusted setup, small proofs, batched verification)
 ./aiken/selective-disclosure/step11/groth16_e2e.sh
+
+# NovaSlim (transparent setup, one folded step per spend)
+./aiken/selective-disclosure/step11/novaslim_e2e.sh
 ```
 
 Overrides: `USERS=`, `AUDITORS=`, `DEPTH=`, `AUDITOR_DEPTH=`, `SEED=`, `OUT=`.
 
 Constraint count at depth 4 / auditor-depth 4 is **~58K** non-linear constraints;
-proof size remains **192 bytes**.
+the Groth16 proof size remains **192 bytes**.  The NovaSlim slim proof is
+**869 bytes** with no trusted setup.
 
 See [`step11/README.md`](step11/README.md) for the full design, circuit files,
 and the CIP-113 mapping.

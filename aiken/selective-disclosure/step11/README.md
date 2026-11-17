@@ -12,8 +12,8 @@
 | **Token conservation** | In pool-note arithmetic only | **Also in token commitments** |
 | **Mint/burn semantics** | None | **Input commitment → two output commitments** |
 | **Ledger view** | Nothing identifiable | **Token UTxOs with commitments** |
-| **Proof path** | Groth16 + NovaSlim | **Groth16** (NovaSlim planned) |
-| **Constraints** | ~35K | **~58K** |
+| **Proof path** | Groth16 + NovaSlim | **Groth16 + NovaSlim** |
+| **Constraints** | ~35K | **~58K** (~64K total R1CS) |
 
 The cryptographic building blocks are unchanged from Steps 5/10:
 
@@ -91,9 +91,25 @@ USERS=8 AUDITORS=4 DEPTH=6 AUDITOR_DEPTH=4 ./groth16_e2e.sh
 
 ### NovaSlim
 
-A NovaSlim step circuit for Step 11 is planned but not yet included.  The token
-conservation logic can be folded into the same step structure as Step 10's
-`elgamal_viewkey_addr_dynamic_nova.circom`.
+```bash
+./novaslim_e2e.sh
+```
+
+Overrides: `DEPTH=`, `AUDITOR_DEPTH=`, `USERS=`, `SPENDS=`, `AUDITORS=`, `SEED=`, `OUT=`.
+
+```bash
+# single spend (default; fastest)
+./novaslim_e2e.sh
+
+# two spends (each folds one Nova step)
+USERS=2 ./novaslim_e2e.sh
+```
+
+The Nova step circuit folds the full Step 11 statement in one step per spend:
+pool spend, dynamic-auditor membership, auditor encryption, and Pedersen token
+conservation.  Because NovaSlim requires the public I/O width to match, all
+per-step public values are committed into a single `state_out` Poseidon chain;
+`state_in` is the 0 sentinel for a singleton step.
 
 ---
 
@@ -103,7 +119,9 @@ conservation logic can be folded into the same step structure as Step 10's
 |---|---|
 | `circom/PrivacyPool/pedersen_commit.circom` | Reusable Pedersen commitment `C = v*H + r*G` over JubJub |
 | `circom/PrivacyPool/privacy_pool_token_lifecycle.circom` | Groth16 circuit combining pool spend, token conservation, dynamic auditor, and auditor encryption |
+| `circom/PrivacyPool/privacy_pool_token_lifecycle_nova.circom` | NovaSlim step circuit: same statement as Groth16, folded as one step per spend |
 | `circom/PrivacyPool/gen_token_lifecycle_input.py` | Witness generator; builds auditor tree and binds token commitments to pool amounts |
+| `circom/PrivacyPool/gen_token_lifecycle_nova_steps.py` | Converts the Groth16 scenario into per-user Nova step inputs and expected `state_out` values |
 
 ---
 
@@ -112,7 +130,7 @@ conservation logic can be folded into the same step structure as Step 10's
 | Path | Verifier | Extra checks |
 |---|---|---|
 | Groth16 | `aiken/groth16` gate (pairing check) | `auditor_root` matches datum; token mint/burn matches public commitments |
-| NovaSlim | planned | — |
+| NovaSlim | `nova-slim-verifier` validator (sumcheck only, no openings) | `state_out` binds all per-step public data; contract checks it against expected token commitments / auditor root |
 
 The gate must ensure:
 
@@ -132,20 +150,49 @@ token_in_commitment[2], token_out_commitment_1[2], token_out_commitment_2[2]
 
 plus public outputs `E[2], C[2], C_a0[2], C_a1[2]`.
 
+## Public I/O per spend (NovaSlim)
+
+NovaSlim requires exactly one public input (`state_in`) and one public output
+(`state_out`).  All Groth16 public values are committed into `state_out` via a
+fixed-order Poseidon chain:
+
+```
+state_out = H( H( ... H( merkle_root, nullifier_hash ), ... ), C_a1[1] )
+```
+
+The chain covers, in order:
+
+```
+merkle_root, nullifier_hash,
+out_commitment_1, out_commitment_2, fee,
+pk_audit[0], pk_audit[1], addr_commitment, auditor_root,
+token_in_commitment[0], token_in_commitment[1],
+token_out_commitment_1[0], token_out_commitment_1[1],
+token_out_commitment_2[0], token_out_commitment_2[1],
+E[0], E[1], C[0], C[1], C_a0[0], C_a0[1], C_a1[0], C_a1[1]
+```
+
+For a singleton step, `state_in = 0`.
+
 ---
 
 ## Representative timing (dev machine)
 
-| Phase | Groth16 (depth 4, 2 users, 3 auditors) |
-|---|---|
-| compile | ~10 s |
-| witness | ~2.8 s per user |
-| trusted setup | ~59 s |
-| prove | ~26 s per user |
-| verify | ~0.13 s total (batch) |
-| **proof size** | **192 B** |
+| Phase | Groth16 (depth 4, 2 users, 3 auditors) | NovaSlim (depth 4, 1 user) |
+|---|---|---|
+| compile | ~10 s | ~12 s |
+| witness | ~2.8 s per user | ~2 s per user |
+| trusted setup | ~59 s | **none** |
+| fold/compress | — | ~14 min per user |
+| verify | ~0.13 s total (batch) | ~0.02 s per user |
+| **proof size** | **192 B** | **869 B** (slim) |
 
-Constraint count at depth 4 / auditor-depth 4: **~58K non-linear constraints**.
+Constraint count at depth 4 / auditor-depth 4:
+**~58K non-linear constraints** (~64K total R1CS).
+
+The NovaSlim compress phase is currently the dominant cost because the step
+circuit is large; it needs no trusted setup and yields a constant-size slim
+proof regardless of circuit size.
 
 ---
 
@@ -168,7 +215,6 @@ and the confidentiality proof in one validator.
 
 ## Future extensions
 
-- **NovaSlim step circuit** for token lifecycle conservation.
 - **CIP-113 policy integration** — burn/mint the actual native asset and check
   the policy ID in the redeemer.
 - **Receiver decryption** — include a one-time DH key in the datum so the
